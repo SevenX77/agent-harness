@@ -67,10 +67,10 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
 
   it("renders one row per dependency with the state light vocabulary", async () => {
     mocks.cliDependencyStatus.mockResolvedValue([
-      { id: "wsl", state: "ok", version: null, detail: null },
-      { id: "ah", state: "outdated", version: "1.7.0", detail: "Studio requires ah >= 1.8.2" },
-      { id: "claude", state: "broken", version: null, detail: "Windows binary on PATH (/mnt/c/x)" },
-      { id: "codex_auth", state: "missing", version: null, detail: null },
+      { id: "wsl", state: "ok", version: null, detail: null, account: null },
+      { id: "ah", state: "outdated", version: "1.7.0", detail: "Studio requires ah >= 1.8.2", account: null },
+      { id: "claude", state: "broken", version: null, detail: "Windows binary on PATH (/mnt/c/x)", account: null },
+      { id: "codex_auth", state: "missing", version: null, detail: null, account: null },
     ])
     const { container, root } = await renderSection()
 
@@ -97,13 +97,13 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
     unmount(container, root)
   })
 
-  // 修订 2026-08-12 —— 行内动作按钮判定表:CLI 行过时 → 更新;登录行缺失/损坏 →
-  // 登录;好行/ah 行没有行内按钮(ah 的修复入口是区头「安装 / 修复」)。
+  // 修订 2026-08-12 —— 行内动作按钮判定表:CLI 行过时 → 更新;登录行常驻「登录」;
+  // ah 行缺失/过时 → 「部署」;其余好行没有行内按钮。
   it("offers an update button only on outdated CLI rows and wires it to the updater", async () => {
     mocks.cliDependencyStatus.mockResolvedValue([
-      { id: "claude", state: "ok", version: "2.1.228 (Claude Code)", detail: null },
-      { id: "codex", state: "outdated", version: "codex-cli 0.147.0", detail: "latest 0.148.0 available" },
-      { id: "ah", state: "outdated", version: "1.7.0", detail: "Studio requires ah >= 1.8.2" },
+      { id: "claude", state: "ok", version: "2.1.228 (Claude Code)", detail: null, account: null },
+      { id: "codex", state: "outdated", version: "codex-cli 0.147.0", detail: "latest 0.148.0 available", account: null },
+      { id: "ah", state: "outdated", version: "1.7.0", detail: "Studio requires ah >= 1.8.2", account: null },
     ])
     mocks.launchCliUpdate.mockResolvedValue(null)
     const { container, root } = await renderSection()
@@ -126,15 +126,24 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
     unmount(container, root)
   })
 
-  it("offers a sign-in button on missing/broken auth rows and wires it to the login console", async () => {
+  // 修订 2026-08-12(用户裁决):登录钮常驻——已登录也可能要换账号;登录行显示
+  // 账号身份(探测第 5 列)。
+  it("keeps the sign-in button on every auth row and shows the signed-in account", async () => {
     mocks.cliDependencyStatus.mockResolvedValue([
-      { id: "claude_auth", state: "broken", version: null, detail: "token expired" },
-      { id: "codex_auth", state: "ok", version: null, detail: null },
+      { id: "claude_auth", state: "broken", version: null, detail: "token expired", account: null },
+      { id: "codex_auth", state: "ok", version: null, detail: null, account: "me@example.com" },
     ])
     mocks.launchCliLogin.mockResolvedValue(null)
     const { container, root } = await renderSection()
 
-    expect(container.querySelector('[data-cli-dependency="codex_auth"] [data-cli-row-action]')).toBeNull()
+    // 已登录(ok)的行同样有「登录」= 换账号入口。
+    expect(
+      container.querySelector('[data-cli-dependency="codex_auth"] [data-cli-row-action="login"]'),
+    ).toBeTruthy()
+    // 登录身份显式可见。
+    expect(container.querySelector('[data-cli-account="codex_auth"]')?.textContent).toBe(
+      "me@example.com",
+    )
     const loginButton = container.querySelector<HTMLButtonElement>(
       '[data-cli-dependency="claude_auth"] [data-cli-row-action="login"]',
     )
@@ -153,10 +162,10 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
   // 属允许的 revalidation 触发)。
   it("offers a deploy button on a missing ah row, wires it to the bundled deploy, then re-probes", async () => {
     mocks.cliDependencyStatus.mockResolvedValue([
-      { id: "ah", state: "missing", version: null, detail: "wsl.exe returned error" },
+      { id: "ah", state: "missing", version: null, detail: "wsl.exe returned error", account: null },
     ])
     mocks.deployVendoredAh.mockResolvedValue({
-      row: { id: "ah", state: "ok", version: "1.14.3", detail: null },
+      row: { id: "ah", state: "ok", version: "1.14.3", detail: null, account: null },
     })
     const { container, root } = await renderSection()
 

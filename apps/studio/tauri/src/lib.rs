@@ -623,11 +623,15 @@ if [ -L "$CLAUDE_CRED" ]; then
 fi"#;
 
 /// 登录界面的 pty 包装器(决议 docs/design/2026-08-12-login-console-clipboard-keys.md):
-/// 扫描登录命令的输出,第一条 https URL 出现时经剪贴板桥自动复制并打确认行;
-/// `c` 重新复制最近一条 URL,`v` 把 Windows 剪贴板注入命令输入(粘 OAuth code)。
-/// `c`/`v` 只在当前输入行为空且为孤立按键(60ms 内无后续字节)时当命令——
-/// 粘贴突发与正常输入原样透传,不吞用户数据。桥协议(copy/paste 两向 seq+ack
-/// 文件握手、alive 心跳、done 收尾)的另一半在 login_bridge_watch_loop。
+/// 扫描登录命令的输出,第一条 https URL 出现时经剪贴板桥自动复制;`c` 重新复制
+/// 最近一条 URL,`v` 把 Windows 剪贴板注入命令输入(粘 OAuth code)。
+/// 判定规则:**孤立按键即命令**——单字节 c/v 且 60ms 内无后续字节。粘贴突发、
+/// 转义序列(终端对 TUI 查询的应答)都是多字节读,天然透传。曾经还叠过一层
+/// 「输入行为空」判定,真机首用即翻车:claude 登录是 Ink TUI,终端应答
+/// (如光标位置报告 ESC[24;1R)流经 stdin 被记成"已开始输入",v 从此永久失效
+/// (2026-08-12 用户实测 + 复现;登录控制台不存在自由打字场景,这层判定
+/// 只有误伤没有收益,按用户裁决删除)。桥协议(copy/paste 两向 seq+ack 文件
+/// 握手、alive 心跳、done 收尾)的另一半在 login_bridge_watch_loop。
 const LOGIN_CONSOLE_WRAPPER_PY: &str = r#"import fcntl, os, pty, re, select, signal, sys, termios, time, tty
 
 BRIDGE = sys.argv[1]
@@ -664,16 +668,13 @@ class State:
     urls = []
     copy_seq = 0
     paste_seq = 0
-    line_empty = True
 
 def copy_url(url):
     State.copy_seq += 1
     bridge_write('copy.txt', url)
     bridge_write('copy.seq', str(State.copy_seq).encode())
-    if wait_ack('copy.ack', State.copy_seq):
-        notice('sign-in link copied to the Windows clipboard - press c to copy it again')
-    else:
-        notice('clipboard bridge offline - select the URL manually')
+    if State.copy_seq == 1:
+        notice('sign-in link copied - press c to re-copy, v to paste the code')
 
 def paste_clipboard(master):
     State.paste_seq += 1
@@ -745,8 +746,6 @@ def main():
                     if not copied_first:
                         copied_first = True
                         copy_url(url)
-                    else:
-                        notice('new link shown - press c to copy it')
         if stdin_fd in ready:
             try:
                 data = os.read(stdin_fd, 4096)
@@ -755,20 +754,16 @@ def main():
             if not data:
                 fds = [master]
                 continue
-            if data in (b'c', b'v') and State.line_empty:
+            if data in (b'c', b'v'):
                 if select.select([stdin_fd], [], [], 0.06)[0]:
                     data += os.read(stdin_fd, 4096)
-            if data == b'c' and State.line_empty and State.urls:
+            if data == b'c' and State.urls:
                 copy_url(State.urls[-1])
                 continue
-            if data == b'v' and State.line_empty:
+            if data == b'v':
                 paste_clipboard(master)
                 continue
             os.write(master, data)
-            if data.endswith((b'\r', b'\n')):
-                State.line_empty = True
-            elif data.strip():
-                State.line_empty = False
     status = 1
     try:
         status = os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
@@ -5879,13 +5874,25 @@ mod tests {
             collected.lock().unwrap()
         );
         let mut stdin = child.stdin.take().unwrap();
+        // 回归钉子(2026-08-12 真机翻车):Ink TUI 会让终端在 stdin 上回
+        // 光标位置报告一类转义应答;它们不得让后续的孤立 v 失效。
+        stdin.write_all(b"\x1b[24;1R").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(200));
         stdin.write_all(b"v").unwrap();
         stdin.flush().unwrap();
         std::thread::sleep(Duration::from_millis(300));
         stdin.write_all(b"\r").unwrap();
         stdin.flush().unwrap();
+        // 测试里的 sh 子进程不消费转义应答,GOT 行会带上它们作前缀——真实 TUI
+        // 自己吃掉应答。所以分两段断:read 完成(GOT:)且注入内容在行内。
         assert!(
-            wait_for("GOT:CODE123"),
+            wait_for("GOT:"),
+            "v 之后回车必须让子进程的 read 完成;输出: {}",
+            collected.lock().unwrap()
+        );
+        assert!(
+            collected.lock().unwrap().contains("CODE123"),
             "v 必须把剪贴板注入子进程输入;输出: {}",
             collected.lock().unwrap()
         );

@@ -162,9 +162,27 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
 
 - **对外 API**：六个域各有自己的包入口并各自维护 `__all__`，顶层 `__init__` 只是极薄的
   re-export。域入口就是契约：`registry` / `resolve` / `role` / `call` / `dialect` / `probing`。
-- **待下沉**（按判据属公共，当前实现仍散在 `apps/studio/backend`）：endpoint 标准化拆分、
-  list-models 解析、model group 分组、identity、notable、6 态投影、熔断持久化、
-  materialize 编排核心、能力合并。（Probe Knowledge Catalog 已下沉，见 §3.B。）
+- **下沉进度**（按 §2 判据属公共能力的九项，2026-08-13 逐条对代码核实）。这张表是**当前
+  事实**，不是计划：每一行都点名它今天真正住在哪个文件，所以谁把一项挪下去、删掉 studio
+  那侧的文件，`tests/test_gateway_docs_name_real_files.py` 立刻变红，逼着这张表跟着改——
+  上一版清单把已经下沉的四项还写成"待下沉"，正是因为没有任何东西会读一份文档。
+
+  | 能力 | 今天住在哪 | 状态 |
+  | --- | --- | --- |
+  | endpoint 标准化拆分 | `registry/endpoints.py:standardize_endpoint_candidates` | ✅ 已下沉 |
+  | list-models 解析 | `probing/judge.py:model_ids` | ✅ 已下沉 |
+  | 6 态投影 | `registry/projection.py:project_route_state` | ✅ 已下沉 |
+  | materialize 编排核心 | `role/materialization.py:materialize_role` | ✅ 已下沉 |
+  | Probe Knowledge Catalog | `registry/catalog.py`（见 §3.B） | ✅ 已下沉 |
+  | 能力合并 | `apps/studio/backend/app/services/llm_route_capabilities.py` | 🔻 待下沉 |
+  | model group 分组 | `apps/studio/backend/app/services/llm_model_groups.py` | 🔻 待下沉 |
+  | identity | `apps/studio/backend/app/services/llm_model_identity.py` · `app/services/llm_provider_identity.py` · `app/services/provider_config.py` | 🔻 待下沉 |
+  | notable | `apps/studio/backend/app/services/llm_notable_models.py` | 🔻 待下沉 |
+  | 熔断持久化 | `apps/studio/backend/app/services/llm_health_store.py` | 🔻 待下沉（判据属公共的是**熔断策略**；sqlite 存储本身按"存储由宿主注入"留在 studio） |
+
+  判"已下沉"的证据是同一条：studio 那侧只剩薄委托或已无实现。例如 6 态投影在
+  `app/services/llm_state_projection.py` 只剩 28 行且直接调网关适配器，endpoint 标准化在
+  studio 侧 grep 不到实现。
 - **模块级现状 vs 目标**详见 `docs/graph-agent-gateway/mvp1/`；域树是怎么定下来的、
   每一期改了什么，见
   [`docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md`](../../docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md)。

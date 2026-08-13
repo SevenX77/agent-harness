@@ -121,11 +121,6 @@ class ProviderRoute(GatewayProviderRoute):
     """Studio-owned route DTO with optional admin/display label."""
 
     display_name: str | None = None
-    # Studio LLM credentials/catalog SSOT: the evidence body lives ON the route —
-    # its single persisted home — embedded as the gateway ``EvidenceRecord`` so it
-    # is wire-isomorphic with the community catalog. Stripped from the gateway
-    # runtime route projection (see ``_gateway_route``).
-    evidence: list[EvidenceRecord] = Field(default_factory=list)
     # W2-A status normalization: the route carries the authoritative UI status the
     # frontend reads DIRECTLY — ``ui_state`` (inherited 6-state) plus its companions
     # ``reason_code`` and (for cooling_down) ``retry_at`` — an ISO-8601 timestamp of
@@ -155,7 +150,7 @@ def _gateway_route(route: ProviderRoute) -> GatewayProviderRoute:
     return GatewayProviderRoute.model_validate(
         route.model_dump(
             mode="python",
-            exclude={"display_name", "evidence", "reason_code", "retry_at"},
+            exclude={"display_name", "reason_code", "retry_at"},
         )
     )
 

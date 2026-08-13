@@ -229,6 +229,11 @@ class ProviderRoute(BaseModel):
     snapshot_version: SnapshotVersion | None = None
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     verified_profiles: list[VerifiedProfile] = Field(default_factory=list)
+    # What has been observed about this route. ``EvidenceRecord`` is this
+    # package's type and the probe catalog is its own, so the route it describes
+    # is where it belongs — role materialization reads it to keep an
+    # endpoint-failed route that once answered from being skipped outright.
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")

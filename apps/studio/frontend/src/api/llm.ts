@@ -1358,6 +1358,16 @@ function endpointTestVerdict(endpoint: ProviderEndpoint, routes: ProviderRoute[]
 }
 
 function routeIsUsable(route: ProviderRoute): boolean {
+  // `disabled` is a prohibition, not a probe outcome: the backend sets it when
+  // the endpoint's key was rejected and clears it on the next successful test
+  // (R-E2). Everything below this line is EVIDENCE that the route worked at
+  // some point, and evidence about the past cannot outvote "do not use this
+  // now" — one stale ready profile on one of fifty disabled routes was enough
+  // to keep an endpoint with a dead key showing green (live 2026-08-12,
+  // gemini-official). `failed` deliberately stays below: that IS a probe
+  // outcome, it can be model-scoped or flaky, and the evidence is allowed to
+  // outweigh it.
+  if (route.status === 'disabled') return false
   return (
     route.status === 'verified' ||
     route.status === 'probe-verified' ||

@@ -1001,6 +1001,76 @@ describe('API Keys v4 registry adapter', () => {
     expect(credentials.providers[0].last_error_code).toBe('')
   })
 
+  it('does not let a disabled route vouch for an endpoint whose key was just rejected', async () => {
+    // Live 2026-08-12 on the real app, gemini-official: the endpoint test
+    // answered "Invalid API key", the backend disabled the endpoint AND all 50
+    // of its routes (R-E2), and the endpoint chip stayed green — because ONE of
+    // those disabled routes still carried a ready verified_profile from back
+    // when the key worked, and routeIsUsable never looked at route.status.
+    // Past evidence that a route once worked cannot outvote a present "do not
+    // use this": disabled is a prohibition, not a probe outcome.
+    const disabledRouteWithStaleProfile: ProviderRoute = {
+      ...route,
+      status: 'disabled',
+      ui_state: 'untested',
+      verified_profiles: [
+        {
+          profile_id: 'text:gemini_generate_content:minimal_thinking',
+          capability: 'text',
+          method_id: 'gemini_generate_content',
+          request_mapper_id: 'gemini_generate_content_thinking_level_low',
+          status: 'ready',
+        },
+      ],
+    }
+    let currentRegistry = registry()
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'get') return currentRegistry
+      if (config.method === 'put') return currentRegistry
+      if (config.method === 'post' && config.url === '/llm/endpoints/openrouter-custom/test') {
+        currentRegistry = registry({
+          provider_endpoints: {
+            'openrouter-custom': {
+              ...endpoint,
+              status: 'disabled',
+              last_test_at: '2026-08-12T18:07:22Z',
+              last_test_message: 'Invalid API key (INVALID_ARGUMENT).',
+            },
+          },
+          provider_routes: {
+            [disabledRouteWithStaleProfile.route_id]: disabledRouteWithStaleProfile,
+          },
+        })
+        return {
+          registry: currentRegistry,
+          tested_endpoint_id: 'openrouter-custom',
+          discovered_model_count: 1,
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const result = await getProviderModels({
+      id: 'openrouter-custom',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-dead',
+      base_url: 'https://openrouter.ai/api/v1',
+    })
+
+    // Not merely "not ok" — the endpoint says exactly what is wrong, and that
+    // wording reaches here only because the backend now names a rejected key as
+    // one (#759). The two halves compose: the gateway settles what the answer
+    // was, and this stops stale evidence from burying it.
+    expect(result.status).toBe('invalid_key')
+    // Nothing on this endpoint can be called, so nothing may be advertised as
+    // reachable — the protocol list is what "we have something that works" means.
+    expect(result.available_sdks).toEqual([])
+    expect(result.model_seen).toBeNull()
+
+    const credentials = await getCredentials()
+    expect(credentials.providers[0].last_test_status).toBe('invalid_key')
+  })
+
   it('does not mark an endpoint failed when every failure is model-scoped invalid_model', async () => {
     const invalidModelRoute: ProviderRoute = {
       ...route,

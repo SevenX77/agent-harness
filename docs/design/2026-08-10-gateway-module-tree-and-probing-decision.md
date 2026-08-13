@@ -163,6 +163,26 @@ TRUTH"),改名只会制造词汇漂移。变化的是它的**范围**——解�
 不允许 `from graph_agent_gateway.<域>.<文件> import X`。每个域的 `__init__.py` 就是它的公开契约,
 域内文件怎么拆是域自己的事。这条规则由一条 lint 测试守住(遍历三个模块的源码,断言没有深导入)。
 
+**订正(2026-08-12,机械点清)。** 上面这段有三处与落地后的事实不符,原文保留、事实以本段为准:
+
+1. **是六个域,不是七个**——上面那棵树自己列的就是六个(`registry` / `resolve` / `role` /
+   `dialect` / `call` / `probing`),D7 的 P6 判据也写的"六个域";`errors.py` / `events.py`
+   是跨域共用词汇,原文已注明"不是域",数进去才凑成七。今天多了第三个同类叶子
+   `account_conditions.py`(账户级条件的词表,见 D12),同样不是域。
+2. **`probing/` 的实际文件是 `questions.py` / `wire.py` / `judge.py` / `results.py`**,
+   没有 `executors.py`、也没有 `evidence.py`;上面括号里那句"问什么(questions)、
+   谁执行(executors)、怎么判(judge)、写进哪(evidence)"说的是四项**职责**,不是四个文件名。
+3. **D3 说的那个唯一写入口不在 `probing/evidence.py`,而在
+   `registry/capabilities.py`**(`measured_effort_capability` / `measured_image_input`)。
+   规则本身没变——"任何'我知道它支持'的写法都必须来自一次真实测量"仍然成立,而且落在
+   `registry/`更对:**产出的是 `CapabilityValue`,那是 registry 的词汇**,让 probing 去铸造
+   registry 的值反而要把 registry 的 schema 摊进 probing。写入口的门牌号以此为准。
+
+这三处是**文档指向不存在文件**的典型:没有任何东西会 import 一份文档,所以域一搬,承诺就
+静悄悄地坏掉。README 与 USAGE.md 的同类问题已由
+`packages/graph-agent-gateway/tests/test_gateway_docs_name_real_files.py` 变成门禁;
+本决议是历史记录(D5/D6 点名的正是"搬走了/删掉了"的文件),**不进那道门禁**,靠订正段落维护。
+
 ### D5. 搬迁映射(纯搬,不改行为)
 
 | 现在 | 去处 | 备注 |

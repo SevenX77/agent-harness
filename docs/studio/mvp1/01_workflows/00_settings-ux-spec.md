@@ -325,7 +325,14 @@
   进度与交互,后台静默失败不可见)**:`claude`/`codex` 行 `outdated` → 「更新」→
   控制台跑 `claude update` / `codex update`;`claude_auth`/`codex_auth` 行
   `missing|broken` → 「登录」→ 控制台跑 `claude auth login` / `codex login`
-  (与 launcher login-doorman、安装脚本 B2 同款命令);ah 行 `missing|outdated` →
+  (与 launcher login-doorman、安装脚本 B2 同款命令)。**登录控制台的剪贴板
+  快捷键(修订 2026-08-12,决议 `2026-08-12-login-console-clipboard-keys.md`)**:
+  设置页「登录」控制台与两个 login-doorman 的登录命令统一经 pty 包装器跑——
+  第一条 https 登录链接出现时**自动复制**进 Windows 剪贴板并打确认行,`c` 重新
+  复制最近一条链接,`v` 把剪贴板内容(OAuth code)注入命令输入;c/v 只在输入行
+  为空且为孤立按键时生效,粘贴与正常输入原样透传。剪贴板读写由 Studio 侧
+  看护线程经 /mnt 交换文件完成(本机进程互通关闭且 OSC 52 实测无效,带内通道
+  不存在);桥/python3 缺失时逐级降级为现行为。ah 行 `missing|outdated` →
   「部署」(修订 2026-08-12,决议 `2026-08-12-ah-vendored-auto-deploy.md`):无声
   布署 app 自带的 vendored ah 后返回复查结果并整体重新探测——ah 是本项目自有产物、
   随 app 打包,不再是用户去装的外部依赖。命令在 Rust 侧按 provider 枚举定死,前端

@@ -167,10 +167,18 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
 
 - **对外 API**：六个域各有自己的包入口并各自维护 `__all__`，顶层 `__init__` 只是极薄的
   re-export。域入口就是契约：`registry` / `resolve` / `role` / `call` / `dialect` / `probing`。
-- **下沉进度**（按 §2 判据属公共能力的九项，2026-08-13 逐条对代码核实）。这张表是**当前
+- **下沉进度**（按 §2 判据属公共能力的十六项，2026-08-13 逐条对代码核实）。这张表是**当前
   事实**，不是计划：每一行都点名它今天真正住在哪个文件，所以谁把一项挪下去、删掉 studio
   那侧的文件，`tests/test_gateway_docs_name_real_files.py` 立刻变红，逼着这张表跟着改——
   上一版清单把已经下沉的四项还写成"待下沉"，正是因为没有任何东西会读一份文档。
+
+  **表的覆盖范围是盘出来的，不是回忆出来的。** 两条判据同时成立即入表：①**属网关域**
+  （模块被 `apps/studio/backend/app/routers/llm.py` 使用，或自身 import 网关）；②**无宿主
+  依赖**（不碰 fastapi / sqlite / 文件路径 / studio 配置——碰了就说明它绑死了 §2「应用加工
+  四件事」之一，得先把规则与介质拆开才谈得上下沉）。按这两条机械扫 studio 的 service 目录，
+  2026-08-13 扫出九个模块，其中**五个是此前任何一版清单都没点过名的**。**已知弱点**：门禁
+  只保证表里点名的文件存在，不保证该入表的都入了表——覆盖完整性今天仍靠人按上面两条判据
+  重扫，这是这张表现在最薄的一环。
 
   | 能力 | 今天住在哪 | 状态 |
   | --- | --- | --- |
@@ -182,7 +190,12 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
   | 能力合并 | `registry/capabilities.py:route_effective_capabilities` · `registry/capabilities.py:verified_profile_capabilities` | ✅ 已下沉 |
   | model group 分组 | `registry/model_naming.py:project_model_group_identity` | ✅ 已下沉 |
   | identity（模型名） | `registry/model_naming.py:project_model_identity` | ✅ 已下沉 |
+  | 单模型探测结果类型 | 探测本体在 `probing/`；`apps/studio/backend/app/services/model_probe.py` 只剩宿主侧 DTO | ✅ 已下沉（29 行：router 把网关 `RouteProbeResult` 适配成这个形状交给自己的调用方，属宿主自用，不再搬） |
   | identity（provider 名 / 配置） | `apps/studio/backend/app/services/llm_provider_identity.py` · `apps/studio/backend/app/services/provider_config.py` | 🔻 待下沉（后者的**匹配规则**属公共，但它读 studio 自己的 `app/data/*.json`，按"存储由宿主注入"要先把规则与介质拆开） |
+  | 厂商官方能力文档源 | `apps/studio/backend/app/services/official_capability_sources.py` | 🔻 待下沉（291 行纯知识：按 provider × 能力主题存官方文档 URL 与取值规则，四件事一条都不绑，任何应用装上都能直接用） |
+  | 证据外发脱敏红线 | `apps/studio/backend/app/services/community_catalog.py` | 🔻 待下沉（网关 owns 探测知识库，却不 owns「什么可以离开这台机器」：白名单构造上传体、私有 / 内网主机整段丢弃端点身份。这条规则和它守护的知识库不该分居两地） |
+  | 证据读取 + 探测排序 | `apps/studio/backend/app/services/llm_credentials_evidence.py` | 🔻 待下沉（其中 `endpoint_probe_priority` 与网关 `registry/catalog.py:probe_priority` 吃同一份输入、目标相反：一个要最快见绿所以领头放已验证的，一个要发现新能力所以跳过已验证的。并排放进网关，这个差别才看得见） |
+  | evidence id 铸造 | `apps/studio/backend/app/services/llm_evidence_ids.py` | 🔻 待下沉（19 行，给网关 `EvidenceRecord` 铸 ID） |
   | notable | `apps/studio/backend/app/services/llm_notable_models.py` | 🔻 待下沉 |
   | 熔断持久化 | `apps/studio/backend/app/services/llm_health_store.py` | 🔻 待下沉（判据属公共的是**熔断策略**；sqlite 存储本身按"存储由宿主注入"留在 studio） |
 

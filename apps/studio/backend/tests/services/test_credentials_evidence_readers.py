@@ -175,7 +175,7 @@ def test_collect_uploadable_excludes_community_failed_and_non_public() -> None:
 def test_endpoint_probe_priority_four_tiers_current_then_historical_then_unknown_then_failed() -> None:
     # Point 1: endpoint Test wants the FEWEST attempts to a green — lead with a
     # known-good model, do NOT skip probe-verified (that is the gateway's
-    # discovery ordering, not endpoint Test's). Mirrors llm.py:_endpoint_probe_order.
+    # discovery ordering, not endpoint Test's).
     from app.services.llm_credentials_evidence import endpoint_probe_priority
 
     creds = _credentials(

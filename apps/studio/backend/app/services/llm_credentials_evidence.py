@@ -191,9 +191,11 @@ def endpoint_probe_priority(
 ) -> list[str]:
     """Order probe candidates so an endpoint Test reaches a green fastest (R9.4).
 
-    Mirrors ``llm.py:_endpoint_probe_order`` — the endpoint-Test ordering, which
-    leads with a known-good model and does NOT skip verified ones (that is the
-    gateway's capability-discovery ``probe_priority``, a different goal):
+    This is the endpoint-Test ordering: it leads with a known-good model and does
+    NOT skip verified ones. The gateway's ``registry/catalog.py:probe_priority``
+    takes the same input and does the opposite — it skips what is already verified
+    — because it is discovering capabilities, not proving the endpoint answers.
+    Neither is a stale copy of the other; the two goals are genuinely opposed:
 
     1. models on a currently-verified route (green) — surest bet,
     2. models with historical probe-verified evidence (blue),

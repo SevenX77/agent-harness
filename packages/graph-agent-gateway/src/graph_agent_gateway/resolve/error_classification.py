@@ -7,6 +7,8 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from graph_agent_gateway.account_conditions import BILLING_MARKERS, CREDENTIAL_MARKERS, says_any
+
 Decision = Literal["fallback_allowed", "fail_fast", "fail_fast_with_route_context"]
 ErrorAction = Literal["retry_same_route", "fallback_route", "fail_request"]
 ErrorScope = Literal["request", "route", "endpoint", "credential", "bucket", "stream", "unknown"]
@@ -166,13 +168,14 @@ def classify_error_context(
             provider_error_message,
             fallback_eligible=True,
         )
-    if status_code == 400 and _looks_like_billing_error(
-        provider_error_type,
-        provider_error_message,
-    ):
-        # Anthropic encodes account-credit exhaustion as 400 invalid_request_error;
-        # semantically it is a 402-class endpoint/billing failure, so the next
-        # route (different account/provider) must get its chance.
+    if status_code == 400 and _is_account_condition(provider_error_type, provider_error_message):
+        # An exhausted balance and a rejected key are properties of the account,
+        # and providers state them without keeping to the 402/401 convention:
+        # Anthropic encodes credit exhaustion as 400 invalid_request_error,
+        # Google encodes a bad key as 400 INVALID_ARGUMENT. Both are the
+        # credential-scope failure the design already calls fallback-eligible,
+        # so the next route (a different account/provider) must get its chance
+        # instead of the request dying on the first one.
         return _action_classification(
             "fallback_route",
             "credential",
@@ -307,26 +310,23 @@ def _looks_like_route_capability_error(
     )
 
 
-def _looks_like_billing_error(
+def _is_account_condition(
     provider_error_type: str | None,
     provider_error_message: str | None,
 ) -> bool:
+    """Whether the provider is talking about the account rather than this call.
+
+    Balance and key are one question here because they get one answer: both are
+    credential-scope, both are worth another route's different account, and
+    neither gets better by retrying the same one.
+    """
+
     text = " ".join(
         item.lower()
         for item in (provider_error_type, provider_error_message)
         if item is not None
     )
-    return any(
-        marker in text
-        for marker in (
-            "credit balance",
-            "insufficient credit",
-            "insufficient funds",
-            "insufficient quota",
-            "purchase credits",
-            "billing",
-        )
-    )
+    return says_any(text, BILLING_MARKERS) or says_any(text, CREDENTIAL_MARKERS)
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:

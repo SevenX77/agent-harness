@@ -236,6 +236,50 @@ route.capabilities.update(measured)
 音频、pdf 或文档列的其他任何一项。**要判断一条 route 是不是实测认图,读 `vision` 且要求
 `source == "probed_verified"`,不要去数模态清单里有没有 `image`**:清单里那一项可能来自文档。
 
+### 3.7 HTTP 状态码是 provider 的选择,答案的含义不是
+
+同一件事——**这把 key 是坏的**——两家的答法不一样(实测 2026-08-12):
+
+| provider | HTTP | body |
+|---|---|---|
+| DeepSeek | 401 | `invalid_request_error` / "Authentication Fails, Your api key: \*\*\*\*de40 is invalid" |
+| Google | **400** | `INVALID_ARGUMENT` / "API key not valid. Please pass a valid API key." / `details[0].reason: "API_KEY_INVALID"` |
+
+余额耗尽也一样:Anthropic 用 HTTP 400 说 "credit balance is too low",而不是 402/403。
+
+所以 `probe_status` 在 400/404 分支里**先问账户级的两件事**——余额、凭据——再去看模型:
+
+```python
+# probing/judge.py,400/404 分支的顺序
+_is_billing_error(answer)              -> "quota_exceeded"
+_is_credential_error(answer)           -> "invalid_key"
+_rejects_our_payload(answer)           -> "error"                    # 被拒的是我们发的东西
+_refuses_the_capability_asked(answer)  -> "capability_unsupported"   # 被拒的是问题本身
+...                                    -> model_not_found_status     # 到这儿才轮到模型
+```
+
+**为什么顺序是这个**:余额和 key 替**整个端点**作答——该端点下每个模型都会这样答。把它
+记成 `invalid_model`,记下的是「这个模型不存在」,并且因为 `invalid_model` 是**确定的**
+答案(不在 `INCONCLUSIVE_PROBE_STATUSES` 里),一批**连门都没进**的能力探测会被读成
+「这条路由就卖这几档」。
+
+**宿主要做的事**:把 `invalid_key` / `quota_exceeded` / `protocol_unsupported` 当作**结构性**
+失败——它们会拒掉端点上每一个模型,所以批量探测应当就地短路,而不是逐个模型再问一遍。
+`invalid_model` 不属于这一族:它是模型级的,换个模型 id 仍值得一试。
+
+**四张标记词表都按实测原文长**(账单 / 凭据 / payload 被拒 / 能力被拒),新 provider 的
+措辞实测到一条加一条。判据读的是 provider 说的**全部**内容——`type`、`code`、`message`,
+以及 Google 放条件的 `details[].reason`(`google.rpc.ErrorInfo` 的标识符,天生给程序读,
+而 `message` 是给人读的散文且可本地化)。
+
+**同一件事在运行时也认得**:账单与凭据这两条**账户级条件**的词表放在
+`graph_agent_gateway/account_conditions.py`,探测判据(`probing/judge.py`)与运行时判据
+(`resolve/error_classification.py`)读同一份——一句话不能因为谁读到而有两种含义。运行时
+认出它的后果是**继续走 fallback 链**:key 坏了值得换一个账户再试,重试同一个没有意义。
+
+收进那份词表的门槛是「**与请求无关**」:余额和 key 对每个模型、每次调用都给同一个答案。
+「这个模型不吃图」「这个参数不认识」换个模型换次调用就变,不进去,留在各自的消费者那里。
+
 ---
 
 ## 4. 这个包不做什么

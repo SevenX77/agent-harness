@@ -4,7 +4,7 @@ import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 
-export type SettingsTab = "general" | "api_keys" | "llm_roles" | "copilot"
+export type SettingsTab = "general" | "api_keys" | "media_generation" | "llm_roles" | "copilot"
 
 export interface ProviderDraft {
   id: string

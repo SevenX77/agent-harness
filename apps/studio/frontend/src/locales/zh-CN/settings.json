@@ -6,9 +6,10 @@
   },
   "tabs": {
     "general": "通用",
-    "apiKeys": "API Keys",
+    "apiKeys": "LLM API-Key",
     "llmRoles": "LLM 角色",
-    "copilot": "Copilot"
+    "copilot": "Copilot",
+    "mediaGeneration": "媒体生成"
   },
   "saveStatus": {
     "pending": "待保存",
@@ -150,7 +151,7 @@
     }
   },
   "apiKeys": {
-    "title": "API Keys",
+    "title": "LLM API-Key",
     "description": "Studio 运行时使用的本地 LLM 服务商凭据。修改会自动保存。",
     "loadFailedTitle": "API Keys 加载失败",
     "loadFailedDescription": "{{error}}。凭据文档加载完成前不会显示已保存的服务商值。",
@@ -470,7 +471,7 @@
     "emptyState": {
       "title": "还没有支持 Anthropic Messages 的 route",
       "description": "去 API Keys 添加支持 anthropic-messages 协议的凭证（Anthropic Official / Ark / DeepSeek / OpenRouter 等），完成单模测试后会在这里显示。",
-      "cta": "去 API Keys 配置"
+      "cta": "去 LLM API-Key 配置"
     },
     "roleCard": {
       "description": "与后端 fallback chain 同步的编程 copilot 角色。",
@@ -529,6 +530,47 @@
     "aria": {
       "testing": "正在测试 {{title}}...",
       "ready": "{{title}} 就绪：{{ready}}/{{total}} 条 route"
+    }
+  },
+  "mediaGen": {
+    "title": "媒体生成",
+    "description": "图像 / 视频生成服务商的密钥、模型目录与连通性测试",
+    "loading": "加载中…",
+    "loadFailedTitle": "媒体生成配置加载失败",
+    "providerRunninghub": "RunningHub",
+    "apiKeyLabel": "API Key",
+    "apiKeyPlaceholder": "输入 RunningHub API Key",
+    "baseUrlLabel": "Base URL",
+    "revealKey": "显示密钥",
+    "testConnection": "测试连接（免费）",
+    "probing": "正在探活…",
+    "untested": "未测试",
+    "keyNotSet": "先配置 API Key",
+    "probeOk": "已连通",
+    "probeAuthFailed": "鉴权失败",
+    "probeNetworkError": "网络错误",
+    "balanceCoins": "余额 {{coins}} RH币",
+    "balanceMoney": "≈¥{{money}}",
+    "lastChecked": "上次探活 {{time}}",
+    "imageModels": "图像模型",
+    "videoModels": "视频模型",
+    "channelEconomy": "低价渠道",
+    "channelOfficial": "官方",
+    "statusCataloged": "目录在册（未实测）",
+    "enabled": "启用",
+    "defaultsTitle": "默认参数",
+    "defaultUnset": "未设",
+    "noDefaultParams": "该模型没有可设置的默认参数",
+    "docSource": "文档来源",
+    "pricingPerImage": "¥{{amount}}/张",
+    "pricingPerSecond": "¥{{amount}}/秒",
+    "pricingPerRun": "¥{{amount}}/次",
+    "taskNames": {
+      "t2i": "文生图",
+      "i2i": "图生图",
+      "i2v": "图生视频",
+      "flf2v": "首尾帧生视频",
+      "ref2v": "参考生视频"
     }
   }
 }

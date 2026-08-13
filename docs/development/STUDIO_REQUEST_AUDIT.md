@@ -115,6 +115,8 @@ BACKEND GET /api/llm/role-test-jobs/{job_id}
 BACKEND GET /api/llm/roles
 BACKEND GET /api/llm/roles/test-results
 BACKEND GET /api/llm/roles/{role_name}
+BACKEND GET /api/media/providers/{provider_id}/credential/secret
+BACKEND GET /api/media/registry
 BACKEND GET /api/settings
 BACKEND GET /api/skills/{skill_id}
 BACKEND GET /api/skills/{skill_id}/compare-candidates
@@ -139,6 +141,7 @@ BACKEND GET /api/system/truth-sources
 BACKEND GET /api/system/truth-sources/{source_id}/content
 BACKEND GET /api/templates
 BACKEND GET /health
+BACKEND PATCH /api/media/models/{model_id}/settings
 BACKEND POST /api/copilot/roles/{role_name}/test-sdk
 BACKEND POST /api/io/scan
 BACKEND POST /api/llm/catalog/contribute
@@ -153,6 +156,7 @@ BACKEND POST /api/llm/roles/{role_name}/test
 BACKEND POST /api/llm/roles/{role_name}/test-jobs
 BACKEND POST /api/llm/routes/{route_id}/probe
 BACKEND POST /api/llm/routes/{route_id}/probe-multimodal
+BACKEND POST /api/media/providers/{provider_id}/probe
 BACKEND POST /api/skills
 BACKEND POST /api/skills/{skill_id}/compile
 BACKEND POST /api/skills/{skill_id}/copilot/dispatch
@@ -200,6 +204,7 @@ BACKEND PUT /api/llm/registry/endpoints
 BACKEND PUT /api/llm/roles
 BACKEND PUT /api/llm/roles/{role_name}
 BACKEND PUT /api/llm/routes/{route_id}
+BACKEND PUT /api/media/providers/{provider_id}/credential
 BACKEND PUT /api/settings
 BACKEND PUT /api/skills/{skill_id}
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts
@@ -223,6 +228,8 @@ FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret
 FRONTEND GET /api/llm/role-test-jobs/{job_id}
 FRONTEND GET /api/llm/roles
 FRONTEND GET /api/llm/roles/test-results
+FRONTEND GET /api/media/providers/{endpoint_id}/credential/secret
+FRONTEND GET /api/media/registry
 FRONTEND GET /api/settings
 FRONTEND GET /api/skills/{skill_id}
 FRONTEND GET /api/skills/{skill_id}/compare-candidates
@@ -244,6 +251,7 @@ FRONTEND GET /api/system/community-catalog-config
 FRONTEND GET /api/system/truth-sources
 FRONTEND GET /api/system/truth-sources/{source_id}/content
 FRONTEND GET /api/templates
+FRONTEND PATCH /api/media/models/{param}/settings
 FRONTEND POST /api/io/scan
 FRONTEND POST /api/llm/catalog/sync-verified
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test
@@ -254,6 +262,7 @@ FRONTEND POST /api/llm/roles/{role_name}/test
 FRONTEND POST /api/llm/roles/{role_name}/test-jobs
 FRONTEND POST /api/llm/routes/{route_id}/probe
 FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal
+FRONTEND POST /api/media/providers/{endpoint_id}/probe
 FRONTEND POST /api/skills/{skill_id}/compile
 FRONTEND POST /api/skills/{skill_id}/copilot/interrupt
 FRONTEND POST /api/skills/{skill_id}/copilot/judge
@@ -278,6 +287,7 @@ FRONTEND POST /api/skills/{skill_id}/test_inputs
 FRONTEND POST /api/skills/{skill_id}/validate_input
 FRONTEND PUT /api/llm/registry/endpoints
 FRONTEND PUT /api/llm/roles
+FRONTEND PUT /api/media/providers/{endpoint_id}/credential
 FRONTEND PUT /api/settings
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
@@ -333,6 +343,8 @@ BACKEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped in-memory 
 BACKEND GET /api/llm/roles | ok | specific | Aggregate roles cold-load projection; backend returns roles_data plus the joined registry snapshot from the same roles/credentials state.
 BACKEND GET /api/llm/roles/test-results | ok | specific | Persisted last-known role-test result projection; backend read is scoped, emits no revalidation event, and tests cover empty/result re-projection.
 BACKEND GET /api/llm/roles/{role_name} | ok | specific | Scoped backend role read; frontend no longer exposes a caller, and backend tests cover materialized single-role response behavior.
+BACKEND GET /api/media/providers/{provider_id}/credential/secret | ok | specific | Explicit per-provider media API key reveal; response tests pin plaintext retrieval as separate from the masked registry view.
+BACKEND GET /api/media/registry | ok | specific | Canonical media catalog + provider state projection; route tests cover catalog completeness, masked credentials, and the per-model settings join.
 BACKEND GET /api/settings | ok | specific | Scoped app-settings read; backend tests cover effective defaults and persisted snapshot roundtrip, and the route emits no revalidation event.
 BACKEND GET /api/skills/{skill_id} | ok | shared | Canonical SkillDetail projection for one skill; consumers cold-load by skill id or revalidate from precise skill/file events.
 BACKEND GET /api/skills/{skill_id}/compare-candidates | ok | specific | Scoped runtime_config projection read for Properties; backend tests cover canonical node map response and it emits no revalidation event.
@@ -357,6 +369,7 @@ BACKEND GET /api/system/truth-sources | ok | shared | Settings General truth-sou
 BACKEND GET /api/system/truth-sources/{source_id}/content | ok | specific | Explicit source preview fallback read keyed by source_id; source list loading does not hydrate content.
 BACKEND GET /api/templates | ok | specific | Static built-in template projection; backend test covers canonical template ids and verifies the read emits no revalidation event.
 BACKEND GET /health | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
+BACKEND PATCH /api/media/models/{model_id}/settings | ok | specific | Explicit per-model settings write validated against the gateway media catalog schema; illegal defaults are rejected with 400 and the canonical snapshot is returned.
 BACKEND POST /api/copilot/roles/{role_name}/test-sdk | ok | specific | Explicit Copilot role SDK test command; returns scoped diagnostics/job state and does not mutate broad registry truth.
 BACKEND POST /api/io/scan | ok | specific | Explicit I/O import scan for a chosen file/folder; scanning is not tied to panel mount or selection.
 BACKEND POST /api/llm/catalog/contribute | ok | specific | Explicit community-catalog contribution command; repository/catalog side effects are command-scoped and do not refresh runtime roles/settings.
@@ -371,6 +384,7 @@ BACKEND POST /api/llm/roles/{role_name}/test | ok | specific | Explicit role tes
 BACKEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role Test command; returns a scoped job id and progress is read only through /role-test-jobs/{job_id}.
 BACKEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
 BACKEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; backend returns the joined canonical RegistryResponse so route-derived model groups stay in sync.
+BACKEND POST /api/media/providers/{provider_id}/probe | ok | specific | Explicit zero-cost account probe (RunningHub accountStatus); rejected 400 without a stored key, persists probe evidence, and returns the canonical snapshot.
 BACKEND POST /api/skills | ok | specific | Explicit create/import skill command; returns one SkillSummary and does not act as a background refresh.
 BACKEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; success returns CompileSuccess with canonical SkillDetail detail built from the same compile/lint result, and failure returns structured CompileFailure.errors.
 BACKEND POST /api/skills/{skill_id}/copilot/dispatch | ok | specific | Unimplemented dispatch scaffold returns 501 and does not store view context or trigger revalidation.
@@ -418,6 +432,7 @@ BACKEND PUT /api/llm/registry/endpoints | ok | specific | Explicit endpoint save
 BACKEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; backend emits roles_changed and returns a roles_data + registry projection snapshot instead of requiring write-after-read refresh.
 BACKEND PUT /api/llm/roles/{role_name} | ok | specific | Explicit scoped role replace used by backend/materializer tests; backend writes roles truth, emits roles_changed, and returns the materialized role.
 BACKEND PUT /api/llm/routes/{route_id} | ok | specific | Explicit route metadata update command; backend returns the joined canonical RegistryResponse.
+BACKEND PUT /api/media/providers/{provider_id}/credential | ok | specific | Explicit credential save command; returns the canonical media registry snapshot and never echoes the stored key.
 BACKEND PUT /api/settings | ok | specific | Explicit app-settings save command; unchanged snapshots are side-effect-free, changed snapshots return the canonical AppSettings response and publish a precise settings_changed event.
 BACKEND PUT /api/skills/{skill_id} | ok | specific | Explicit skill metadata update; returns canonical SkillDetail for the edited skill.
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Runtime artifact writes are explicit output-config saves and return the canonical runtime_config snapshot.
@@ -441,6 +456,8 @@ FRONTEND GET /api/llm/registry/endpoints/{endpoint_id}/secret | ok | specific | 
 FRONTEND GET /api/llm/role-test-jobs/{job_id} | ok | specific | Scoped polling starts only after an explicit Test command returns a job id; pollers do not refresh registry/roles/settings truth.
 FRONTEND GET /api/llm/roles | ok | shared | Cached read path is guarded against mount, focus, and reconnect refetch; roles response carries registry projection data, so cold loads do not perform a second broad registry read.
 FRONTEND GET /api/llm/roles/test-results | ok | shared | Shared persisted role-test badge read; API Keys does not mount LLM Roles/Copilot seed effects, and first visible LLM Roles/Copilot use shares the cached read.
+FRONTEND GET /api/media/providers/{endpoint_id}/credential/secret | ok | specific | Explicit reveal-button read only; mount, tab switch, focus, and reconnect never hydrate media secrets.
+FRONTEND GET /api/media/registry | ok | shared | Media Generation tab cold-loads the registry once on first mount; later updates project canonical snapshots returned by credential/settings writes and explicit probes, never remount refetches.
 FRONTEND GET /api/settings | ok | shared | Cold load waits for API readiness and dialog open or close must not refetch.
 FRONTEND GET /api/skills/{skill_id} | ok | shared | Shared per-skill SkillDetail cold load uses Studio truth SWR policy; manual Compile, Local History revert, and source-write/file events project canonical snapshots or revalidate only the exact skill key.
 FRONTEND GET /api/skills/{skill_id}/compare-candidates | ok | shared | Shared per-skill cold load; node selection must remain network-silent after load.
@@ -462,6 +479,7 @@ FRONTEND GET /api/system/community-catalog-config | ok | shared | Settings Gener
 FRONTEND GET /api/system/truth-sources | ok | shared | Settings General cold-loads once; client cache dedupes concurrent/repeated consumers.
 FRONTEND GET /api/system/truth-sources/{source_id}/content | ok | shared | Explicit source-open preview fallback only; no mount, tab switch, focus, or selection trigger.
 FRONTEND GET /api/templates | ok | shared | Disabled until the create-skill template UI is visible; no Copilot skill chat mount fetch.
+FRONTEND PATCH /api/media/models/{param}/settings | ok | specific | Explicit per-model enable/default change with in-flight supersede guard; the returned snapshot is projected without any broad refetch.
 FRONTEND POST /api/io/scan | ok | specific | Explicit I/O import dialog action scans a chosen file/folder and returns scoped field candidates; no panel mount or node selection scans disk.
 FRONTEND POST /api/llm/catalog/sync-verified | ok | specific | No lifecycle trigger remains in Settings; future use must be an explicit command or precise backend event path.
 FRONTEND POST /api/llm/endpoints/{endpoint_id}/models/test | ok | specific | Explicit manual model probe command; client projects returned registry/results and does not perform a follow-up registry GET.
@@ -472,6 +490,7 @@ FRONTEND POST /api/llm/roles/{role_name}/test | ok | specific | Explicit legacy 
 FRONTEND POST /api/llm/roles/{role_name}/test-jobs | ok | specific | Explicit role/Copilot Test button command; tests cover validation gating, start/poll/settle, and no job start when validation fails.
 FRONTEND POST /api/llm/routes/{route_id}/probe | ok | specific | Explicit route probe command; client projects returned registry and returns the updated route to the caller.
 FRONTEND POST /api/llm/routes/{route_id}/probe-multimodal | ok | specific | Explicit multimodal route probe command; client projects returned registry and returns the updated route to the caller.
+FRONTEND POST /api/media/providers/{endpoint_id}/probe | ok | specific | Explicit test-connection command plus the single post-key-save probe chain; no timers, reconnects, or lifecycle triggers.
 FRONTEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; client projects CompileSuccess.detail into the shared skill-detail cache with revalidate:false and performs no broad /skills/{skill_id} follow-up read.
 FRONTEND POST /api/skills/{skill_id}/copilot/interrupt | ok | specific | Explicit Copilot Stop button command; it interrupts only the active skill stream and never revalidates registry/roles/settings/skill truth.
 FRONTEND POST /api/skills/{skill_id}/copilot/judge | ok | specific | Explicit Copilot Judge preparation from a compare result; it returns scoped refs for the next Copilot message and is not a background context sync.
@@ -496,6 +515,7 @@ FRONTEND POST /api/skills/{skill_id}/test_inputs | ok | specific | Explicit Test
 FRONTEND POST /api/skills/{skill_id}/validate_input | ok | specific | Explicit playground/input validation command; it validates a submitted payload and does not revalidate broad skill or runtime truth.
 FRONTEND PUT /api/llm/registry/endpoints | ok | specific | Explicit API Keys save/upsert command; client uses the returned canonical registry snapshot and no longer follows with a broad /llm/registry GET.
 FRONTEND PUT /api/llm/roles | ok | specific | Explicit aggregate roles save; client projects the returned roles_data + registry snapshot and performs no follow-up /llm/registry GET.
+FRONTEND PUT /api/media/providers/{endpoint_id}/credential | ok | specific | Commit-on-blur credential save with supersede-guarded tickets; the response snapshot is projected and a key change chains exactly one probe.
 FRONTEND PUT /api/settings | ok | specific | Settings autosave only follows explicit field edits; debounce/in-flight semantics keep the latest payload and suppress stale response projection.
 FRONTEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Output artifact config save is an explicit command and projects the returned runtime_config snapshot.
 FRONTEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | specific | Explicit Properties compare-candidates autosave for one node; client updates the skill-scoped cache entry and clears in-flight stale reads.

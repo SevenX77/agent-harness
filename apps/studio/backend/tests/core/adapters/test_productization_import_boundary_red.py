@@ -25,6 +25,13 @@ SDK_IMPORT_ALLOWLIST = {
         "expiry": "replace SDK concrete DTO reuse with Studio-owned port DTOs before Wave 3 runtime expansion",
         "gate": "test_studio_business_layer_does_not_import_sdk_internals_directly",
     },
+    "app/core/adapters/media_gateway.py": {
+        "owner": "studio-settings",
+        "reason": "media_gateway is the Studio boundary for the Gateway media generation domain (catalog/schema/probe)",
+        "risk": "Gateway media SDK concrete types can leak past the adapter into Studio business services",
+        "expiry": "replace SDK concrete DTO reuse with Studio-owned media port DTOs when media-invocation-runtime lands",
+        "gate": "test_studio_business_layer_does_not_import_sdk_internals_directly",
+    },
     "app/core/adapters/gateway_config_store_local.py": {
         "owner": "studio-platform",
         "reason": "local config truth store implements the Gateway storage contract",

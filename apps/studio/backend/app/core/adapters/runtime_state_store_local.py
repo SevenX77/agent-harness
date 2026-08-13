@@ -19,13 +19,34 @@ from app.core.adapters.http_transport import StudioAdapterError
 if sys.platform == "win32":
     import msvcrt
 
+    # `msvcrt.locking(LK_LOCK)` is not "wait until it is yours": it retries ten
+    # times a second apart and then raises OSError [Errno 36] "Resource deadlock
+    # avoided" — measured at 9.1s on Windows 11. Every other platform's
+    # `flock(LOCK_EX)` waits as long as the holder takes, so on Windows alone a
+    # holder that kept the lock through a slow write turned a waiter's ordinary
+    # wait into an untyped OSError, escaping the StudioAdapterError contract
+    # every caller of this module is written against.
+    #
+    # `LK_NBLCK` does not retry at all: it raises PermissionError immediately
+    # when the byte is taken. That is the primitive worth having — it lets the
+    # waiting be ours, and therefore unbounded, matching flock.
+    _WINDOWS_LOCK_RETRY_SECONDS = 0.05
+
     def _platform_lock_file(file: Any) -> None:
         file.seek(0, os.SEEK_END)
         if file.tell() == 0:
             file.write(b"\0")
             file.flush()
-        file.seek(0)
-        msvcrt.locking(file.fileno(), msvcrt.LK_LOCK, 1)
+        while True:
+            file.seek(0)
+            try:
+                msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except PermissionError:
+                # Someone else holds it. Any other OSError is about this handle
+                # rather than about contention, and must not be retried into a
+                # silent hang.
+                time.sleep(_WINDOWS_LOCK_RETRY_SECONDS)
 
     def _platform_unlock_file(file: Any) -> None:
         file.seek(0)

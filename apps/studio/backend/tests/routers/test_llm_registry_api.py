@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from app.core import config
+from app.core.adapters.gateway import parse_catalog_evidence
 from app.models.llm_config import (
     CapabilityValue,
     LLMCredentialsFile,
@@ -25,7 +26,6 @@ from app.models.llm_config import (
     RolesData,
 )
 from app.routers import llm as llm_router
-from app.services.community_catalog import parse_catalog_evidence
 from app.services.community_catalog_runtime import (
     promote_community_evidence_into_credentials,
 )

@@ -21,7 +21,7 @@ import json
 import httpx
 from pydantic import BaseModel, ConfigDict
 
-from app.services.community_catalog import EvidenceUpload
+from app.core.adapters.gateway import EvidenceUpload
 
 EVIDENCE_BATCH_PATH = "/v1/evidence/batches"
 PROTOCOL_MAJOR = 1

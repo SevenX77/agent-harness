@@ -1,18 +1,27 @@
-"""Community Probe Catalog — Phase 2a client redaction + upload payload builder.
+"""What a piece of probe evidence looks like once it leaves this machine.
 
-This module owns the privacy red-line for community evidence sharing:
+The Probe Knowledge Catalog is worth sharing, so this module owns the rule for
+what may cross that line — the same package that owns the catalog owns the
+red-line guarding it:
 
-- It builds an :class:`EvidenceUpload` payload from a local
-  :class:`EvidenceRecord` using a strict field **allowlist** (``extra="forbid"``),
-  so secrets, credential refs, local paths, raw prompt/IO, and free-form probe
-  blobs can never reach the wire by construction.
-- Endpoint identity is published **only** when the host is safe to publish — a
-  public DNS host / public IP with no userinfo (``is_safe_to_publish``). Private /
-  LAN / identity-bearing hosts drop their endpoint identity entirely; a bare
-  un-salted hash of a private host is never emitted.
+- :class:`EvidenceUpload` is a strict allowlist (``extra="forbid"``), so secrets,
+  credential refs, local paths, raw prompt/IO and free-form probe blobs cannot
+  reach the wire by construction rather than by remembering to strip them.
+- Endpoint identity is published only when the host is safe to publish — a public
+  DNS name or globally-routable IP with no userinfo. A private / LAN /
+  identity-bearing host drops its identity entirely; a bare un-salted hash of a
+  private host is never emitted, because a hash of a guessable name is not
+  anonymous.
+- Only ``probe``-type, ``probe-verified`` evidence is shareable at all, and both
+  wire mappings fail closed on anything else.
 
-The wire ``evidence_type`` is ``"probe_result"`` (mapped from the gateway's
-internal ``"probe"``); see :mod:`app.services.community_catalog` round-trip.
+``published_base_url`` is NOT ``registry/base_url.py:canonicalize_base_url`` and
+the two must not be confused. That one answers "which URL do I actually call",
+and is protocol-aware — it appends ``/anthropic`` for DeepSeek's
+anthropic-compatible endpoint, ``/api/v3`` for Ark. This one answers "which
+string do two different people publish so the same endpoint matches", and so
+lowercases the host, drops default ports and discards query/fragment. Feeding
+either one to the other's job produces a wrong answer that looks right.
 """
 
 from __future__ import annotations
@@ -24,7 +33,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from app.core.adapters.gateway import EvidenceRecord
+from graph_agent_gateway.registry.schema import EvidenceRecord
 
 WIRE_EVIDENCE_TYPE: Literal["probe_result"] = "probe_result"
 INTERNAL_PROBE_EVIDENCE_TYPE = "probe"
@@ -36,9 +45,10 @@ COMMUNITY_PROVENANCE = "community-catalog"
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
-def normalize_base_url(base_url: str) -> str:
-    """Return a canonical base URL: lowercase scheme/host, default ports and a
-    trailing slash stripped, and collapsed path slashes. Query/fragment dropped."""
+def published_base_url(base_url: str) -> str:
+    """Return the form of a base URL that is published and fingerprinted:
+    lowercase scheme/host, default port and trailing slash stripped, collapsed
+    path slashes, query/fragment discarded."""
     split = urlsplit(base_url.strip())
     scheme = split.scheme.lower()
     host = (split.hostname or "").lower()
@@ -174,7 +184,7 @@ def build_upload_record(
     normalized_url: str | None = None
     fingerprint: str | None = None
     if base_url and is_safe_to_publish(base_url):
-        normalized_url = normalize_base_url(base_url)
+        normalized_url = published_base_url(base_url)
         fingerprint = endpoint_fingerprint(normalized_url)
 
     route_key: str | None = None
@@ -267,6 +277,7 @@ def parse_catalog_evidence(wire_record: dict[str, Any]) -> EvidenceRecord:
 
 __all__ = [
     "COMMUNITY_PROVENANCE",
+    "UPLOADABLE_TRUST_STATE",
     "WIRE_EVIDENCE_TYPE",
     "EvidenceUpload",
     "build_upload_record",
@@ -275,7 +286,7 @@ __all__ = [
     "from_wire_evidence_type",
     "is_safe_to_publish",
     "is_uploadable",
-    "normalize_base_url",
+    "published_base_url",
     "parse_catalog_evidence",
     "to_wire_evidence_type",
 ]

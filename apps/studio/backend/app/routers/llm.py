@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
+    COMMUNITY_PROVENANCE,
     INCONCLUSIVE_PROBE_STATUSES,
     CapabilitySource,
     CredentialProviderProtocol,
@@ -91,7 +92,6 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
-from app.services.community_catalog import COMMUNITY_PROVENANCE
 from app.services.community_catalog_runtime import sync_verified_community_catalog_into_credentials
 from app.services.community_catalog_sync import (
     VerifiedSyncError,

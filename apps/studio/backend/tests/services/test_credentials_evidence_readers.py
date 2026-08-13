@@ -8,9 +8,8 @@ readers (research §4 reader table). All queries read ONLY credentials.
 
 from __future__ import annotations
 
-from app.core.adapters.gateway import EvidenceRecord
+from app.core.adapters.gateway import COMMUNITY_PROVENANCE, EvidenceRecord
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
-from app.services.community_catalog import COMMUNITY_PROVENANCE
 
 
 def _probe_evidence(

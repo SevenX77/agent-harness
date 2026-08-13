@@ -11,14 +11,13 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from app.services.community_catalog import (
+from graph_agent_gateway.registry import (
     EvidenceUpload,
     build_upload_record,
     is_safe_to_publish,
     is_uploadable,
-    normalize_base_url,
+    published_base_url,
 )
-
 from tests.helpers_community_catalog import probe_record as _probe_record  # type: ignore[import-not-found]
 
 
@@ -106,7 +105,7 @@ def test_upload_model_forbids_extra_fields() -> None:
     ],
 )
 def test_normalize_base_url(raw: str, expected: str) -> None:
-    assert normalize_base_url(raw) == expected
+    assert published_base_url(raw) == expected
 
 
 @pytest.mark.parametrize(

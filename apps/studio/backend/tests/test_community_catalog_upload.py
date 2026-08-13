@@ -16,8 +16,8 @@ import json
 
 import httpx
 import pytest
+from app.core.adapters.gateway import EvidenceUpload, build_upload_record
 from app.core.backends import BackendConfig, clear_backend_caches
-from app.services.community_catalog import EvidenceUpload, build_upload_record
 from app.services.community_catalog_upload import (
     EVIDENCE_BATCH_PATH,
     CommunityUploadClient,

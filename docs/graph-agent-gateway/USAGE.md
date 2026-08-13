@@ -298,7 +298,8 @@ name = project_model_identity(
 )
 # name.display_name  -> "Claude Opus 4.1 20250805"
 # name.section_label -> "anthropic"          分区用
-# name.unknown_tokens-> ("opus",)            见下面那条警告,别照字面理解
+# name.confidence    -> "high"               这个答案是模型 id 自己给的
+# name.unknown_tokens-> ()                   这个 id 里没有本包不认识的词
 
 group = project_model_group_identity(route=route, endpoint=endpoint)
 # group.key              -> "claude-opus-4-1"   同一组的路由拿到同一个 key
@@ -309,15 +310,27 @@ group = project_model_group_identity(route=route, endpoint=endpoint)
 ```
 
 `provider_label` 是**你**给端点起的用户可见名字,由参数传进来而不是从 endpoint 上读——
-网关的 `ProviderEndpoint` 没有展示字段。它只在模型 id 自己认不出品牌时当线索用。
+网关的 `ProviderEndpoint` 没有展示字段。它只在模型 id 自己什么都没声明时当线索用。
 
-> **`unknown_tokens` 今天名不副实,别拿它当「这个模型我不认识」的判据。** 实测
-> (2026-08-13,`claude-opus-4-1-20250805`)它返回 `("opus",)`——而 `opus` 正是推出
-> family=Claude 的那个词。原因是 `_recognized_tokens` 只把 owner 与 family 的名字
-> (`anthropic` / `claude`)算作认识的,没把**促成这次归类的证据 token**算进去,所以
-> `opus` / `sonnet` / `haiku` 这类家族成员词一律落进"不认识"。这是本包的已知缺陷,
-> 不是有意设计;在它修好之前,要判断"这个模型认不认得出",读 `confidence`
-> (`high` = 认出厂商 / `medium` = 只认出家族 / `low` = 都没认出)。
+**模型自己声明的厂商,压过它挂在谁身上。** 一个代理的域名里带 `anthropic`,不代表
+它服务的 `xiaomi/mimo-v2.5` 是 Anthropic 做的。所以模型 id 的 `vendor/` 前缀先被读:
+认得的厂商直接算数(`openai/o3-mini` → `openai` 区);**不认得的厂商也算数**——答案
+是"某个本包不认识的厂商做的"(`section_label` 取声明的厂商名 `xiaomi`,`confidence`
+= `low`),而不是"归给这台代理域名里的那个词"。只有一个厂商都没声明的 id
+(`large-2411`)才会去看它挂的端点。
+
+`confidence` 说的是**这个答案是从哪儿来的**,不是它有多可能对:
+
+| 值 | 谁说的 | 例 |
+|---|---|---|
+| `high` | 模型 id 自己点了名 | `claude-opus-4-1-20250805`、`openai/o3-mini` |
+| `medium` | id 没声明,是从它挂的端点(`endpoint_id` / `provider_label`)猜的 | 端点标着 "Mistral Cloud",模型叫 `large-2411` |
+| `low` | 声明了一个本包不认识的厂商,或者什么都认不出 | `xiaomi/mimo-v2.5` |
+
+`unknown_tokens` 是**这个 id 里没有任何一张表认领的词**——也就是"想让本包认得更多,
+下一个该往词表里加什么"的清单。它不会列出已经被用掉的词:`opus` 推出了 family=Claude、
+`doubao` 推出了 owner=ByteDance,这两个都不算"不认识"。`qwen3-235b-a22b-instruct-2507`
+返回 `("235b", "a22b", "instruct", "2507")`,四个都是本包确实没有词条的。
 
 **这里有两个「同一个模型」,别弄混**:
 

@@ -3,7 +3,7 @@ module: 05-orch-capabilities-and-models
 doc: mvp1-alignment
 status: drafted
 binds_design: ./baseline.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:normalize_route_capabilities/build_runtime_setting_descriptors · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/lint.py:lint_role_routes/capability_key_for_lint · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/profile_selector.py:select_verified_profile/ProfileSelectionError · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:resolve_role · apps/studio/backend/app/routers/llm.py:probe_route/_registry_response/_capability_state · apps/studio/backend/app/services/llm_model_identity.py:project_model_identity · apps/studio/backend/app/services/llm_model_groups.py:project_model_group_identity/normalize_model_group_key · apps/studio/backend/app/services/llm_notable_models.py:notable_model_ids/default_provider_notes_dir · apps/studio/backend/app/services/llm_route_capabilities.py:route_effective_capabilities/route_thinking_capability/verified_profile_route_capabilities
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:normalize_route_capabilities/build_runtime_setting_descriptors · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/lint.py:lint_role_routes/capability_key_for_lint · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/profile_selector.py:select_verified_profile/ProfileSelectionError · packages/graph-agent-gateway/src/graph_agent_gateway/resolve/resolver.py:resolve_role · apps/studio/backend/app/routers/llm.py:probe_route/_registry_response/_capability_state · packages/graph-agent-gateway/src/graph_agent_gateway/registry/model_naming.py:project_model_identity · packages/graph-agent-gateway/src/graph_agent_gateway/registry/model_naming.py:project_model_group_identity/normalize_model_group_key · apps/studio/backend/app/services/llm_notable_models.py:notable_model_ids/default_provider_notes_dir · packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:route_effective_capabilities/verified_profile_capabilities
 units: [capability-model-knowledge]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
@@ -11,19 +11,20 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 # 05 — Capabilities & Models（能力归一化 / profile 选择 / lint / 模型知识）· MVP1 设计
 
 > **组织方式**：**以每个功能为索引** —— 每个功能(F1–F8)一段，把它的机制/数据流 · 决策+动机 · 原话 · 测试点 · status · 归属**全收在自己段里**；仅「定义」「接口契约」「跨功能设计依据」是模块级总览，证据附录（已实现/差异、覆盖代码、代码索引）落在文末。现状基线见同目录 `baseline.md`。
-> **Tier**：③b gateway 公共能力内核（`capabilities`/`lint`/`profile_selector` 已在包内；**model_groups / identity / notable / route_capabilities 的能力内核也属 ③b，现散 ③a `apps/studio/backend/app/services` 待下沉**）
+> **Tier**：③b gateway 公共能力内核（`capabilities`/`lint`/`profile_selector` 已在包内；**model_groups / identity / route_capabilities 的能力内核也属 ③b，已于 2026-08-13 下沉进包内（#772 → `registry/model_naming.py`、#771 → `registry/capabilities.py`）；notable 的内核同判 ③b，但其数据源是宿主文档目录，按「存储由宿主注入」仍散在 ③a**）
 > **Owns**：把各厂商参差的模型能力**归一化**成统一表示、把能力翻译成前端可渲染的**控件描述符**、在单条 route 内选择已验证的**调用 profile**、对显式 route 链做 capability **lint**、把原始 model id 客观**分组（model group）/ 识别品牌家族（identity）/ 沉淀已知可用知识（notable）/ 合并静态+探测能力（route_capabilities）**；**不调模型、不做动态选型**
-> **Status**：设计定稿（2026-06-03 判据第四轮反转 model_groups/identity/notable/route_capabilities 归属）；代码 = `capabilities`/`lint`/`profile_selector` 不动，四项模型知识能力内核待下沉 ③b，`_capability_state` 四态轴已落地
+> **Status**：设计定稿（2026-06-03 判据第四轮反转 model_groups/identity/notable/route_capabilities 归属）；代码 = `capabilities`/`lint`/`profile_selector` 不动；四项模型知识能力内核中 **model_groups / identity / route_capabilities 已下沉 ③b（2026-08-13，#771 / #772）**，notable 待拆规则与介质后下沉，`_capability_state` 四态轴已落地
 > **Related**：[[02-orch-role-resolution]]（消费 profile + lint 结果）· [[04-orch-registry-schema]]（`CapabilityValue`/`VerifiedProfile`/`LintResult` 字段权威源）· [[08-orch-test-status-ssot]]（capability_state 第二轴投影落点）· [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]（消费 `call_method_id`/`request_mapper_id`）
 > **决策日志**：`packages/graph-agent-gateway/README.md` §2/§3 + `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.0 + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（行 42-45 四项反转）
 > **现状**：见同目录 `baseline.md`
+> **怎么读下文里的「现散 ③a 待下沉」**：那句话描述的是 2026-06-03 判据反转当时的状态。分组 / 识别 / 能力合并三项已于 2026-08-13 下沉（#771 / #772），下文凡出现在**决策叙述与被否原文**里的旧措辞是历史，不是当前事实——当前事实以上面 Tier / Status 两行、`baseline.md` 与 `packages/graph-agent-gateway/README.md` §7 那张表为准。仍然待下沉的只有 notable。
 
 ## 定义
 
 MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，但按"公共能力内核 vs 应用加工"判据**把它们稳定定位为「编排输入和诊断」**，而不是"动态选型"，也不是"产品展示投影"。两类职责按判据分层：
 
 - **能力归一化 + 控件描述符 + profile 选择 + lint**（`capabilities.py` / `profile_selector.py` / `lint.py`）：把模型能力标准化、翻译成可配置项、在单 route 内选调用方式、守门配置合法性 = **③b 公共**（已在 gateway 包）。
-- **模型知识：分组 / 识别 / 知识库 / 能力合并**（`llm_model_groups.py` / `llm_model_identity.py` / `llm_notable_models.py` / `llm_route_capabilities.py`）：把原始 model id 客观分组、归类品牌家族、沉淀"哪些模型存在/可用/值得试"、合并静态+探测能力 = **③b 公共能力内核（本轮反转，现散 ③a 待下沉）**；只有**展示名样式覆盖 / family 折叠 / 弃用区 / notable 数据源路径注入 / identity 展示投影**这层应用加工留 ③a。
+- **模型知识：分组 / 识别 / 知识库 / 能力合并**（`llm_model_groups.py` / `llm_model_identity.py` / `llm_notable_models.py` / `llm_route_capabilities.py`）：把原始 model id 客观分组、归类品牌家族、沉淀"哪些模型存在/可用/值得试"、合并静态+探测能力 = **③b 公共能力内核（本轮反转）**；其中分组 / 识别 / 能力合并三项已下沉包内，notable 仍在 ③a。只有**展示名样式覆盖 / family 折叠 / 弃用区 / notable 数据源路径注入 / identity 展示投影**这层应用加工留 ③a。
 
 调用层 A' 迁移到原生 ChatX 时，这些模块仍只负责描述 route 能力、选单 route 内调用 profile、阻断非法配置、产出模型知识 DTO。**不调模型**（调用归 [[09-inv-invocation-runtime]]），**不做动态选型**（capability 只能 lint/warn/block，runtime 仍按显式 `route_id` 执行）。本文只写文档目标，不改代码。
 
@@ -38,7 +39,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 | **控件描述符 → ③b** | `build_runtime_setting_descriptors(route: ProviderRoute) -> dict[str, RuntimeSettingDescriptor]`（`registry/capabilities.py:259-271`，`RuntimeSettingDescriptor` schema `registry/schema.py:147-160`）。按 11 个固定 key 输出控件描述（key/类型/支持状态/上下限/默认/枚举/来源），驱动 ① intent 控件；前端只选"关心哪几种能力"，不硬编码 provider 规则。 |
 | **profile 选择 → ③b** | `select_verified_profile(route, runtime_settings) -> VerifiedProfile | None`（`resolve/profile_selector.py:14-52`）。无 ready profile → 返回 `None`（走默认调用方式，不失败）；要求模态/reasoning 无 ready profile 覆盖 → 抛 `ProfileSelectionError`（无 verified profile 满足请求意图的异常）。**单 route 入参**（只接收单个 `ProviderRoute`），结构上保证不跨 route 选型。 |
 | **lint → ③b** | `lint_role_routes(role, routes) -> list[LintResult]`（`resolve/lint.py:27-87`）。`LintResult`{ `severity`(warn/error)、`blocking`(bool)、`code`(`requires_probe`/incompatible…) }（`registry/schema.py:388-400`）。**只产出结果**，不改 `fallback_chain`、不补 route。 |
-| **模型知识 → ③b（现散 ③a 待下沉）** | `project_model_group_identity(route) -> ModelGroupIdentityProjection`（组 key/组展示名/section/剥离 token，`llm_model_groups.py:43-68`）；`project_model_identity(route) -> ModelIdentityProjection`（展示名/section/置信度/unknown_tokens，`llm_model_identity.py:83-121`）；`notable_model_ids(provider, notes_dir) -> list[str]`（`llm_notable_models.py:16-37`）；`route_effective_capabilities(route) -> dict`（静态 + ready verified 合并，`llm_route_capabilities.py:10-64`）。**输出 = 模型知识 DTO**；③b **看得到**"route + endpoint 原始信息"（通用），**看不到**"family 折叠态/弃用区/展示名样式覆盖/数据源在哪个文件"（③a 应用加工）。 |
+| **模型知识 → ③b（三项已下沉，notable 待下沉）** | `project_model_group_identity(route, endpoint, provider_label) -> ModelGroupIdentityProjection`（组 key/组展示名/section/剥离 token，`registry/model_naming.py`）；`project_model_identity(...) -> ModelIdentityProjection`（展示名/section/置信度/unknown_tokens，同文件）；`route_effective_capabilities(route) -> dict`（静态 + ready verified 合并，`registry/capabilities.py`）；`notable_model_ids(provider, notes_dir) -> list[str]`（仍在 `apps/studio/backend/app/services/llm_notable_models.py`）。**输出 = 模型知识 DTO**；③b **看得到**"route + endpoint 原始信息"（通用），**看不到**"family 折叠态/弃用区/展示名样式覆盖/数据源在哪个文件"（③a 应用加工）。 |
 | **capability_state 第二轴（D2，四态）** | `_capability_state(capabilities) -> Literal["unknown","callable_only","partial","known"]`（现散 ③a `routers/llm.py`，已按四态落地）。**判据 = 按每个 capability 的 `source` 算（probe-verified vs doc/list/draft 声称 vs 未知），不并入 `route.status`（availability）**。投影侧落点见 [[08-orch-test-status-ssot]] 回填。归属 = route 内在轴（③b 标准总结，现散 ③a待下沉）。机制/决策见 §F8。 |
 | **错误** | profile 无匹配 → `ProfileSelectionError`（route 级不可执行原因，由 `resolve_role` 转 skipped diagnostic 或 override fail-fast，归 [[02-orch-role-resolution]]）；blocking lint → `RegistryResolutionError`（role 级配置错误）。**不抛"找不到更好的 route"类错误**（无动态选型）。 |
 | **归属 / 稳定性** | 所有上述 schema 字段权威源 = [[04-orch-registry-schema]]；本模块只链接。`call_method_id`/`request_mapper_id` 的消费契约由 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]] 钉死。 |
@@ -119,7 +120,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 
 ### F4 model_groups 分组（`project_model_group_identity`）
 
-- **机制 / 数据流**：同一份 route capabilities 被 〔**分组 ③b（现散 ③a）**〕`project_model_group_identity` 投影成 Available Models 模型知识 DTO（③a 套上 family 折叠 / 弃用区 / 展示名样式）。`project_model_group_identity`（把同模型多变体折叠成一张模型组卡身份的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`apps/studio/backend/app/services/llm_model_groups.py:43-68`）。**留 ③a 的只有**：展示名样式覆盖 / family 折叠 / 弃用区分区 / identity 展示投影渲染。Studio 前端通过 registry DTO 看到 model_groups；它**展示**这些信息（套 family 折叠 / 弃用区 / 颜色），但 **role 执行仍以保存的 route chain 为准**（`apps/studio/backend/app/routers/llm.py:1361-1383`）。**判据**：model_groups DTO 的分组内核 ③b（现散 ③a），渲染 ③a。
+- **机制 / 数据流**：同一份 route capabilities 被 〔**分组 ③b（已下沉）**〕`project_model_group_identity` 投影成 Available Models 模型知识 DTO（③a 套上 family 折叠 / 弃用区 / 展示名样式）。`project_model_group_identity`（把同模型多变体折叠成一张模型组卡身份的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`registry/model_naming.py:project_model_group_identity`）。**留 ③a 的只有**：展示名样式覆盖 / family 折叠 / 弃用区分区 / identity 展示投影渲染。Studio 前端通过 registry DTO 看到 model_groups；它**展示**这些信息（套 family 折叠 / 弃用区 / 颜色），但 **role 执行仍以保存的 route chain 为准**（`apps/studio/backend/app/routers/llm.py:1361-1383`）。**判据**：model_groups DTO 的分组内核 ③b（现散 ③a），渲染 ③a。
   - **关键边界（判据，目标语义）**：model group = 模型知识的客观加工（分组不依赖 UI/产品策略/调用方式/存储介质），换任何 app 都要 → ③b 公共。
 - **决策 + 动机**：分组内核归属反转见「跨功能设计依据」决策 #1（model_groups 与 identity/notable/route_caps 同批反转为 ③b 公共能力内核，现散 ③a 待下沉）。本功能特定边界：`project_model_group_identity` 折叠同模型多变体后 runtime 仍用精确 `route_id`。
 - **原话**：
@@ -130,16 +131,16 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
   > "#R3 在model family上做一个折叠功能: anthropic 可以折叠起来, 隐藏里面的所有模型"（ux-spec §2.0 行 80）→ family 折叠 = 展示策略，留前端 ①/③a；identity 的"归类成 anthropic 家族"内核 = ③b。
 - **测试点**：**模型知识 = 客观分组、不影响执行**：`project_model_group_identity` 折叠同模型多变体后，runtime **仍用精确 `route_id`** 执行（`llm_model_groups.py:48-53` 注释「exact execution still uses each route_id」必测）。
 - **status**：已实现——Studio registry response 已输出 model_groups（`apps/studio/backend/app/routers/llm.py:1361-1383`）。分组内核下沉 gateway；family 折叠/弃用区展示留 ③a = target。
-- **归属**：**③b 公共能力内核（现散 ③a 待下沉）** `apps/studio/backend/app/services/llm_model_groups.py`（分组）。**③a 应用加工（留 studio / 前端）**：展示名样式覆盖、family 折叠、弃用区分区。
+- **归属**：**③b 公共能力内核（已下沉 2026-08-13 #772）** `packages/graph-agent-gateway/src/graph_agent_gateway/registry/model_naming.py`（分组）。**③a 应用加工（留 studio / 前端）**：展示名样式覆盖、family 折叠、弃用区分区。
 
 ### F5 identity 品牌/家族识别（`project_model_identity`）
 
-- **机制 / 数据流**：同一份 route capabilities 被 〔**识别 ③b（现散 ③a）**〕`project_model_identity` 投影成模型知识 DTO。`project_model_identity`（把 route/endpoint 名解析成品牌/家族归类的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`apps/studio/backend/app/services/llm_model_identity.py:83-121`）。**留 ③a 的只有**：identity 展示投影渲染。
+- **机制 / 数据流**：同一份 route capabilities 被 〔**识别 ③b（已下沉）**〕`project_model_identity` 投影成模型知识 DTO。`project_model_identity`（把 route/endpoint 名解析成品牌/家族归类的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`registry/model_naming.py:project_model_identity`）。**留 ③a 的只有**：identity 展示投影渲染。
   - **关键边界（判据，目标语义）**：identity = 模型知识的客观加工（归类不依赖 UI/产品策略/调用方式/存储介质），换任何 app 都要 → ③b 公共。identity 的"归类成 anthropic 家族"内核 = ③b；family 折叠（展示策略）留前端 ①/③a（见 F4 #R3 原话）。
 - **决策 + 动机**：识别内核归属反转见「跨功能设计依据」决策 #1（identity 与 model_groups/notable/route_caps 同批反转为 ③b 公共能力内核，现散 ③a 待下沉）。
 - **测试点**：（与 F4「模型知识 = 客观分组、不影响执行」同一架构边界——投影不改变 runtime 精确 route_id 执行。）
 - **status**：识别内核下沉 gateway；展示名样式覆盖留 ③a = target。
-- **归属**：**③b 公共能力内核（现散 ③a 待下沉）** `apps/studio/backend/app/services/llm_model_identity.py`（品牌/家族识别）。**③a 应用加工**：展示名样式覆盖、identity 展示投影渲染。
+- **归属**：**③b 公共能力内核（已下沉 2026-08-13）** `packages/graph-agent-gateway/src/graph_agent_gateway/registry/model_naming.py`（品牌/家族识别，#772）。**③a 应用加工**：展示名样式覆盖、identity 展示投影渲染。
 
 ### F6 notable 已知可用知识库（`notable_model_ids`）
 
@@ -152,12 +153,12 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 
 ### F7 route_capabilities 合并（`route_effective_capabilities`）
 
-- **机制 / 数据流**：route capabilities → 〔**合并 ③b（现散 ③a）**〕`route_effective_capabilities`（并入 ready verified profile facts）→ 供描述符/投影/lint 复用。`route_effective_capabilities`（把静态声明能力 + ready verified profile 派生能力合并的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`apps/studio/backend/app/services/llm_route_capabilities.py:10-64`）。
+- **机制 / 数据流**：route capabilities → 〔**合并 ③b（已下沉）**〕`route_effective_capabilities`（并入 ready verified profile facts）→ 供描述符/投影/lint 复用。`route_effective_capabilities`（把静态声明能力 + ready verified profile 派生能力合并的函数）= **把原始模型数据标准化/组织/合并/沉淀知识，换任何 app 都要 → ③b 公共**；它**不改变 runtime route_id**（runtime 仍按显式 `route_id` 执行）（`apps/studio/backend/app/services/llm_route_capabilities.py:10-64`）。
   - **关键边界（判据，目标语义）**：route_capabilities = 模型知识的客观加工（合并不依赖 UI/产品策略/调用方式/存储介质），换任何 app 都要 → ③b 公共。
 - **决策 + 动机**：能力合并归属反转见「跨功能设计依据」决策 #1（route_capabilities 与 model_groups/identity/notable 同批反转为 ③b 公共能力内核，现散 ③a 待下沉）。
 - **疑点（原 #2）**：resolver 是否应使用 `route_effective_capabilities` 合并 ready verified profile facts 后再 lint，目前源码没有这样做；这可能影响 verified profile 对 thinking capability 的补强（`apps/studio/backend/app/services/llm_route_capabilities.py:10-19`，`resolve/resolver.py:104-116`）。下沉 `route_effective_capabilities` 到 ③b 后，resolver 与 Studio 投影可共用同一份合并能力。
 - **status**：能力合并下沉 gateway；可供 resolver lint 复用 = target。
-- **归属**：**③b 公共能力内核（现散 ③a 待下沉）** `apps/studio/backend/app/services/llm_route_capabilities.py`（静态+探测能力合并）。
+- **归属**：**③b 公共能力内核（已下沉 2026-08-13）** `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py`（静态+探测能力合并）。
 
 ### F8 capability 就绪轴（D2，第二轴 capability_state）（`_capability_state`）
 
@@ -217,10 +218,10 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 | `registry/capabilities.py`（`normalize_route_capabilities` 归一化 + `build_runtime_setting_descriptors` 控件描述符） | **③b**（已在包内） | 保留归一化规则与 11 控件描述符；A' 换 ChatX 不动 |
 | `resolve/profile_selector.py`（`select_verified_profile` 单 route 内选 ready profile） | **③b**（已在包内） | 保留单 route 选择语义；输出作 `ResolvedRoute` 调用方法提示 |
 | `resolve/lint.py`（`lint_role_routes` 显式链 lint，不选型） | **③b**（已在包内） | 保留 warn/block，守"不动态选型"边界 |
-| `services/llm_model_identity.py`（`project_model_identity` 品牌/家族识别） | **③b 能力内核（现散 ③a 待下沉）** | 识别内核下沉 gateway；展示名样式覆盖留 ③a |
-| `services/llm_model_groups.py`（`project_model_group_identity` 同模型折叠成组卡） | **③b 能力内核（现散 ③a 待下沉）** | 分组内核下沉 gateway；family 折叠/弃用区展示留 ③a |
+| `registry/model_naming.py`（`project_model_identity` 品牌/家族识别） | **③b 能力内核（已下沉 #772）** | 识别内核下沉 gateway；展示名样式覆盖留 ③a |
+| `registry/model_naming.py`（`project_model_group_identity` 同模型折叠成组卡） | **③b 能力内核（已下沉 #772）** | 分组内核下沉 gateway；family 折叠/弃用区展示留 ③a |
 | `services/llm_notable_models.py`（`notable_model_ids` 已知可用知识） | **③b 能力内核（现散 ③a 待下沉）** | 知识库下沉 gateway；数据源路径注入 + 展示面板留 ③a |
-| `services/llm_route_capabilities.py`（`route_effective_capabilities` 静态+探测能力合并） | **③b 能力内核（现散 ③a 待下沉）** | 能力合并下沉 gateway；可供 resolver lint 复用 |
+| `registry/capabilities.py`（`route_effective_capabilities` 静态+探测能力合并） | **③b 能力内核（已下沉 #771）** | 能力合并下沉 gateway；可供 resolver lint 复用 |
 | 调用点（`resolve_role` 解析使用链 / `_registry_response` 组装 Studio registry DTO） | **③b**（`resolve_role`）+ **③a**（DTO 组装/渲染） | resolve 使用链不动；DTO 组装的分组/状态内核下沉 ③b，渲染留 ③a |
 
 ## 代码索引（clues）（模块级证据附录）
@@ -228,7 +229,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 > 保留原代码索引全部条目 + 归属标注。
 
 - `docs/graph-agent-gateway/mvp1/README.md:58` — 05 模块覆盖 brief。
-- `packages/graph-agent-gateway/README.md:59-69` — §3.B 模型知识 + §3.C 能力（model group/identity/notable/route_capabilities 标 🔻 = 公共但现散 ③a）。
+- `packages/graph-agent-gateway/README.md` — §3.B 模型知识 + §3.C 能力（notable 仍标 🔻；model group / identity / 能力合并已改标 ✅ = 公共但现散 ③a）。
 - `docs/graph-agent-gateway/mvp1/module-disposition-revised.md:42-45` — 四项反转判定（model_groups/identity/notable/route_capabilities → ③b 公共）。
 - 历史 mvp0 材料只作背景,不作为本模块 baseline 或 MVP1 接口事实来源；本模块的现状依据以当前代码和 mvp1 README / disposition 为准。
 - 「编排 / 调用分离」（D2，本文留底，见「跨功能设计依据」）— RouteChatModelFactory 目标是用 ResolvedRoute 构造原生 ChatX；落点 [[10-inv-route-chat-model-factory]]（决策记录系临时文档已不引用）。
@@ -238,8 +239,8 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 - `resolve/profile_selector.py:14-52` — `select_verified_profile`（单 route 内选 verified profile 的函数）。**③b**。
 - `resolve/lint.py:27-87` — `lint_role_routes`（role route lint，只产出结果的函数）。**③b**。
 - `resolve/resolver.py:72-132` — `resolve_role`（把 selected profile 和 lint_results 装入 resolved role 的函数）。**③b**。
-- `apps/studio/backend/app/services/llm_model_identity.py:83-121` — `project_model_identity`（Studio 模型身份投影函数）。**③b 内核（现散 ③a）**。
-- `apps/studio/backend/app/services/llm_model_groups.py:43-68` — `project_model_group_identity`（Studio 模型组投影函数）。**③b 内核（现散 ③a）**。
-- `apps/studio/backend/app/services/llm_notable_models.py:16-37` — `notable_model_ids`（从文档提取 notable models 的函数）。**③b 内核（现散 ③a）**。
-- `apps/studio/backend/app/services/llm_route_capabilities.py:10-64` — `route_effective_capabilities` / `verified_profile_route_capabilities`（合并 verified profile facts 的函数）。**③b 内核（现散 ③a）**。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/model_naming.py:project_model_identity` — 模型身份投影（已下沉 #772）。**③b 内核（现散 ③a）**。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/model_naming.py:project_model_group_identity` — 模型组投影（已下沉 #772）。**③b 内核（现散 ③a）**。
+- `apps/studio/backend/app/services/llm_notable_models.py:notable_model_ids` — `notable_model_ids`（从文档提取 notable models 的函数）。**③b 内核（现散 ③a）**。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:route_effective_capabilities` / `:verified_profile_capabilities` — 已下沉 #771（合并 verified profile facts 的函数）。**③b 内核（现散 ③a）**。
 - `apps/studio/backend/app/routers/llm.py:_capability_state` — capability 就绪轴已四态；`tools`/`structured_output` summary 已按能力值派生。

@@ -4,7 +4,7 @@ doc: baseline
 status: drafted
 verified_at: 2026-06-06
 binds_design: ./mvp1-alignment.md
-binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message/_usage_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/call/dispatch.py:dispatch_ordinary_chat/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_call_wavespeed_any_llm/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/call/models.py:GenericRouteChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel/_generate/_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message/_usage_from_ai_message/_apply_system_prompt_prefix · packages/graph-agent-gateway/src/graph_agent_gateway/call/factory.py:RouteChatModelFactory/build · packages/graph-agent-gateway/src/graph_agent_gateway/call/plain.py:chat_plainly · packages/graph-agent-gateway/src/graph_agent_gateway/dialect/ · packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:GatewayChatModel · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute
 units: [chatx-invocation-runtime]
 aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---

@@ -620,7 +620,8 @@ features:
   - path: packages/graph-agent/src/graph_agent/cognitive/finish_task.py
   error_codes_primary: []
   error_codes_secondary: []
-  events_primary: []
+  events_primary:
+  - FinishTaskVerdictEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
@@ -724,7 +725,9 @@ features:
   - path: packages/graph-agent/src/graph_agent/middleware/execution_control.py
   error_codes_primary: []
   error_codes_secondary: []
-  events_primary: []
+  events_primary:
+  - LoopDetectedEvent
+  - ProtocolViolationEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
+
+from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.events import LoopDetectedEvent
 
 
 class LoopDetectionMiddleware(AgentMiddleware[AgentState[Any]]):
@@ -20,11 +24,13 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState[Any]]):
         loop_window: int = 5,
         loop_threshold: int = 3,
         phase_name: str = "unknown",
+        callbacks: Sequence[Any] | None = None,
     ) -> None:
         super().__init__()
         self._loop_window = max(1, loop_window)
         self._loop_threshold = max(2, loop_threshold)
         self._phase_name = phase_name
+        self._callbacks = callbacks
         self._last_diagnostic_signature: tuple[str, str] | None = None
 
     def after_model(
@@ -45,6 +51,19 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState[Any]]):
         if signature == self._last_diagnostic_signature:
             return None
         self._last_diagnostic_signature = signature
+        _safe_emit_event(
+            self._callbacks,
+            LoopDetectedEvent(
+                phase_name=self._phase_name,
+                tool_name=signature[0],
+                count=count,
+                message=(
+                    f"Detected a no-progress loop in phase {self._phase_name!r}: "
+                    f"tool {signature[0]!r} returned the same result {count} times in a row; "
+                    "injected a corrective diagnostic telling the model to change course."
+                ),
+            ),
+        )
         return _diagnostic_update(self._phase_name, signature[0], count)
 
 

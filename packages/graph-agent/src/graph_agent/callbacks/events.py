@@ -458,12 +458,66 @@ class RunEndedEvent(_EventBase):
     wall_time_seconds: float
 
 
+class FinishTaskVerdictEvent(_EventBase):
+    """What became of one finish_task submission: taken, refused, or repeated.
+
+    The verdict is a decision that steers the run — a refusal goes back to the
+    model as retry feedback, an acceptance writes the phase's result — and a
+    decision that steers the run must say so itself (glass-box decision D4:
+    report decisions, not passages). ``message`` is the machine speaking in a
+    whole sentence; a reader should not have to assemble the story from fields.
+    """
+
+    event_type: Literal["finish_task_verdict"] = "finish_task_verdict"
+    phase_name: str
+    verdict: Literal["accepted", "rejected", "duplicate"]
+    message: str
+    #: Why a rejected submission was rejected; empty for the other verdicts.
+    errors: list[str] = Field(default_factory=list)
+    #: How many parsed items an accepted submission carried; None otherwise.
+    item_count: int | None = None
+    #: Pipeline narration, one full sentence per stage that actually ran:
+    #: md2json parse result, per-block schema check, business-validator
+    #: conclusion. Answers "which machinery touched this submission" without
+    #: the reader reverse-engineering the middleware.
+    details: list[str] = Field(default_factory=list)
+
+
+class LoopDetectedEvent(_EventBase):
+    """LoopDetectionMiddleware found a no-progress tool loop and injected a
+    corrective diagnostic into the conversation. That injection changes what
+    the model sees next, so it must be visible in the trace."""
+
+    event_type: Literal["loop_detected"] = "loop_detected"
+    phase_name: str
+    tool_name: str
+    #: How many identical (tool, result) pairs sat inside the sliding window.
+    count: int
+    message: str
+
+
+class ProtocolViolationEvent(_EventBase):
+    """ProtocolValidationMiddleware found the WorkflowState violating a
+    framework contract and is about to break the agent loop. Emitted before
+    the raise so the trace names the violations even when the run dies."""
+
+    event_type: Literal["protocol_violation"] = "protocol_violation"
+    phase_name: str
+    #: Which LLM-step boundary the check ran at: before_model / after_model.
+    boundary: str
+    #: One "label: detail" line per violated contract.
+    violations: list[str] = Field(default_factory=list)
+    message: str
+
+
 class ValidationPassEvent(_EventBase):
     """Fired when a phase validator returns (True, []). Complements ValidationFail."""
 
     event_type: Literal["validation_pass"] = "validation_pass"
     phase_name: str
     retry_count: int  # how many retries were consumed before the pass (0 = first-try)
+    #: Full sentence naming the validator and what it concluded.
+    message: str = ""
 
 
 class RetryExhaustedEvent(_EventBase):
@@ -661,6 +715,9 @@ CallbackEvent = Annotated[
     | LLMCallSettingsEvent
     | RunStartedEvent
     | RunEndedEvent
+    | FinishTaskVerdictEvent
+    | LoopDetectedEvent
+    | ProtocolViolationEvent
     | ValidationPassEvent
     | RetryExhaustedEvent
     | InternalErrorEvent
@@ -708,6 +765,9 @@ __all__ = [
     "RunStartedEvent",
     "RunEndedEvent",
     "ValidationPassEvent",
+    "FinishTaskVerdictEvent",
+    "LoopDetectedEvent",
+    "ProtocolViolationEvent",
     "RetryExhaustedEvent",
     "InternalErrorEvent",
     "ModelResolvedEvent",

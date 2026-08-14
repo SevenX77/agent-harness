@@ -20,10 +20,11 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+import threading
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import Any, Literal
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -34,6 +35,8 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
+from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.events import FinishTaskVerdictEvent
 from graph_agent.core.exceptions import ErrorPayload, GraphAgentError, make_error_payload
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.schema_engine import (
@@ -73,6 +76,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         business_validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] | None = None,
         phase_name: str = "unknown",
         interrupt_fn: InterruptFn | None = None,
+        callbacks: Sequence[Any] | None = None,
     ) -> None:
         # Phase 2 A2 v3 + Phase 3 M7 (PHASE2_DESIGN.md §3.4, PHASE3_DESIGN.md §3):
         # ``current_phase_schema`` accepts ``type[BaseModel] | SchemaObject |
@@ -102,6 +106,38 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         # 以"接受时的父 AI 消息标识"为键:同轮并行重复共享同一条父消息,
         # 新一轮产生新消息,门自动重开(iterate 复用实例也无需生命周期钩子)。
         self._accepted_finish_turn_key: str | None = None
+        # ToolNode 在线程池里并发执行同轮的并行 tool_calls,上面这个轮内门是
+        # check-then-act:不加锁时两笔重复提交都能在对方设门前通过检查,双双
+        # 走接受分支,同一超步写两次 data/flow 通道(实测 2026-08-14)。
+        self._finish_gate = threading.Lock()
+        self._callbacks = callbacks
+
+    def _say_verdict(
+        self,
+        verdict: Literal["accepted", "rejected", "duplicate"],
+        message: str,
+        *,
+        errors: list[str] | None = None,
+        item_count: int | None = None,
+        details: list[str] | None = None,
+    ) -> None:
+        """The verdict steers the run, so the verdict speaks for itself.
+
+        A logger.info used to be the only witness — invisible in the trace,
+        which showed N identical finish_task rows and no way to tell the
+        refused ones from the one that was taken (glass-box decision D4).
+        """
+        _safe_emit_event(
+            self._callbacks,
+            FinishTaskVerdictEvent(
+                phase_name=self._phase_name,
+                verdict=verdict,
+                message=message,
+                errors=list(errors or []),
+                item_count=item_count,
+                details=list(details or []),
+            ),
+        )
 
     @staticmethod
     def validate_finish_task_with_schema_gate(
@@ -503,12 +539,35 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         *,
         tool_call_id: str,
     ) -> Command[Any]:
+        with self._finish_gate:
+            return self._handle_finish_task_locked(args, state, tool_call_id=tool_call_id)
+
+    def _handle_finish_task_locked(
+        self,
+        args: dict[str, Any],
+        state: WorkflowState,
+        *,
+        tool_call_id: str,
+    ) -> Command[Any]:
         turn_key = _finish_turn_key(state)
         if turn_key is not None and turn_key == self._accepted_finish_turn_key:
+            self._say_verdict(
+                "duplicate",
+                f"Ignored a duplicate finish_task in phase {self._phase_name!r}: "
+                "another submission in this turn was already accepted.",
+            )
             return self._duplicate_finish_response(tool_call_id)
         validation = self._validate_finish_args(args)
         if not validation.ok:
-            return self._reject_finish(tool_call_id, list(validation.errors))
+            errors = list(validation.errors)
+            self._say_verdict(
+                "rejected",
+                f"Rejected a finish_task submission in phase {self._phase_name!r}: "
+                f"{len(errors)} problem(s) found; the model was asked to retry.",
+                errors=errors,
+                details=list(validation.story),
+            )
+            return self._reject_finish(tool_call_id, errors)
 
         finish_result: dict[str, Any] = {
             # The marker names its producing phase: FrameworkState survives
@@ -529,10 +588,13 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         )
         next_state = self._apply_io_hoist(next_state, finish_result)
 
-        logger.info(
-            "[CognitiveFlowMiddleware] accepted finish_task phase=%s schema=%s",
-            self._phase_name,
-            validation.schema_validation,
+        accepted_count = len(validation.parsed_items or [])
+        self._say_verdict(
+            "accepted",
+            f"Accepted the finish_task submission in phase {self._phase_name!r}: "
+            f"{accepted_count} item(s) passed schema and business validation.",
+            item_count=accepted_count,
+            details=list(validation.story),
         )
         self._accepted_finish_turn_key = _finish_turn_key(state)
         return Command(
@@ -591,8 +653,13 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 ok=False,
                 schema_validation="failed",
                 errors=(f"Markdown 解析失败：{type(exc).__name__}: {exc}",),
+                story=("md2json failed to parse business_data_md.",),
             )
 
+        story: list[str] = [
+            f"md2json parsed {len(blocks)} '##' block(s) out of business_data_md."
+        ]
+        schema_label = getattr(model, "__name__", type(model).__name__)
         if not blocks:
             return _FinishValidation(
                 ok=False,
@@ -601,6 +668,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                     "未能在 business_data_md 中检测到任何 ## 块。"
                     "必须按 output_schema 范例输出至少 1 个 ## 块。",
                 ),
+                story=tuple(story),
             )
 
         parsed_items: list[dict[str, Any]] = []
@@ -613,11 +681,17 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             parsed_items.append(item)
 
         if errors:
+            story.append(
+                f"Schema check against {schema_label!r}: {len(errors)} error(s) "
+                f"across {len(blocks)} block(s)."
+            )
             return _FinishValidation(
                 ok=False,
                 schema_validation="failed",
                 errors=tuple(errors),
+                story=tuple(story),
             )
+        story.append(f"Schema check against {schema_label!r}: all {len(blocks)} block(s) passed.")
 
         # Phase 2 A2 v3 (design v4 §3.2 #3): run the per-phase business
         # validator on the parsed items list. Pydantic has already
@@ -627,16 +701,25 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         # Validators receive ``list[dict[str, Any]]`` per A1 §2.4.
         business_errors = self._run_business_validator(parsed_items)
         if business_errors:
+            story.append(
+                f"Business validator rejected the submission: {len(business_errors)} problem(s)."
+            )
             return _FinishValidation(
                 ok=False,
                 schema_validation="failed",
                 errors=tuple(business_errors),
+                story=tuple(story),
             )
+        if self._business_validator is None:
+            story.append("No business validator is declared for this phase.")
+        else:
+            story.append(f"Business validator passed {len(parsed_items)} item(s).")
 
         return _FinishValidation(
             ok=True,
             schema_validation="passed",
             parsed_items=parsed_items,
+            story=tuple(story),
         )
 
     def _parse_finish_markdown(
@@ -848,11 +931,15 @@ class _FinishValidation:
         schema_validation: str,
         parsed_items: list[dict[str, Any]] | None = None,
         errors: tuple[str, ...] = (),
+        story: tuple[str, ...] = (),
     ) -> None:
         self.ok = ok
         self.schema_validation = schema_validation
         self.parsed_items = parsed_items
         self.errors = errors
+        # One full sentence per pipeline stage that ran; the verdict event
+        # forwards it so the trace narrates md2json/schema/business steps.
+        self.story = story
 
 
 @dataclass(frozen=True)

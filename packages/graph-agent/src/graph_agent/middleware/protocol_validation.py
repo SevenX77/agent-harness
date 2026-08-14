@@ -37,6 +37,7 @@ authoring bugs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents import AgentState
@@ -44,6 +45,8 @@ from langchain.agents.middleware import AgentMiddleware
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ValidationError
 
+from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.events import ProtocolViolationEvent
 from graph_agent.core.exceptions import GraphAgentError
 from graph_agent.core.schema_engine import SchemaObject
 from graph_agent.core.state import FrameworkState
@@ -83,6 +86,7 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
         current_phase_schema: type[BaseModel] | SchemaObject | None = None,
         *,
         phase_name: str = "unknown",
+        callbacks: Sequence[Any] | None = None,
     ) -> None:
         # Phase 2 A2 v3 (design v4 §3.4 step 1): the schema parameter union
         # was extended from ``SchemaObject | None`` to also accept a Pydantic
@@ -98,6 +102,7 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
         self._schema_engine = schema_engine
         self._current_phase_schema = current_phase_schema
         self._phase_name = phase_name
+        self._callbacks = callbacks
 
     def before_model(
         self,
@@ -203,6 +208,22 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
                 violations.append(("schema_engine_validate", "; ".join(result.errors)))
 
         if violations:
+            # Say it before raising: the raise breaks the agent loop, and a
+            # trace that ends in silence is exactly the black box the glass-box
+            # decision (2026-08-13 D4) forbids.
+            _safe_emit_event(
+                self._callbacks,
+                ProtocolViolationEvent(
+                    phase_name=self._phase_name,
+                    boundary=boundary,
+                    violations=[f"{label}: {detail}" for label, detail in violations],
+                    message=(
+                        f"Protocol validation at {boundary} in phase {self._phase_name!r} "
+                        f"found {len(violations)} contract violation(s); "
+                        "execution stops here because the framework state is no longer trustworthy."
+                    ),
+                ),
+            )
             raise ProtocolValidationError(
                 f"ProtocolValidation failed at {boundary} for phase "
                 f"'{self._phase_name}': {len(violations)} violation(s)",

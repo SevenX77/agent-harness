@@ -25,6 +25,9 @@ class LLMProviderResponse(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
     content: Any
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # The thinking that produced the answer, whole. The slices of it are
+    # droppable on the wire; this is the one copy that is not.
+    reasoning: str = ""
 
 
 class LLMProviderChunk(BaseModel):
@@ -222,6 +225,11 @@ class LLMProviderChatModel(BaseChatModel):
                 tool_calls=tool_calls,
                 response_metadata=response_metadata,
                 usage_metadata=usage_metadata,
+                # Same key the gateway puts on its own messages, so one reader
+                # serves both an engine-driven and a caller-supplied model.
+                additional_kwargs=(
+                    {"reasoning_content": response.reasoning} if response.reasoning else {}
+                ),
             )
             step.finished(message)
         return ChatResult(
@@ -262,16 +270,21 @@ def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:
     """
     parts: list[Any] = []
     metadata: dict[str, Any] = {}
+    thoughts: list[str] = []
     for chunk in chunks:
         if chunk.restarts_answer:
             # Not "prefer the newer value" — the abandoned attempt's own claims
             # (which route answered, why it stopped) describe an answer nobody
             # received, and keeping the ones the replacement does not happen to
-            # overwrite would leave them describing this one.
+            # overwrite would leave them describing this one. Its thinking goes
+            # with it: it reasoned its way to an answer nobody received.
             parts.clear()
             metadata.clear()
+            thoughts.clear()
         if chunk.content != "" and chunk.content is not None:
             parts.append(chunk.content)
+        if chunk.reasoning:
+            thoughts.append(chunk.reasoning)
         metadata.update(chunk.metadata)
     if all(isinstance(part, str) for part in parts):
         content: Any = "".join(parts)
@@ -284,7 +297,7 @@ def _assemble(chunks: Iterator[LLMProviderChunk]) -> LLMProviderResponse:
             for part in parts
             for block in (part if isinstance(part, list) else [part])
         ]
-    return LLMProviderResponse(content=content, metadata=metadata)
+    return LLMProviderResponse(content=content, metadata=metadata, reasoning="".join(thoughts))
 
 
 class ChatModelProvider:

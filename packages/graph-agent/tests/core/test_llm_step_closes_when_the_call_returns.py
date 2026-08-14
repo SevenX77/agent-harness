@@ -305,3 +305,81 @@ def test_an_ending_is_reported_once_and_not_by_two_reporters(tmp_path: Path) -> 
     seen = _run_the_probe(tmp_path)
 
     assert seen.count("llm_call") == seen.count("prompt_captured")
+
+
+class _ThinkingProvider(FakeLLMProvider):
+    """Streams reasoning the way a reasoning model does: before the answer."""
+
+    def __init__(self, slices: list[LLMProviderChunk]) -> None:
+        super().__init__()
+        self._slices = slices
+
+    def stream(self, request: Any) -> Any:
+        self.requests.append(request)
+        yield from self._slices
+
+
+def test_the_ending_carries_the_thinking_that_produced_it() -> None:
+    """The thinking channel gets the same guarantee as the answer: one whole
+    copy on the closing frame. Deltas are droppable — that is only harmless
+    when what they spell out is also written once, and until now the answer
+    was and the thinking was not (a reasoning model that ends in a tool call
+    leaves ``content`` empty, so the run's longest output had no record)."""
+    recorder = Recorder()
+    model = LLMProviderChatModel(
+        provider=_ThinkingProvider([
+            LLMProviderChunk(reasoning="First I compare the two clauses. "),
+            LLMProviderChunk(reasoning="They disagree."),
+            LLMProviderChunk(content="B", metadata={"model_name": "fake-m"}),
+        ]),
+        role="analyst",
+        phase_name="segment",
+        event_callbacks=(recorder,),
+    )
+
+    model.invoke([HumanMessage(content="pick one")])
+
+    ended = next(e for e in recorder.events if getattr(e, "event_type", "") == "llm_call")
+    assert ended.response_data["reasoning"] == "First I compare the two clauses. They disagree."
+
+
+def test_a_restarted_answer_forgets_the_abandoned_attempts_thinking() -> None:
+    recorder = Recorder()
+    model = LLMProviderChatModel(
+        provider=_ThinkingProvider([
+            LLMProviderChunk(reasoning="draft A thinking"),
+            LLMProviderChunk(content="truncated attempt"),
+            # The restart marker is an empty chunk, exactly as the gateway
+            # sends it: the voiding is the event, not a payload.
+            LLMProviderChunk(restarts_answer=True),
+            LLMProviderChunk(reasoning="draft B thinking"),
+            LLMProviderChunk(content="final"),
+        ]),
+        role="analyst",
+        phase_name="segment",
+        event_callbacks=(recorder,),
+    )
+
+    model.invoke([HumanMessage(content="q")])
+
+    ended = next(e for e in recorder.events if getattr(e, "event_type", "") == "llm_call")
+    assert ended.response_data["reasoning"] == "draft B thinking"
+    assert ended.response_data["content"] == "final"
+
+
+def test_a_call_that_never_thought_says_so_rather_than_saying_nothing() -> None:
+    """``reasoning`` is always present: None means "did not think", and a
+    reader never has to guess whether the key was simply not written yet."""
+    recorder = Recorder()
+    model = LLMProviderChatModel(
+        provider=FakeLLMProvider(),
+        role="analyst",
+        phase_name="segment",
+        event_callbacks=(recorder,),
+    )
+
+    model.invoke([HumanMessage(content="q")])
+
+    ended = next(e for e in recorder.events if getattr(e, "event_type", "") == "llm_call")
+    assert "reasoning" in ended.response_data
+    assert ended.response_data["reasoning"] is None

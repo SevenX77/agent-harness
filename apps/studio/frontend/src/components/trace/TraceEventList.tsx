@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { RunDeltas } from '../../hooks/useRunDeltas'
@@ -107,7 +107,9 @@ export function TraceEventList({
   }, [focusPhase, events.length])
 
   const predictTrace = isPredictTrace(events.map(({ event }) => event))
-  const steps = buildTraceSteps(events)
+  // Rebuilt only when the events actually change: this runs on every render of
+  // a panel that re-renders per streamed token, and grouping is O(run length).
+  const steps = useMemo(() => buildTraceSteps(events), [events])
   const selectedPosition = selectedEventId
     ? steps.findIndex((step) => step.key === selectedEventId)
     : -1
@@ -201,6 +203,11 @@ export function TraceEventList({
                   // each row: eight consecutive `segment` events used to print
                   // `SEGMENT` eight times (decision 2026-08-08 D3).
                   const opensGroup = position === 0 || steps[position - 1].phase !== phase
+                  // Agent phases layer their steps by loop turn (decision
+                  // 2026-08-13 D1): a divider per iteration, rows indented
+                  // under it. Phases without loop markers stay flat.
+                  const opensIteration = step.iteration !== null
+                    && (opensGroup || steps[position - 1].iteration !== step.iteration)
                   return (
                     <div
                       key={step.key}
@@ -219,15 +226,25 @@ export function TraceEventList({
                           {phase === RUN_SCOPE ? 'Run' : phase}
                         </div>
                       ) : null}
-                      <TraceStepRow
-                        step={step}
-                        eventId={step.key}
-                        selected={selectedEventId === step.key}
-                        expanded={isExpanded(step.key, step.status)}
-                        onToggleExpanded={() => toggleExpanded(step.key, step.status)}
-                        onSelectEvent={onSelectEvent}
-                        liveOutput={step.stepId ? deltas?.[step.stepId] : undefined}
-                      />
+                      {opensIteration ? (
+                        <div
+                          data-trace-iteration-header={`${phase}:${step.iteration}`}
+                          className="mt-1 mb-0.5 pl-7 font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60"
+                        >
+                          Iteration {step.iteration}
+                        </div>
+                      ) : null}
+                      <div className={step.iteration !== null ? 'pl-3' : undefined}>
+                        <TraceStepRow
+                          step={step}
+                          eventId={step.key}
+                          selected={selectedEventId === step.key}
+                          expanded={isExpanded(step.key, step.status)}
+                          onToggleExpanded={() => toggleExpanded(step.key, step.status)}
+                          onSelectEvent={onSelectEvent}
+                          liveOutput={step.stepId ? deltas?.[step.stepId] : undefined}
+                        />
+                      </div>
                     </div>
                   )
                 })}

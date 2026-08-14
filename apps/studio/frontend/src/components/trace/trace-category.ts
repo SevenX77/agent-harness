@@ -20,7 +20,11 @@ export const TRACE_CATEGORY_LABEL: Record<TraceCategory, string> = {
 
 /** Which bucket an event type belongs to. Unknown types are flow (the default skeleton). */
 export function traceEventCategory(eventType: string): TraceCategory {
-  if (eventType === 'internal_error' || eventType === 'validation_fail') {
+  if (
+    eventType === 'internal_error'
+    || eventType === 'validation_fail'
+    || eventType === 'protocol_violation'
+  ) {
     return 'errors'
   }
   if (eventType === 'llm_call' || eventType === 'prompt_captured' || eventType === 'llm_route_decision') {

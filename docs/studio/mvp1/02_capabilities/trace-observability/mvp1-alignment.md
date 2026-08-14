@@ -155,7 +155,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Capability links: `run-execution`, `golden-eval`, `debug-resume`.
 
 ## 4. 设计决策基础（PM 原话）
-- 长 trace **默认折叠大块**;自动展开 payload 上限 **~2KB**(超出给"展开"按钮)。
+- 长 trace **默认折叠大块**;折叠机制按 2026-08-13 决议 D3(`docs/design/2026-08-13-trace-goes-glass-box-decision.md`)为**按行三态**:收起显示 5 行(一眼识别这段是什么)→ 展开显示 20 行 → 点链接进 Monaco 只读视图看全文。唯一实现是共享原语 `components/ui/folded-text`(超长单行按显示行折算,禁止任何 trace 表面自造折叠;原「自动展开 payload 上限 ~2KB」的字节阈值机制被本条取代,「默认折叠大块」的原则不变)。
+- 2026-08-13 D1:展开的 LLM 步骤按**执行顺序**渲染子条目——装载 prompt(`template_source`)→ 渲染后 prompt → 思考(`response_data.reasoning`)→ 回答 / 工具 → 设置 / 路由判定;废除 TEMPLATE / VARIABLES 特殊容器。agent phase 内按 Iteration 分层(数据源 `agent_loop_iteration` + `prompt_captured.loop_index`,纯前端投影)。机器自述事件(`finish_task_verdict` / `loop_detected` / `protocol_violation` 等,决议 D4)以通用语义行渲染:行首整句 `message`,展开显示 `details` 管线叙述与 `errors`/`violations` 原因列表。
 - 2026-08-09:「full trace删掉,功能重复,本来就应该显示full tracing」——通读职责回到 Trace 自身(F2/F3)。
 - 2026-08-09:「顶条只显示run_id,后面跟状态徽章,状态徽章不需要一串字,用打勾、错误等原型徽章就行,加上tooltip显示文字success等」(F8)。
 - 2026-08-09:「predict徽章用一个图标就可以了,而且所有ui代表predict的都要统一」(F8)。

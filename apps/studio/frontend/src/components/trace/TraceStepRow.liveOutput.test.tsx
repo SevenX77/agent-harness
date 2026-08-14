@@ -35,6 +35,8 @@ function render(
         stepId: 'step-1',
         status,
         start: { event, index: 0 },
+        iteration: null,
+        verdicts: [],
         end,
       }}
       eventId="evt-0"

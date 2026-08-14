@@ -13,7 +13,6 @@ import {
   eventTimeLabel,
   isRunScopedEvent,
   routeDecisionDetails,
-  payloadPreview,
   retryBadge,
   RUN_SCOPE,
   runOutcomeFromEvents,
@@ -126,30 +125,6 @@ describe('errorStack (D10 retry-exhausted error stack, n4-trace #25)', () => {
 
   it('returns an empty array for events that are neither failure type', () => {
     expect(errorStack(event({ event_type: 'phase_end', phase_name: 'draft' }))).toEqual([])
-  })
-})
-
-describe('payloadPreview (D1 / §4 default-collapse big payloads)', () => {
-  it('returns the full serialized payload untruncated when it is under the auto-expand limit', () => {
-    const preview = payloadPreview(event({ event_type: 'phase_start', phase_name: 'draft' }))
-    expect(preview.truncated).toBe(false)
-    expect(preview.text).toContain('phase_start')
-    expect(preview.sizeBytes).toBeGreaterThan(0)
-  })
-
-  it('marks the payload as truncated once it exceeds the ~2KB auto-expand limit', () => {
-    const bigText = 'x'.repeat(4000)
-    const preview = payloadPreview(event({ event_type: 'llm_call', big_field: bigText }))
-    expect(preview.truncated).toBe(true)
-    expect(preview.sizeBytes).toBeGreaterThan(2048)
-    // The collapsed preview text must be shorter than the full payload.
-    expect(preview.text.length).toBeLessThan(JSON.stringify(event({ event_type: 'llm_call', big_field: bigText }), null, 2).length)
-  })
-
-  it('reports a human-readable size label in kilobytes', () => {
-    const bigText = 'y'.repeat(4000)
-    const preview = payloadPreview(event({ event_type: 'llm_call', big_field: bigText }))
-    expect(preview.sizeLabel).toMatch(/KB$/)
   })
 })
 

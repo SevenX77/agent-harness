@@ -87,7 +87,12 @@ export function eventMessage(event: CallbackEvent): string {
         ? `Model resolved: ${event.resolved_model}`
         : 'Model resolved'
     default:
-      return event.event_type
+      // The machinery-speaks contract (decision 2026-08-13 D4): every internal
+      // decision event carries a full-sentence `message`. Rendering it here
+      // means a NEW machinery event never degrades to its raw type name.
+      return typeof event.message === 'string' && event.message !== ''
+        ? event.message
+        : event.event_type
   }
 }
 
@@ -116,8 +121,18 @@ export type TraceSeverity = 'error' | 'warning' | 'normal'
  * pill — ask this one function rather than each keeping a list of types.
  */
 export function eventSeverity(event: CallbackEvent): TraceSeverity {
-  if (event.event_type === 'internal_error' || event.event_type === 'validation_fail') {
+  if (
+    event.event_type === 'internal_error'
+    || event.event_type === 'validation_fail'
+    || event.event_type === 'protocol_violation'
+  ) {
     return 'error'
+  }
+  if (event.event_type === 'loop_detected') {
+    return 'warning'
+  }
+  if (event.event_type === 'finish_task_verdict') {
+    return event.verdict === 'rejected' ? 'warning' : 'normal'
   }
   const settings = callSettingsDetails(event)
   if (settings !== null) {
@@ -201,20 +216,6 @@ export interface RetryBadge {
   exhausted: boolean
 }
 
-/** Auto-expand a trace payload only when it is small enough to read inline (~2KB). */
-export const TRACE_PAYLOAD_AUTO_EXPAND_BYTES = 2048
-
-export interface PayloadPreview {
-  /** Serialized payload, truncated to a readable head when it exceeds the limit. */
-  text: string
-  /** True when the full payload is larger than the auto-expand limit. */
-  truncated: boolean
-  /** Byte size of the full serialized payload. */
-  sizeBytes: number
-  /** Human-readable size, e.g. "3.9 KB". */
-  sizeLabel: string
-}
-
 function numericField(value: JsonValue | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
@@ -248,27 +249,9 @@ export function retryBadge(event: CallbackEvent): RetryBadge | null {
   }
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-  return `${(bytes / 1024).toFixed(1)} KB`
-}
-
-export function payloadPreview(event: CallbackEvent): PayloadPreview {
-  const full = JSON.stringify(event, null, 2)
-  const sizeBytes = full.length
-  const sizeLabel = formatBytes(sizeBytes)
-  if (sizeBytes <= TRACE_PAYLOAD_AUTO_EXPAND_BYTES) {
-    return { text: full, truncated: false, sizeBytes, sizeLabel }
-  }
-  return {
-    text: `${full.slice(0, TRACE_PAYLOAD_AUTO_EXPAND_BYTES)}…`,
-    truncated: true,
-    sizeBytes,
-    sizeLabel,
-  }
-}
+// The ~2KB byte-threshold payload preview that used to live here was replaced
+// outright by the line-based fold primitive `ui/folded-text` (decision
+// 2026-08-13 D3): folding belongs to the text, not to a byte budget.
 
 // ── Agent tool-call folding (D1/P2, n4-trace #16) ───────────────────────────
 // The engine emits a `tool_call` event (packages/graph-agent .../events.py
@@ -646,4 +629,71 @@ export function callSettingsMessage(details: CallSettingsDetails): string {
   }
   const moved = details.settings.filter((outcome) => WARNING_VERDICTS.has(outcome.verdict)).length
   return `${moved} of ${count} ${noun} did not run as asked`
+}
+
+// ── 决议 2026-08-13 D1/D4:LLM 步骤的语义分解 + 机器自述 ─────────────────────
+
+/**
+ * The model's recorded thinking for a settled LLM step: `response_data.reasoning`
+ * (decision 2026-08-13 D2 put it on disk; here it becomes a flow sub-entry).
+ * Null when the model did not think, or the step has not settled.
+ */
+export function answerReasoning(event: CallbackEvent | undefined): string | null {
+  if (!event || !isJsonObject(event.response_data)) {
+    return null
+  }
+  const reasoning = event.response_data.reasoning
+  return typeof reasoning === 'string' && reasoning !== '' ? reasoning : null
+}
+
+/** The settled answer's text content; null when empty (e.g. straight to tools). */
+export function answerContent(event: CallbackEvent | undefined): string | null {
+  if (!event || !isJsonObject(event.response_data)) {
+    return null
+  }
+  const content = event.response_data.content
+  return typeof content === 'string' && content !== '' ? content : null
+}
+
+/** The tool calls the answer reached for, pretty-printed; null when none. */
+export function answerToolCallsText(event: CallbackEvent | undefined): string | null {
+  if (!event || !isJsonObject(event.response_data)) {
+    return null
+  }
+  const toolCalls = event.response_data.tool_calls
+  return Array.isArray(toolCalls) && toolCalls.length > 0
+    ? JSON.stringify(toolCalls, null, 2)
+    : null
+}
+
+export interface MachineryNarration {
+  /** The pipeline narration, one full sentence per stage that actually ran. */
+  details: string[]
+  /** Why the decision went against the submission (errors / violations). */
+  problems: string[]
+}
+
+/**
+ * A machinery event's structured account of itself (decision 2026-08-13 D4):
+ * `details` narrates the pipeline, `errors` / `violations` carry the reasons a
+ * decision went against the run. Null when the event carries neither — the
+ * caller falls back to the raw payload.
+ */
+export function machineryNarration(event: CallbackEvent): MachineryNarration | null {
+  const details = stringList(event.details)
+  const problems = [...stringList(event.errors), ...stringList(event.violations)]
+  if (details.length === 0 && problems.length === 0) {
+    return null
+  }
+  return { details, problems }
+}
+
+const SEVERITY_RANK: Record<TraceSeverity, number> = { normal: 0, warning: 1, error: 2 }
+
+/** The loudest of several severities — a step is as red as its worst part. */
+export function maxSeverity(severities: readonly TraceSeverity[]): TraceSeverity {
+  return severities.reduce<TraceSeverity>(
+    (worst, current) => (SEVERITY_RANK[current] > SEVERITY_RANK[worst] ? current : worst),
+    'normal',
+  )
 }

@@ -22,6 +22,8 @@ function renderRow(event: CallbackEvent, expanded = false): string {
         stepId: null,
         status: 'done',
         start: { event, index: 0 },
+        iteration: null,
+        verdicts: [],
         end: null,
       }}
       eventId="evt-0"
@@ -55,22 +57,20 @@ describe('TraceStepRow retry badge (D10)', () => {
   })
 })
 
-describe('TraceStepRow payload collapse (D1 / §4)', () => {
-  it('renders the full payload inline when it is under the ~2KB auto-expand limit', () => {
+describe('TraceStepRow payload folding (decision 2026-08-13 D3)', () => {
+  it('renders a short payload whole, with no fold control', () => {
     const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }), true)
 
-    // Small payload: no "show full" affordance — it is already fully shown.
-    expect(html).not.toContain('Show full payload')
+    expect(html).not.toContain('Expand (')
     expect(html).toContain('phase_start')
   })
 
-  it('collapses an oversized payload and offers a sized "show full" toggle', () => {
+  it('folds an oversized payload to the 5-line head via the ONE fold primitive', () => {
     const big = 'z'.repeat(4000)
     const html = renderRow(event({ event_type: 'phase_end', big_field: big }), true)
 
-    expect(html).toContain('Show full payload')
-    // The size label is surfaced so the PM knows how big the hidden blob is.
-    expect(html).toContain('KB)')
+    expect(html).toContain('data-slot="folded-text"')
+    expect(html).toContain('Expand (')
     // The collapsed head must not contain the full 4000-char blob verbatim.
     expect(html).not.toContain(big)
   })
@@ -150,11 +150,15 @@ describe('TraceStepRow shows the prompt in place (decision 2026-08-09 D5)', () =
       true,
     )
 
-    expect(html).toContain('Template')
+    // Decision 2026-08-13 D1: the body reads in execution order — loading the
+    // prompt (naming its source) comes first, the rendered prompt after it.
+    // The TEMPLATE / VARIABLES containers are gone.
+    expect(html).toContain('Prompt loaded')
     expect(html).toContain('draft.md')
-    expect(html).toContain('Variables')
     expect(html).toContain('venus')
-    expect(html).toContain('Rendered')
+    expect(html).toContain('Rendered prompt')
+    expect(html).not.toContain('>Template<')
+    expect(html).not.toContain('>Variables<')
   })
 
   it('offers no link out to a separate inspector', () => {
@@ -177,6 +181,8 @@ describe('TraceStepRow status (decision 2026-08-09 D4)', () => {
           status: 'running',
           start: { event: event({ event_type: 'prompt_captured', phase_name: 'draft' }), index: 0 },
           end: null,
+          iteration: null,
+          verdicts: [],
         }}
         eventId="evt-0"
         expanded
@@ -198,6 +204,8 @@ describe('TraceStepRow status (decision 2026-08-09 D4)', () => {
           status: 'done',
           start: { event: event({ event_type: 'prompt_captured', phase_name: 'draft' }), index: 0 },
           end: { event: event({ event_type: 'llm_call', phase_name: 'draft', input_tokens: 10, output_tokens: 20 }), index: 1 },
+          iteration: null,
+          verdicts: [],
         }}
         eventId="evt-0"
         expanded={false}

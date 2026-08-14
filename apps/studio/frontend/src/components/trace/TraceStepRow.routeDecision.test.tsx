@@ -28,6 +28,8 @@ function render(event: CallbackEvent): string {
         stepId: null,
         status: 'done',
         start: { event, index: 0 },
+        iteration: null,
+        verdicts: [],
         end: null,
       }}
       eventId="evt-0"

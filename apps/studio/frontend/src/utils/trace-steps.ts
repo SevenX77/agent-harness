@@ -20,6 +20,20 @@ export interface TraceStep {
   start: IndexedTraceEvent
   /** The event that closed it. Null while running, and null for a lone event. */
   end: IndexedTraceEvent | null
+  /**
+   * Which agent-loop turn the step belongs to (decision 2026-08-13 D1), from
+   * the phase's `agent_loop_iteration` markers or the opening event's own
+   * `loop_index`. Null in phases that never emit either — those stay flat.
+   */
+  iteration: number | null
+  /**
+   * Gateway verdicts (`llm_route_decision` / `llm_call_settings`) that arrived
+   * while this was the ONLY open LLM step of its phase. They are the step's
+   * final sub-entries (decision 2026-08-13 D1: … → 设置/路由判定); when the
+   * attribution would be a guess — two open steps, or none — the verdict stays
+   * its own row instead, because a wrong nesting is worse than a flat list.
+   */
+  verdicts: IndexedTraceEvent[]
 }
 
 /**
@@ -40,6 +54,10 @@ export interface TraceStep {
  * before the engine minted step ids, put the first answer on whichever prompt
  * happened to still be open.
  *
+ * `agent_loop_iteration` events do not become rows: they are the layer markers
+ * the rows are grouped under (decision 2026-08-13 D1), so the marker's whole
+ * rendering IS the iteration divider.
+ *
  * Everything else is one step, unchanged. So is a completion whose opening half
  * is not in this list: a filter can hide it, and the answer to that is to show
  * the half you have, not to drop it.
@@ -48,12 +66,29 @@ export function buildTraceSteps(events: IndexedTraceEvent[]): TraceStep[] {
   const steps: TraceStep[] = []
   const openLlmByStepId = new Map<string, TraceStep>()
   const openToolByCallId = new Map<string, TraceStep>()
+  const iterationByPhase = new Map<string, number>()
 
   for (const entry of events) {
     const { event } = entry
     const phase = eventPhase(event)
     const callId = toolCallId(event)
     const stepId = traceStepId(event)
+
+    if (event.event_type === 'agent_loop_iteration') {
+      const iteration = numericIteration(event.iteration)
+      if (iteration !== null) {
+        iterationByPhase.set(phase, iteration)
+      }
+      continue
+    }
+
+    if (isGatewayVerdict(event)) {
+      const host = onlyOpenLlmStepOfPhase(openLlmByStepId, phase)
+      if (host) {
+        host.verdicts.push(entry)
+        continue
+      }
+    }
 
     if (event.event_type === 'llm_call' && stepId !== null) {
       const open = openLlmByStepId.get(stepId)
@@ -84,6 +119,8 @@ export function buildTraceSteps(events: IndexedTraceEvent[]): TraceStep[] {
       status: opensAStep ? 'running' : 'done',
       start: entry,
       end: null,
+      iteration: numericIteration(event.loop_index) ?? iterationByPhase.get(phase) ?? null,
+      verdicts: [],
     }
     steps.push(step)
 
@@ -111,4 +148,30 @@ export function traceStepId(event: CallbackEvent): string | null {
 function toolCallId(event: CallbackEvent): string | null {
   const value = event.tool_call_id
   return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function numericIteration(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? value : null
+}
+
+/** The gateway's per-call verdicts; they carry no step_id, only a phase. */
+function isGatewayVerdict(event: CallbackEvent): boolean {
+  return event.event_type === 'llm_route_decision' || event.event_type === 'llm_call_settings'
+}
+
+function onlyOpenLlmStepOfPhase(
+  open: Map<string, TraceStep>,
+  phase: string,
+): TraceStep | null {
+  let found: TraceStep | null = null
+  for (const step of open.values()) {
+    if (step.phase !== phase) {
+      continue
+    }
+    if (found) {
+      return null
+    }
+    found = step
+  }
+  return found
 }

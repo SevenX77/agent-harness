@@ -116,3 +116,80 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
     expect(steps.map((step) => step.start.index)).toEqual([0, 1])
   })
 })
+
+// ── 决议 2026-08-13 D1:Iteration 分层 + 判定归并 ─────────────────────────────
+
+describe('iteration layering (decision 2026-08-13 D1)', () => {
+  it('agent_loop_iteration becomes the layer marker, not a row of its own', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'agent_loop_iteration', phase_name: 'work', iteration: 1 },
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1' },
+    ]))
+
+    expect(steps).toHaveLength(1)
+    expect(steps[0].iteration).toBe(1)
+  })
+
+  it('steps opened after the next iteration marker carry the new number', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'agent_loop_iteration', phase_name: 'work', iteration: 1 },
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1' },
+      { event_type: 'llm_call', phase_name: 'work', step_id: 's1' },
+      { event_type: 'agent_loop_iteration', phase_name: 'work', iteration: 2 },
+      { event_type: 'tool_call_started', phase_name: 'work', tool_call_id: 't1' },
+    ]))
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0].iteration).toBe(1)
+    expect(steps[1].iteration).toBe(2)
+  })
+
+  it('prompt_captured.loop_index is an equally valid source of the layer', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1', loop_index: 3 },
+    ]))
+
+    expect(steps[0].iteration).toBe(3)
+  })
+
+  it('a phase without loop markers stays flat (iteration null)', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'phase_start', phase_name: 'setup' },
+    ]))
+
+    expect(steps[0].iteration).toBeNull()
+  })
+})
+
+describe('verdict attachment (decision 2026-08-13 D1 sub-entry order)', () => {
+  it('a route decision during the only open LLM step of its phase nests into that step', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1' },
+      { event_type: 'llm_route_decision', phase_name: 'work', decision: 'answered' },
+      { event_type: 'llm_call', phase_name: 'work', step_id: 's1' },
+    ]))
+
+    expect(steps).toHaveLength(1)
+    expect(steps[0].verdicts).toHaveLength(1)
+    expect(steps[0].verdicts[0].event.event_type).toBe('llm_route_decision')
+  })
+
+  it('with two open steps in one phase the verdict stays its own row — never guess', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1' },
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's2' },
+      { event_type: 'llm_call_settings', phase_name: 'work', settings: [] },
+    ]))
+
+    expect(steps).toHaveLength(3)
+  })
+
+  it('with no open step the verdict stays its own row', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'llm_route_decision', phase_name: 'work', decision: 'exhausted' },
+    ]))
+
+    expect(steps).toHaveLength(1)
+    expect(steps[0].verdicts).toHaveLength(0)
+  })
+})

@@ -1,5 +1,4 @@
 import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
-import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type {
   CallSettingsDetails,
@@ -8,6 +7,9 @@ import type {
   TraceSeverity,
 } from '../../utils/trace'
 import {
+  answerContent,
+  answerReasoning,
+  answerToolCallsText,
   errorStack,
   eventColor,
   eventSeverity,
@@ -19,16 +21,18 @@ import {
   eventTimeLabel,
   jsonText,
   callSettingsDetails,
+  machineryNarration,
+  maxSeverity,
   routeDecisionDetails,
   mockedSourceClass,
   mockedSourceLabel,
-  payloadPreview,
   retryBadge,
   tokenText,
   toolCallSummary,
 } from '../../utils/trace'
 import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
+import { FoldedText } from '../ui/folded-text'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { EventTypeBadge } from './EventTypeBadge'
 
@@ -56,6 +60,9 @@ interface TraceStepRowProps {
  * is what made the panel feel dead. When the step finishes it settles into a
  * one-line summary (decision 2026-08-09 D4). The caller owns expansion so the
  * default can follow the step's status while a deliberate toggle still sticks.
+ *
+ * Every long text in this file goes through the ONE fold primitive
+ * (`ui/folded-text`, decision 2026-08-13 D3) — no section decides its own fold.
  */
 export function TraceStepRow({
   step,
@@ -74,11 +81,17 @@ export function TraceStepRow({
   const retry = retryBadge(settled)
   const isError = settled.event_type === 'internal_error' || settled.event_type === 'validation_fail'
   const failures = errorStack(settled)
-  const routeDecision = routeDecisionDetails(settled)
-  const callSettings = callSettingsDetails(settled)
-  const severity = eventSeverity(settled)
+  // A warning buried in an attached verdict must still tint the collapsed row.
+  const severity = maxSeverity([
+    eventSeverity(settled),
+    ...step.verdicts.map(({ event }) => eventSeverity(event)),
+  ])
   const modelName = eventModelName(settled)
   const timeLabel = eventTimeLabel(step.start.event)
+  // A STANDALONE gateway verdict row (one that could not be attributed to an
+  // open LLM step) is its own block — the verdict is the row's whole content.
+  const ownRouteDecision = routeDecisionDetails(settled)
+  const ownCallSettings = callSettingsDetails(settled)
 
   return (
     <div className="relative pl-5">
@@ -164,12 +177,17 @@ export function TraceStepRow({
             {settled.error_message}
           </p>
         ) : null}
-        {routeDecision ? <RouteDecisionBlock details={routeDecision} severity={severity} /> : null}
-        {callSettings ? <CallSettingsBlock details={callSettings} severity={severity} /> : null}
-        {running && liveOutput ? <LiveOutput output={liveOutput} /> : null}
+        {ownRouteDecision ? <RouteDecisionBlock details={ownRouteDecision} severity={severity} /> : null}
+        {ownCallSettings ? <CallSettingsBlock details={ownCallSettings} severity={severity} /> : null}
+        {/* Collapsed rows keep only verdicts that went WRONG in sight; the
+            healthy ones read in flow order inside the expanded body (D1). */}
+        {expanded ? null : <VerdictBlocks verdicts={step.verdicts} onlyProblems />}
         <ToolHeadline step={step} />
         {failures.length > 0 ? <ErrorStack failures={failures} /> : null}
       </button>
+      {/* Outside the row button: these carry their own interactive fold
+          controls, and a button inside a button is not a thing. */}
+      {running && liveOutput ? <LiveOutput output={liveOutput} /> : null}
       {expanded ? <StepBody step={step} /> : null}
     </div>
   )
@@ -201,7 +219,7 @@ function ToolHeadline({ step }: { step: TraceStep }) {
 function StepBody({ step }: { step: TraceStep }) {
   const opener = step.start.event
   if (opener.event_type === 'prompt_captured' || opener.event_type === 'llm_call') {
-    return <PromptSections step={step} />
+    return <LlmFlowBody step={step} />
   }
   const summary = toolCallSummary(step.end?.event ?? opener)
   if (summary) {
@@ -210,39 +228,98 @@ function StepBody({ step }: { step: TraceStep }) {
   if (opener.event_type === 'tool_call_started') {
     return <ToolArguments event={opener} />
   }
+  const narration = machineryNarration(step.end?.event ?? opener)
+  if (narration) {
+    return <MachineryBody narration={narration} />
+  }
   return <GenericPayload event={step.end?.event ?? opener} />
 }
 
 /**
- * The prompt, where it belongs: inside the step that sent it (decision
- * 2026-08-09 D5). This used to be a separate modal reached from a link on the
- * row, which is a second home for something the step already has to show the
- * moment it opens.
+ * The expanded LLM step, as the sequence it actually was (decision 2026-08-13
+ * D1): loading the prompt → the rendered prompt → the model thinking → what it
+ * answered or which tools it reached for → the gateway's verdicts about the
+ * call. The TEMPLATE / VARIABLES / RENDERED / Response containers this replaces
+ * arranged the same data by KIND, which is an order no execution ever ran in.
  */
-function PromptSections({ step }: { step: TraceStep }) {
+function LlmFlowBody({ step }: { step: TraceStep }) {
   const prompt = step.start.event
   const answered = step.end?.event
-  const rendered = jsonText(prompt.resolved_prompt)
+  const variables = jsonText(prompt.variables)
+  const hasVariables = variables !== '' && variables !== '{}'
+  const reasoning = answerReasoning(answered)
+  const answer = answerContent(answered)
+  const toolCalls = answerToolCallsText(answered)
+  const bareResponse = answered && !reasoning && !answer && !toolCalls
   return (
     <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
-      <PromptSection label="Template">{prompt.template_source ?? 'inline'}</PromptSection>
-      <PromptSection label="Variables">{jsonText(prompt.variables)}</PromptSection>
-      <PromptSection label="Rendered">{rendered}</PromptSection>
-      {answered ? (
-        <PromptSection label="Response">{jsonText(answered.response_data ?? undefined)}</PromptSection>
+      <FlowEntry title={`Prompt loaded — ${typeof prompt.template_source === 'string' && prompt.template_source !== '' ? prompt.template_source : 'inline'}`}>
+        {hasVariables ? (
+          <FoldedText text={variables} label="Prompt variables" language="json" />
+        ) : null}
+      </FlowEntry>
+      <FlowEntry title="Rendered prompt">
+        <FoldedText text={jsonText(prompt.resolved_prompt)} label="Rendered prompt" language="json" />
+      </FlowEntry>
+      {reasoning ? (
+        <FlowEntry title="Thinking">
+          <FoldedText text={reasoning} label="Thinking" className="italic text-muted-foreground" />
+        </FlowEntry>
       ) : null}
+      {answer ? (
+        <FlowEntry title="Answer">
+          <FoldedText text={answer} label="Answer" />
+        </FlowEntry>
+      ) : null}
+      {toolCalls ? (
+        <FlowEntry title="Tool calls">
+          <FoldedText text={toolCalls} label="Tool calls" language="json" />
+        </FlowEntry>
+      ) : null}
+      {/* A response none of the semantic entries could claim still gets shown —
+          decomposing the answer must never become a way of hiding it. */}
+      {bareResponse ? (
+        <FlowEntry title="Response">
+          <FoldedText text={jsonText(answered.response_data ?? undefined)} label="Response" language="json" />
+        </FlowEntry>
+      ) : null}
+      <VerdictBlocks verdicts={step.verdicts} />
     </div>
   )
 }
 
-function PromptSection({ label, children }: { label: string, children: string }) {
+function FlowEntry({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div>
-      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
-      <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] leading-relaxed text-foreground">
-        {children}
-      </pre>
+    <div data-trace-flow-entry>
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{title}</div>
+      {children ? <div className="mt-0.5">{children}</div> : null}
     </div>
+  )
+}
+
+/**
+ * The gateway's verdicts about a call, rendered where the reader is
+ * (`onlyProblems` on the collapsed row keeps trouble visible without opening).
+ */
+function VerdictBlocks({ verdicts, onlyProblems = false }: { verdicts: TraceStep['verdicts']; onlyProblems?: boolean }) {
+  const shown = verdicts.filter(({ event }) => !onlyProblems || eventSeverity(event) !== 'normal')
+  if (shown.length === 0) {
+    return null
+  }
+  return (
+    <>
+      {shown.map(({ event, index }) => {
+        const route = routeDecisionDetails(event)
+        if (route) {
+          return <RouteDecisionBlock key={`verdict-${index}`} details={route} severity={eventSeverity(event)} />
+        }
+        const settings = callSettingsDetails(event)
+        if (settings) {
+          return <CallSettingsBlock key={`verdict-${index}`} details={settings} severity={eventSeverity(event)} />
+        }
+        return null
+      })}
+    </>
   )
 }
 
@@ -251,9 +328,9 @@ function ToolArguments({ event }: { event: CallbackEvent }) {
   return (
     <div className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
       <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
-      <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
-        {jsonText(event.args)}
-      </pre>
+      <div className="mt-0.5">
+        <FoldedText text={jsonText(event.args)} label="Tool input" language="json" />
+      </div>
     </div>
   )
 }
@@ -269,23 +346,29 @@ function ToolArguments({ event }: { event: CallbackEvent }) {
  *
  * Thinking is kept visually apart from the answer for the same reason it
  * travels on its own channel: it is the model working, not what it replied.
+ * Both clamp from the END: live text hides its head, never the line arriving.
  */
 function LiveOutput({ output }: { output: StepOutput }) {
   if (!output.text && !output.thinking) {
     return null
   }
   return (
-    <div data-trace-live-output className="mt-2 space-y-1.5">
+    <div data-trace-live-output className="mt-2 space-y-1.5 px-2.5">
       {output.thinking ? (
-        <p className="whitespace-pre-wrap rounded border border-border bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground">
-          {output.thinking}
-        </p>
+        <FoldedText
+          text={output.thinking}
+          label="Live thinking"
+          clampFrom="end"
+          className="border border-border bg-muted/30 italic text-muted-foreground"
+        />
       ) : null}
       {output.text ? (
-        <p className="whitespace-pre-wrap text-xs leading-snug text-foreground/90">
-          {output.text}
-          <span aria-hidden className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-foreground/60 align-middle" />
-        </p>
+        <FoldedText
+          text={output.text}
+          label="Live answer"
+          clampFrom="end"
+          className="bg-transparent p-0 text-xs leading-snug text-foreground/90"
+        />
       ) : null}
     </div>
   )
@@ -421,47 +504,62 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
       {summary.args ? (
         <div className="mt-1.5">
           <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
-          {/* No height cap and no inner scrollbar: the panel already scrolls, and
-              a scroller inside a scroller is a worse way to read a long value
-              than a fold the reader controls (decision 2026-08-09 D6). */}
-          <pre className="mt-0.5 whitespace-pre-wrap rounded bg-background/80 p-2 text-[11px] text-foreground">
-            {summary.args}
-          </pre>
+          <div className="mt-0.5">
+            <FoldedText text={summary.args} label="Tool input" language="json" />
+          </div>
         </div>
       ) : null}
       {summary.resultSummary ? (
         <div className="mt-1.5">
           <div className="text-[10px] font-semibold uppercase text-muted-foreground">Result</div>
-          <p className="mt-0.5 whitespace-pre-wrap leading-relaxed text-foreground">{summary.resultSummary}</p>
+          <div className="mt-0.5">
+            <FoldedText text={summary.resultSummary} label="Tool result" className="bg-transparent p-0 leading-relaxed" />
+          </div>
         </div>
       ) : null}
     </div>
   )
 }
 
-function GenericPayload({ event }: { event: CallbackEvent }) {
-  // §4: long payloads default to a collapsed ~2KB head; only the user opts in to
-  // the full dump so a multi-megabyte trace event never floods (or OOMs) the panel.
-  const [showFull, setShowFull] = useState(false)
-  const preview = payloadPreview(event)
-  const body = showFull ? JSON.stringify(event, null, 2) : preview.text
+/**
+ * A machinery event's own account of itself (decision 2026-08-13 D4): the
+ * pipeline narration it carried in `details`, and the reasons in
+ * `errors` / `violations` when the decision went against the submission.
+ */
+function MachineryBody({ narration }: { narration: NonNullable<ReturnType<typeof machineryNarration>> }) {
   return (
-    <div className="mt-2">
-      <pre className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed whitespace-pre-wrap text-foreground shadow-sm">
-        {body}
-      </pre>
-      {preview.truncated ? (
-        <button
-          type="button"
-          onClick={(clickEvent) => {
-            clickEvent.stopPropagation()
-            setShowFull((open) => !open)
-          }}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-link hover:text-link/80"
-        >
-          {showFull ? 'Collapse payload' : `Show full payload (${preview.sizeLabel})`}
-        </button>
+    <div className="mt-2 space-y-1.5 rounded-md border border-border bg-muted/30 p-2 text-xs">
+      {narration.details.length > 0 ? (
+        <ol className="space-y-1">
+          {narration.details.map((line, position) => (
+            <li key={`detail-${position}`} className="flex gap-2 text-foreground/90">
+              <span className="font-mono text-muted-foreground">{position + 1}.</span>
+              <span className="whitespace-pre-wrap">{line}</span>
+            </li>
+          ))}
+        </ol>
       ) : null}
+      {narration.problems.length > 0 ? (
+        <ol className="space-y-1">
+          {narration.problems.map((reason, position) => (
+            <li
+              key={`problem-${position}`}
+              className="flex gap-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-destructive"
+            >
+              <span className="font-mono text-destructive/70">#{position + 1}</span>
+              <span className="whitespace-pre-wrap">{reason}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  )
+}
+
+function GenericPayload({ event }: { event: CallbackEvent }) {
+  return (
+    <div className="mt-2 rounded-md border border-border bg-muted/30 p-2">
+      <FoldedText text={jsonText(event as never)} label="Event payload" language="json" />
     </div>
   )
 }

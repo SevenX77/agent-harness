@@ -45,6 +45,7 @@ def build_middleware_chain(
             schema_engine=schema_engine,
             current_phase_schema=current_phase_schema,
             phase_name=phase_name,
+            callbacks=callbacks,
         ),
         "CognitiveFlow": CognitiveFlowMiddleware(
             io_manager=io_manager,
@@ -54,6 +55,7 @@ def build_middleware_chain(
             business_validator=business_validator,
             phase_name=phase_name,
             interrupt_fn=interrupt_fn,
+            callbacks=callbacks,
         ),
         "ExecutionControl": ExecutionControlMiddleware(
             callbacks=callbacks,
@@ -64,7 +66,7 @@ def build_middleware_chain(
             phase_name=phase_name,
         ),
         "ToolError": ToolErrorHandlingMiddleware(phase_name=phase_name),
-        "LoopDetection": LoopDetectionMiddleware(phase_name=phase_name),
+        "LoopDetection": LoopDetectionMiddleware(phase_name=phase_name, callbacks=callbacks),
         "ExitControl": ExitControlMiddleware(
             phase_name=phase_name,
             callbacks=callbacks,

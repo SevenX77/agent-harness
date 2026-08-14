@@ -626,12 +626,14 @@ features:
   error_codes_primary:
   - '[F-v3-agent-exit-control-failed]'
   error_codes_secondary: []
-  events_primary: []
+  events_primary:
+  - FinishTaskVerdictEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
   - tests/runtime/test_exit_contract.py::test_v030_exit_contract_is_hardcoded_at_prompt_tail
   - tests/core/test_ws_e8_exit_gate_red.py::test_agent_without_finish_task_returns_explicit_failure
+  - tests/middleware/test_finish_task_says_its_verdict.py::test_an_accepted_finish_says_so_and_says_what_it_accepted
   public_api_symbols:
   - FinishTaskEvent
 - id: F-md-patch
@@ -729,13 +731,18 @@ features:
   core_paths:
   - path: packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py
   - path: packages/graph-agent/src/graph_agent/middleware/execution_control.py
+  - path: packages/graph-agent/src/graph_agent/middleware/loop_detection.py
+  - path: packages/graph-agent/src/graph_agent/middleware/protocol_validation.py
   error_codes_primary: []
   error_codes_secondary: []
-  events_primary: []
+  events_primary:
+  - LoopDetectedEvent
+  - ProtocolViolationEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
   - tests/cognitive/test_middlewares.py::TestCreateCustomMiddlewaresPR5::test_clarification_enabled_by_default
+  - tests/middleware/test_machinery_decisions_are_events.py::TestLoopDetectionSpeaks::test_a_detected_loop_is_an_event_with_the_full_sentence
 - id: F-predict-internal-mocking
   description: Provide deterministic prediction, golden-case mocks, and headless
     golden evaluation for offline execution and tests.

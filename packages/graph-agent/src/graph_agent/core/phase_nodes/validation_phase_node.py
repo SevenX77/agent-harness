@@ -80,11 +80,20 @@ class ValidationPhaseNode(PhaseNode):
         if passed:
             retries_used = retry_counts.get(retry_key, 0)
             retry_counts.pop(retry_key, None)
+            validator_label = getattr(phase.validator, "__name__", "validator")
             _safe_emit_event(
                 self.container.callbacks,
                 ValidationPassEvent(
                     phase_name=phase.name,
                     retry_count=retries_used,
+                    message=(
+                        f"Validator {validator_label!r} passed phase {phase.name!r} data "
+                        + (
+                            f"after {retries_used} retry(ies)."
+                            if retries_used
+                            else "on the first try."
+                        )
+                    ),
                 ),
             )
             next_state = StateManager.update_framework(

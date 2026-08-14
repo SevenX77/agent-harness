@@ -348,6 +348,24 @@ effort 进 UI、top_p 不进)。前决议管「被拒之后怎么办」,本决�
 **过哪道门算完**:决议 §3 验收判据 1-15 在真机逐项点验(CDP 驱动真窗口)+ 五列验证报告全绿。
 G-M4 合并后为纯前端刷新(vendor 已在 E2 后重建),主仓 `git pull` 即生效。
 
+**真机逐项点验完成(2026-08-14,#794 合并后,CDP 驱动真窗口,18 张截图留档会话 scratchpad)**:
+E2 判据 14 由真实数据自然触发(exp-b-round7 review 相真声明了 `finish_task` → 编译诊断
+`[F-v3-agent-tool-reserved]` + 节点红徽章 + Properties 工具行红字红三角,按诊断删行后转绿);
+E1 判据 1 以盘上成品坐实(真实 run `trace.jsonl` 28/28 `llm_call.response_data.reasoning`
+非空,样例 5543 字中文思考;判据 2 的 content=0 形状未自然出现,机制已由 28/28 证明);
+E3 判据 3/4 坐实(verdict/nudge/tool_history_repaired/loop_detected 全为完整句子;纯透传
+setup 相仅 input_dispatch/phase_start/phase_end 零机器自述;判据 5 的独立 validation 事件
+未被自然触发,契约由 #788/#790 引擎测试锁定,finish 路径的校验自述在 verdict 消息中实测);
+M1/M2 判据 7/8 三态三截图(收起 5 行 → 展开 20 行 → Monaco 全文)+ 子条目流程序
+(PROMPT LOADED → RENDERED PROMPT → THINKING → ANSWER → TOOL CALLS → Runtime settings →
+Route used)+ ITERATION 分层(20 轮);M3 判据 9 双向实测(真实 run 到 max_iterations 失败
+→ 零 running 残留零动画;真实 run Pause→Stop 取消 → `prompt_captured` 挂 "never completed"
+胶囊、结局行 "Run cancelled"、segment 节点按对照表显示 Paused);M4 判据 11/12/13 全态实测
+(边点=边操作行+tamper 区、五种范围收窄+chip 一键清除、共享卡片基类 DOM 逐字节相同、
+单击=选中/双击=面板)。**带出发现一条(范围外,已挂后台任务 chip)**:run-fail 阶段的
+Run 按钮可点但 `handleRun` 静默返回(gate-state.ts:76 × Workspace.tsx handleRun 守卫),
+违反 FRONTEND_UI_SPEC §2.7a。点验后 9222 调试口已关闭并 curl 复核。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

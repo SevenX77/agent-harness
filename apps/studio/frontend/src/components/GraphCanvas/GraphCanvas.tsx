@@ -2465,10 +2465,10 @@ export function GraphCanvas({
           if (node.type === 'subgraphGroup') return
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
-            // Carry the boundary identity so the i/o panel scopes to input- or
-            // output-only (handleBoundarySelect clears any phase selection).
+            // Single click SELECTS, the same as every other node (decision
+            // 2026-08-13 D8) — it records which boundary is selected and
+            // nothing more. Jumping to the I/O panel is double-click's job.
             onBoundarySelect?.(node.type === 'globalInput' ? 'input' : 'output')
-            onPanelChange?.('input')
             return
           }
           if (node.type === 'skill') {

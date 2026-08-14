@@ -641,3 +641,79 @@ describe('failed run reason', () => {
     expect(html).not.toContain('llm.provider_invoke_failed')
   })
 })
+
+// 选中即范围 (decision 2026-08-13 D6/D5): the canvas selection narrows the
+// trace; the chip announces it; an edge scope carries the tamper section.
+describe('TracePanel scope (D6 选中即范围)', () => {
+  const scopedEvents: EventEnvelope[] = [
+    events[0],
+    {
+      schema_version: 'studio.event.v1',
+      stream_id: 'run:run-1',
+      seq: 2,
+      cursor: 'run:run-1:2',
+      run_id: 'run-1',
+      event_type: 'phase_start',
+      timestamp: '2026-06-14T00:00:01Z',
+      payload: {
+        schema_version: '1.0',
+        event_type: 'phase_start',
+        phase_name: 'draft',
+        timestamp: '2026-06-14T00:00:01Z',
+      },
+    } satisfies EventEnvelope,
+    {
+      schema_version: 'studio.event.v1',
+      stream_id: 'run:run-1',
+      seq: 3,
+      cursor: 'run:run-1:3',
+      run_id: 'run-1',
+      event_type: 'input_dispatch',
+      timestamp: '2026-06-14T00:00:02Z',
+      payload: {
+        schema_version: '1.0',
+        event_type: 'input_dispatch',
+        from_phase: 'draft',
+        to_phase: 'review',
+        dispatched_keys: ['topic'],
+        timestamp: '2026-06-14T00:00:02Z',
+      },
+    } satisfies EventEnvelope,
+  ]
+
+  it('announces the scope in a chip with a one-click clear', () => {
+    const html = render({ traceLogs: scopedEvents, scope: { kind: 'node', phase: 'draft' } })
+    expect(html).toContain('data-trace-scope')
+    expect(html).toContain('draft')
+    expect(html).toContain('aria-label="Clear trace scope"')
+  })
+
+  it('narrows the list to the scope: a node scope hides other phases', () => {
+    const html = render({ traceLogs: scopedEvents, scope: { kind: 'node', phase: 'draft' } })
+    expect(html).toContain('Phase started: draft')
+    expect(html).not.toContain('input_dispatch')
+  })
+
+  it('an edge scope shows the edge ops and the tamper section', () => {
+    const html = render({
+      traceLogs: scopedEvents,
+      scope: { kind: 'edge', source: 'draft', target: 'review' },
+      selectedEdge: {
+        id: 'draft->review',
+        source: 'draft',
+        target: 'review',
+        contextJson: { blackboard_snapshot: { topic: 'cats' }, checkpoint_id: 'cp-1' },
+      },
+      onResumeEdgeDownstream: () => undefined,
+    })
+    expect(html).toContain('draft → review')
+    expect(html).toContain('input_dispatch')
+    expect(html).not.toContain('Phase started: draft')
+    expect(html).toContain('Tamper')
+  })
+
+  it('renders no chip without a scope', () => {
+    const html = render({ traceLogs: scopedEvents })
+    expect(html).not.toContain('data-trace-scope')
+  })
+})

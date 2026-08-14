@@ -2767,6 +2767,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onResumeNode={runId ? handleResumeNode : undefined}
         onSubmitHitlResponse={handleSubmitHitlResponse}
         onResumeEdgeDownstream={runId ? handleResumeEdgeDownstream : undefined}
+        onClearTraceScope={handleNodeDeselect}
         compareTabs={compareTabs}
         activeCandidateId={compareCandidateId}
         onSelectCandidate={handleSelectCandidate}

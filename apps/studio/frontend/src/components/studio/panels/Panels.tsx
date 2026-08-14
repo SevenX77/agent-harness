@@ -12,8 +12,8 @@ import { AssetsPanel } from "./AssetsPanel"
 import { HistoryPanel } from "./HistoryPanel"
 import { InputPanel } from "./InputPanel"
 import type { IoBoundarySelection } from "./io-target"
+import type { TraceScope } from "@/utils/trace-scope"
 import { PanelHeader } from "./_shared/PanelHeader"
-import { EdgeContextView } from "./EdgeContextView"
 import { PropertiesPanel } from "./PropertiesPanel"
 import { TimelinePanel } from "./TimelinePanel"
 import type { TraceView } from "./trace-view"
@@ -82,6 +82,8 @@ interface PanelsProps {
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
   onResumeEdgeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
+  /** D6: one-click scope clear — same full deselect as clicking blank canvas. */
+  onClearTraceScope?: () => void
   /** Per-node golden promote (atom #32), surfaced in the node Properties panel. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
   // n4-trace#23 (P8 model-compare): per-candidate Trace tabs + selection, forwarded
@@ -140,6 +142,7 @@ export function Panels({
   onResumeNode,
   onSubmitHitlResponse,
   onResumeEdgeDownstream,
+  onClearTraceScope,
   onPromoteNode,
   compareTabs,
   activeCandidateId,
@@ -148,7 +151,7 @@ export function Panels({
   onOpenSettings,
   onSelectGraph,
 }: PanelsProps) {
-  const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
+  const { onFileOpen, selectedEdge } = useWorkspaceContext()
   const selectedNodeSkillId = selectedNode?.data.skillId ?? null
   const selectedNodeWorkspaceRoot = selectedNode?.data.workspaceRoot ?? null
   const selectedNodeUsesDifferentSkill = Boolean(
@@ -241,16 +244,18 @@ export function Panels({
     )
   }
   if (activePanel === "trace") {
-    if (selectedEdge) {
-      return (
-        <EdgeContextView
-          selectedEdge={selectedEdge}
-          onClear={() => setSelectedEdge?.(null)}
-          onResumeDownstream={onResumeEdgeDownstream}
-          resumeLoading={traceResumeLoading}
-        />
-      )
-    }
+    // 选中即范围 (decision 2026-08-13 D6): whatever is selected on the canvas
+    // is the trace's display scope — an edge outranks a node outranks a
+    // boundary, matching what the user most recently anchored. The old
+    // EdgeContextView swap is retired (D5): an edge now scopes the SAME trace
+    // panel, whose rows are the edge-op events themselves.
+    const traceScope: TraceScope | null = selectedEdge
+      ? { kind: "edge", source: selectedEdge.source, target: selectedEdge.target }
+      : selectedNode
+      ? { kind: "node", phase: selectedNode.id }
+      : ioBoundary
+      ? { kind: ioBoundary }
+      : null
     // viewed-run model (decision 2026-08-07): the region shows the run the user
     // is LOOKING AT, not whichever run last streamed. Live view keeps every run
     // action; a historical view is a read-only replay of the same TracePanel.
@@ -280,6 +285,11 @@ export function Panels({
           compareTabs={compareTabs}
           activeCandidateId={activeCandidateId}
           onSelectCandidate={onSelectCandidate}
+          scope={traceScope}
+          onClearScope={onClearTraceScope}
+          selectedEdge={selectedEdge}
+          onResumeEdgeDownstream={onResumeEdgeDownstream}
+          edgeResumeLoading={traceResumeLoading}
         />
       )
     }
@@ -294,6 +304,11 @@ export function Panels({
           onBack={onCloseTraceView}
           runId={traceView.runId}
           metadata={traceView.metadata}
+          scope={traceScope}
+          onClearScope={onClearTraceScope}
+          selectedEdge={selectedEdge}
+          onResumeEdgeDownstream={onResumeEdgeDownstream}
+          edgeResumeLoading={traceResumeLoading}
         />
       )
     }

@@ -396,7 +396,7 @@ describe('GraphCanvas', () => {
     }
   })
 
-  it('opens the I/O panel and carries the boundary identity when a global input/output node is clicked', () => {
+  it('boundary single click selects only; double click is what opens the I/O panel (D8)', () => {
     const onNodeSelect = vi.fn()
     const onNodeDeselect = vi.fn()
     const onBoundarySelect = vi.fn()
@@ -415,18 +415,24 @@ describe('GraphCanvas', () => {
 
     const props = reactFlowPropsRef.current as {
       onNodeClick?: (event: unknown, node: Node<GlobalNodeData, 'globalInput' | 'globalOutput'>) => void
+      onNodeDoubleClick?: (event: unknown, node: Node<GlobalNodeData, 'globalInput' | 'globalOutput'>) => void
     } | null
 
+    // Single click = selection, same as every other node. The boundary
+    // identity flows through onBoundarySelect (input / output) so the trace
+    // scope and the i/o panel can attribute it — but no panel jump happens.
     props?.onNodeClick?.({}, globalNode(INPUT_ID, 'globalInput'))
     props?.onNodeClick?.({}, globalNode(OUTPUT_ID, 'globalOutput'))
-
-    expect(onPanelChange).toHaveBeenCalledTimes(2)
-    expect(onPanelChange).toHaveBeenNthCalledWith(1, 'input')
-    expect(onPanelChange).toHaveBeenNthCalledWith(2, 'input')
-    // The boundary identity now flows through onBoundarySelect (input / output),
-    // not an untyped onNodeDeselect — so the panel can scope to that role.
+    expect(onPanelChange).not.toHaveBeenCalled()
     expect(onBoundarySelect).toHaveBeenNthCalledWith(1, 'input')
     expect(onBoundarySelect).toHaveBeenNthCalledWith(2, 'output')
+
+    // Double click is the "open" gesture: it jumps to the I/O panel.
+    props?.onNodeDoubleClick?.({}, globalNode(INPUT_ID, 'globalInput'))
+    expect(onPanelChange).toHaveBeenCalledTimes(1)
+    expect(onPanelChange).toHaveBeenCalledWith('input')
+    expect(onBoundarySelect).toHaveBeenNthCalledWith(3, 'input')
+
     expect(onNodeSelect).not.toHaveBeenCalled()
     expect(onNodeDeselect).not.toHaveBeenCalled()
     expect(onNodeFileOpen).not.toHaveBeenCalled()

@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
+import { NODE_CAPSULE_BASE, nodeCardClass } from './node-card'
 import { GLOBAL_INPUT_SOURCE_HANDLE_ID, GLOBAL_OUTPUT_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { GlobalNodeData } from './types'
 
@@ -7,16 +8,19 @@ export type { GlobalNodeData } from './types'
 
 type GlobalNode = Node<GlobalNodeData>
 
+// The boundary card is the same card a phase node is (decision 2026-08-13 D8:
+// shared node-card module, no bare-card copies) — only width and content differ.
 export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>) {
   const isInput = data.type === 'global-input'
   const compileErrors = data.compileErrors ?? []
 
   return (
     <div
-      className={[
-        'group relative min-w-[220px] cursor-pointer rounded-md border bg-card p-3 text-sm text-card-foreground shadow-sm transition-colors',
-        selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
-      ].join(' ')}
+      className={nodeCardClass({
+        minWidth: 'min-w-[220px]',
+        ring: selected ? 'selected' : 'none',
+        extra: ['text-sm'],
+      })}
     >
       {isInput ? (
         <Handle
@@ -42,7 +46,7 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <NodeCompileErrorBadge errors={compileErrors} scope="boundary" />
-          <span className="inline-flex items-center rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className={[NODE_CAPSULE_BASE, 'border-border bg-card text-muted-foreground'].join(' ')}>
             {isInput ? 'INPUT' : 'OUTPUT'}
           </span>
         </div>

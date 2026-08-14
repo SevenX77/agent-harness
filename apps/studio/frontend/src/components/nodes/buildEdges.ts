@@ -1,6 +1,7 @@
 import type { Edge } from '@xyflow/react'
 import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
+import { EDGE_STROKE_WIDTH } from '@/components/edges/edge-style'
 import { edgeContextFromEvents } from '@/lib/edge-context'
 import {
   GLOBAL_INPUT_SOURCE_HANDLE_ID,
@@ -46,7 +47,7 @@ export function createContextEdge(
       targetPhaseId: target,
       showContextControl: true,
     },
-    style: { strokeWidth: 1.5 },
+    style: { strokeWidth: EDGE_STROKE_WIDTH },
   }
 }
 

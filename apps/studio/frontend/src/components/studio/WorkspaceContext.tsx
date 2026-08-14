@@ -5,21 +5,15 @@ import type { FileOpenInput, FileMeta } from './file-types'
 export type EditorSide = 'left' | 'right'
 export type WorkspacePanelKind = 'assets' | 'input' | 'trace' | 'properties' | 'local-history' | null
 
-// One node-to-node micro operation recorded between the upstream phase end and
-// the downstream phase start. The engine already emits each of these on the run
-// event stream (blackboard_reduce / input_dispatch / input_file_injected /
-// artifact_saved); EdgeContextView renders the ordered list as the dot's
-// "what happened across this transition" operation log.
-export type EdgeOperation =
-  | { kind: 'reduce'; reducer: string; changed_keys: string[] }
-  | { kind: 'dispatch'; dispatched_keys: string[]; changed_keys: string[] }
-  | { kind: 'inject'; file_ref: string; target_field: string }
-  | { kind: 'persist'; name: string; path: string; size_bytes: number | null }
-
+// The LAST dispatch that crossed one graph edge in the selected run
+// (edge-context.ts assembles it). The per-operation log that used to ride
+// along here retired into the trace rows themselves (decision 2026-08-13 D5:
+// an edge selection scopes the trace, and the rows ARE the edge's operations);
+// what remains feeds EdgeTamperSection — the dispatched blackboard snapshot
+// plus the checkpoint/resume bookkeeping the tamper editor needs.
 export interface EdgeContextJson {
   inputs?: unknown
   phase_outputs?: Record<string, unknown>
-  operations?: EdgeOperation[]
   [key: string]: unknown
 }
 

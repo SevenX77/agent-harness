@@ -1,6 +1,7 @@
 import * as ReactFlow from '@xyflow/react'
 import type { Edge, EdgeProps } from '@xyflow/react'
 import type { KeyboardEvent, MouseEvent } from 'react'
+import { EDGE_DOT_RADIUS, EDGE_STROKE_ACCENT, EDGE_STROKE_BASE, EDGE_STROKE_WIDTH } from './edge-style'
 
 export interface ContextEdgeData extends Record<string, unknown> {
   hasTraceData: boolean
@@ -24,7 +25,6 @@ type GlobalWithProcess = typeof globalThis & {
 }
 
 const STRAIGHT_EDGE_EPSILON = 0.5
-const EDGE_DOT_RADIUS = 7
 
 function isHorizontalHandlePosition(position: ReactFlow.Position): boolean {
   return position === ReactFlow.Position.Left || position === ReactFlow.Position.Right
@@ -95,7 +95,7 @@ export function EdgeContextDot({
         r={EDGE_DOT_RADIUS}
         className={hasTraceData ? 'edge-context-dot__halo' : undefined}
         fill="var(--studio-canvas-edge-dot-fill, var(--color-background))"
-        stroke={hasTraceData ? 'var(--studio-canvas-accent, var(--primary))' : 'var(--studio-canvas-border, var(--color-border))'}
+        stroke={hasTraceData ? EDGE_STROKE_ACCENT : 'var(--studio-canvas-border, var(--color-border))'}
         strokeWidth={2}
       />
       <circle
@@ -155,8 +155,8 @@ export function ContextEdge({
         id={id}
         path={edgePath}
         style={{
-          stroke: 'var(--studio-canvas-edge, var(--color-border))',
-          strokeWidth: 2,
+          stroke: EDGE_STROKE_BASE,
+          strokeWidth: EDGE_STROKE_WIDTH,
           ...style,
         }}
       />
@@ -169,8 +169,8 @@ export function ContextEdge({
           path={edgePath}
           className={isFlowing ? "animated-flow-line" : undefined}
           style={{
-            stroke: 'var(--studio-canvas-accent, var(--primary))',
-            strokeWidth: 2,
+            stroke: EDGE_STROKE_ACCENT,
+            strokeWidth: EDGE_STROKE_WIDTH,
             strokeOpacity: 0.8,
             pointerEvents: 'none',
           }}

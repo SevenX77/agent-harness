@@ -44,22 +44,25 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: 部分 live(2026-08-07 viewed-run 决议:列表点某次 → 该 run 完整 trace 视图(一次性拉取,与 Full Trace 文档/PromptInspector 共读同一事件缓存,修复「Full Trace 永远读实时流」的脱钩);predict 行以 RunMetadata.kind 判别。2026-08-08 决议:Full Trace 去 Monaco 化为按节点分块的排版文档、删除 1200 字符硬截断(长值折叠可展开);predict 与已完成 run 的事件流由 `stream_run` 从该 run 目录回放,不再因内存 record 消失而失联。仍 target-design:run_id 概要中间层、从 trace 行跳到文档对应状态)。
 - 归属: regions `timeline`, `editor`; platform `engine`.
 
-### F3. Focus Locates The Reader, It Never Filters The Trace
+### F3. 选中即范围(2026-08-13 决议 D6,推翻 2026-08-09 D2)
 
-- 机制: 选中画布节点 → Trace **滚动定位**到该节点的分组标题并把标题提亮;列表内容**一条不减**。
-  取消选中只是不再有定位目标,不改变列表内容。节点的多次执行(loop / retry / batch)按原有分组保留,
-  不折叠为「最后一次尝试」。
-- 决策: 2026-08-09 决议 D2 **作废了本条原先的过滤语义**(「blank focus = 全run摘要 / node focus = 只看该节点」)。
-  作废理由有二:(一)删掉 link 开关与收窄提示后仍保留过滤,等于给用户一个**看不见、也关不掉**的过滤器;
-  (二)同一决议 D1 删除了 Full Trace 文档,通读职责回到 Trace 自身,一个会被聚焦悄悄截断的列表无法承担通读。
-  「聚焦决定用户注意力落点」这一原始意图,改由滚动定位承接。
-- 原话/来源: `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` §D2(含被作废条目的完整交代);
-  PM 原话「full trace删掉,功能重复,本来就应该显示full tracing」「link删掉」。
-- 测试: 聚焦某节点后列表长度不变、该节点分组标题带 `data-trace-focus-group="true"`;
-  过滤投影 `filterTraceEvents` 的入参类型中不存在 `activePhase`(类型级断言,防止过滤悄悄回归)。
-- Status: live(2026-08-09:`useTraceFilter` 已删 `activePhase` 条件;`TraceEventList` 接 `focusPhase`
-  只做 `scrollIntoView` 与标题提亮;link 开关及其贯穿 Workspace/Panels 的接线已删除)。
-- 归属: capability `trace-observability`; regions `canvas`, `timeline`, `editor`.
+- 机制: **画布选中态 = trace 显示范围**。选中节点 → 只显示该节点的事件(边事件按 `to_phase`
+  归属);选中边 → 只显示该边的边操作事件(见 F4);选中 Input → 离开输入边界的派发事件;
+  选中 Output → 到达输出边界的事件;**点空白 = 全量**。范围过滤的唯一实现是
+  `utils/trace-scope.ts` 的 `eventInScope`;trace 面板头部显示当前范围 chip
+  (`data-trace-scope`,文案 = `scopeLabel`,与画布命名一致)并带**一键清除**按钮,
+  清除 = 与点空白同一条 `handleNodeDeselect`(全部选中态一起清)。run 级派生
+  (verdict 徽章 / 结局行 / 降级计数)**不受范围影响**——范围只窄化列表。
+- 决策: 本条**推翻** 2026-08-09 D2 的「聚焦只定位不过滤」,且当年的反对理由被正面化解:
+  「不可见」→ 过滤严格绑定可见的画布选中环 + 面板头部范围 chip;「不可关」→ chip 一键清除、
+  点空白回全量。两次裁决都在案:2026-08-09 删的是无锚点的隐形过滤,2026-08-13 立的是
+  锚点即选中态、状态可见、一键可退的范围机制。
+- 原话/来源: `docs/design/2026-08-13-trace-goes-glass-box-decision.md` §D6(含对 D2 的正面回应);
+  历史脉络 `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` §D2。
+- 测试: `utils/trace-scope.test.ts`(各范围的准入规则)、`TracePanel.test.tsx`
+  (chip 呈现/清除按钮/节点范围窄化/边范围含 tamper 区/无范围无 chip)。
+- Status: live(2026-08-14 落地)。
+- 归属: capability `trace-observability`; regions `canvas`, `timeline`.
 
 ### F8. Trace 顶条只回答两个问题
 
@@ -101,15 +104,33 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: live(2026-08-09)。
 - 归属: capability `trace-observability`; region `timeline`; platform `engine`(`tool_call_started` 半边)。
 
-### F4. Edge Dot Blackboard Transition(双态:静态推断 + 运行期真实)
+### F4. 边点 = 边的步骤(2026-08-13 决议 D5,改组 2026-07-02 双态方案)
 
-- 机制: dot 有两态,同一个 dot 面板承载:
-  - **未跑前(静态推断)**:像节点 io 一样给出该边的黑板字段推断——"graph 跑到这个 dot 时,黑板上应该有哪些字段"。推导规则与编译期数据流校验同源:该边可用字段 = 根 `io.inputs` ∪ 下游节点全部上游祖先 phase 的 `io.outputs` ∪ runtime_config 中该 phase 的 import binding 注入字段 ∪ iterate/batch 注入字段;同名顺序覆盖(`allow_sequential_overwrite`)取最近祖先;并标出下游节点将按其 `io.inputs` 切走哪些字段。逐边不同,随拓扑/io 声明/runtime_config 编辑即时更新;由前端按拓扑 + 节点 io 声明 + runtime_config 推导(engine `graph-exec` E4 已把 canvas 黑板可视化划给前端,呼应本 workflow REQ-2 黑板可视化连线)。
-  - **跑后(选中某次 run)**:clicking the dot shows real blackboard state and all operations between upstream end and downstream start——数据源 = engine 边操作事件族(`InputDispatchEvent`/`BlackboardReduceEvent`/`InputFileInjectedEvent`/`ArtifactSavedEvent`/`CompactionEvent`)的 `blackboard_snapshot` + `changed_keys` + `branch_index`,按 `from_phase`/`to_phase` 聚合(engine `02-observability` OB4/OB5)。
-- 决策: dot is the between-node state-machine transition point;**默认显示静态推断,选中某次 run 切换为该 run 的真实快照/操作记录**(PM 2026-07-02 扩充)。
-- 原话/来源: `01_workflows/04_run-and-verify.md:76` defines dot semantics; `01_workflows/04_run-and-verify.md:109` keeps the PM wording;PM 2026-07-02:"我说的不是跑过一次后拿到trace,我说的是在没跑之前,也要像node的io一样,给出一个schema推断,这个dot在这里应该会有哪些字段。当然你说的这些(运行期快照/操作记录)都要加上"。
-- 测试: 未跑时 dot 显示静态字段推断且逐边不同、随 io 声明/拓扑变化即时更新;dot shows reducer/filter/inject/persist operations for the selected run; parallel branches show shared filtered input(`branch_index` 区分)。
-- Status: live(双态齐备:运行期 edgeContextFromEvents + 未跑期 staticEdgeInference;GraphCanvas.tsx:1429-1434 / lib/edge-static-inference.ts:139,2026-07 对账)。
+- 机制: 点边 dot = 选中这条边 = trace 范围收窄到这条边(F3 的 edge 范围),此时列表里的
+  行**就是**这条边的操作步骤——`input_dispatch` / `blackboard_reduce` /
+  `input_file_injected` 按 `from_phase`/`to_phase` 归边,`artifact_saved` 按上游
+  `phase_name` 归边——与节点步骤同一套行样式(M1 折叠原语),不再有第二套"边专用"呈现。
+  面板中随范围 chip 保留的是 `EdgeTamperSection`,承载两件 trace 行给不了的东西:
+  - **未跑前(静态推断)**:像节点 io 一样给出该边的黑板字段推断——"graph 跑到这个 dot
+    时,黑板上应该有哪些字段"。推导规则与编译期数据流校验同源:该边可用字段 = 根
+    `io.inputs` ∪ 下游节点全部上游祖先 phase 的 `io.outputs` ∪ runtime_config 中该
+    phase 的 import binding 注入字段 ∪ iterate/batch 注入字段;同名顺序覆盖
+    (`allow_sequential_overwrite`)取最近祖先;并标出下游节点将按其 `io.inputs` 切走
+    哪些字段。没跑过就没有事件,trace 行天然空白——静态推断正是补这块的。
+  - **篡改黑板续跑(操作,不是展示)**:`EdgeTamperEditor` 编辑该边派发的黑板 JSON 并从
+    checkpoint 恢复下游,这是一个动作入口,不属于事件流呈现,留在面板。
+- 决策: dot 仍是节点间状态机转换点(2026-07-02 语义不变),但**运行期"真实快照/操作记录"
+  的呈现载体从独立的 EdgeContextView 面板改组为 trace 行本身**(D5:"边点显示 phase 间
+  步骤,与节点步骤同样式")。理由:边操作本来就是事件流里的事件,再养一个平行面板等于同一
+  信息两处呈现、两处要同步;`EdgeContextView.tsx` 已删除,不重建。
+- 原话/来源: `docs/design/2026-08-13-trace-goes-glass-box-decision.md` §D5;
+  `01_workflows/04_run-and-verify.md:76` defines dot semantics;PM 2026-07-02 原话
+  (静态推断 + 运行期都要)继续有效,变的只是运行期呈现的载体。
+- 测试: `trace-scope.test.ts`(边范围恰好收进该边的边操作事件、`artifact_saved` 归上游、
+  Input 边界边接受 null `from_phase`);`EdgeTamperSection.test.tsx`(静态推断体 / tamper
+  编辑器 / 无记录时的诚实空态);`TracePanel.test.tsx`(边范围时 tamper 区出现在范围 chip 下)。
+- Status: live(2026-08-14:EdgeContextView 删除,EdgeTamperSection + edge 范围接管;
+  静态推断 lib/edge-static-inference.ts 不变)。
 - 归属: rendering `graph-authoring`/`canvas`; data `trace-observability`.
 
 ### F5. Prompt 就在它自己的步骤里(原 Prompt Inspector 已删除)

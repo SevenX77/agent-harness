@@ -1,53 +1,22 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, ListTree, Minus, Network, Pause, Plus, Radio, ShieldCheck, ShieldHalf, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, Briefcase, Code, ListTree, Minus, Network, Pause, Plus, ShieldCheck, ShieldHalf } from 'lucide-react'
 import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
+import { nodeCardClass, type NodeCardRing } from './node-card'
+import { STATUS_STYLE, StatusCapsule } from './StatusCapsule'
 import {
   SKILL_FLOW_SOURCE_HANDLE_ID,
   SKILL_FLOW_TARGET_HANDLE_ID,
   SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
 } from './subgraph-bridge-handles'
-import type { SkillGraphNode, SkillGraphNodeData, SkillNodeStatus } from './types'
+import type { SkillGraphNode, SkillGraphNodeData } from './types'
 
 type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
 
 export { formatNodeCompileError } from './NodeCompileErrorBadge'
-
-const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, icon: typeof Circle }> = {
-  idle: {
-    label: 'Idle',
-    className: 'border-border bg-card text-muted-foreground',
-    icon: Circle,
-  },
-  running: {
-    label: 'Running',
-    className: 'animate-pulse-primary border-primary bg-primary/10 text-link',
-    icon: Radio,
-  },
-  success: {
-    label: 'Success',
-    className: 'border-success-border/60 bg-success/10 text-success',
-    icon: CheckCircle2,
-  },
-  error: {
-    label: 'Error',
-    className: 'border-destructive/50 bg-destructive/10 text-destructive',
-    icon: AlertTriangle,
-  },
-  paused: {
-    label: 'Paused',
-    className: 'border-warning-border/60 bg-warning/10 text-warning',
-    icon: Pause,
-  },
-  breakpoint: {
-    label: 'Breakpoint',
-    className: 'border-primary/45 bg-primary/10 text-link',
-    icon: Workflow,
-  },
-}
 
 function phaseKindLabel(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>): PhaseKind {
   if (data.subgraphPath || data.mode === 'subgraph') return 'SUBGRAPH'
@@ -62,8 +31,7 @@ function phaseKindIcon(kind: PhaseKind): typeof Bot {
 }
 
 export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
-  const style = STATUS_STYLE[data.status]
-  const StatusIcon = style.icon
+  const statusLabel = STATUS_STYLE[data.status].label
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
   const subagentCount = data.subagents?.length ?? 0
@@ -84,21 +52,22 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   // subgraph nodes never get it (build-nodes leaves the callbacks undefined).
   const canEditSteps = kind === 'AGENT' && typeof data.onToggleSteps === 'function' && typeof data.agentBody === 'string'
 
+  const ring: NodeCardRing = data.isConflictCancelled
+    ? 'destructive'
+    : data.activeConflict
+    ? 'warning'
+    : selected
+    ? 'selected'
+    : 'none'
   const nodeContent = (
     <div
       aria-disabled={isDirtyDownstream || undefined}
       data-dirty-downstream={isDirtyDownstream || undefined}
-      className={[
-        'group relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
-        isDirtyDownstream ? 'opacity-50 grayscale' : '',
-        data.isConflictCancelled
-          ? 'border-destructive ring-2 ring-destructive/30'
-          : data.activeConflict
-          ? 'border-warning ring-2 ring-warning/30'
-          : selected
-          ? 'border-primary ring-2 ring-primary/30'
-          : 'border-border',
-      ].join(' ')}
+      className={nodeCardClass({
+        minWidth: 'min-w-[240px]',
+        ring,
+        extra: [isDirtyDownstream && 'opacity-50 grayscale'],
+      })}
     >
       <Handle
         id={SKILL_FLOW_TARGET_HANDLE_ID}
@@ -160,12 +129,9 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className={['inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium', style.className].join(' ')}>
-              <StatusIcon className="size-3" />
-              {style.label}
-            </span>
+            <StatusCapsule status={data.status} />
           </TooltipTrigger>
-          <TooltipContent side="top">{style.label}</TooltipContent>
+          <TooltipContent side="top">{statusLabel}</TooltipContent>
         </Tooltip>
       </div>
       {inlineErrorMessage ? (

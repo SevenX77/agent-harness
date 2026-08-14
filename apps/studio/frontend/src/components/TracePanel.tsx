@@ -4,6 +4,10 @@ import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countRouteDegradations, isPredictTrace } from '../utils/trace'
 import { runVerdict, type RunVerdict } from '../utils/run-status-projection'
+import { eventInScope, scopeLabel, type TraceScope } from '../utils/trace-scope'
+import { EdgeTamperSection } from './trace/EdgeTamperSection'
+import type { SelectedEdge } from './studio/WorkspaceContext'
+import type { ResumeRunOptions } from '../api/client'
 import { traceOutcomeEntry } from '../utils/trace-outcome'
 import { runStatusMark, type RunStatusMark } from '../utils/run-status-mark'
 import type { LucideIcon } from 'lucide-react'
@@ -16,6 +20,7 @@ import {
   MoreVertical,
   Play,
   ShieldCheck,
+  X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
@@ -113,6 +118,21 @@ interface TracePanelProps {
   compareTabs?: CompareTab[]
   activeCandidateId?: string | null
   onSelectCandidate?: (candidateId: string) => void
+  /**
+   * 选中即范围 (decision 2026-08-13 D6): the canvas selection this trace is
+   * narrowed to. Null = the whole run. The chip in the header announces it and
+   * clears it via `onClearScope` (same effect as clicking blank canvas).
+   */
+  scope?: TraceScope | null
+  onClearScope?: () => void
+  /**
+   * The selected edge behind an edge scope (D5): the tamper editor — an
+   * operation, not a display — renders under the scope chip, wired to the
+   * same resume-downstream flow the retired EdgeContextView owned.
+   */
+  selectedEdge?: SelectedEdge | null
+  onResumeEdgeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
+  edgeResumeLoading?: boolean
 }
 
 function envelopePayload(event: EventEnvelope): CallbackEvent {
@@ -282,6 +302,11 @@ export function TracePanel({
   activeCandidateId = null,
   onSelectCandidate,
   skillId = null,
+  scope = null,
+  onClearScope,
+  selectedEdge = null,
+  onResumeEdgeDownstream,
+  edgeResumeLoading = false,
 }: TracePanelProps) {
   const traceEvents = traceLogs.map(envelopePayload)
   // Live output goes into the step rows that are producing it (decision
@@ -293,7 +318,8 @@ export function TracePanel({
   // list SCROLLS, never what it contains.
   const focusPhase = selectedNode?.id ?? activePhase
   const focusLabel = selectedNode?.data.label ?? focusPhase
-  const filter = useTraceFilter(traceEvents)
+  const scopedEvents = scope ? traceEvents.filter((event) => eventInScope(event, scope)) : traceEvents
+  const filter = useTraceFilter(scopedEvents)
   const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
   // trace-observability F7: a run that silently fell back to another provider
   // announces it up front; clicking the chip narrows the trace to the fallback
@@ -466,12 +492,42 @@ export function TracePanel({
     </Alert>
   ) : null
 
+  // D6: the scope chip is the filter's visible anchor — always shown while a
+  // scope is active, including the no-events branch (a pre-run edge click has
+  // its static inference to show there).
+  const scopeStrip = scope ? (
+    <div data-trace-scope className="shrink-0 space-y-2 border-b border-border bg-card px-3 py-2">
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <span>Scope</span>
+        <span className="rounded-full border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
+          {scopeLabel(scope)}
+        </span>
+        <button
+          type="button"
+          aria-label="Clear trace scope"
+          onClick={() => onClearScope?.()}
+          className="flex items-center rounded-full border border-border p-0.5 text-muted-foreground hover:bg-accent"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+      {scope.kind === 'edge' && selectedEdge ? (
+        <EdgeTamperSection
+          selectedEdge={selectedEdge}
+          onResumeDownstream={onResumeEdgeDownstream}
+          resumeLoading={edgeResumeLoading}
+        />
+      ) : null}
+    </div>
+  ) : null
+
   if (traceEvents.length === 0) {
     return (
       <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
         {compareTabStrip}
         {identityStrip}
         {failureBanner}
+        {scopeStrip}
         <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
           {live ? 'Waiting for run events' : 'No events recorded for this run'}
         </div>
@@ -484,6 +540,7 @@ export function TracePanel({
       {compareTabStrip}
       {identityStrip}
       {failureBanner}
+      {scopeStrip}
       <div className="shrink-0 space-y-2 border-b border-border bg-card px-3 py-2">
         {/* One focus scope over the box and its tags: reaching for a tag must not
             be what closes the tags (decision 2026-08-09 D11). */}

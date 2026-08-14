@@ -329,6 +329,25 @@ effort 进 UI、top_p 不进)。前决议管「被拒之后怎么办」,本决�
 |---|---|---|---|
 | M1 | 媒体生成模型独立设置页(用户裁决 2026-08-13:类别名 `media_generation`;不进 API Keys 页,原页改名「LLM API-Key」;新页含 RunningHub 凭据、零成本探活 accountStatus(余额展示)、10 条证据锚定模型目录(按模态分组,任务/渠道/价格徽章)、声明式参数 schema 驱动的能力胶囊与默认参数;L3 真实生成测试与调用运行时显式后置为 `media-invocation-runtime` 单元) | ✅ 已合并(#782)+ 真机点验完成(2026-08-13) | 决议 `docs/studio/mvp1/02_capabilities/media-generation/design-decision.md` + gateway 侧 `docs/graph-agent-gateway/mvp1/14-media-generation/design-decision.md`。gateway 新增 `media` 域(schema/catalog/probing,与 LLM registry 类型隔离,role→route 不可见);backend `/api/media/*` 5 端点;前端新 tab。已过门(本地):gateway 15 测试 + mypy --strict + ruff;backend 9 测试 + mypy + 全量 604 gateway 套件;前端四门禁 + worktree Playwright smoke(截图)。已过门(全量):backend 1694 + engine 1581 + gateway 604 全绿(quality-gates 首跑中 test_publish 幂等重试用例因在册 re-run flaky 红一次,重跑即绿)+ pip-audit/npm audit 0 CVE + 新端点登记 STUDIO_REQUEST_AUDIT.md + media_gateway 进 SDK 边界白名单。真机点验(CDP 驱动真窗口,截图存档):tab 改名/新页打开/10 模型分组徽章价格/无效 key 真探活打到 RunningHub 生产返回 code=806 APIKEY_USER_NOT_FOUND 红态呈现/能力胶囊/默认参数下拉仅合法枚举、选 2k 后落盘 %APPDATA%/AgentStudio/media/media_generation.json 因果确认/生成测试按钮不存在(按 D2 后置) |
 
+### 用户功能批次 2026-08-13:tracing 去黑箱(glass-box)
+
+决议正本:`docs/design/2026-08-13-trace-goes-glass-box-decision.md`(#786,用户九条裁决 +
+验收判据 1-15)。目标:跑一次 skill,读者能像读程序 print 一样看清每一步在做什么。
+实施顺序 E1 → E3 → M1+M2 → M3 → M4 → E2。
+
+| # | 项 | 状态 | 处置 |
+|---|---|---|---|
+| G-E1 | thinking 落盘:产生答案的推理随 run 保存(`llm_call.response_data.reasoning`) | ✅ 已合并(#787) | engine `core/llm_provider.py` 聚合流式 reasoning 进结束帧;此前 thinking 只活在增量帧里,run 一结束就没了(决议 B2)。vendor 已重建 |
+| G-E3 | 机器自述事件:中间件/md2json/validator 发「决定」不发「路过」 | ✅ 已合并(#788 + #790) | 新事件 `FinishTaskVerdictEvent` / `NudgeEvent` / `ToolErrorHandledEvent`(exit 中间件裁决、nudge 注入、工具错误被拦都成为可见步骤);「每步做了什么要像 print 一样写清」的引擎侧供给(决议 D3)。vendor 已重建 |
+| G-M1M2 | 折叠原语统一 + LLM 步骤按流程序拆子条目 + Iteration 分层 | ✅ 已合并(#789) | 前端 `components/trace/` 折叠文本原语(5 行/20 行档,编辑器看全文);LLM 步骤内 Template/Variables/Rendered/Thinking/Response 按真实流程顺序排;agent 回合按 Iteration 分组(决议 D1/D2/D4) |
+| G-M3 | run 状态投影 SSOT(决议 D7 铁律:run 到终态 ⇒ 任何派生状态不得为 running) | ✅ 已合并(#793) | 新模块 `utils/run-status-projection.ts` 是事件流+run 记录折叠成一切派生状态的唯一出口;stop/pause 响应作为 canonical 快照被捕获;trace 步骤新增 `severed` 态(终态时未闭合步骤显示「never completed」不转圈);B8 两份旧推导(node-status.ts / runOutcomeFromEvents)整体删除;per-consumer 状态→显示对照表入设计源 F6 并有测试锁死 |
+| G-E2 | finish_task 保留字成编译诊断:`[F-v3-agent-tool-reserved]`(第 98 码) | ✅ 已合并(#791) | 用户裁决「finish task 这个 tool 还能删掉?这不是搞笑吗」:内置框架工具始终可用,声明它 = 编译错误;`has_finish_task` 旗标删除(出口闸无条件);顺带修出 after_agent `jump_to: end` 无限重入的真缺陷(最小复现 21 次重入,改 return None);UI ToolsField 对诊断行标红;RESERVED_TOOL_NAMES 前端自造规则删除(diagnostics SSOT)。vendor 已重建 |
+| G-FLAKE | cross-platform-smoke 抖动:Rust 并行测试竞争进程级环境变量 | ✅ 已合并(#792) | `sidecar.rs` 端口分配改纯函数 + 一行环境变量包装(副作用隔离);测试喂显式输入,不再 set/remove 全局 env |
+| G-M4 | D8 共享样式模块 + D6 选中即范围 + D5 边点=边的步骤 | ✅ 随本行同 PR 合入 | D8:`nodes/node-card.ts` + `nodes/StatusCapsule.tsx` + `edges/edge-style.ts`,SkillNode/GlobalInputOutputNode/buildEdges/ContextEdge 全部消费共享模块(通则入 FRONTEND_UI_SPEC §2.12);单击=选中/双击=面板(边界节点单击不再跳 I/O);D6:`utils/trace-scope.ts` 选中即 trace 范围,面板范围 chip + 一键清除,正面化解 2026-08-09 D2 的「不可见不可关」反对(两次裁决都记入设计源 F3);D5:EdgeContextView 删除,边操作以 trace 行呈现,EdgeTamperSection 只留 tamper 编辑器 + 未跑期静态推断(设计源 F4 改写);`operations` 死管线(EdgeOperation/collectEdgeOperations)连根删除;trace-observability 文档哈希重钉 |
+
+**过哪道门算完**:决议 §3 验收判据 1-15 在真机逐项点验(CDP 驱动真窗口)+ 五列验证报告全绿。
+G-M4 合并后为纯前端刷新(vendor 已在 E2 后重建),主仓 `git pull` 即生效。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

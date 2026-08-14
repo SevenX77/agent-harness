@@ -344,12 +344,25 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - **不要阻止事件冒泡**:守卫只 `preventDefault()` 默认行为,绝不 `stopPropagation`,否则会打断业务组件自己的 `onDoubleClick`(子图下钻就是靠双击冒泡到画布,见 §3)。
 - **覆盖范围**:Sonner toast / 错误抽屉 / 日志面板等 portal 到 `body` 的内容同样受全局 `body` 规则约束,需要可复制就照样登记白名单。
 
-## 3. GraphCanvas 画布样式覆写
+### 2.12 共享样式模块:「使 X 与 Y 一致」= 先提模块再消费(2026-08-13 D8)
+
+- **通则:凡是「使 X 与 Y 长得一致」的改动,一律先把这份外观提炼成共享模块(常量 / 辅助函数 /
+  小组件),再让 X 和 Y 都去消费它;禁止把 Y 的 class 串复制一份贴进 X。** 复制出来的一致性在
+  下一次改动时就会漂移——那不是一致,是巧合。改动时的判断次序:先找有没有现成共享模块可消费;
+  没有就先建再用;绝不以「就改这一处」为由复制。
+- 仓内既有范式(节点/边这层的样式 SSOT,均在 2026-08-14 落地):
+  - 节点卡片外观 = `components/nodes/node-card.ts`(`nodeCardClass` + `NODE_CAPSULE_BASE`),
+    `SkillNode` 与 `GlobalInputOutputNode` 都从这里取,选中/警告/错误 ring 的优先级也定义在此;
+  - 节点状态胶囊 = `components/nodes/StatusCapsule.tsx`(`STATUS_STYLE` + `StatusCapsule`);
+  - 边的描边宽度/中点圆点尺寸/颜色 = `components/edges/edge-style.ts`,`buildEdges` 与
+    `ContextEdge` 共同消费。
+- 这条与「2.2 样式 Token 化」相邻但不同层:token 管的是**色值/间距只有一个定义**,本条管的是
+  **一组元素的整套外观组合只有一个定义**。两层都必须满足。
 原生的 `@xyflow/react` 深色主题仍带有较重的网页感，在 `GraphCanvas` 组件和全局 `index.css` 中进行了覆写：
 - **默认布局对齐**: 单链或可直线化的默认流程（例如 `Input -> init -> Output`）必须采用节点中心点坐标作为布局基准，并让左右 handle 在同一水平中心线上；同一水平线的连接边应渲染为直线路径，避免无意义的 Bezier 弯线或 IO 节点与 phase 节点上下错位。
 - **首屏视口就绪后再显示**: 进入或切换 skill 时，`GraphCanvas` 不得在 `skillDetail` 加载期渲染默认占位节点，也不得依赖 ReactFlow 的 `fitView` prop 暴露首帧自动缩放；画布内容应保持不可见直到真实节点完成受控 `fitView` 后再显示，避免用户看到占位图或缩放跳帧。
 - **拓扑编辑不得重排或重置视口**: 点击 subgraph 节点右侧 `+/-` 只切换 inline preview 展开态，不得触发 `fitView`、auto-center 或自动移动 canvas 焦点；连线、断线、重连、output 标记等边拓扑变化只更新边，不得触发主图 dagre 重排、auto-center 或自动 refit。初次进入一个图 scope 时可以做一次初始布局和 fit；之后新增可见节点时只给新节点分配初始坐标，已有节点必须保留当前位置。
-- **节点选择反馈**: 单击 skill node 必须立即打开左侧 `Properties` panel 并同步选中态；双击继续用于打开对应 phase 文件。左侧工作区工具栏顺序固定为 `Assets`, `Properties`, `Input`, `Trace Timeline`, `Local History`，避免节点检查路径被埋在第三顺位之后。
+- **节点选择反馈(单击=选中,双击=打开;全画布统一,2026-08-13 D6/D8)**: 单击任何节点只做**选中**——skill node 单击打开左侧 `Properties` panel 并同步选中态;Input/Output 边界节点单击同样只记录边界选中态(`onBoundarySelect`),**不再跳转 I/O 面板**;任何选中态(节点/边/边界)同时成为 Trace 面板的显示范围(选中即范围,权威条目:`docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md` F3)。**双击才是「打开」**:skill node 双击打开对应 phase 文件,边界节点双击才跳到 I/O 面板。左侧工作区工具栏顺序固定为 `Assets`, `Properties`, `Input`, `Trace Timeline`, `Local History`，避免节点检查路径被埋在第三顺位之后。
 - **节点双击语义统一走 ReactFlow `onNodeDoubleClick`，节点内部禁止 `stopPropagation` 截断双击**: 双击节点是「上层路由」——普通节点打开 phase 文件、子图（subgraph）节点下钻进子图，二者都由 `GraphCanvas` 的 `onNodeDoubleClick` 统一分发。因此 `SkillNode` 等节点组件**不得**在自己的 `onDoubleClick` 里 `event.stopPropagation()`：一旦截断，React Flow 收不到双击，子图下钻直接失效（双击只会打开 Properties，不下钻）。这是 2026-06-23 修过的真实回归（节点曾对有 `subgraphPath` 的双击 `stopPropagation`，导致下钻哑火，而手册一度仍标「符合」——状态滞后于代码）。节点内只有「需要保留原生双击选择」的局部区域才用 `data-allow-native-double-click` 放行（与 §2.9 全局 double-click guard 配套），其余一律让双击冒泡到画布。回归由 e2e `n2-canvas-shots.spec.ts #14` 守护（双击子图节点须出现面包屑 + 子图子节点）。
 - **Canvas authoring 文件驱动**: 画布上的新建 phase、属性编辑、节点连线都必须先写入 phase 文件或 `GRAPH.md`，再通过刷新 `SkillDetail` 让 canvas 重绘；禁止渲染只存在于前端 state 的“假节点”。`GRAPH.md` 的 phase `src` 必须写 phase 目录（如 `phases/agent`），不要写具体文件路径（如 `phases/agent/SKILL.md`），否则 graph-agent loader 会把它当目录继续查找节点文件。`Properties` 是可编辑设置面板，不是 metadata inspector：不得展示 `phase id`、`node type`、`depends_on`、phase file path 这类不可改属性；只编辑当前 AST/schema 明确支持的字段，当前白名单为 `LOGIC.md` 的 `actions` + `validator`，`SKILL.md` 的 `llm_role` + `tools` + `subagents`，`SUBGRAPH.md` 的目标重连（写入 `path`）+ `validator`。`SUBGRAPH.md` 的 `name` 可以改，但必须通过 rename dialog，同时更新 `GRAPH.md` phase id 引用和 `phases/<id>/` 文件夹名；不得做成常驻 inline input。`batch`、`loop` 等节点类型只有在 schema 提供稳定可写字段后才加对应控件，不能用只读 metadata 或临时字符串字段凑数。`path` 不允许自由文本输入，必须通过选择已有 child graph folder 重连；保存时优先写相对当前 skill 根目录的路径，`target_skill` 只作为 legacy 字段迁移读取，不得写回。不得写回旧版 `prompt`、`agent_tools`、`execute_steps`、`sub_skill_ref` 等会被后端 AST 拒绝的字段。保存时必须保留未知字段和正文。ReactFlow 连线必须持久化为 `GRAPH.md` 的 `depends_on`，不能只停留在本地 edge state。
 - **节点主体 (`SkillNode`)**: 应用统一的背景令牌 (`bg-card`) (见 `GraphCanvas.tsx:143`)；处于执行态时，采用呼吸式的高亮效果，但仅应用在节点内部的 Status 徽章上 (通过 Tailwind `animate-pulse-primary` 实现，见 `GraphCanvas.tsx:186`)。

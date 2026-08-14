@@ -120,7 +120,7 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     expect(html).not.toContain('Resume run from last checkpoint')
   })
 
-  it('gives an active selected edge precedence over the live trace stream', () => {
+  it('scopes the live trace to a selected edge instead of swapping the panel out (D5)', () => {
     const html = renderTimelinePanel(
       { runId: 'run-1', traceEvents: oneEvent, traceView: { source: 'live' } },
       {
@@ -140,9 +140,13 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
       },
     )
 
-    expect(html).toContain('Blackboard transition')
-    expect(html).toContain('draft')
-    expect(html).toContain('review')
-    expect(html).not.toContain('data-trace-step-count=')
+    // The trace panel stays mounted — the edge only narrows its scope. The
+    // scope chip names the edge, offers one-click exit, and carries the tamper
+    // machinery that used to live in the retired EdgeContextView.
+    expect(html).toContain('data-trace-scope')
+    expect(html).toContain('draft → review')
+    expect(html).toContain('aria-label="Clear trace scope"')
+    expect(html).toContain('Tamper downstream resume context')
+    expect(html).toContain('data-trace-step-count=')
   })
 })

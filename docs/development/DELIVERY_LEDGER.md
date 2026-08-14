@@ -366,6 +366,17 @@ Route used)+ ITERATION 分层(20 轮);M3 判据 9 双向实测(真实 run 到 ma
 Run 按钮可点但 `handleRun` 静默返回(gate-state.ts:76 × Workspace.tsx handleRun 守卫),
 违反 FRONTEND_UI_SPEC §2.7a。点验后 9222 调试口已关闭并 curl 复核。
 
+**两条 ⚠️ 的收尾(2026-08-14 追加)**:判据 2(content=0 的调用思考仅凭 trace.jsonl 可读)已由
+特制探针 skill `glassbox-probe` 真跑坐实——单次 llm_call content_len=0、reasoning 232 字、
+tool_calls=1(finish_task),UI 展开为 THINKING → TOOL CALLS 无 ANSWER 段,报告行转 ✅。
+判据 5 定性为**设计-实现漂移**:意图(校验自述可见)已由 `finish_task_verdict` 消息满足
+(真实 run 实测 22 次"passed schema and business validation"/"N problem(s) found"),但判据
+点名的 `ValidationPassEvent`/`ValidationFailEvent` 本体是死码——`llm_phase_node.py`
+`_prepare_framework_state` 对每个 LLM 相无条件设 `validation_middleware_phase`,
+`validation_phase_node.py:48` 因此永远短路(M7 收编的遗留),LOGIC 相则根本没有校验节点
+(`graph_builder.py:87` code-only 分支)。按 no-backward-compat 建议删除死路径并把判据 5
+改写到 verdict 通道;属引擎契约变更,待用户裁决后另开任务。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

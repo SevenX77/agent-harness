@@ -13,6 +13,7 @@ import {
 } from '../ui/message-scroller'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
 import { buildTraceSteps, type TraceStepStatus } from '../../utils/trace-steps'
+import type { RunVerdict } from '../../utils/run-status-projection'
 import { initialTracePosition } from './trace-initial-scroll'
 import { TraceOutcomeRow } from './TraceOutcomeRow'
 import { TraceStepRow } from './TraceStepRow'
@@ -45,6 +46,12 @@ interface TraceEventListProps {
    */
   outcome?: TraceOutcomeEntry | null
   /**
+   * The run's verdict from run-status-projection (decision 2026-08-13 D7).
+   * It severs steps the run ended out from under — without it a killed run's
+   * open steps would spin forever.
+   */
+  verdict?: RunVerdict
+  /**
    * Live output keyed by step id. A row takes only its own step's entry — the
    * whole map would make every row re-render on every token of every step.
    */
@@ -68,6 +75,7 @@ export function TraceEventList({
   streamKey = null,
   focusPhase = null,
   outcome = null,
+  verdict = 'running',
   onSelectEvent,
   deltas,
 }: TraceEventListProps) {
@@ -109,7 +117,7 @@ export function TraceEventList({
   const predictTrace = isPredictTrace(events.map(({ event }) => event))
   // Rebuilt only when the events actually change: this runs on every render of
   // a panel that re-renders per streamed token, and grouping is O(run length).
-  const steps = useMemo(() => buildTraceSteps(events), [events])
+  const steps = useMemo(() => buildTraceSteps(events, verdict), [events, verdict])
   const selectedPosition = selectedEventId
     ? steps.findIndex((step) => step.key === selectedEventId)
     : -1

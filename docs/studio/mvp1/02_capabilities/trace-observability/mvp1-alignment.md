@@ -129,14 +129,42 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: live(2026-08-09)。
 - 归属: capability `trace-observability`; region `timeline`.
 
-### F6. Event To Node State Deriver
+### F6. Run Status Projection(状态投影 SSOT,2026-08-13 决议 D7)
 
-- 机制: trace events derive canvas node state for run progress and debug red/resume affordances.
-- 决策: this belongs to trace because it interprets runtime events into node view state.
-- 原话/来源: `01_workflows/04_run-and-verify.md:106` and `01_workflows/05_debugging.md:25` assign the derivation to trace.
-- 测试: running/success/error/paused states match event order and reset between runs.
-- Status: target-design.
-- 归属: capability `trace-observability`; capabilities `run-execution`, `debug-resume`; region `canvas`.
+- 机制: 前端模块 `utils/run-status-projection` 是把 `(事件流, run 记录)` 折叠成一切
+  派生运行状态的**唯一出口**——画布节点灯、trace 步骤行、顶条/run 列表徽章全部消费它,
+  不允许第二份推导逻辑。裁决函数 `runVerdict(events, metadata)`:落章的 run 记录终态
+  优先(流只知道 worker 停了,记录才知道那次停是 cancelled 还是 paused),其次取最后
+  一条流式 `run_ended`(resumed run 结束多次,只有最后一次描述读者所见),两者皆无 = running。
+  第二真相通道的来源:`run_ended` 后的终态回读、以及 stop/pause 请求返回的 canonical
+  记录快照(成功写返回权威快照,属 SSOT 读取原则允许的 revalidation 触发)。
+- **铁律: run 到终态 ⇒ 任何派生状态不得为 running。** 缺结束帧(worker 被杀、流先死)
+  不是「永远转圈」的理由——记录终态本身就是最后的裁决输入。
+- 消费组件「状态 → 显示效果」对照表(各自用测试锁死):
+  - **画布节点**(`NODE_STATUS_AT_RUN_END`,`run-status-projection.test.ts` 锁):
+    verdict success → 节点 success;failed → error;cancelled → paused(用户止损不是节点失败);
+    paused → paused。
+  - **trace 步骤行**(`trace-steps.test.ts` + `TraceStepRow.test.tsx` 锁):
+    running → 旋转 spinner + 自动展开;done → 落定行,无标记;终态 verdict 下未闭合的
+    步骤 = **severed** →「never completed」灰 chip、无 spinner(不是 done:读者应看见
+    「它没做完」,而不是一个看似完整的摘要)。paused 不 sever——步骤是挂起不是死亡,
+    resume 的闭合半帧仍会配对。
+  - **顶条/run 列表徽章**(`runStatusMark`,`run-status-mark.test.ts` 锁):
+    running → 进行中;success → Run succeeded;failed → Run failed;paused → Run paused;
+    cancelled → Run cancelled。live 且 running 时顶条显脉冲点(F8 形态不变)。
+  - **结局行**(`trace-outcome.test.ts` 锁):只有真终态(success/failed/cancelled)产生
+    结论条目;running/paused 无结论。流侧孤立的 `interrupted` 不武断下结论,等记录落章。
+- 决策: this belongs to trace because it interprets runtime events into node view state;
+  D7 把它从「trace 内一处推导」升格为跨表面 SSOT,收编原 `node-status.ts` 独立分支与
+  `buildTraceSteps` 无闭合输入两处旧推导(B8)。
+- 原话/来源: `docs/design/2026-08-13-trace-goes-glass-box-decision.md` §D7;
+  `01_workflows/04_run-and-verify.md:106` 与 `01_workflows/05_debugging.md:25` 把派生归属 trace。
+- 测试: `run-status-projection.test.ts`(裁决优先级 + 铁律 + 节点闭合表)、
+  `run-status-projection.derived.test.ts`(迁移的逐事件派生回归)、
+  `trace-steps.test.ts`(severed)、`TraceStepRow.test.tsx`(三态视觉)、
+  `run-status-mark.test.ts`(徽章表)、`trace-outcome.test.ts`(结论门槛)。
+- Status: live(2026-08-14 落地)。
+- 归属: capability `trace-observability`; capabilities `run-execution`, `debug-resume`; region `canvas` + `timeline`.
 
 ### F7. LLM Fallback Visibility
 

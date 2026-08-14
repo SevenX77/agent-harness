@@ -74,6 +74,7 @@ export function TraceStepRow({
   liveOutput,
 }: TraceStepRowProps) {
   const running = step.status === 'running'
+  const severed = step.status === 'severed'
   // Chips describe the outcome, so they read from the half that HAS one.
   const settled = step.end?.event ?? step.start.event
   const tokens = tokenText(settled)
@@ -120,6 +121,14 @@ export function TraceStepRow({
             <EventTypeBadge eventType={settled.event_type} severity={severity} />
             {running ? (
               <Loader2 aria-label="Step in progress" className="h-3 w-3 animate-spin text-muted-foreground" />
+            ) : null}
+            {severed ? (
+              <span
+                aria-label="Step never completed — the run ended first"
+                className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              >
+                never completed
+              </span>
             ) : null}
             {timeLabel ? (
               <span data-trace-time className="font-mono text-[10px] text-muted-foreground/80">{timeLabel}</span>

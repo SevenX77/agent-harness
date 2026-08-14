@@ -1,8 +1,12 @@
 import type { CallbackEvent, RunMetadata } from '../api/types'
-import { runOutcomeFromEvents, type TraceRunOutcome } from './trace'
+import { runVerdict, type RunVerdict } from './run-status-projection'
 
 export interface TraceOutcomeEntry {
-  status: Exclude<TraceRunOutcome, 'running'>
+  /**
+   * A conclusion only exists once the run can no longer continue: `running`
+   * has nothing to conclude and `paused` will resume — both yield no entry.
+   */
+  status: Exclude<RunVerdict, 'running' | 'paused'>
   /** Wall time in seconds, or null when neither source reported one. */
   wallTimeSec: number | null
   totalTokens: number | null
@@ -21,10 +25,13 @@ function finiteNumber(value: unknown): number | null {
  * entry carrying the verdict, what it cost, and the way to the report, instead
  * of hiding the report behind a menu the reader has to know about.
  *
- * Returns null while the run is still going: there is no conclusion to state.
+ * Returns null while the run is still going or merely paused: there is no
+ * conclusion to state. The verdict itself comes from run-status-projection
+ * (decision 2026-08-13 D7) — the same fold of stream + sealed record every
+ * other status surface quotes, so this entry cannot disagree with the badge.
  *
- * The two sources are not interchangeable. `run_ended` arrives the moment the
- * engine stops and carries the verdict and wall time; the sealed metadata
+ * The two number sources are not interchangeable. `run_ended` arrives the
+ * moment the engine stops and carries the wall time; the sealed metadata
  * arrives later and carries the token total and the report path. Metadata wins
  * where they overlap, so this entry and the run list quote the same numbers.
  */
@@ -32,38 +39,17 @@ export function traceOutcomeEntry(
   events: CallbackEvent[],
   metadata: RunMetadata | null | undefined,
 ): TraceOutcomeEntry | null {
-  const streamed = runOutcomeFromEvents(events)
-  const status = streamed === 'running' ? statusFromMetadata(metadata) : streamed
-  if (!status) {
+  const verdict = runVerdict(events, metadata)
+  if (verdict === 'running' || verdict === 'paused') {
     return null
   }
   const endedEvent = [...events].reverse().find((event) => event.event_type === 'run_ended')
   return {
-    status,
+    status: verdict,
     wallTimeSec:
       finiteNumber(metadata?.metrics?.wall_time_sec)
       ?? finiteNumber(endedEvent?.wall_time_seconds),
     totalTokens: finiteNumber(metadata?.metrics?.total_tokens),
     reportPath: metadata?.report_path ?? null,
-  }
-}
-
-/**
- * A replayed run has no `run_ended` in view when the reader filtered it away,
- * and a run sealed by the backend after a crash may never have emitted one at
- * all — its record still states how it ended.
- */
-function statusFromMetadata(
-  metadata: RunMetadata | null | undefined,
-): TraceOutcomeEntry['status'] | null {
-  switch (metadata?.status) {
-    case 'success':
-      return 'success'
-    case 'failed':
-      return 'failed'
-    case 'cancelled':
-      return 'interrupted'
-    default:
-      return null
   }
 }

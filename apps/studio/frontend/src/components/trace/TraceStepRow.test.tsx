@@ -218,3 +218,47 @@ describe('TraceStepRow status (decision 2026-08-09 D4)', () => {
     expect(done).toContain('10/20')
   })
 })
+
+// D7 对照表 (trace step rows): running → spinner; done → settled row, no
+// marker; severed → "never completed" chip, NO spinner. Locked here so the
+// severed state cannot silently regress into either of its neighbors.
+describe('TraceStepRow × step status (decision 2026-08-13 D7)', () => {
+  function renderWithStatus(status: 'running' | 'done' | 'severed'): string {
+    const start = event({ event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' })
+    return renderToStaticMarkup(
+      <TraceStepRow
+        step={{
+          key: 'evt-0',
+          phase: 'draft',
+          stepId: 's1',
+          status,
+          start: { event: start, index: 0 },
+          iteration: null,
+          verdicts: [],
+          end: null,
+        }}
+        eventId="evt-0"
+        expanded={false}
+        onToggleExpanded={() => undefined}
+      />,
+    )
+  }
+
+  it('spins while running', () => {
+    const html = renderWithStatus('running')
+    expect(html).toContain('Step in progress')
+    expect(html).not.toContain('never completed')
+  })
+
+  it('marks a severed step and stops the spinner', () => {
+    const html = renderWithStatus('severed')
+    expect(html).toContain('never completed')
+    expect(html).not.toContain('Step in progress')
+  })
+
+  it('marks a done step with neither', () => {
+    const html = renderWithStatus('done')
+    expect(html).not.toContain('never completed')
+    expect(html).not.toContain('Step in progress')
+  })
+})

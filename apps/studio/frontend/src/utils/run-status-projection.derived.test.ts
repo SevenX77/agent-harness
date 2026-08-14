@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CallbackEvent, EventEnvelope } from "@/api/types"
-import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
+import { deriveNodeErrorMessages, deriveNodeStatuses } from "./run-status-projection"
 
 function event(partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent {
   return {

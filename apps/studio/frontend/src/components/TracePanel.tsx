@@ -2,7 +2,8 @@ import type { CallbackEvent, EventEnvelope, RunMetadata } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
 import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { countRouteDegradations, isPredictTrace, runOutcomeFromEvents, type TraceRunOutcome } from '../utils/trace'
+import { countRouteDegradations, isPredictTrace } from '../utils/trace'
+import { runVerdict, type RunVerdict } from '../utils/run-status-projection'
 import { traceOutcomeEntry } from '../utils/trace-outcome'
 import { runStatusMark, type RunStatusMark } from '../utils/run-status-mark'
 import type { LucideIcon } from 'lucide-react'
@@ -216,31 +217,18 @@ export function traceRunActions({
  * The strip has 331px of content box and one job per element (decision
  * 2026-08-09 D3); a word like "Success" spends a third of that saying what a
  * check mark says. The icon vocabulary itself is shared with the run list
- * (D9) — this only decides WHICH status the strip is describing.
+ * (D9); WHICH status the strip describes comes from run-status-projection's
+ * verdict (D7) — the same fold of stream + sealed record every other status
+ * surface quotes, so a cancel whose stream died still lands here.
  */
-function stripStatusMark(
-  live: boolean,
-  metadata: RunMetadata | null | undefined,
-  outcome: TraceRunOutcome,
-): RunStatusMark | null {
-  // A live stream that went quiet says which way it went, rather than pulsing
-  // "in progress" at a run that already ended.
-  if (live && outcome === 'running') {
-    return null
-  }
-  return runStatusMark(live ? outcome : metadata?.status)
-}
-
 function RunStatusMark({
   live,
-  metadata,
-  outcome,
+  verdict,
 }: {
   live: boolean
-  metadata?: RunMetadata | null
-  outcome: TraceRunOutcome
+  verdict: RunVerdict
 }) {
-  if (live && outcome === 'running') {
+  if (live && verdict === 'running') {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
@@ -255,7 +243,7 @@ function RunStatusMark({
       </Tooltip>
     )
   }
-  const mark = stripStatusMark(live, metadata, outcome)
+  const mark = runStatusMark(verdict)
   if (!mark) {
     return null
   }
@@ -315,7 +303,9 @@ export function TracePanel({
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
-  const runOutcome = runOutcomeFromEvents(traceEvents)
+  // D7: ONE verdict — stream and sealed record folded by run-status-projection —
+  // feeds the strip badge, the outcome entry, and the step list's severing.
+  const verdict = runVerdict(traceEvents, metadata)
   // D8: the run's conclusion is the last thing in its own trace. Fed the full
   // event list, not the filtered one — the ending of a run is not a search hit.
   const outcome = traceOutcomeEntry(traceEvents, metadata)
@@ -460,7 +450,7 @@ export function TracePanel({
       ) : (
         <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">Trace</span>
       )}
-      <RunStatusMark live={live} metadata={metadata} outcome={runOutcome} />
+      <RunStatusMark live={live} verdict={verdict} />
       {runActionsMenu}
     </div>
   )
@@ -574,6 +564,7 @@ export function TracePanel({
           streamKey={runId}
           focusPhase={focusPhase}
           outcome={outcome}
+          verdict={verdict}
           onSelectEvent={onSelectEvent}
           deltas={deltas}
         />

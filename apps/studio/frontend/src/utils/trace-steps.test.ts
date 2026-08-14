@@ -193,3 +193,35 @@ describe('verdict attachment (decision 2026-08-13 D1 sub-entry order)', () => {
     expect(steps[0].verdicts).toHaveLength(0)
   })
 })
+
+describe('buildTraceSteps × run verdict (decision 2026-08-13 D7 铁律)', () => {
+  it('severs a step the run ended out from under — no spinner after the verdict', () => {
+    // The cancel/crash case: the prompt went out, the worker died, the answer
+    // will never come. "running" would be a lie the reader has to disprove.
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+    ]), 'cancelled')
+
+    expect(steps).toHaveLength(1)
+    expect(steps[0].status).toBe('severed')
+  })
+
+  it('leaves closed steps alone when severing', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'llm_call', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'tool_call_started', phase_name: 'draft', tool_call_id: 't1' },
+    ]), 'failed')
+
+    expect(steps[0].status).toBe('done')
+    expect(steps[1].status).toBe('severed')
+  })
+
+  it('keeps steps running while the run is live or merely paused', () => {
+    const open = [{ event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' }]
+    expect(buildTraceSteps(indexed(open), 'running')[0].status).toBe('running')
+    // A paused run resumes into the same step ids — the step is suspended, not
+    // dead, and the resume's llm_call will close it properly.
+    expect(buildTraceSteps(indexed(open), 'paused')[0].status).toBe('running')
+  })
+})

@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, CirclePause, Clock, FileText, Hash } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, FileText, Hash, XCircle } from 'lucide-react'
 import { openLocalPath } from '../../lib/tauri'
 import { formatRunDuration, formatRunTokens } from '../../utils/run-format'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
@@ -6,7 +6,7 @@ import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
 const OUTCOME_PRESENTATION = {
   success: { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' },
   failed: { icon: AlertCircle, label: 'Run failed', tone: 'text-destructive' },
-  interrupted: { icon: CirclePause, label: 'Run interrupted', tone: 'text-warning' },
+  cancelled: { icon: XCircle, label: 'Run cancelled', tone: 'text-destructive' },
 } as const
 
 /**

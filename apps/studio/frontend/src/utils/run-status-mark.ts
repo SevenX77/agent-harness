@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle2, CirclePause, Loader2, XCircle, type LucideIcon } from 'lucide-react'
 import type { RunStatus } from '../api/types'
-import type { TraceRunOutcome } from './trace'
+import type { RunVerdict } from './run-status-projection'
 
 export interface RunStatusMark {
   icon: LucideIcon
@@ -23,12 +23,11 @@ export interface RunStatusMark {
  * rather than guessing.
  */
 export function runStatusMark(
-  status: RunStatus | TraceRunOutcome | null | undefined,
+  status: RunStatus | RunVerdict | null | undefined,
 ): RunStatusMark | null {
   switch (status) {
     case 'success':
       return { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' }
-    case 'interrupted':
     case 'paused':
       return { icon: CirclePause, label: 'Run paused', tone: 'text-warning' }
     case 'running':

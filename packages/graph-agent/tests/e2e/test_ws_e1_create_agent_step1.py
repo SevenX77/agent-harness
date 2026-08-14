@@ -61,8 +61,6 @@ io:
       answer:
         type: string
 max_iterations: 2
-tools:
-  - finish_task
 ---
 <role>
 Executor.

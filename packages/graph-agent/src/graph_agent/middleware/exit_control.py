@@ -28,12 +28,10 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         *,
         phase_name: str = "unknown",
         callbacks: Sequence[Callback] | None = None,
-        has_finish_task: bool = False,
     ) -> None:
         super().__init__()
         self._phase_name = phase_name
         self._callbacks = list(callbacks or [])
-        self._has_finish_task = has_finish_task
         # Per-thread iteration budget, held OUTSIDE the flow channel: a flow
         # write from before_model races other legitimate flow writers in the
         # same superstep and the reducer-less LastValue channel raises
@@ -54,9 +52,6 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         runtime: Runtime[Any],
     ) -> dict[str, Any] | None:
         del runtime
-        if not self._has_finish_task:
-            return None
-
         thread_key = self._thread_key()
         current_iteration = self._iterations_by_thread.get(thread_key, 0) + 1
         self._iterations_by_thread[thread_key] = current_iteration
@@ -104,7 +99,7 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         # sibling CognitiveFlow middleware ships both hooks for this reason).
         return self.before_model(state, runtime)
 
-    @hook_config(can_jump_to=["end", "model"])
+    @hook_config(can_jump_to=["model"])
     async def aafter_agent(
         self,
         state: AgentState[Any],
@@ -116,21 +111,22 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         # 2026-08-01T12-52-39, review phase, 1 llm_call, no tool_call).
         return self.after_agent(state, runtime)
 
-    @hook_config(can_jump_to=["end", "model"])
+    @hook_config(can_jump_to=["model"])
     def after_agent(
         self,
         state: AgentState[Any],
         runtime: Runtime[Any],
     ) -> dict[str, Any] | None:
-        if not self._has_finish_task:
-            return None
-
         # 1. 检查是否有合格的 finish_task_result
         if self._has_valid_finish(state):
             logger.info(
                 "[ExitControlMiddleware] Qualified finish_task marker observed. Exiting success."
             )
-            return {"jump_to": "end"}
+            # after_agent only runs when the loop is already terminating, so
+            # success needs no jump — and `{"jump_to": "end"}` here re-enters
+            # after_agent forever (langchain hook routing, minimal repro
+            # 2026-08-14: 21 re-entries before an artificial cap fired).
+            return None
 
         # 2. 到这里代表没有合格标记，需要评估预算
         from langgraph.config import get_config

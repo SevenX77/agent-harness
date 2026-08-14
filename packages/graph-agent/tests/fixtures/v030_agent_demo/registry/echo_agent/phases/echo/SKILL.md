@@ -11,8 +11,6 @@ io:
     properties:
       echoed_note:
         type: string
-tools:
-  - finish_task
 subagents: []
 subgraphs: []
 references: []

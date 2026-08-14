@@ -267,7 +267,6 @@ max_iterations: 1
 llm_role: graph_agent
 tools:
   - lookup
-  - finish_task
 ---
 <role>
 Middleware verifier.

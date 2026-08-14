@@ -28,7 +28,7 @@ When an agent phase is executed in Predict, the system resolves mock outputs aut
 
 ## 3. P1 Mock Format for Agent Nodes with `finish_task`
 
-If an agent node declares `tools: [finish_task]`, do **not** hand-write `business_data_md` or Markdown field lists in the Predict mock. Predict's mock model takes a phase output object, then wraps it into a `finish_task` tool call internally. The wrapper renders the whole object as one `## item-1` fenced JSON block because the `finish_task` parser reads object blocks, not loose Markdown fields.
+Every agent node exits through `finish_task` — the engine always mounts it, so it never appears in the phase's `tools` list (declaring it there is compile error `[F-v3-agent-tool-reserved]`). Do **not** hand-write `business_data_md` or Markdown field lists in the Predict mock. Predict's mock model takes a phase output object, then wraps it into a `finish_task` tool call internally. The wrapper renders the whole object as one `## item-1` fenced JSON block because the `finish_task` parser reads object blocks, not loose Markdown fields.
 
 Copy this shape for `mock_llm` / Predict custom mock input:
 

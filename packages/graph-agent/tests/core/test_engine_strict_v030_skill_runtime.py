@@ -58,8 +58,6 @@ phase_config:
       properties:
         answer:
           type: string
-  tools:
-    - finish_task
 ---
 <role>Strict contract verifier.</role>
 <goal>Return an answer.</goal>
@@ -373,8 +371,6 @@ validator: false
         root / "phases" / "segment" / "SKILL.md",
         """---
 max_iterations: 2
-tools:
-  - finish_task
 io:
   inputs:
     type: object
@@ -409,8 +405,6 @@ io:
         root / "phases" / "review" / "SKILL.md",
         """---
 max_iterations: 2
-tools:
-  - finish_task
 io:
   inputs:
     type: object

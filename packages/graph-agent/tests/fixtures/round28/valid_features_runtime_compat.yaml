@@ -248,6 +248,7 @@ features:
   - '[F-v3-agent-step-invalid]'
   - '[F-v3-agent-subagent-invalid]'
   - '[F-v3-agent-tool-unknown]'
+  - '[F-v3-agent-tool-reserved]'
   - '[F-v3-agent-validator-failed]'
   error_codes_secondary: []
   events_primary:

@@ -37,7 +37,6 @@ def build_middleware_chain(
     unattended: bool = False,
     interrupt_fn: InterruptFn | None = None,
     callbacks: Sequence[Callback] | None = None,
-    has_finish_task: bool = False,
 ) -> tuple[AgentMiddleware[AgentState[Any]], ...]:
     """Instantiate the seven middleware slots in the γ0 contract order."""
     by_contract_name: dict[str, AgentMiddleware[AgentState[Any]]] = {
@@ -70,7 +69,6 @@ def build_middleware_chain(
         "ExitControl": ExitControlMiddleware(
             phase_name=phase_name,
             callbacks=callbacks,
-            has_finish_task=has_finish_task,
         ),
     }
     return tuple(by_contract_name[name] for name in MIDDLEWARE_ORDER_CONTRACT)

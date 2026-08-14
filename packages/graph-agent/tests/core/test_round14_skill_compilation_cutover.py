@@ -97,7 +97,6 @@ io:
     {_schema_yaml("text")}
   outputs:
     {_schema_yaml("result")}
-tools: [finish_task]
 references:
   - {{id: R1, path: references/r1.md, summary: "Reference"}}
 examples:

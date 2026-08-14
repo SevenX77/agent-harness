@@ -9,12 +9,12 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 
 # 03-compile-rules — 契约 A · 编译规则 + 错误码全表
 
-> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: 编译/装配/运行生命周期契约 + 全部校验规则(DAG/IO/mention/purity/golden/iterate)+ `[F-v3-*]` 错误码全表 | **现状**: mvp1 自承载,代码 registry 97 码 | **Related**: `skill-syntax`(被校验语法)· `01-compile`(扫描器实现)· `invalidation`/`06-golden-eval`(golden eval 期)· `02-iterate`(iterate 新码目标)· `03-api-contract`(CompileResult)
+> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: 编译/装配/运行生命周期契约 + 全部校验规则(DAG/IO/mention/purity/golden/iterate)+ `[F-v3-*]` 错误码全表 | **现状**: mvp1 自承载,代码 registry 98 码 | **Related**: `skill-syntax`(被校验语法)· `01-compile`(扫描器实现)· `invalidation`/`06-golden-eval`(golden eval 期)· `02-iterate`(iterate 新码目标)· `03-api-contract`(CompileResult)
 
 ## 1. 定义
 compile-rules = skill **要满足什么才合法可编译**,以及 Loader **怎么判、错误怎么报**(`[F-v3-*]`)。这是喂 copilot 的核心:copilot 生成的 skill 必须过这些规则。规则是声明式契约；扫描器实现归 `02-mechanism/01-compile`，运行外层行为归 `02-mechanism/04-run-outer/01-graph-exec`。
 
-本文件现在是 compile-rules 的 mvp1 SSOT，不再链接 mvp0 spec 当权威。97 个现有码以 `packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY` 为代码 baseline；本文件保留迁移源里的「具体原因 / 修复建议」，避免旧文删除后丢失解释语义。
+本文件现在是 compile-rules 的 mvp1 SSOT，不再链接 mvp0 spec 当权威。98 个现有码以 `packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY` 为代码 baseline；本文件保留迁移源里的「具体原因 / 修复建议」，避免旧文删除后丢失解释语义。
 
 Implementation binding: the public compile entry is
 `packages/graph-agent/src/graph_agent/core/compiler.py:compile_skill`; it is a
@@ -106,7 +106,7 @@ Compiled GraphSkillAST
 | inline examples | SKILL.md body `<example id>` | 否 | `[]` | `[F-v3-agent-example-invalid]` | `{skill_examples_inline}` |
 | examples registry | frontmatter document `examples` | 否 | `[]` | `[F-v3-resource-example-invalid]` | `{example_registry_listing}` |
 | output schema | `io.outputs` | 是 | 无 | `[F-v3-cognitive-output-schema-render-failed]`, `[F-v3-cognitive-output-schema-invalid]` | `{output_schema}` in hardcoded exit_contract |
-| tools list | frontmatter `tools` + builtin | 否 | builtin minimum tools | `[F-v3-agent-tool-unknown]` | Agent tool bindings |
+| tools list | frontmatter `tools` + builtin | 否 | builtin minimum tools | `[F-v3-agent-tool-unknown]`, `[F-v3-agent-tool-reserved]` | Agent tool bindings |
 | reference reader input/output | references registry | 否 | raw excerpt fallback | `[F-v3-reference-reader-input-invalid]`, `[F-v3-reference-reader-output-invalid]`, `[F-v3-reference-reader-failed]` | knowledge report |
 
 装配顺序必须保证:
@@ -228,8 +228,8 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 **向后兼容(impl 注意,归 kiro)**:加字段本身 additive 安全(`diagnostics=[]` / `details={}` / `remediation=None`);风险点:(a) `ErrorCodeMetadata` 现为 `NamedTuple` + 位置参数(`error_registry.py:8`),加字段须改 dataclass/Pydantic 或关键字构造,否则全量改 93 行;(b) `doc_link` 改 scheme/HTTPS 是语义变化,保留弃用别名;(c) studio 多处 `extra="forbid"` 模型(`RunMetadata` / `RunDetail` / `ErrorResponse`),加 diagnostics 须同步 studio 模型 + TS 类型(engine 加字段 / studio 同步 = 跨边界协同)。
 
-## 4. 错误码全表(97)
-本表与 `ERROR_REGISTRY` 逐码核对:97 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
+## 4. 错误码全表(98)
+本表与 `ERROR_REGISTRY` 逐码核对:98 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
 
 ### graph domain
 
@@ -318,6 +318,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | `[F-v3-agent-output-schema-missing]` | 运行期 | io.outputs schema 缺失 (编译期未生成), fatal 拒绝 | 修正 AST / pipeline | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-exit-control-failed]` | 运行期 | AGENT phase 达到迭代预算仍无合格 finish_task marker | 让模型调用 finish_task 并提交通过 schema 的业务输出 | [ExitControl](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md) |
 | `[F-v3-agent-tool-unknown]` | 编译期 | tool 未注册 | 注册 tool 或删引用 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
+| `[F-v3-agent-tool-reserved]` | 编译期 | `tools` 声明了内置框架工具(finish_task / read_reference / read_example / log_ambiguity) | 内置工具由引擎无条件挂载:从 `tools` 列表删除该行 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-subagent-invalid]` | 编译期 | subagents 项缺字段 | 补 name/target_skill/description | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-subgraph-invalid]` | 编译期 | subgraphs 项缺字段 | 补 name/path/description | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-max-iterations-invalid]` | 编译期 | max_iterations 超范围 | 设为 1..50 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
@@ -382,7 +383,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 | ID | 决策 | 契约落点 | 代码现状 |
 |---|---|---|---|
-| CR1 | compile-rules mvp1 自承载生命周期契约和 97 码全表 | 本文 §2 / §4 | 已迁入，mvp0 不再是 SSOT |
+| CR1 | compile-rules mvp1 自承载生命周期契约和 98 码全表 | 本文 §2 / §4 | 已迁入，mvp0 不再是 SSOT |
 | CR2 | purity 是 compile 的一条规则 | `[F-v3-logic-action-purity-violation]` 编译期 FATAL；扫描器实现归 `02-mechanism/01-compile` | 现只挡本地写 API；`run_skill`/FS/`sys.path` 扩展待实现 |
 | CR3 | `[F-v3-golden-stale-fields]` 是 **eval 期** staleness，不是编译期 | `05-invalidation` + `05-run-inner/06-golden-eval` | 已进入 registry；不得按旧编译期逻辑落地 |
 | CR4 | `[F-v3-iterate-*]` 是 mvp1 新增码族 | `02-mechanism/04-run-outer/02-iterate` + 本文 §4 / §6 | 已纳入 registry |
@@ -409,7 +410,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | StateMapper required | 契约目标要求 slice 缺 required 报 `[F-v3-runtime-state-mapping-failed]`；代码只过滤 properties | alignment 写目标，baseline 写代码现状并交叉引用 graph-exec |
 
 ## 8. 测试关键点
-1. registry 与本文 §4 保持 97 个现有码一致。
+1. registry 与本文 §4 保持 98 个现有码一致。
 2. `ErrorPayload` 至少含 `code/level/stage/message/doc_link`，未知 code 被拒绝。
 3. DAG 无环/无孤岛、IO 数据流、mention 可达各报对应 `[F-v3-*]`。
 4. action 写文件 / 未来 `run_skill` / `sys.path` 命中编译期 `[F-v3-logic-action-purity-violation]` FATAL。

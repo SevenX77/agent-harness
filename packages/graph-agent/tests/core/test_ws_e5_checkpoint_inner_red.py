@@ -117,8 +117,6 @@ io:
         type: string
 max_iterations: 3
 llm_role: graph_agent
-tools:
-  - finish_task
 ---
 <role>
 Checkpoint boundary verifier.

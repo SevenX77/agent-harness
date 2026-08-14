@@ -165,7 +165,6 @@ io:
         type: string
 tools:
   - lookup
-  - finish_task
 ---
 <role>
 Exit gate verifier.

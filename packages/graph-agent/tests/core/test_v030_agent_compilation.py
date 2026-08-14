@@ -59,8 +59,6 @@ io:
     properties:
       answer:
         type: string
-tools:
-  - finish_task
 references:
   - id: R1
     path: refs/r1.md

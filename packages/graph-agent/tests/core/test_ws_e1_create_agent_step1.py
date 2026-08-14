@@ -75,7 +75,6 @@ max_iterations: {max_iterations}
 llm_role: graph_agent
 tools:
   - lookup
-  - finish_task
 references:
   - id: Guide
     path: refs/guide.md
@@ -335,7 +334,7 @@ class _OneFinishCallModel(BaseChatModel):
 
 
 class _OneSubagentCallModel(BaseChatModel):
-    emitted: bool = False
+    turns: int = 0
 
     @property
     def _llm_type(self) -> str:
@@ -353,10 +352,8 @@ class _OneSubagentCallModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         del messages, stop, run_manager, kwargs
-        if self.emitted:
-            message = AIMessage(content="done")
-        else:
-            self.emitted = True
+        self.turns += 1
+        if self.turns == 1:
             message = AIMessage(
                 content="",
                 tool_calls=[
@@ -367,6 +364,23 @@ class _OneSubagentCallModel(BaseChatModel):
                     }
                 ],
             )
+        elif self.turns == 2:
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "finish_task",
+                        "args": {
+                            "reasoning": "subagent answered",
+                            "diagnostics_md": "checked",
+                            "business_data_md": "## item-1\n```json\n{}\n```\n",
+                        },
+                        "id": "finish-1",
+                    }
+                ],
+            )
+        else:
+            message = AIMessage(content="done")
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
@@ -772,6 +786,21 @@ class _TwoInvalidSubagentCallModel(BaseChatModel):
                         "name": "call_subagent_child_expert",
                         "args": {"inputs": [{"invalid_field": "contracts"}]},
                         "id": "subagent-2",
+                    }
+                ],
+            )
+        elif self.calls == 3:
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "finish_task",
+                        "args": {
+                            "reasoning": "giving up on the subagent",
+                            "diagnostics_md": "checked",
+                            "business_data_md": "## item-1\n```json\n{}\n```\n",
+                        },
+                        "id": "finish-1",
                     }
                 ],
             )

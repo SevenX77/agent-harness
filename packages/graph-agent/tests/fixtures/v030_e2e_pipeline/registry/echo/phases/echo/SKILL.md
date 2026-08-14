@@ -12,8 +12,6 @@ io:
     properties:
       echoed:
         type: string
-tools:
-  - finish_task
 ---
 <role>
 You echo a concise review note for the parent segmentation editor.

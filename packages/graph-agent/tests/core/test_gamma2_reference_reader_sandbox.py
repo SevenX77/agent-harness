@@ -89,8 +89,6 @@ io:
         type: string
 role: reader
 goal: read reference
-tools:
-  - finish_task
 references:
   - id: Guide
     path: references/guide.md

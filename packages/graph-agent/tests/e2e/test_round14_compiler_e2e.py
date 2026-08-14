@@ -154,7 +154,7 @@ def test_full_pipeline_skill_compiles_into_expected_products(pipeline_root: Path
     assert [reference.id for reference in segment.references] == ["R1"]
     assert [example.id for example in segment.examples] == ["E2"]
     assert [example.id for example in segment.examples_inline] == ["E1"]
-    assert segment.tools == ["finish_task"]
+    assert segment.tools == []
     assert [(s.name, s.target_skill) for s in segment.subagents] == [("echo_helper", "e2e.echo")]
     assert [(s.name, s.path) for s in segment.subgraphs] == [("deep_dive", "registry/expander")]
     assert segment.max_iterations == 8

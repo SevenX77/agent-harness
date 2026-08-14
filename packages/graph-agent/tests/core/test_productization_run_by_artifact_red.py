@@ -211,8 +211,6 @@ io:
     properties:
       answer:
         type: string
-tools:
-  - finish_task
 max_iterations: 2
 ---
 <role>
@@ -303,8 +301,6 @@ io:
         type: object
       segments_summary:
         type: string
-tools:
-  - finish_task
 max_iterations: 2
 ---
 <role>

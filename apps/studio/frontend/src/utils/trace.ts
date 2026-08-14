@@ -507,30 +507,6 @@ function isMockedSource(value: JsonValue | undefined): value is MockedSource {
   )
 }
 
-/**
- * What the events themselves say about how the run ended.
- *
- * A live trace panel knows which run it follows but not whether that run is
- * still going: the stream simply stops. The run's own `run_ended` event carries
- * the verdict, so the panel reads it there instead of claiming "Live" forever
- * (decision 2026-08-08 D5).
- */
-export type TraceRunOutcome = 'running' | 'success' | 'failed' | 'interrupted'
-
-export function runOutcomeFromEvents(events: CallbackEvent[]): TraceRunOutcome {
-  const ended = [...events].reverse().find((event) => event.event_type === 'run_ended')
-  if (!ended) {
-    return 'running'
-  }
-  if (ended.status === 'crashed') {
-    return 'failed'
-  }
-  if (ended.status === 'interrupted') {
-    return 'interrupted'
-  }
-  return 'success'
-}
-
 // The gateway emits `llm_call_settings` (graph_agent_gateway/events.py, code
 // [F-v3-gateway-llm-call-settings]) once per answered call, carrying one
 // verdict per setting the user actually chose. It answers a different question

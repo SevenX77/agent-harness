@@ -1,9 +1,16 @@
 import type { CallbackEvent } from '../api/types'
 import type { IndexedTraceEvent } from '../hooks/useTraceFilter'
 import { traceEventId } from '../hooks/useTraceSelection'
+import type { RunVerdict } from './run-status-projection'
 import { eventPhase } from './trace'
 
-export type TraceStepStatus = 'running' | 'done'
+/**
+ * `severed` is a step whose closing half can never arrive: the run reached a
+ * verdict while the step was still open (decision 2026-08-13 D7 铁律 — a run
+ * at a terminal state leaves nothing running). It is not `done`: the reader
+ * should see "this never finished", not a summary that looks complete.
+ */
+export type TraceStepStatus = 'running' | 'done' | 'severed'
 
 export interface TraceStep {
   /** Stable across the step's whole life: it is minted from the opening event. */
@@ -62,7 +69,10 @@ export interface TraceStep {
  * is not in this list: a filter can hide it, and the answer to that is to show
  * the half you have, not to drop it.
  */
-export function buildTraceSteps(events: IndexedTraceEvent[]): TraceStep[] {
+export function buildTraceSteps(
+  events: IndexedTraceEvent[],
+  verdict: RunVerdict = 'running',
+): TraceStep[] {
   const steps: TraceStep[] = []
   const openLlmByStepId = new Map<string, TraceStep>()
   const openToolByCallId = new Map<string, TraceStep>()
@@ -128,6 +138,15 @@ export function buildTraceSteps(events: IndexedTraceEvent[]): TraceStep[] {
       openLlmByStepId.set(stepId, step)
     } else if (event.event_type === 'tool_call_started' && callId !== null) {
       openToolByCallId.set(callId, step)
+    }
+  }
+
+  // D7 铁律: a run at a terminal verdict leaves nothing running. A paused run
+  // is the one non-terminal stop — its steps are suspended, not dead, and the
+  // resume's closing half will still pair up.
+  if (verdict !== 'running' && verdict !== 'paused') {
+    for (const open of [...openLlmByStepId.values(), ...openToolByCallId.values()]) {
+      open.status = 'severed'
     }
   }
 

@@ -1,5 +1,95 @@
-import type { CallbackEvent, EventEnvelope } from "@/api/types"
+import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
 import type { SkillNodeStatus } from "@/components/GraphCanvas"
+
+// ————————————————————————————————————————————————————————————————————————————
+// run-status-projection (decision 2026-08-13 D7): the ONE module that turns
+// (event stream, run record) into every derived "is anything still running"
+// answer — canvas node lights, trace step spinners, the top-strip badge.
+//
+// 铁律: a run at a terminal state leaves NOTHING running. A missing end frame
+// is not a reason to spin forever — the run's own verdict is the final input,
+// and it can arrive on either channel: the streamed `run_ended` event, or the
+// sealed run record when the stream died with the worker (crash, cancel).
+// ————————————————————————————————————————————————————————————————————————————
+
+/**
+ * How the run stands, folded from both truth channels.
+ *
+ * `paused` is not terminal (a resume continues the run) but it still means
+ * nothing is executing; `cancelled` is the user ending it, which is not a
+ * failure (RunStatus's own definition in api/types.ts).
+ */
+export type RunVerdict = "running" | "paused" | "success" | "failed" | "cancelled"
+
+/** What the streamed run_ended statuses mean in verdict terms. */
+const RUN_ENDED_EVENT_VERDICT: Readonly<Record<string, RunVerdict>> = {
+  completed: "success",
+  crashed: "failed",
+  interrupted: "paused",
+}
+
+/**
+ * The registered close table for canvas nodes (D7 对照表): what a node still
+ * marked running becomes when the run's verdict says nothing is executing.
+ * `cancelled` closes to paused, not error — the node did not fail, the user
+ * ended the run around it.
+ */
+export const NODE_STATUS_AT_RUN_END: Readonly<
+  Record<Exclude<RunVerdict, "running">, SkillNodeStatus>
+> = {
+  success: "success",
+  failed: "error",
+  cancelled: "paused",
+  paused: "paused",
+}
+
+type TraceEventInput = CallbackEvent | EventEnvelope
+
+function callbackPayload(event: TraceEventInput): CallbackEvent {
+  const maybeEnvelope = event as EventEnvelope
+  if (maybeEnvelope.schema_version === "studio.event.v1" && maybeEnvelope.payload) {
+    return maybeEnvelope.payload as CallbackEvent
+  }
+  return event as CallbackEvent
+}
+
+function eventRunId(traceEvent: TraceEventInput, payload: CallbackEvent): string | null {
+  const maybeEnvelope = traceEvent as EventEnvelope
+  if (maybeEnvelope.schema_version === "studio.event.v1" && typeof maybeEnvelope.run_id === "string") {
+    return maybeEnvelope.run_id
+  }
+  return typeof payload.run_id === "string" ? payload.run_id : null
+}
+
+/**
+ * The one answer to "how does this run stand".
+ *
+ * The sealed run record wins over the streamed event where both exist: the
+ * stream reports how the worker stopped (`interrupted`), the record states
+ * what that stop WAS (`cancelled` vs `paused`) — the record is the canonical
+ * seal the rest of Studio quotes. With no record verdict, the last streamed
+ * `run_ended` decides (a resumed run ends more than once; only the final end
+ * describes the state the reader is looking at). With neither, it is running.
+ */
+export function runVerdict(
+  events: readonly TraceEventInput[] | null | undefined,
+  metadata?: RunMetadata | null,
+  runId?: string | null,
+): RunVerdict {
+  const recorded = metadata?.status
+  if (recorded && recorded !== "running") {
+    return recorded
+  }
+  let fromEvents: RunVerdict | null = null
+  for (const traceEvent of events ?? []) {
+    const payload = callbackPayload(traceEvent)
+    if (payload.event_type !== "run_ended") continue
+    const eventRun = eventRunId(traceEvent, payload)
+    if (runId && eventRun && eventRun !== runId) continue
+    fromEvents = RUN_ENDED_EVENT_VERDICT[payload.status ?? "completed"] ?? "success"
+  }
+  return fromEvents ?? "running"
+}
 
 // Engine event_types that mark a phase as failed (see
 // packages/graph-agent/src/graph_agent/callbacks/events.py):
@@ -38,24 +128,6 @@ function isPausedEvent(type: string, status: string | null | undefined): boolean
   return false
 }
 
-type TraceEventInput = CallbackEvent | EventEnvelope
-
-function callbackPayload(event: TraceEventInput): CallbackEvent {
-  const maybeEnvelope = event as EventEnvelope
-  if (maybeEnvelope.schema_version === "studio.event.v1" && maybeEnvelope.payload) {
-    return maybeEnvelope.payload as CallbackEvent
-  }
-  return event as CallbackEvent
-}
-
-function eventRunId(traceEvent: TraceEventInput, payload: CallbackEvent): string | null {
-  const maybeEnvelope = traceEvent as EventEnvelope
-  if (maybeEnvelope.schema_version === "studio.event.v1" && typeof maybeEnvelope.run_id === "string") {
-    return maybeEnvelope.run_id
-  }
-  return typeof payload.run_id === "string" ? payload.run_id : null
-}
-
 function numberField(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value
   if (typeof value === "string" && value.trim() !== "") {
@@ -63,18 +135,6 @@ function numberField(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
-}
-
-// A run that has ended has nothing still executing. `run_ended` is run-scoped
-// (RunEndedEvent in packages/graph-agent/.../callbacks/events.py:336-344 carries
-// run_id + status, no phase_name), so a node left mid-flight has no per-phase
-// event that will ever close it — the run's own verdict is the only truth
-// available, and deferring to it is what stops a finished run from showing a
-// node spinning forever.
-const RUN_END_STATUS_TO_NODE_STATUS: Readonly<Record<string, SkillNodeStatus>> = {
-  completed: "success",
-  crashed: "error",
-  interrupted: "paused",
 }
 
 function eventAttempt(event: CallbackEvent): number | null {
@@ -93,29 +153,25 @@ function eventAttempt(event: CallbackEvent): number | null {
  * validation_pass / phase_end) end up green, while a phase whose final state is
  * a failure (validation_fail with no recovery, or retry_exhausted) ends up red.
  *
- * `run_ended` then closes out whatever is still marked running: the run is the
- * owner of "is anything executing", so a phase with no ending event of its own
- * takes the run's verdict rather than spinning after the run is over.
+ * The run's verdict then closes out whatever is still marked running: the run
+ * owns "is anything executing", and its verdict reaches here even when the
+ * stream died before a `run_ended` frame — the sealed record (`metadata`) is
+ * the second channel (铁律 above).
  */
 export function deriveNodeStatuses(
   events: readonly TraceEventInput[] | null | undefined,
   runId?: string | null,
+  metadata?: RunMetadata | null,
 ): Record<string, SkillNodeStatus> {
   const statuses: Record<string, SkillNodeStatus> = {}
   const attempts: Record<string, number> = {}
   if (!events) return statuses
-  // Last run_ended wins: a resumed run ends more than once, and only its final
-  // verdict describes the state the reader is looking at.
-  let runEndStatus: SkillNodeStatus | null = null
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
     const eventRun = eventRunId(traceEvent, event)
     if (runId && eventRun && eventRun !== runId) continue
     const type = event.event_type || ""
-    if (type === "run_ended") {
-      runEndStatus = RUN_END_STATUS_TO_NODE_STATUS[event.status ?? "completed"] ?? "success"
-      continue
-    }
+    if (type === "run_ended") continue
     const phaseName = event.phase_name || event.current_phase
     if (!phaseName) continue
     const attempt = eventAttempt(event)
@@ -132,9 +188,10 @@ export function deriveNodeStatuses(
       statuses[phaseName] = "success"
     }
   }
-  if (runEndStatus) {
+  const verdict = runVerdict(events, metadata, runId)
+  if (verdict !== "running") {
     for (const [phaseName, status] of Object.entries(statuses)) {
-      if (status === "running") statuses[phaseName] = runEndStatus
+      if (status === "running") statuses[phaseName] = NODE_STATUS_AT_RUN_END[verdict]
     }
   }
   return statuses

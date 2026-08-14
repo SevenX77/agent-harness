@@ -46,7 +46,7 @@ import {
   projectGateEvent,
   type SkillGateEvent,
 } from "./gate-state"
-import { deriveNodeErrorMessages, deriveNodeStatuses, runningPhaseOf } from "./node-status"
+import { deriveNodeErrorMessages, deriveNodeStatuses, runningPhaseOf } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -851,9 +851,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [currentSkillId, finalizedRunId, projectRun])
 
+  // The sealed record for the run the canvas is lit by, when we have it. This
+  // is the projection's second truth channel (D7 铁律): a cancel or crash can
+  // kill the stream before `run_ended` ever arrives, and only the record then
+  // says the run is over.
+  const liveRunMetadata = liveRunRecord?.runId === runId ? liveRunRecord.metadata : null
   const statusByNodeId = useMemo(
-    () => deriveNodeStatuses(runStream.events, runId),
-    [runId, runStream.events],
+    () => deriveNodeStatuses(runStream.events, runId, liveRunMetadata),
+    [runId, runStream.events, liveRunMetadata],
   )
   const errorMessageByNodeId = useMemo(
     () => deriveNodeErrorMessages(runStream.events, runId),
@@ -2561,7 +2566,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const handlePause = useCallback(async () => {
     if (!currentSkillId || !runId) return
     try {
-      await pauseRun(currentSkillId, runId)
+      // Same channel as handleStop: the response is the canonical record, and
+      // the projection needs it to stop showing "running" for a halted worker.
+      const sealed = await pauseRun(currentSkillId, runId)
+      setLiveRunRecord({ runId, metadata: sealed })
       toast.success("Run paused")
     } catch (error) {
       toast.error(`Pause failed: ${errorMessage(error)}`)
@@ -2571,7 +2579,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const handleStop = useCallback(async () => {
     if (!currentSkillId || !runId) return
     try {
-      await stopRun(currentSkillId, runId)
+      // The response IS the sealed record (canonical write snapshot). Feeding
+      // it to the projection closes every derived running state immediately —
+      // the stream may never deliver a run_ended for a killed worker (D7 铁律).
+      const sealed = await stopRun(currentSkillId, runId)
+      setLiveRunRecord({ runId, metadata: sealed })
       toast.success("Run stopped")
     } catch (error) {
       toast.error(`Stop failed: ${errorMessage(error)}`)

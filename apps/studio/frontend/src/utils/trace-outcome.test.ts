@@ -54,13 +54,24 @@ describe('traceOutcomeEntry', () => {
     expect(entry?.reportPath).toBe('/skills/demo/report.md')
   })
 
-  it('reports a crashed run as failed and an interrupted one as interrupted', () => {
+  it('reports a crashed run as failed', () => {
     expect(
       traceOutcomeEntry([event({ event_type: 'run_ended', status: 'crashed' })], null)?.status,
     ).toBe('failed')
+  })
+
+  it('states no conclusion for a streamed interruption until the record says what it was', () => {
+    // The stream only knows the worker stopped; whether that was a pause (will
+    // resume, no conclusion) or a cancel is the sealed record's call (D7).
     expect(
-      traceOutcomeEntry([event({ event_type: 'run_ended', status: 'interrupted' })], null)?.status,
-    ).toBe('interrupted')
+      traceOutcomeEntry([event({ event_type: 'run_ended', status: 'interrupted' })], null),
+    ).toBeNull()
+    expect(
+      traceOutcomeEntry(
+        [event({ event_type: 'run_ended', status: 'interrupted' })],
+        metadata({ status: 'cancelled' }),
+      )?.status,
+    ).toBe('cancelled')
   })
 
   it('falls back to the record when the run left no run_ended in view', () => {

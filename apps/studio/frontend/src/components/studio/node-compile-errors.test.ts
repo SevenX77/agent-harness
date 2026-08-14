@@ -44,7 +44,7 @@ describe("compileErrorsByNode", () => {
     expect(byNode.expand).toHaveLength(1)
   })
 
-  it("omits graph-level errors (GRAPH.md / null file) 鈥?not attributable to a node", () => {
+  it("omits graph-level errors (GRAPH.md / null file) — not attributable to a node", () => {
     const byNode = compileErrorsByNode([err("GRAPH.md"), err(null), err("phases/p/LOGIC.md")])
     expect(Object.keys(byNode)).toEqual(["p"])
   })
@@ -115,7 +115,7 @@ describe("compileErrorsByNode", () => {
   })
 
   it("omits a file-less error whose field carries no node-id prefix", () => {
-    // A bare field with no "<node>." prefix isn't node-attributable 鈥?stays in the drawer only.
+    // A bare field with no "<node>." prefix isn't node-attributable — stays in the drawer only.
     expect(compileErrorsByNode([goldenFieldErr("summary")])).toEqual({})
   })
 })
@@ -182,7 +182,7 @@ describe("lintErrorsByNode", () => {
   })
 })
 
-describe("lintErrorToCompileError (N3 atom #4 鈥?feed lint into the node tooltip)", () => {
+describe("lintErrorToCompileError (N3 atom #4 — feed lint into the node tooltip)", () => {
   it("renames the engine field_path locator onto the CompileError field axis", () => {
     const compile = lintErrorToCompileError(
       lintErr("phases/segment/SKILL.md", {
@@ -213,7 +213,7 @@ describe("lintErrorToCompileError (N3 atom #4 鈥?feed lint into the node toolti
   })
 })
 
-describe("activeLintErrors (N3 atom #4 鈥?first-screen vs realtime override)", () => {
+describe("activeLintErrors (N3 atom #4 — first-screen vs realtime override)", () => {
   const firstScreenLint = [lintErr("phases/draft/SKILL.md", { message: "first-screen lint" })]
   const manifestErrors = [lintErr("GRAPH.md", { message: "manifest error" })]
   const realtime = [lintErr("phases/draft/SKILL.md", { message: "realtime lint" })]
@@ -253,7 +253,7 @@ describe("activeLintErrors (N3 atom #4 鈥?first-screen vs realtime override)", 
   })
 })
 
-describe("mergeNodeErrors (N3 atom #4 鈥?compile + lint without dropping either)", () => {
+describe("mergeNodeErrors (N3 atom #4 — compile + lint without dropping either)", () => {
   it("concatenates compile and lint errors per node, keeping both channels", () => {
     const compileByNode = { draft: [err("phases/draft/SKILL.md")] }
     const lintByNode = {

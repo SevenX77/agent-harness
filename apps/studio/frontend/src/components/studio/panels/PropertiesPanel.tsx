@@ -1621,13 +1621,13 @@ function ActionsField({
           ))}
         </div>
       ) : (
-        <FieldDescription>No actions yet 鈥?add one to scaffold its file.</FieldDescription>
+        <FieldDescription>No actions yet — add one to scaffold its file.</FieldDescription>
       )}
       {onActionCreate ? (
         <AddActionDialog existing={[...declared, ...orphans]} onAdd={(name) => onActionCreate(phaseId, name)} />
       ) : null}
       {/* n2-properties #19: an action's writeable outputs are bounded by io.outputs,
-          edited in the I/O panel 鈥?surfaced here as a non-blocking hint. */}
+          edited in the I/O panel — surfaced here as a non-blocking hint. */}
       <FieldDescription>
         Output fields an action writes are bounded by io.outputs - edit those field boundaries in the I/O panel (toolbar tab 3).
       </FieldDescription>
@@ -1775,7 +1775,7 @@ function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
             <FieldDescription>
-              A Python identifier 鈥?becomes <span className="font-mono">def &lt;name&gt;(context)</span>.
+              A Python identifier — becomes <span className="font-mono">def &lt;name&gt;(context)</span>.
             </FieldDescription>
             {invalid ? (
               <p className="text-xs text-destructive">Use letters, digits, underscore; not starting with a digit.</p>
@@ -2161,9 +2161,9 @@ function IterateField({
         <YamlNestedFieldLabel htmlFor="phase-iterate-mode">
           mode
           <HelpTooltip label="About iterate mode">
-            <p><span className="font-mono">off</span> 鈥?run once.</p>
-            <p><span className="font-mono">batch</span> 鈥?map over the array concurrently, each item independent.</p>
-            <p><span className="font-mono">loop</span> 鈥?iterate serially and accumulate results across rounds.</p>
+            <p><span className="font-mono">off</span> — run once.</p>
+            <p><span className="font-mono">batch</span> — map over the array concurrently, each item independent.</p>
+            <p><span className="font-mono">loop</span> — iterate serially and accumulate results across rounds.</p>
           </HelpTooltip>
         </YamlNestedFieldLabel>
         <Select
@@ -2327,10 +2327,10 @@ function IterateField({
                         accumulate.merge
                         <HelpTooltip label="About accumulate.merge">
                           <p>How each increment joins the accumulator:</p>
-                          <p><span className="font-mono">append</span> 鈥?add the increment as one item.</p>
-                          <p><span className="font-mono">extend</span> 鈥?concatenate a list of items.</p>
-                          <p><span className="font-mono">merge</span> 鈥?merge objects key by key.</p>
-                          <p><span className="font-mono">replace</span> 鈥?overwrite with the latest value.</p>
+                          <p><span className="font-mono">append</span> — add the increment as one item.</p>
+                          <p><span className="font-mono">extend</span> — concatenate a list of items.</p>
+                          <p><span className="font-mono">merge</span> — merge objects key by key.</p>
+                          <p><span className="font-mono">replace</span> — overwrite with the latest value.</p>
                         </HelpTooltip>
                       </YamlNestedFieldLabel>
                       <Select
@@ -2450,9 +2450,9 @@ function uniqueStrings(values: string[]): string[] {
   })
 }
 
-// validator gates on whether the sibling validator.py EXISTS. No file 鈫?there is no
+// validator gates on whether the sibling validator.py EXISTS. No file → there is no
 // switch, only a "Create validator.py" action (scaffolds a passing stub + flips the
-// flag on). File present 鈫?the on/off switch plus an Edit button. Mirrors the user's
+// flag on). File present → the on/off switch plus an Edit button. Mirrors the user's
 // rule that the toggle is only meaningful once the file backing it exists.
 function ValidatorField({
   value,
@@ -3908,13 +3908,12 @@ function groupedSearchableOptions(options: SearchableComboboxOption[]): Array<{
   return groups
 }
 
-// Engine built-in tools (loader.py scan_mentions tool set) are always available to an
-// agent 鈥?they must NOT be declared in `tools`. Adding them is blocked below.
-const RESERVED_TOOL_NAMES = new Set(["finish_task", "read_reference", "read_example", "log_ambiguity"])
-
-// Agent `tools` as a managed name list 鈥?same flat-card idiom as LOGIC actions, minus
+// Agent `tools` as a managed name list — same flat-card idiom as LOGIC actions, minus
 // the file scaffolding (a tool name is just a declaration the body references via
 // @tool:<name>, no sibling file to create or open). Add/remove edit the form draft.
+// Per-name validity (unknown tool, reserved builtin) belongs to the engine compiler
+// (diagnostics SSOT, decision 2026-08-13 D9): this field only projects the returned
+// diagnostics onto the declared rows, so Remove doubles as the repair action.
 function ToolsField({
   value,
   errors,
@@ -3934,6 +3933,11 @@ function ToolsField({
   const add = (name: string) => {
     onChange([...tools, name].join("\n"))
   }
+  // The engine names the offending tool in single quotes inside the message
+  // (loader.py `_validate_agent_declared_tools`); that quoted name is the only
+  // per-row locator the diagnostic carries.
+  const rowErrors = (name: string) =>
+    (errors ?? []).filter((error) => error.message.includes(`'${name}'`))
 
   return (
     <Field>
@@ -3947,31 +3951,55 @@ function ToolsField({
       </YamlFieldLabel>
       {tools.length > 0 ? (
         <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
-          {tools.map((name) => (
-            <div key={name} className="flex items-center justify-between gap-2 text-xs text-foreground">
-              <span className="min-w-0 flex-1 truncate">
-                <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
-                {name}
-              </span>
-              <Button
-                type="button"
-                size="icon"
-                variant="secondary"
-                className={YAML_ICON_BUTTON_CLASS}
-                aria-label={`Remove tool ${name}`}
-                onClick={() => remove(name)}
-              >
-                <Trash2 className="size-3.5" aria-hidden />
-              </Button>
-            </div>
-          ))}
+          {tools.map((name) => {
+            const ownErrors = rowErrors(name)
+            const diagnosed = ownErrors.length > 0
+            return (
+              <div key={name} className="flex items-center justify-between gap-2 text-xs text-foreground">
+                <span
+                  className={`min-w-0 flex-1 truncate${diagnosed ? " text-destructive" : ""}`}
+                >
+                  <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
+                  {name}
+                  {diagnosed ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          role="img"
+                          aria-label={`Tool ${name} has ${ownErrors.length === 1 ? "1 issue" : `${ownErrors.length} issues`}: ${ownErrors.map((error) => error.message).join("; ")}`}
+                          className="ms-1.5 inline-flex items-center align-middle"
+                        >
+                          <AlertTriangle className="size-3.5" aria-hidden />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-72">
+                        {ownErrors.map((error) => (
+                          <p key={error.message}>{error.message}</p>
+                        ))}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className={YAML_ICON_BUTTON_CLASS}
+                  aria-label={`Remove tool ${name}`}
+                  onClick={() => remove(name)}
+                >
+                  <Trash2 className="size-3.5" aria-hidden />
+                </Button>
+              </div>
+            )
+          })}
         </div>
       ) : (
-        <FieldDescription>No tools yet 鈥?add one this agent can call.</FieldDescription>
+        <FieldDescription>No tools yet — add one this agent can call.</FieldDescription>
       )}
       <AddToolDialog existing={tools} onAdd={add} />
       <FieldDescription>
-        Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available 鈥?don&rsquo;t list them here.
+        Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available &mdash; don&rsquo;t list them here.
       </FieldDescription>
     </Field>
   )
@@ -3982,8 +4010,7 @@ function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: 
   const [draft, setDraft] = useState("")
   const name = draft.trim()
   const duplicate = name.length > 0 && existing.includes(name)
-  const reserved = name.length > 0 && RESERVED_TOOL_NAMES.has(name)
-  const canAdd = Boolean(name && !duplicate && !reserved)
+  const canAdd = Boolean(name && !duplicate)
 
   useEffect(() => {
     if (open) {
@@ -4031,11 +4058,10 @@ function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: 
               autoFocus
               spellCheck={false}
               placeholder="my_tool"
-              aria-invalid={duplicate || reserved || undefined}
+              aria-invalid={duplicate || undefined}
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
             {duplicate ? <p className="text-xs text-destructive">{name} is already declared.</p> : null}
-            {reserved ? <p className="text-xs text-destructive">{name} is a built-in tool 鈥?always available, no need to declare it.</p> : null}
           </form>
         </Field>
         <DialogFooter>

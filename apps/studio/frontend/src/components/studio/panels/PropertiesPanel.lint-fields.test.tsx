@@ -7,7 +7,7 @@ import { PropertiesPanel } from "./PropertiesPanel"
 
 // Field-level lint near-projection (authoring N3 atom #5): the Properties panel marks the
 // offending frontmatter field by the engine's `field_path`. No-field errors degrade to the
-// node badge (not asserted here 鈥?they simply do not render a field marker).
+// node badge (not asserted here — they simply do not render a field marker).
 
 function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
   return {
@@ -57,7 +57,7 @@ function renderPanel(args: {
 
 const LOGIC_CONTENT = ["---", "name: segment", "validator: true", "---", "body"].join("\n")
 
-describe("PropertiesPanel 鈥?field-level lint projection (atom #5)", () => {
+describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
   it("marks the field named by the engine field_path", () => {
     const html = renderPanel({
       id: "segment",
@@ -100,14 +100,14 @@ describe("PropertiesPanel 鈥?field-level lint projection (atom #5)", () => {
       data: baseData({ filePath: "phases/segment/LOGIC.md" }),
       filePath: "phases/segment/LOGIC.md",
       content: LOGIC_CONTENT,
-      // GRAPH-level error: no field_path 鈫?degrades to node badge, no field marker.
+      // GRAPH-level error: no field_path → degrades to node badge, no field marker.
       lintErrors: [lintErr({ field_path: null, file: "GRAPH.md", phase_name: null, message: "graph broken" })],
     })
     expect(html).not.toContain("Field has")
     expect(html).not.toContain("graph broken")
   })
 
-  it("scopes markers to the selected node 鈥?other phases' field errors are ignored", () => {
+  it("scopes markers to the selected node — other phases' field errors are ignored", () => {
     const html = renderPanel({
       id: "segment",
       data: baseData({ filePath: "phases/segment/LOGIC.md" }),
@@ -133,5 +133,53 @@ describe("PropertiesPanel 鈥?field-level lint projection (atom #5)", () => {
     // The validator field still renders. No sibling validator.py here, so it shows the
     // create affordance rather than the on/off switch.
     expect(html).toContain("Create validator.py")
+  })
+})
+
+// Decision 2026-08-13 D9: the engine owns the reserved-builtin rule via
+// [F-v3-agent-tool-reserved]; Studio only PROJECTS the diagnostic. The declared row
+// itself is marked so the row's Remove button reads as the repair action.
+describe("ToolsField — engine tool diagnostics mark the declared row", () => {
+  const SKILL_CONTENT = [
+    "---",
+    "name: segment",
+    "tools:",
+    "  - custom_tool",
+    "  - finish_task",
+    "---",
+    "<role>r</role>",
+  ].join("\n")
+
+  const reservedError = lintErr({
+    file: "phases/segment/SKILL.md",
+    error_code: "F-v3-agent-tool-reserved",
+    message:
+      "tool 'finish_task' in SKILL phase 'segment' is a built-in framework tool: " +
+      "it is always available and must not be declared in `tools`; remove the line",
+    field_path: "tools",
+  })
+
+  it("marks only the diagnosed tool row and shows the engine message", () => {
+    const html = renderPanel({
+      id: "segment",
+      data: baseData({ mode: "agent", filePath: "phases/segment/SKILL.md" }),
+      filePath: "phases/segment/SKILL.md",
+      content: SKILL_CONTENT,
+      lintErrors: [reservedError],
+    })
+    expect(html).toContain("Tool finish_task has 1 issue")
+    expect(html).toContain("is a built-in framework tool")
+    expect(html).not.toContain("Tool custom_tool has")
+  })
+
+  it("marks no rows when the tools field has no diagnostics", () => {
+    const html = renderPanel({
+      id: "segment",
+      data: baseData({ mode: "agent", filePath: "phases/segment/SKILL.md" }),
+      filePath: "phases/segment/SKILL.md",
+      content: SKILL_CONTENT,
+      lintErrors: [],
+    })
+    expect(html).not.toContain("has 1 issue")
   })
 })

@@ -174,6 +174,8 @@ class NudgeEvent(_EventBase):
     phase_name: str
     nudge_count: int
     nudge_type: str = "standard"
+    #: Full sentence saying what was injected and why (machinery-speaks D4).
+    message: str = ""
 
 
 class WorkingMemoryUpdateEvent(_EventBase):
@@ -510,6 +512,44 @@ class ProtocolViolationEvent(_EventBase):
     message: str
 
 
+class ToolErrorHandledEvent(_EventBase):
+    """ToolErrorHandlingMiddleware swallowed a tool exception and turned it
+    into an error ToolMessage the model reads as feedback. Swallowing an error
+    changes the run's course, so it must be visible in the trace."""
+
+    event_type: Literal["tool_error_handled"] = "tool_error_handled"
+    phase_name: str
+    tool_name: str
+    #: "ExceptionType: str(exc)" — what actually blew up.
+    error: str
+    message: str
+
+
+class ToolHistoryRepairedEvent(_EventBase):
+    """ToolHistoryIntegrityMiddleware rewrote the outgoing message history to
+    satisfy the provider contract (each AI tool_calls immediately answered).
+    Emitted only when something actually changed — a legal history is 路过."""
+
+    event_type: Literal["tool_history_repaired"] = "tool_history_repaired"
+    phase_name: str
+    #: Orphaned tool_calls given a synthetic ToolMessage.
+    synthesized_count: int
+    #: Stray ToolMessages (answering nothing in this history) dropped.
+    dropped_count: int
+    message: str
+
+
+class RuntimeInputInjectedEvent(_EventBase):
+    """RuntimeInputMiddleware seeded the phase's first model turn with the
+    declared inputs — the model's opening view of the task is this injection,
+    so the trace says which keys it delivered."""
+
+    event_type: Literal["runtime_input_injected"] = "runtime_input_injected"
+    phase_name: str
+    keys: list[str] = Field(default_factory=list)
+    message: str
+
+
 class ValidationPassEvent(_EventBase):
     """Fired when a phase validator returns (True, []). Complements ValidationFail."""
 
@@ -718,6 +758,9 @@ CallbackEvent = Annotated[
     | FinishTaskVerdictEvent
     | LoopDetectedEvent
     | ProtocolViolationEvent
+    | ToolErrorHandledEvent
+    | ToolHistoryRepairedEvent
+    | RuntimeInputInjectedEvent
     | ValidationPassEvent
     | RetryExhaustedEvent
     | InternalErrorEvent
@@ -768,6 +811,9 @@ __all__ = [
     "FinishTaskVerdictEvent",
     "LoopDetectedEvent",
     "ProtocolViolationEvent",
+    "ToolErrorHandledEvent",
+    "ToolHistoryRepairedEvent",
+    "RuntimeInputInjectedEvent",
     "RetryExhaustedEvent",
     "InternalErrorEvent",
     "ModelResolvedEvent",

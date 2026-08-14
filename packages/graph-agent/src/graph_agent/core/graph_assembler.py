@@ -2040,8 +2040,12 @@ def _build_skill_node(
     # (placeholder rendering + first-turn input seeding) must happen per model
     # call — outermost in the chain, before cognitive/tracing middlewares.
     middleware_chain = (
-        RuntimeInputMiddleware(phase_id, declared_input_keys),
-        ToolHistoryIntegrityMiddleware(),
+        RuntimeInputMiddleware(
+            phase_id, declared_input_keys, callbacks=_callback_tuple(callbacks)
+        ),
+        ToolHistoryIntegrityMiddleware(
+            phase_name=phase_id, callbacks=_callback_tuple(callbacks)
+        ),
         *middleware_chain,
     )
 

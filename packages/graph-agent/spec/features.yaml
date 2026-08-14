@@ -733,11 +733,17 @@ features:
   - path: packages/graph-agent/src/graph_agent/middleware/execution_control.py
   - path: packages/graph-agent/src/graph_agent/middleware/loop_detection.py
   - path: packages/graph-agent/src/graph_agent/middleware/protocol_validation.py
+  - path: packages/graph-agent/src/graph_agent/middleware/runtime_input.py
+  - path: packages/graph-agent/src/graph_agent/middleware/tool_error.py
+  - path: packages/graph-agent/src/graph_agent/middleware/tool_history.py
   error_codes_primary: []
   error_codes_secondary: []
   events_primary:
   - LoopDetectedEvent
   - ProtocolViolationEvent
+  - ToolErrorHandledEvent
+  - ToolHistoryRepairedEvent
+  - RuntimeInputInjectedEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:

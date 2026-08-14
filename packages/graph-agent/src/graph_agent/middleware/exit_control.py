@@ -165,6 +165,22 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
                 "Please use the `finish_task` tool to submit the final output once complete."
             )
             nudge_msg = HumanMessage(content=nudge_text)
+            from graph_agent.callbacks.emit import _safe_emit_event
+            from graph_agent.callbacks.events import NudgeEvent
+
+            _safe_emit_event(
+                self._callbacks,
+                NudgeEvent(
+                    phase_name=self._phase_name,
+                    nudge_count=current_iteration,
+                    nudge_type="exit_control_no_tool_calls",
+                    message=(
+                        f"The model made no tool calls and did not finish in phase "
+                        f"{self._phase_name!r}; injected a reminder to submit via "
+                        "finish_task and sent it back to the model."
+                    ),
+                ),
+            )
             return {
                 "jump_to": "model",
                 "messages": [nudge_msg],

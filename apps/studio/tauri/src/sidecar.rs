@@ -332,7 +332,15 @@ pub fn allocate_loopback_port() -> std::io::Result<u16> {
     // (which is bound at vite startup, before the sidecar has even spawned) line
     // up with the sidecar's actual listening port — fixing the 502s when the
     // browser opens 127.0.0.1:5173 in dev tunnel mode (R-F2).
-    if let Ok(value) = std::env::var("STUDIO_SIDECAR_PORT") {
+    allocate_loopback_port_from(std::env::var("STUDIO_SIDECAR_PORT").ok().as_deref())
+}
+
+// The env read stays in the one-line wrapper above so this decision logic is a
+// pure function of its input: process env is global mutable state, and tests
+// mutating it raced each other under cargo's parallel runner (the pinned-port
+// test saw another test's remove_var and got a dynamic port instead).
+fn allocate_loopback_port_from(pinned_env: Option<&str>) -> std::io::Result<u16> {
+    if let Some(value) = pinned_env {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             match trimmed.parse::<u16>() {
@@ -609,15 +617,13 @@ fn generate_api_token() -> String {
 mod tests {
     use super::*;
 
+    // These feed allocate_loopback_port_from explicit input instead of mutating
+    // STUDIO_SIDECAR_PORT: process env is shared by every test thread, and the
+    // set/remove dance raced under cargo's parallel runner (CI 2026-08-14: the
+    // pinned test observed a sibling's remove_var and got a dynamic port).
     #[test]
     fn allocate_loopback_port_returns_bindable_dynamic_port() {
-        // SAFETY: tests in this module run in the same process; clearing the env
-        // here is fine because the only consumer is allocate_loopback_port and
-        // tests touching the pinned-port branch set the env explicitly.
-        unsafe {
-            std::env::remove_var("STUDIO_SIDECAR_PORT");
-        }
-        let port = allocate_loopback_port().expect("port");
+        let port = allocate_loopback_port_from(None).expect("port");
         assert_ne!(port, 0);
         let listener = TcpListener::bind(("127.0.0.1", port)).expect("released port should rebind");
         drop(listener);
@@ -625,28 +631,13 @@ mod tests {
 
     #[test]
     fn allocate_loopback_port_honors_pinned_env() {
-        // Use a high static port that is exceedingly unlikely to clash so we can
-        // assert we returned the pinned value rather than a random OS-allocated one.
-        let pinned: u16 = 49317;
-        unsafe {
-            std::env::set_var("STUDIO_SIDECAR_PORT", pinned.to_string());
-        }
-        let port = allocate_loopback_port().expect("port");
-        unsafe {
-            std::env::remove_var("STUDIO_SIDECAR_PORT");
-        }
-        assert_eq!(port, pinned);
+        let port = allocate_loopback_port_from(Some("49317")).expect("port");
+        assert_eq!(port, 49317);
     }
 
     #[test]
     fn allocate_loopback_port_falls_back_on_invalid_env() {
-        unsafe {
-            std::env::set_var("STUDIO_SIDECAR_PORT", "not-a-number");
-        }
-        let port = allocate_loopback_port().expect("port");
-        unsafe {
-            std::env::remove_var("STUDIO_SIDECAR_PORT");
-        }
+        let port = allocate_loopback_port_from(Some("not-a-number")).expect("port");
         assert_ne!(port, 0);
     }
 
@@ -668,7 +659,9 @@ mod tests {
 
     #[test]
     fn health_wait_times_out_for_closed_port() {
-        let port = allocate_loopback_port().expect("port");
+        // A dynamic port explicitly: this test only needs a free port, and must
+        // not pick up a pinned env value that might actually be listening.
+        let port = allocate_loopback_port_from(None).expect("port");
         assert!(!wait_for_health(port, Duration::from_millis(20)));
     }
 

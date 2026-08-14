@@ -65,7 +65,7 @@ def build_middleware_chain(
             callbacks=callbacks,
             phase_name=phase_name,
         ),
-        "ToolError": ToolErrorHandlingMiddleware(phase_name=phase_name),
+        "ToolError": ToolErrorHandlingMiddleware(phase_name=phase_name, callbacks=callbacks),
         "LoopDetection": LoopDetectionMiddleware(phase_name=phase_name, callbacks=callbacks),
         "ExitControl": ExitControlMiddleware(
             phase_name=phase_name,

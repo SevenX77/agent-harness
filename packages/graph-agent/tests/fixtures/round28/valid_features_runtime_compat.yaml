@@ -728,6 +728,9 @@ features:
   events_primary:
   - LoopDetectedEvent
   - ProtocolViolationEvent
+  - ToolErrorHandledEvent
+  - ToolHistoryRepairedEvent
+  - RuntimeInputInjectedEvent
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:

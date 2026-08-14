@@ -15,12 +15,14 @@ that gap per model call:
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware, ModelRequest
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.events import RuntimeInputInjectedEvent
 from graph_agent.core.template import _safe_render_template
 
 
@@ -35,10 +37,17 @@ def _blackboard_view(state: Any) -> dict[str, Any]:
 class RuntimeInputMiddleware(AgentMiddleware):
     """Per-model-call rendering + first-turn input seeding for AGENT phases."""
 
-    def __init__(self, phase_name: str, input_keys: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        phase_name: str,
+        input_keys: tuple[str, ...],
+        *,
+        callbacks: Sequence[Any] | None = None,
+    ) -> None:
         super().__init__()
         self._phase_name = phase_name
         self._input_keys = input_keys
+        self._callbacks = callbacks
 
     def _transformed_request(self, request: ModelRequest) -> ModelRequest:
         view = _blackboard_view(request.state)
@@ -63,6 +72,20 @@ class RuntimeInputMiddleware(AgentMiddleware):
                         "以下是本阶段的输入数据(JSON):\n"
                         + json.dumps(payload, ensure_ascii=False, default=str)
                     )
+                ),
+            )
+            # The model's opening view of the task IS this injection (glass-box
+            # decision 2026-08-13 D4) — say which keys were delivered.
+            delivered = sorted(str(key) for key in payload)
+            _safe_emit_event(
+                self._callbacks,
+                RuntimeInputInjectedEvent(
+                    phase_name=self._phase_name,
+                    keys=delivered,
+                    message=(
+                        f"Seeded the first model turn of phase {self._phase_name!r} "
+                        f"with the runtime input(s): {', '.join(delivered) or '(empty)'}."
+                    ),
                 ),
             )
 

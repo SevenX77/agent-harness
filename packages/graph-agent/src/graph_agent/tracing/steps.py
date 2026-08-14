@@ -298,6 +298,11 @@ def _answer_report(answer: AIMessage, metadata: dict[str, Any]) -> dict[str, Any
     """
     report = dict(metadata)
     report["content"] = answer.content
+    # Always present: None says "did not think", so a reader never has to
+    # guess whether the key just was not written yet. This is the thinking
+    # channel's one whole copy — the deltas that streamed it are droppable.
+    reasoning = answer.additional_kwargs.get("reasoning_content")
+    report["reasoning"] = reasoning if isinstance(reasoning, str) and reasoning else None
     report["tool_calls"] = list(answer.tool_calls or [])
     usage = answer.usage_metadata
     report["usage"] = dict(usage) if usage else None

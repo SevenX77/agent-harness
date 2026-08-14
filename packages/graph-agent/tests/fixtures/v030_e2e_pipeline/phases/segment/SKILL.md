@@ -15,8 +15,6 @@ io:
         type: array
         items:
           type: object
-tools:
-  - finish_task
 subagents:
   - name: echo_helper
     target_skill: e2e.echo

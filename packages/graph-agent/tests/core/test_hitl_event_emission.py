@@ -106,7 +106,6 @@ io:
 max_iterations: 3
 tools:
   - ask_clarification
-  - finish_task
 ---
 <role>Executor.</role>
 <goal>Ask the user to choose, then finish.</goal>

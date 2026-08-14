@@ -90,8 +90,6 @@ io:
     properties:
       answer:
         type: string
-tools:
-  - finish_task
 references:
   - id: Guide
     path: references/guide.md

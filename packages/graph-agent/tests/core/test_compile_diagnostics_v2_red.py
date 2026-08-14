@@ -659,11 +659,11 @@ def test_reference_has_no_path_missing_code_example_does() -> None:
 
 
 def test_error_registry_len_unchanged_97() -> None:
-    # LOCK (R4.3 / design §6.5): the 97-code freeze and the round28 catalog
+    # LOCK (R4.3 / design §6.5): the 98-code freeze and the round28 catalog
     # bijection must not move — this spec revives dead codes, never adds/removes.
-    assert len(ERROR_REGISTRY) == 97
+    assert len(ERROR_REGISTRY) == 98
     catalog = export_error_catalog()
-    assert len(catalog["items"]) == 97
+    assert len(catalog["items"]) == 98
     assert all(item["remediation"] for item in catalog["items"])
 
 
@@ -731,6 +731,7 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-agent-output-schema-invalid]': ('FATAL', ('运行期',)),
     '[F-v3-agent-output-schema-missing]': ('FATAL', ('运行期',)),
     '[F-v3-agent-tool-unknown]': ('FATAL', ('编译期',)),
+    '[F-v3-agent-tool-reserved]': ('FATAL', ('编译期',)),
     '[F-v3-agent-subagent-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-subgraph-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-max-iterations-invalid]': ('FATAL', ('编译期',)),

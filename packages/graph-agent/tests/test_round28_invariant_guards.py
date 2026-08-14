@@ -105,7 +105,7 @@ def test_round28_error_registry_keeps_f_v3_metadata_shape() -> None:
     }
 
     assert set(ERROR_REGISTRY) == set(primary_owner_by_code)
-    assert len(ERROR_REGISTRY) == 97
+    assert len(ERROR_REGISTRY) == 98
     for code, metadata in ERROR_REGISTRY.items():
         assert code.startswith("[F-v3-")
         assert metadata.code == code

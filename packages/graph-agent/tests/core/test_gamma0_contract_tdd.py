@@ -71,8 +71,6 @@ io:
   outputs:
     type: object
     properties: {{}}
-tools:
-  - finish_task
 ---
 <role>
 Research assistant.

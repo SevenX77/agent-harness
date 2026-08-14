@@ -81,8 +81,6 @@ io:
     properties:
       answer:
         type: string
-tools:
-  - finish_task
 references:
   - id: R1
     path: {reference_path}

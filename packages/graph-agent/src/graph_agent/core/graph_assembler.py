@@ -1857,9 +1857,13 @@ def _build_skill_node(
         chat_model=phase_chat_model,
         max_patch_attempts=max_patch_attempts,
     )
-    has_finish_task = bool(phase_ast.tools and "finish_task" in phase_ast.tools)
-    if has_finish_task:
-        finish_task.return_direct = True
+    # The v0.3.0 cognitive template hardcodes the finish_task exit contract at
+    # every agent prompt's tail and the tool is always mounted, so the exit
+    # gate is unconditional. It used to key off `finish_task` being declared in
+    # `tools:` — declaring a built-in is now a compile diagnostic
+    # ([F-v3-agent-tool-reserved]), and a gate that a redundant declaration
+    # could silently switch off was exactly the half-open state D9 closed.
+    finish_task.return_direct = True
     class FrameworkStateProxyDict(dict[str, Any]):
         def __init__(self, obj: Any) -> None:
             super().__init__()
@@ -2024,7 +2028,6 @@ def _build_skill_node(
         unattended=False,  # dynamically resolved in middleware
         interrupt_fn=None,
         callbacks=_callback_tuple(callbacks),
-        has_finish_task=has_finish_task,
     )
 
     from graph_agent.middleware.runtime_input import RuntimeInputMiddleware

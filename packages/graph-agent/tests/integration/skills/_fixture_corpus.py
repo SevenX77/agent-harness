@@ -135,8 +135,6 @@ io:
     properties:
       {output_property}:
         type: object
-tools:
-  - finish_task
 ---
 <role>
 Fixture analyst.

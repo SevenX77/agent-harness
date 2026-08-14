@@ -181,7 +181,6 @@ io:
         type: string
 tools:
   - inspect_payload
-  - finish_task
 ---
 <role>
 Trace exerciser.

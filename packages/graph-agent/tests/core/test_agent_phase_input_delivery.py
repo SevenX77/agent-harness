@@ -55,7 +55,6 @@ io:
     properties:
       summary:
         type: string
-tools: [finish_task]
 max_iterations: 3
 validator: false
 ---

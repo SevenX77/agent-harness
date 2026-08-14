@@ -1252,6 +1252,23 @@ def _validate_agent_declared_tools(
         phase_tool_names = {tool.id for tool in registry.by_phase.get(doc.phase_name, [])}
         available = root_tool_names | phase_tool_names | framework_tool_names
         for tool_name in doc.ast.tools:
+            if tool_name in framework_tool_names:
+                # Built-in framework tools are mounted unconditionally by the
+                # assembler; a declaration adds nothing the engine reads — but
+                # it makes Studio render the tool as user-managed, deletable
+                # included (decision 2026-08-13 D9). Deleting the line is the fix.
+                diags.append(
+                    _Diag(
+                        doc.path,
+                        _frontmatter_key_line(doc.path, "tools"),
+                        "[F-v3-agent-tool-reserved]",
+                        f"tool {tool_name!r} in SKILL phase {doc.phase_name!r} is a "
+                        "built-in framework tool: it is always available and must not "
+                        "be declared in `tools`; remove the line",
+                        field_path="tools",
+                    )
+                )
+                continue
             if tool_name in available or _is_critic_tool_name(tool_name):
                 continue
             diags.append(

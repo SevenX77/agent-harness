@@ -216,6 +216,13 @@ edit its files, never kill its processes, never `wt-clean` it. Clean up only
 
 ## 4. Per-item verification on Windows — drive the real window over CDP
 
+> **可执行入口:`/studio-verify` skill(`.claude/skills/studio-verify/`)** —
+> 本节方法的落地实例:启停 launcher(带/不带 9222)+ cdp/click/shot/emulate/console
+> 五件套脚本 + 纪律清单,拿来即用。本节保留原理与协议细节;两处如有出入,以能跑通的
+> skill 为准并回修本节。**禁止**用浏览器直开 Vite 的 web 模式充当验证(2026-08-14
+> 用户裁决):web 模式下 Tauri 原生桥是假的、Recent 存在 Rust native store 里根本
+> 打不开 skill,结论不可信。
+
 The desktop app's UI is a WebView2 (Chromium) instance, so the real window can
 be driven over the Chrome DevTools Protocol: DOM-level assertions and real
 mouse events, no screenshot-pixel guessing. This is the standard way the agent

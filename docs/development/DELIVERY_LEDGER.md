@@ -404,6 +404,13 @@ CompactionEvent)→ PR E 整族删(含 ModelResolvedEvent「已被替代不迁�
 ctx 桥 `legacy_context_from_state` 族、零发射点事件类、前端死分支、spec 清单条目)
 + vendor 重建 + `/studio-verify` 真机冒烟。每步过引擎门禁(mypy --strict + 3×pytest)。
 
+在册风险:flow 通道并行写——同一超步两个写 flow 的认知工具并行调用会
+InvalidUpdateError(PR #803 实施报告发现,先于该 PR 的引擎级限制);first-principles
+修复=给 flow 通道设计合并 reducer,待排期。另录 PR C 实施发现:ToolNode 内工具
+Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循环分叉成两条
+并行 model 车道(幻影回合)——PR C 已摘除 update_working_memory / log_ambiguity
+两处 goto;`_reject_finish` 与澄清分支的同款 goto 待同根因处置。
+
 ### 用户缺陷批次 2026-08-15:copilot 多会话后端路由(会话身份契约)
 
 **缺陷(2026-08-15 真机实测)**:面板 "New chat" 只换前端视图——`newSession()` 纯前端

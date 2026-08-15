@@ -74,6 +74,11 @@ def _truncate_context_text(text: str) -> str:
     return text
 
 
+#: Shared working-memory contract: CognitiveFlowMiddleware writes the plan
+#: text under this key (migration decision §3.2); ExitControlMiddleware's
+#: planning gate reads the same key to decide whether a plan exists (§3.5).
+WORKING_MEMORY_PLAN_KEY = "plan"
+
 ToolCallResult = ToolMessage | Command[Any]
 ToolCallHandler = Callable[[ToolCallRequest], ToolCallResult]
 AsyncToolCallHandler = Callable[[ToolCallRequest], Awaitable[ToolCallResult]]
@@ -106,7 +111,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     _INTERCEPTED_TOOLS = frozenset({_FINISH_TOOL, _CLARIFICATION_TOOL}) | _STATE_TOOLS
     # update_working_memory owns exactly one key inside the shared
     # working_memory dict; iterate bookkeeping keys coexist beside it.
-    _WORKING_MEMORY_PLAN_KEY = "plan"
+    _WORKING_MEMORY_PLAN_KEY = WORKING_MEMORY_PLAN_KEY
     _REJECTION_PREFIX = "[提交已被系统驳回] 当前任务仍未结束，请继续修正并重新提交！"
 
     def __init__(
@@ -713,6 +718,12 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 content=plan,
             ),
         )
+        # Deliberately NO goto here: a Command goto from inside the ToolNode
+        # double-routes — langgraph executes the goto AND the tools→model
+        # conditional edge still fires, forking the loop into two parallel
+        # model lanes (one phantom turn per state-tool call; observed
+        # 2026-08-15 while wiring the exit-gate nudge adapter). The tools
+        # edge already continues the loop back to the model.
         return Command(
             update={
                 "flow": next_state["flow"],
@@ -724,7 +735,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                     )
                 ],
             },
-            goto="model",
         )
 
     def _handle_log_ambiguity(
@@ -765,6 +775,8 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             {"status": "recorded", "index": len(reports) - 1, "type": ambiguity_type},
             ensure_ascii=False,
         )
+        # No goto — same double-routing fork as _handle_update_working_memory;
+        # the run continues uninterrupted through the regular tools→model edge.
         return Command(
             update={
                 "flow": next_state["flow"],
@@ -776,7 +788,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                     )
                 ],
             },
-            goto="model",
         )
 
     def _query_working_memory_message(
@@ -1348,4 +1359,4 @@ def _get_unattended(state_val: Any, default_val: bool) -> bool:
     return default_val
 
 
-__all__ = ["CognitiveFlowError", "CognitiveFlowMiddleware"]
+__all__ = ["WORKING_MEMORY_PLAN_KEY", "CognitiveFlowError", "CognitiveFlowMiddleware"]

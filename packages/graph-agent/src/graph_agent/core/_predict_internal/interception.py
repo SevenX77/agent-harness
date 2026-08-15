@@ -33,6 +33,7 @@ class _PredictGatewayChatModelMixin:
     name: str | None
     role_name: str
     phase_name: str | None
+    phase_output_schema: dict[str, Any] | None
     resolved_role: Any
     max_tokens: int
     temperature: float
@@ -131,7 +132,8 @@ class _PredictGatewayChatModelMixin:
                 source = "manual"
             return self.mock_strategy.get_manual_override(phase_name), source
 
-        return generate_heuristic_stub(self.mock_strategy.get_phase_schema(phase_name)), ("heuristic_stub")
+        schema = self.phase_output_schema or self.mock_strategy.get_phase_schema(phase_name)
+        return generate_heuristic_stub(schema), "heuristic_stub"
 
     def _build_predict_chat_result(
         self,
@@ -203,6 +205,12 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
     prompt_template_source: str | None = None
     prompt_variables: dict[str, Any] = Field(default_factory=dict)
     profile: Any = None
+    #: This phase's declared io.outputs, handed over by the assembler that owns
+    #: it. Held on the model rather than looked up in a shared per-phase-name map
+    #: because phase names are only unique WITHIN a skill — two subgraphs may both
+    #: have a phase called "review", and a shared map serves one of them the
+    #: other's schema (decision doc 2026-08-15 predict-nested-phase-schema).
+    phase_output_schema: dict[str, Any] | None = None
 
     def __init__(
         self,
@@ -219,6 +227,7 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
         bound_tools: Sequence[Any] = (),
         tool_choice: str | None = None,
         tool_kwargs: dict[str, object] | None = None,
+        phase_output_schema: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(  # type: ignore[call-arg]
@@ -234,6 +243,7 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
             bound_tools=tuple(bound_tools),
             tool_choice=tool_choice,
             tool_kwargs=dict(tool_kwargs or {}),
+            phase_output_schema=phase_output_schema,
             **kwargs,
         )
 
@@ -265,6 +275,7 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
             thinking_enabled=self.thinking_enabled,
             bound_tools=tuple(_normalise_predict_tool(tool) for tool in tools),
             tool_choice=tool_choice,
+            phase_output_schema=self.phase_output_schema,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
             call_counter=self.call_counter,
             name=self.name,

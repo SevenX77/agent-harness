@@ -32,9 +32,9 @@ import {
 } from '../../utils/trace'
 import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
-import { FoldedText } from '../ui/folded-text'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { EventTypeBadge } from './EventTypeBadge'
+import { TraceText } from './TraceText'
 
 interface TraceStepRowProps {
   step: TraceStep
@@ -61,8 +61,9 @@ interface TraceStepRowProps {
  * one-line summary (decision 2026-08-09 D4). The caller owns expansion so the
  * default can follow the step's status while a deliberate toggle still sticks.
  *
- * Every long text in this file goes through the ONE fold primitive
- * (`ui/folded-text`, decision 2026-08-13 D3) — no section decides its own fold.
+ * Every long text in this file goes through the ONE well primitive
+ * (`TraceText` over `ui/text-well`, decision 2026-08-14) — no section decides
+ * its own fold, and no section wraps the well in a second box.
  */
 export function TraceStepRow({
   step,
@@ -261,35 +262,35 @@ function LlmFlowBody({ step }: { step: TraceStep }) {
   const toolCalls = answerToolCallsText(answered)
   const bareResponse = answered && !reasoning && !answer && !toolCalls
   return (
-    <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
+    <div className="mt-2 space-y-2 text-xs">
       <FlowEntry title={`Prompt loaded — ${typeof prompt.template_source === 'string' && prompt.template_source !== '' ? prompt.template_source : 'inline'}`}>
         {hasVariables ? (
-          <FoldedText text={variables} label="Prompt variables" language="json" />
+          <TraceText text={variables} label="Prompt variables" language="json" />
         ) : null}
       </FlowEntry>
       <FlowEntry title="Rendered prompt">
-        <FoldedText text={jsonText(prompt.resolved_prompt)} label="Rendered prompt" language="json" />
+        <TraceText text={jsonText(prompt.resolved_prompt)} label="Rendered prompt" language="json" />
       </FlowEntry>
       {reasoning ? (
         <FlowEntry title="Thinking">
-          <FoldedText text={reasoning} label="Thinking" className="italic text-muted-foreground" />
+          <TraceText text={reasoning} label="Thinking" className="italic text-muted-foreground" />
         </FlowEntry>
       ) : null}
       {answer ? (
         <FlowEntry title="Answer">
-          <FoldedText text={answer} label="Answer" />
+          <TraceText text={answer} label="Answer" />
         </FlowEntry>
       ) : null}
       {toolCalls ? (
         <FlowEntry title="Tool calls">
-          <FoldedText text={toolCalls} label="Tool calls" language="json" />
+          <TraceText text={toolCalls} label="Tool calls" language="json" />
         </FlowEntry>
       ) : null}
       {/* A response none of the semantic entries could claim still gets shown —
           decomposing the answer must never become a way of hiding it. */}
       {bareResponse ? (
         <FlowEntry title="Response">
-          <FoldedText text={jsonText(answered.response_data ?? undefined)} label="Response" language="json" />
+          <TraceText text={jsonText(answered.response_data ?? undefined)} label="Response" language="json" />
         </FlowEntry>
       ) : null}
       <VerdictBlocks verdicts={step.verdicts} />
@@ -335,10 +336,10 @@ function VerdictBlocks({ verdicts, onlyProblems = false }: { verdicts: TraceStep
 /** What a tool was asked to do, while it is still doing it. */
 function ToolArguments({ event }: { event: CallbackEvent }) {
   return (
-    <div className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
+    <div className="mt-2 text-xs">
       <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
       <div className="mt-0.5">
-        <FoldedText text={jsonText(event.args)} label="Tool input" language="json" />
+        <TraceText text={jsonText(event.args)} label="Tool input" language="json" />
       </div>
     </div>
   )
@@ -355,7 +356,7 @@ function ToolArguments({ event }: { event: CallbackEvent }) {
  *
  * Thinking is kept visually apart from the answer for the same reason it
  * travels on its own channel: it is the model working, not what it replied.
- * Both clamp from the END: live text hides its head, never the line arriving.
+ * Both wells auto-follow: live text keeps the line arriving in view.
  */
 function LiveOutput({ output }: { output: StepOutput }) {
   if (!output.text && !output.thinking) {
@@ -364,19 +365,19 @@ function LiveOutput({ output }: { output: StepOutput }) {
   return (
     <div data-trace-live-output className="mt-2 space-y-1.5 px-2.5">
       {output.thinking ? (
-        <FoldedText
+        <TraceText
           text={output.thinking}
           label="Live thinking"
-          clampFrom="end"
-          className="border border-border bg-muted/30 italic text-muted-foreground"
+          autoFollow
+          className="italic text-muted-foreground"
         />
       ) : null}
       {output.text ? (
-        <FoldedText
+        <TraceText
           text={output.text}
           label="Live answer"
-          clampFrom="end"
-          className="bg-transparent p-0 text-xs leading-snug text-foreground/90"
+          autoFollow
+          className="text-foreground/90"
         />
       ) : null}
     </div>
@@ -505,7 +506,7 @@ function ErrorStack({ failures }: { failures: string[] }) {
 // (output), so the agent is not a black box and nobody has to read raw JSON.
 function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof toolCallSummary>> }) {
   return (
-    <div className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs">
+    <div className="mt-2 text-xs">
       <div className="flex items-center gap-1.5 font-medium text-foreground">
         <ListTree className="h-3.5 w-3.5" />
         {summary.headline}
@@ -514,7 +515,7 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
         <div className="mt-1.5">
           <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
           <div className="mt-0.5">
-            <FoldedText text={summary.args} label="Tool input" language="json" />
+            <TraceText text={summary.args} label="Tool input" language="json" />
           </div>
         </div>
       ) : null}
@@ -522,7 +523,7 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
         <div className="mt-1.5">
           <div className="text-[10px] font-semibold uppercase text-muted-foreground">Result</div>
           <div className="mt-0.5">
-            <FoldedText text={summary.resultSummary} label="Tool result" className="bg-transparent p-0 leading-relaxed" />
+            <TraceText text={summary.resultSummary} label="Tool result" />
           </div>
         </div>
       ) : null}
@@ -567,8 +568,8 @@ function MachineryBody({ narration }: { narration: NonNullable<ReturnType<typeof
 
 function GenericPayload({ event }: { event: CallbackEvent }) {
   return (
-    <div className="mt-2 rounded-md border border-border bg-muted/30 p-2">
-      <FoldedText text={jsonText(event as never)} label="Event payload" language="json" />
+    <div className="mt-2">
+      <TraceText text={jsonText(event as never)} label="Event payload" language="json" />
     </div>
   )
 }

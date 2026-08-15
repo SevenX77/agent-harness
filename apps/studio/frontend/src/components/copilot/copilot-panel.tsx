@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, ChevronDown, CircleAlert, History, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
@@ -30,6 +30,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { Bubble, BubbleContent } from '../ui/bubble'
 import { Message, MessageContent } from '../ui/message'
+import { TextWell } from '../ui/text-well'
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -233,25 +234,19 @@ function renderProcessSegment(segment: TranscriptSegment, ctx: ProcessRenderCont
 /**
  * R7-A: reasoning trace. While the turn streams the block stays open and its
  * scroll box auto-follows the newest reasoning (PM「thinking 的内容也不会自动
- * 往下滚动」). Once settled it lives inside the folded process row.
+ * 往下滚动」). Once settled it lives inside the folded process row. The scroll
+ * box is the shared `TextWell` — trace long texts render through the same
+ * module (decision 2026-08-14「和copilot的thinking一样」).
  */
 function ThinkingBlock({ content, streaming }: { content: string; streaming: boolean }) {
-  const preRef = useRef<HTMLPreElement>(null)
-  useEffect(() => {
-    if (streaming && preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight
-    }
-  }, [content, streaming])
   return (
     <details open={streaming} className="py-0.5 text-xs text-muted-foreground">
       <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Thought</summary>
-      <pre
-        ref={preRef}
-        {...allowTextSelectionProps()}
-        className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug"
-      >
-        {content}
-      </pre>
+      <TextWell
+        text={content}
+        autoFollow={streaming}
+        className="mt-1.5 text-xs leading-snug text-muted-foreground"
+      />
     </details>
   )
 }

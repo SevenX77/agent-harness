@@ -95,9 +95,17 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 默认展开态由**步骤状态**决定:进行中默认展开,完成默认折叠;**用户的手动切换优先**且此后一直生效
   (只记录被显式切换过的步骤,其余跟随状态,所以完成时会自动折叠而不会推翻读者的选择)。
 - 分组沿用 2026-08-08 D3:相邻步骤同节点时只在组首标一次节点名。
-- 中间结果**不设固定高度框**(D6):删掉工具输入的 `max-h-32` 与 payload 的 `max-h-40` 内层滚动。
-  面板本身已有滚动,嵌套滚动更难读;超长内容靠折叠/展开(用户可控),不靠固定高度截断(强加)。
-- 原话/来源: 决议 D4 / D6;PM 原话「tracing里面的中间结果不要用一个固定高度的框框住,本来panel就有scroll」。
+- 长文本 = **固定高度文本井**(2026-08-14 裁决,改判 2026-08-09「不设固定高度框」):步骤体内的
+  每段长文本(prompt / thinking / answer / 工具输入输出 / payload)呈现为一个与 copilot thinking
+  同款的固定高度滚动井(`components/ui/text-well`,唯一实现,copilot ThinkingBlock 与 trace 共用),
+  短文本自然矮于井高;井溢出时提供「View full text」,走**正常编辑器出现方式**打开只读全文
+  (`onFileOpen` 虚拟只读文档,`saveEnabled: false`),禁止自造 modal。一段文本**恰好一层视觉容器**
+  (井自己),步骤体内不套卡片盒。决议全文:
+  `docs/design/2026-08-14-trace-longtext-text-well-decision.md`。
+- 原话/来源: 决议 D4;2026-08-14 PM 原话「不要套那么多层容器…改成和copilot的thinking一样,一个
+  固定高度的scrollarea,把我之前说的5行20行覆盖掉…编辑器该怎么出现还是怎么出现」。
+  (2026-08-09 原话「tracing里面的中间结果不要用一个固定高度的框框住,本来panel就有scroll」
+  针对的盒中盒问题由「恰好一层容器」承接,固定高度禁令就长文本范围被上句改判。)
 - 测试: 只有 `prompt_captured` 时步骤为 running 且 `end` 为空;补上 `llm_call` 后合成一条 done;
   一个节点的答复不会关掉另一个节点的 prompt;两个工具调用在飞时按 id 各自关闭;
   列表里 running 步骤 `aria-expanded="true"`、done 步骤 `false`。
@@ -109,7 +117,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 机制: 点边 dot = 选中这条边 = trace 范围收窄到这条边(F3 的 edge 范围),此时列表里的
   行**就是**这条边的操作步骤——`input_dispatch` / `blackboard_reduce` /
   `input_file_injected` 按 `from_phase`/`to_phase` 归边,`artifact_saved` 按上游
-  `phase_name` 归边——与节点步骤同一套行样式(M1 折叠原语),不再有第二套"边专用"呈现。
+  `phase_name` 归边——与节点步骤同一套行样式(长文本走 `text-well` 原语),不再有第二套"边专用"呈现。
   面板中随范围 chip 保留的是 `EdgeTamperSection`,承载两件 trace 行给不了的东西:
   - **未跑前(静态推断)**:像节点 io 一样给出该边的黑板字段推断——"graph 跑到这个 dot
     时,黑板上应该有哪些字段"。推导规则与编译期数据流校验同源:该边可用字段 = 根
@@ -204,13 +212,18 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Capability links: `run-execution`, `golden-eval`, `debug-resume`.
 
 ## 4. 设计决策基础（PM 原话）
-- 长 trace **默认折叠大块**;折叠机制按 2026-08-13 决议 D3(`docs/design/2026-08-13-trace-goes-glass-box-decision.md`)为**按行三态**:收起显示 5 行(一眼识别这段是什么)→ 展开显示 20 行 → 点链接进 Monaco 只读视图看全文。唯一实现是共享原语 `components/ui/folded-text`(超长单行按显示行折算,禁止任何 trace 表面自造折叠;原「自动展开 payload 上限 ~2KB」的字节阈值机制被本条取代,「默认折叠大块」的原则不变)。
+- 长 trace **默认折叠大块**;机制按 2026-08-14 裁决(`docs/design/2026-08-14-trace-longtext-text-well-decision.md`,推翻 2026-08-13 D3 的 5 行/20 行/Monaco 三态)为**固定高度文本井**:与 copilot thinking 同款的固定高度 scrollarea,超出井高的部分靠井内滚动;溢出时「View full text」走正常编辑器通路打开只读全文,不自造 modal。唯一实现是共享原语 `components/ui/text-well`(copilot ThinkingBlock 同源消费;禁止任何 trace 表面自造折叠;「默认折叠大块」的原则不变)。原话:「改成和copilot的thinking一样,一个固定高度的scrollarea,把我之前说的5行20行覆盖掉」「弹编辑器为什么要自创一个modal?编辑器该怎么出现还是怎么出现啊」。
 - 2026-08-13 D1:展开的 LLM 步骤按**执行顺序**渲染子条目——装载 prompt(`template_source`)→ 渲染后 prompt → 思考(`response_data.reasoning`)→ 回答 / 工具 → 设置 / 路由判定;废除 TEMPLATE / VARIABLES 特殊容器。agent phase 内按 Iteration 分层(数据源 `agent_loop_iteration` + `prompt_captured.loop_index`,纯前端投影)。机器自述事件(`finish_task_verdict` / `loop_detected` / `protocol_violation` 等,决议 D4)以通用语义行渲染:行首整句 `message`,展开显示 `details` 管线叙述与 `errors`/`violations` 原因列表。
 - 2026-08-09:「full trace删掉,功能重复,本来就应该显示full tracing」——通读职责回到 Trace 自身(F2/F3)。
 - 2026-08-09:「顶条只显示run_id,后面跟状态徽章,状态徽章不需要一串字,用打勾、错误等原型徽章就行,加上tooltip显示文字success等」(F8)。
 - 2026-08-09:「predict徽章用一个图标就可以了,而且所有ui代表predict的都要统一」(F8)。
 - 2026-08-09:「running的时候,timeline的显示要和copilot一样显示动态过程啊,内部处理的过程显示太少了,要把每一步具体做了什么都流式的显示出来,就和copilot一样。不要直接显示折叠结果,而是和copilot一样,等完成后再折叠」(F1/F9)。
-- 2026-08-09:「tracing里面的中间结果不要用一个固定高度的框框住,本来panel就有scroll」(F9)。
+- 2026-08-09:「tracing里面的中间结果不要用一个固定高度的框框住,本来panel就有scroll」(F9;
+  固定高度禁令就长文本范围已被 2026-08-14 裁决改判,见下条)。
+- 2026-08-14:「tracing里面长文结果的折叠展开还是很奇怪。首先不要套那么多层容器,第二改成和
+  copilot的thinking一样,一个固定高度的scrollarea,把我之前说的5行20行覆盖掉,第三,弹编辑器
+  为什么要自创一个modal?编辑器该怎么出现还是怎么出现啊。」(F9 文本井;推翻 2026-08-13 D3 三态
+  与 2026-08-09 固定高度禁令,决议 `docs/design/2026-08-14-trace-longtext-text-well-decision.md`)。
 - 2026-08-09:「这个prompt inspect是什么东西?不要搞那么复杂,如果显示清楚每一步做了什么,就能直接从tracing里面看到具体的prompt,不用搞特殊化」(F5)。
 
 ## 5. 决策 + 动机

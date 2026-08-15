@@ -356,6 +356,9 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
   - 节点状态胶囊 = `components/nodes/StatusCapsule.tsx`(`STATUS_STYLE` + `StatusCapsule`);
   - 边的描边宽度/中点圆点尺寸/颜色 = `components/edges/edge-style.ts`,`buildEdges` 与
     `ContextEdge` 共同消费。
+  - 长文本井(固定高度 scrollarea,流式自动跟底)= `components/ui/text-well.tsx`(`TextWell`),
+    copilot ThinkingBlock 与 trace 全部长文本(`components/trace/TraceText`)共同消费
+    (2026-08-14 裁决「和 copilot 的 thinking 一样,一个固定高度的 scrollarea」)。
 - 这条与「2.2 样式 Token 化」相邻但不同层:token 管的是**色值/间距只有一个定义**,本条管的是
   **一组元素的整套外观组合只有一个定义**。两层都必须满足。
 原生的 `@xyflow/react` 深色主题仍带有较重的网页感，在 `GraphCanvas` 组件和全局 `index.css` 中进行了覆写：

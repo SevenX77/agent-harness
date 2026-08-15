@@ -57,22 +57,22 @@ describe('TraceStepRow retry badge (D10)', () => {
   })
 })
 
-describe('TraceStepRow payload folding (decision 2026-08-13 D3)', () => {
-  it('renders a short payload whole, with no fold control', () => {
+describe('TraceStepRow payload text well (decision 2026-08-14)', () => {
+  it('renders a payload with no fold control — the well clips by CSS, not by state', () => {
     const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }), true)
 
     expect(html).not.toContain('Expand (')
     expect(html).toContain('phase_start')
   })
 
-  it('folds an oversized payload to the 5-line head via the ONE fold primitive', () => {
+  it('renders an oversized payload WHOLE inside the ONE well primitive', () => {
     const big = 'z'.repeat(4000)
     const html = renderRow(event({ event_type: 'phase_end', big_field: big }), true)
 
-    expect(html).toContain('data-slot="folded-text"')
-    expect(html).toContain('Expand (')
-    // The collapsed head must not contain the full 4000-char blob verbatim.
-    expect(html).not.toContain(big)
+    expect(html).toContain('data-slot="text-well"')
+    // The full text is in the DOM — the fixed-height well scrolls it, nothing slices it.
+    expect(html).toContain(big)
+    expect(html).not.toContain('Expand (')
   })
 })
 

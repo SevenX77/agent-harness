@@ -24,9 +24,50 @@ V030_COGNITIVE_TEMPLATE_ID = "cognitive/v0.3.0"
 
 V030_AGENT_EXIT_CONTRACT_TEXT = (
     "回答必须调用 finish_task，输出符合下方 Schema 的结构化结果。"
-    "business_data_md 遵循 output_schema 列业务字段；diagnostics_md 写自检诊断。\n"
+    "business_data_md 按下方 Schema 与 Markdown 结构说明提交业务输出；diagnostics_md 写自检诊断。\n"
     "强制输出 Schema："
 )
+
+# The rule ``parse_md`` enforces, stated to the party that has to satisfy it.
+# ``finish_task(business_data_md=...)`` is parsed by
+# ``graph_agent.tools.md_to_json.parse_md``, which reads every ``## `` heading as
+# ONE complete output object. Handing the model a JSON Schema and the words
+# "list the business fields" invites the opposite reading — one heading per
+# FIELD — which parses as N objects each missing every field, and every one of
+# them is rejected. Saying the shape here, next to the schema, is what keeps the
+# instruction and the parser from drifting apart.
+_BUSINESS_DATA_MD_SHAPE_RULE = (
+    "business_data_md 是 Markdown，不是 JSON：每个 `## ` 标题开启一个**完整的输出对象**，"
+    "该对象的全部字段都写在这个标题下面。要输出几个对象就写几个 `## ` 块；"
+    "**不要**给每个字段单独开一个 `## ` 块——那会被解析成多个各自缺字段的对象并被全部打回。"
+)
+
+_BUSINESS_DATA_MD_ITEM_HEADER = "item-1"
+
+
+def _render_business_data_md_skeleton(output_schema: dict[str, Any] | None) -> str:
+    """Render the concrete ``business_data_md`` skeleton for this phase's schema.
+
+    Returns an empty string when the schema declares no top-level object
+    properties — there is no field list to show, and the shape rule alone still
+    carries the ``##``-block meaning.
+    """
+    if not output_schema:
+        return ""
+    properties = output_schema.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return ""
+
+    lines = [
+        "```markdown",
+        f"## {_BUSINESS_DATA_MD_ITEM_HEADER}",
+    ]
+    lines.extend(f"- {name}: <值>" for name in properties)
+    lines.append("```")
+    lines.append(
+        "（也可以把整个对象写成一个 JSON 对象，放在 `## ` 标题下的 ```json 代码块里。）"
+    )
+    return "\n".join(lines)
 
 
 def resolve_role_prefix_from_llm_role(llm_role: str | None) -> str:
@@ -176,6 +217,10 @@ def apply_v030_cognitive_template(
         knowledge_base_markdown if knowledge_base_markdown is not None else knowledge_base
     ).strip() or "无预读取参考资料"
     schema_md = json.dumps(output_schema, ensure_ascii=False, indent=2) if output_schema else "{}"
+    skeleton_md = _render_business_data_md_skeleton(output_schema)
+    business_data_md_shape = (
+        f"{_BUSINESS_DATA_MD_SHAPE_RULE}\n\n{skeleton_md}\n" if skeleton_md else ""
+    )
 
     return f"""
 <role>
@@ -243,7 +288,7 @@ def apply_v030_cognitive_template(
 <output_schema>
 {schema_md}
 </output_schema>
-</exit_contract>
+{business_data_md_shape}</exit_contract>
 """.strip()
 
 

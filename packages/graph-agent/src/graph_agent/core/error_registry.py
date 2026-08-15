@@ -143,6 +143,7 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-runtime-state-mapping-failed]': ErrorCodeMetadata('[F-v3-runtime-state-mapping-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/02-mechanism/04-run-outer/01-graph-exec/mvp1-alignment.md#3-接口契约'),
     '[F-v3-runtime-phase-failed]': ErrorCodeMetadata('[F-v3-runtime-phase-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/02-mechanism/04-run-outer/01-graph-exec/mvp1-alignment.md#3-接口契约'),
     '[F-v3-sequential-overwrite-unauthorized]': ErrorCodeMetadata('[F-v3-sequential-overwrite-unauthorized]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
+    '[F-v3-parallel-write-conflict]': ErrorCodeMetadata('[F-v3-parallel-write-conflict]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-agent-exit-control-failed]': ErrorCodeMetadata('[F-v3-agent-exit-control-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md'),
 }
 
@@ -245,6 +246,7 @@ _CATALOG_METADATA_ROWS: tuple[tuple[str, str], ...] = (
     (_DOMAIN_COGNITIVE_RUNTIME, '检查 phase IO 和上游输出'),
     (_DOMAIN_COGNITIVE_RUNTIME, '查看 trace 原始异常'),
     (_DOMAIN_GRAPH, '在 Frontmatter 中声明 allow_sequential_overwrite 允许覆盖'),
+    (_DOMAIN_GRAPH, '让该字段只有一个 owner，或用 depends_on 排出先后次序'),
     (_DOMAIN_AGENT, '让模型调用 finish_task 并提交通过 schema 的业务输出'),
 )
 _CATALOG_METADATA_BY_CODE: dict[str, tuple[str, str]] = dict(

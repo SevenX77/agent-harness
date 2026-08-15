@@ -444,6 +444,14 @@ def _phase_result_payload(
     result: WorkflowState | dict[str, Any],
     output_keys: set[str] | None,
 ) -> dict[str, Any]:
+    if isinstance(result, dict) and isinstance(result.get("data"), dict):
+        # Channel delta from a wrapped phase runner: the data dict already
+        # holds exactly this phase's outputs — take them directly.
+        after_data = dict(result["data"])
+        after_data.pop("phase_outputs", None)
+        if output_keys is None:
+            return after_data
+        return {key: after_data[key] for key in output_keys if key in after_data}
     result_state = _coerce_workflow_state(result)
     after_data = result_state["data"].model_dump()
     if output_keys is None:
@@ -456,6 +464,25 @@ def _phase_result_payload(
         delta.pop("phase_outputs", None)
         return delta
     return {key: after_data[key] for key in output_keys if key in after_data}
+
+
+def _phase_outputs_delta(
+    phase_outputs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Channel delta carrying business payloads plus their phase_outputs entries.
+
+    In-graph iterate phases return this instead of a merged full state so the
+    reducer channels fold them (parallel-fanout decision, 2026-08-15). The
+    graph-level iterate runtime keeps using `_with_phase_outputs` because its
+    result is the invoke return value, not a channel write.
+    """
+    data_delta: dict[str, Any] = {}
+    for payload in phase_outputs.values():
+        data_delta.update(payload)
+    data_delta["phase_outputs"] = {
+        phase_id: dict(payload) for phase_id, payload in phase_outputs.items()
+    }
+    return {"data": data_delta}
 
 
 def _with_phase_outputs(
@@ -855,7 +882,7 @@ def _build_batch_iterate_phase(
     output_schema: dict[str, Any] | None,
     include_batch_outputs: bool,
 ) -> Any:
-    def _batch_phase(state: WorkflowState) -> WorkflowState:
+    def _batch_phase(state: WorkflowState) -> dict[str, Any]:
         workflow_state = _coerce_workflow_state(state)
         payload = _phase_batch_payload(
             workflow_state,
@@ -867,7 +894,7 @@ def _build_batch_iterate_phase(
             node=node,
             include_batch_outputs=include_batch_outputs,
         )
-        return _with_phase_outputs(workflow_state, {phase_id: payload})
+        return _phase_outputs_delta({phase_id: payload})
 
     return _batch_phase
 
@@ -885,7 +912,7 @@ def _build_loop_iterate_phase(
         _iterate_merge_fatal("loop iterate requires accumulate")
     output_keys = _schema_output_keys(output_schema)
 
-    def _loop_phase(state: WorkflowState) -> WorkflowState:
+    def _loop_phase(state: WorkflowState) -> dict[str, Any]:
         workflow_state = _coerce_workflow_state(state)
         items = _apply_iterate_range(_resolve_iterate_items(workflow_state, iterate.over), iterate.range)
         acc = copy.deepcopy(accumulate.init)
@@ -915,7 +942,7 @@ def _build_loop_iterate_phase(
                 reducer=accumulate.merge,
             )
         final_payload = {accumulate.var: acc}
-        return _with_phase_outputs(workflow_state, {phase_id: final_payload})
+        return _phase_outputs_delta({phase_id: final_payload})
 
     return _loop_phase
 
@@ -1128,7 +1155,7 @@ def _wrap_phase_runtime_node(
         validator_error_code=f"[F-v3-{node_kind}-validator-failed]",
     ).wrap(_node_with_lifecycle)
 
-    def _dispatch_and_run(state: WorkflowState) -> WorkflowState:
+    def _dispatch_and_run(state: WorkflowState) -> dict[str, Any]:
         _emit_input_dispatch(callbacks, phase_id=phase_id, mapper=mapper, state=state)
         return phase_runner(state)
 

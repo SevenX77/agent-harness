@@ -385,6 +385,7 @@ class SkillLoader:
             poisoned_phases=poisoned_phases,
         )
         _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs, post_diags)
+        _validate_parallel_writers(graph_path, body_phase_refs, phase_docs, post_diags)
 
         discovery_failed = False
         subagent_failed = False
@@ -2875,16 +2876,14 @@ def _parse_attrs(raw: str) -> dict[str, str]:
     return {match.group(1): match.group(3) for match in _ATTR_RE.finditer(raw)}
 
 
-def _validate_sequential_overwrites(
-    graph_path: Path,
+def _phase_ancestor_sets(
     body_phase_refs: list[BodyPhaseRef],
-    phase_docs: list[PhaseDocument],
-    diags: list[_Diag],
-) -> None:
+) -> dict[str, set[str]]:
+    """Transitive dependency closure per phase (excluding the 'input' pseudo-node)."""
     depends_on_map = {ref.name: list(ref.depends_on) for ref in body_phase_refs}
 
     def get_ancestors(phase_name: str) -> set[str]:
-        ancestors = set()
+        ancestors: set[str] = set()
         queue = list(depends_on_map.get(phase_name, []))
         while queue:
             curr = queue.pop(0)
@@ -2893,6 +2892,10 @@ def _validate_sequential_overwrites(
                 queue.extend(depends_on_map.get(curr, []))
         return ancestors
 
+    return {ref.name: get_ancestors(ref.name) for ref in body_phase_refs}
+
+
+def _phase_declared_output_keys(phase_docs: list[PhaseDocument]) -> dict[str, set[str]]:
     phase_output_keys: dict[str, set[str]] = {}
     for doc in phase_docs:
         keys = set()
@@ -2901,6 +2904,66 @@ def _validate_sequential_overwrites(
             if isinstance(props, dict):
                 keys = {k for k in props if isinstance(k, str)}
         phase_output_keys[doc.phase_name] = keys
+    return phase_output_keys
+
+
+def _validate_parallel_writers(
+    graph_path: Path,
+    body_phase_refs: list[BodyPhaseRef],
+    phase_docs: list[PhaseDocument],
+    diags: list[_Diag],
+) -> None:
+    """Reject two dependency-independent phases declaring the same output field.
+
+    Phases with no dependency path between them can execute in the same
+    superstep; both writing one business field would race on the reducer
+    channel with nondeterministic last-writer-wins. The illegal state is made
+    unrepresentable at compile time instead (parallel-fanout decision,
+    2026-08-15).
+    """
+    ancestor_sets = _phase_ancestor_sets(body_phase_refs)
+    phase_output_keys = _phase_declared_output_keys(phase_docs)
+    docs_by_name = {doc.phase_name: doc for doc in phase_docs}
+    names = [ref.name for ref in body_phase_refs]
+
+    for index, first in enumerate(names):
+        for second in names[index + 1 :]:
+            if first in ancestor_sets.get(second, set()):
+                continue
+            if second in ancestor_sets.get(first, set()):
+                continue
+            overlap = phase_output_keys.get(first, set()) & phase_output_keys.get(
+                second, set()
+            )
+            report_doc = docs_by_name.get(second) or docs_by_name.get(first)
+            if report_doc is None:
+                continue
+            for key in sorted(overlap):
+                detail = (
+                    f"Phases '{first}' and '{second}' have no dependency path between "
+                    f"them (they may run in parallel) but both declare output field "
+                    f"'{key}'. Parallel writers of one field race nondeterministically; "
+                    f"give the field a single owner or order the phases with depends_on."
+                )
+                diags.append(
+                    _Diag(
+                        path=report_doc.path,
+                        line=1,
+                        code="[F-v3-parallel-write-conflict]",
+                        message=detail,
+                        field_path=f"io.outputs.properties.{key}",
+                    )
+                )
+
+
+def _validate_sequential_overwrites(
+    graph_path: Path,
+    body_phase_refs: list[BodyPhaseRef],
+    phase_docs: list[PhaseDocument],
+    diags: list[_Diag],
+) -> None:
+    ancestor_sets = _phase_ancestor_sets(body_phase_refs)
+    phase_output_keys = _phase_declared_output_keys(phase_docs)
 
     for doc in phase_docs:
         phase_name = doc.phase_name
@@ -2908,7 +2971,7 @@ def _validate_sequential_overwrites(
         if not current_outputs:
             continue
 
-        ancestors = get_ancestors(phase_name)
+        ancestors = ancestor_sets.get(phase_name, set())
         allowed_overwrites = set(getattr(doc.ast, "allow_sequential_overwrite", []) or [])
 
         for ancestor_name in ancestors:

@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from graph_agent.core.exceptions import GraphAgentFatalError
-from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
+from graph_agent.core.state import (
+    BusinessData,
+    FrameworkState,
+    WorkflowState,
+    merge_business_channel,
+)
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     ReaderSandboxState,
@@ -199,9 +204,16 @@ def test_phase_wrapper_maps_input_and_output() -> None:
     )
     res = wrapped(state)
 
-    # The phase now also records its outputs into the reserved phase_outputs map
-    # (D7 per-node golden); phase_id defaults to "unknown" for this bare mapper.
-    assert res["data"].model_dump() == {
+    # The wrapper returns a channel delta (parallel-fanout decision 2026-08-15);
+    # folding it through the data reducer yields the merged state, with the
+    # phase's outputs recorded in the reserved phase_outputs map (D7 per-node
+    # golden); phase_id defaults to "unknown" for this bare mapper.
+    assert res["data"] == {
+        "answer": "A",
+        "phase_outputs": {"unknown": {"answer": "A"}},
+    }
+    merged = merge_business_channel(state["data"], res["data"])
+    assert merged.model_dump() == {
         "topic": "A",
         "extra": True,
         "answer": "A",
@@ -218,10 +230,16 @@ def test_wrap_phase_output_accumulates_real_phase_outputs_map_per_node() -> None
     step2 = StateMapper(output_schema={"type": "object", "properties": {"b": {}}}, phase_id="step2")
 
     state = WorkflowState(data=BusinessData(), flow=FrameworkState(), messages=[])
-    after1 = step1.wrap_phase_output(state, {"data": {"a": 1}})
-    after2 = step2.wrap_phase_output(after1, {"data": {"b": 2}})
+    delta1 = step1.wrap_phase_output(state, {"data": {"a": 1}})
+    folded1 = WorkflowState(
+        data=merge_business_channel(state["data"], delta1["data"]),
+        flow=state["flow"],
+        messages=[],
+    )
+    delta2 = step2.wrap_phase_output(folded1, {"data": {"b": 2}})
+    folded2 = merge_business_channel(folded1["data"], delta2["data"])
 
-    real_map = after2["data"].model_dump()["phase_outputs"]
+    real_map = folded2.model_dump()["phase_outputs"]
     assert real_map == {"step1": {"a": 1}, "step2": {"b": 2}}
 
 
@@ -242,9 +260,9 @@ def test_wrap_phase_output_does_not_leak_child_phase_outputs_across_subgraph_io(
             "phase_outputs": {"child_prep": {"scratch_only": 1}, "child_final": {"child_answer": "ok"}},
         }
     }
-    after = delegate.wrap_phase_output(state, result)
+    delta = delegate.wrap_phase_output(state, result)
 
-    dumped = after["data"].model_dump()
+    dumped = merge_business_channel(state["data"], delta["data"]).model_dump()
     # The child's intermediate field never leaked into the parent business namespace.
     assert "scratch_only" not in dumped
     assert dumped["child_answer"] == "ok"

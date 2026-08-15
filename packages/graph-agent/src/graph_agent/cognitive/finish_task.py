@@ -23,7 +23,16 @@ class FinishTaskInput(BaseModel):
 
     reasoning: str = Field(default="", description="Reasoning or explanation of the submitted work.")
     diagnostics_md: str = Field(default="", description="Additional diagnostic markdown or details.")
-    business_data_md: str = Field(..., description="Final structured/unstructured business markdown output.")
+    business_data_md: str = Field(
+        ...,
+        description=(
+            "Final business output as Markdown. Every '## ' heading starts ONE "
+            "complete object matching the phase output schema, with that "
+            "object's fields written under it as '- name: value' bullets (or as "
+            "a single JSON object in a fenced block). Write one '## ' block per "
+            "object — never one per field."
+        ),
+    )
 
 
 Md2JsonConverter = Callable[[str, dict[str, Any] | None], Md2JsonResult]

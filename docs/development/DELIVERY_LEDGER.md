@@ -168,6 +168,9 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 | W2-8 | predict 端点把引擎交给工作线程,不在事件循环上跑 | ✅ 已合并(#818) | 决议 `.kiro/specs/decision-2026-08-15-predict-off-the-event-loop.md`。端点是 `async def` 却直接调同步的 `dispatch_predict_job`,引擎批处理路径内部的 `asyncio.run()`(`core/graph_assembler.py` `_run_batch_iterate_payload` 与 subagent 批处理路径)在事件循环线程上必然抛 RuntimeError → **任何用 `iterate.mode=batch` 的 skill,从界面点 Predict 一定失败**;同函数在 `services/copilot_tools.py:543` 已包 `asyncio.to_thread`,所以 copilot 路径一直能 predict、界面按钮一直不能 |
 | W2-9 | 引擎归不了类的异常不再冒充 LLM provider 失败(`engine.unexpected_error`) | ✅ 已合并(#819) | 决议 `.kiro/specs/decision-2026-08-15-engine-unclassified-error-code.md`。`runner.py` 两处 `except Exception` 包的是**整张图的一次执行**,兜底码却是 `llm.provider_invoke_failed`;而真 provider 异常全都自带 code(`LLMProviderError.__init__` 把 `error_code` 列为必填构造参数、`LLMProviderMissingError` 类级写死),兜底分支执行本身就证明"它不是 provider 异常"——这个默认值每次生效都是错的。同函数三行外的 `_safe_provider_error_message` 用的正是相反判据。不动 `adapters/engine.py:392`:那处包的是 `model.stream(...)` 内部,默认诚实 |
 
+| W2-10 | 一个 batch 条目 / loop 轮次是一次独立调用,有自己的迭代身份 | ✅ 已合并(#822) | 决议 `.kiro/specs/decision-2026-08-15-engine-batch-item-isolation.md`。相位级 batch 的 `_phase_batch_runner` 只设 branch index(纯事件标签)不设 `active_outer_ns`,而它的图级孪生 `_graph_batch_runner` 两个都设;`_skill_node` 又把 `checkpoint_ns` 写死成 `agent:{phase_id}`、`thread_id` 是整次 run 的常量 → 每个条目递给 agent 图的 key **完全相同**,checkpointer 让条目 2 恢复条目 1 的整段对话,`ExitControlMiddleware` 让条目 2 继承条目 1 用剩的预算。相位级 loop 同一漏点一并修。中间件身份走自定义键 `agent_invocation_id`(实测 LangGraph 递给 hook 的 `checkpoint_ns` 是**每次 hook 调用**的新 uuid,`_skill_node` 写的那个到不了) |
+| W2-11 | 校验器强制的 `business_data_md` Markdown 形状,契约里必须明说 | 🔄 PR 待合并 | 决议 `.kiro/specs/decision-2026-08-15-business-data-md-shape-in-exit-contract.md`。`parse_md` 的规则是「一个 `## ` 标题 = 一个完整输出对象」,但提示词只说 "business_data_md 遵循 output_schema **列业务字段**" 再甩一份原始 JSON Schema,工具参数描述是 "Final structured/unstructured business markdown output." ——**两处都没提 `##`**(实测:该次 run 的 `prompt_captured` 全文搜不到任何 `##` 示范)。引擎里有个函数专门说这件事(`tools/dynamic_schema.py:253` `render_dynamic_schema_output_format`),**`src/` 下零调用点**;两种写法经 `core/schema_engine.py:139` 汇成同一份 JSON Schema,所以**没有任何相位被告知过这个形状** |
+
 > **W2-3 ~ W2-9 是一条因果链,不是七个独立缺陷。** 它们是在用 MoirAI 修真实复杂 skill
 > (`story-deconstruction`:子图嵌两层 + 六路并行 + loop 累积 + 图级 batch)的过程中
 > 逐个撞出来的——前一个不修,后一个根本暴露不出来。W2-1~W2-7 修完后,该 skill 的 predict
@@ -183,7 +186,12 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 > after 8 iteration(s)`。trace 显示 batch 的两个条目**共用同一份 agent 循环预算**
 > (迭代计数器 1→8 之后条目 2 从 **9** 接着数),且条目 2 的输出是条目 1 的内容
 > (输入 `chapter_number=2` + 第 2 章原文,输出却是第 1 章剧情)——**这一条不报错、出错数据**。
-> 根因排查与最小复现另开,不在本行结论内。
+> 根因即 W2-10。
+> **第二次真跑(W2-10 合并 + 重建 vendor 之后)**:`.workspace/runs/2026-08-15T11-35-15_55b58e42`。
+> `segmentation` 子图两章全部跑完,**串台消失**——第 1 章提交「驱车前往野狼谷、搭帐篷、
+> 取出铜镜」,第 2 章提交「篝火旁铜镜看到异次元宫殿、次日清晨下山」,各自对上各自的原文。
+> 流程推进到 `event_timeline` 子图,233.967 秒后崩在相位 `aggregate`,根因即 W2-11
+> (模型把一个字段写成一个 `##` 块,`parse_md` 读成三个各自缺字段的对象,连打 5 次回票)。
 > **踩坑记录**:桌面 app 的 sidecar 永远从冻结 vendor 快照导入引擎,这五个 PR 合并期间
 > 未重建 vendor,导致 MoirAI 一直在对落后 3 个 PR 的旧引擎做推理并报"32 errors",
 > 而同一时刻当前源码离线编译是 `COMPILE OK`。评估 agent 表现前必须先按 AGENTS.md

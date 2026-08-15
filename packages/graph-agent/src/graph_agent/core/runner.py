@@ -1053,6 +1053,33 @@ def _safe_provider_error_message(exc: Exception) -> str:
     return "[redacted]" if _contains_sensitive_error_text(message) else message
 
 
+def _artifact_error_result(exc: Exception, *, run_id: str) -> RunArtifactErrorResult:
+    """Report a run that died of an exception, without inventing a cause for it.
+
+    Every provider failure names itself: `LLMProviderError` takes `error_code` as a
+    required constructor argument and `LLMProviderMissingError` carries one at class
+    level. So an exception arriving here WITHOUT an `error_code` is, by construction,
+    not a provider failure — defaulting to an `llm.*` code told whoever read the
+    payload to go look at the gateway for a fault that lives in the engine.
+    `_safe_provider_error_message` already draws exactly this line one line below.
+    """
+    error_code = str(getattr(exc, "error_code", "") or "engine.unexpected_error")
+    details = _safe_provider_error_details(getattr(exc, "details", {}))
+    details.setdefault("exception_type", type(exc).__name__)
+    retryable = bool(getattr(exc, "retryable", False))
+    return RunArtifactErrorResult(
+        error_code=error_code,
+        error_payload={
+            "error_code": error_code,
+            "message": _safe_provider_error_message(exc),
+            "details": details,
+            "retryable": retryable,
+        },
+        run_id=run_id,
+        retryable=retryable,
+    )
+
+
 def _contains_sensitive_error_text(value: str) -> bool:
     lowered = value.lower()
     return any(
@@ -1170,22 +1197,7 @@ def run_artifact(
         if isinstance(outputs, RunArtifactErrorResult):
             return outputs
     except Exception as exc:
-        error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
-        message = _safe_provider_error_message(exc)
-        details = _safe_provider_error_details(getattr(exc, "details", {}))
-        retryable = getattr(exc, "retryable", False)
-
-        return RunArtifactErrorResult(
-            error_code=error_code,
-            error_payload={
-                "error_code": error_code,
-                "message": message,
-                "details": details,
-                "retryable": retryable,
-            },
-            run_id=run_id,
-            retryable=retryable,
-        )
+        return _artifact_error_result(exc, run_id=run_id)
 
     result_ref = (
         _workflow_result_ref(outputs, runs_root(workspace_dir) if workspace_dir else None)
@@ -1240,21 +1252,7 @@ def predict_artifact(
             if isinstance(result, RunArtifactErrorResult):
                 return result
         except Exception as exc:
-            error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
-            message = _safe_provider_error_message(exc)
-            details = _safe_provider_error_details(getattr(exc, "details", {}))
-            retryable = getattr(exc, "retryable", False)
-            return RunArtifactErrorResult(
-                error_code=error_code,
-                error_payload={
-                    "error_code": error_code,
-                    "message": message,
-                    "details": details,
-                    "retryable": retryable,
-                },
-                run_id=run_id,
-                retryable=retryable,
-            )
+            return _artifact_error_result(exc, run_id=run_id)
         workspace_dir = _resolve_artifact_workspace_dir(request)
         result_ref = _workflow_result_ref(result, predicts_root(workspace_dir) if workspace_dir else None)
         if run_artifact_store is not None:

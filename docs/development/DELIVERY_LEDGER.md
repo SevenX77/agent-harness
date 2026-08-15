@@ -483,11 +483,25 @@ AST import 图,对已删模块/符号的 import **0 条**。
 (import 得到 `graph_agent`,又与前端同仓);引擎不该知道有个前端文件,前端没有 Python
 可内省。三个变异验伪:删一条 / 加一条幽灵 / 改常量名,均被精确点名。
 
-**未完成的最后一步(不得据此认为已验证)**:`/studio-verify` 真机点验 + 五列报告。
-它需要独占仓根主 app 与 CDP 9222,而该资源自 2026-08-15 09:47 起被另一会话
-(story-deconstruction 实验)在运行时资源黑板上连续续期占用,故排队等待中——按黑板规矩
-不抢占(抢占会打断对方正在跑的验证,且 vendor 重建必须先关 app)。
-**排队期间已在磁盘上坐实三项**(证据源:同日 10:19 的真实 run
+**真机点验已完成(2026-08-15 13:33–14:0x,报告页
+https://claude.ai/code/artifact/49211f28-0991-4833-ae1f-39d68dd37bb4)**。占用等了约 3.7 小时
+(09:47 起被 story-deconstruction 实验会话持有,按黑板规矩排队不抢占),13:33 轮到后:
+关 app → 重建 vendor(连带补进他人后续合并的 #819/#825/#826)→ 预热 `.pyc` →
+带 CDP 调试口重启 → 逐项驱动真窗口 → 验完确认 9222 关闭(`curl` 返回 000)、起无调试口实例、
+释放 `cdp-9222`/`main-app`。**九项:八项实测通过,一项仅静态**——
+- **① 删后引擎可被 sidecar 导入**:首屏正常、无 Backend unavailable、Recent 可读,本次启动日志
+  ImportError/traceback **0 条**;重建后的快照静态验尸:死家族 14 模块 / ctx 桥 / 死事件类均 0 残留。
+- **② 编译单出口**:点 Compile 后 2683ms 弹成功 toast(带 sha256 与指纹),后端三次 `POST …/compile`
+  全部 200 OK。
+- **③ 前端 run-status 投影**:打开 10:19 那条 run,渲染 88 行 / 14 类、**unknown 类型 0 个**;
+  `finish_task_verdict` 7 条 = 5×`bg-warning`(rejected)+ 2×常态(accepted),`loop_detected` 2×warning,
+  其余各类条数与 trace 文件**逐类相等**(预期值点验前已从 trace 预先算出,是数字对数字)。
+- **④ `DeadEndPrunedEvent` 保留——仅静态,未打勾**:发布快照里三节链齐全(生产者
+  `middleware/execution_control.py:258` 的 `cb.on_dead_end_pruned(...)`、事件类 `callbacks/events.py:165`、
+  `ExecutionControlMiddleware` 位列活链第 3 槽),但**全机所有 run trace 中该事件 0 条**,
+  造一个必然 dead-end 的场景再赌 LLM 走到那一步,代价与收益不成比例。
+
+**另有三项在排队期间已于磁盘上坐实**(证据源:同日 10:19 的真实 run
 `D:\coding\skills\story-deconstruction-v3-lab\.workspace\runs\2026-08-15T10-19-55_df555c19\`,
 跑在 09:39 重建的 vendor 上,该快照内容级实证含五 PR):
 - **PR B 认知工具**——`report.md` 的 Tools 表记 `log_ambiguity` ×1 / `update_working_memory` ×3,
@@ -502,9 +516,11 @@ AST import 图,对已删模块/符号的 import **0 条**。
 
 **另有两项没有真机可观测面,只能由单测锁定,报告里如实标注不打勾**:① `context_access`
 opt-in 门——引擎事件只记录工具**被调用**、不记录**被挂载**(`prompt_captured` 字段无 tools),
-"没挂上"从 trace 看不出来;② compaction 触发条件是上下文超窗 80%,冒烟不可控、本次未触发。
-**真正还欠窗口的只剩四项**:app 重建 vendor(含他人 PR #819)后能起、Compile 通、
-前端投影逐条对数(预期值已从 trace 预先算好)、`dead_end_pruned` 的识别。
+"没挂上"从 trace 看不出来;② compaction 触发条件是上下文超窗 80%,冒烟不可控、全机所有 run 均未触发。
+
+**本条至此收敛**:代码面五 PR + 收尾件 #808/#820/#823/#824 全部合并,门禁全绿,真机点验完成、
+报告已交。唯一不打勾的是 `DeadEndPrunedEvent` 的运行时观测(理由见上),它不影响 PR E 的结论
+——"该事件有活生产者、不该删"是由代码链证明的,与能否在一次冒烟里触发无关。
 PR E 的逐项重核推翻了决议 §5 的一条:
 **`DeadEndPrunedEvent` 不删**——它有活生产者(`ExecutionControlMiddleware` 经旧式
 `on_dead_end_pruned` 回调发出),决议起草时的清单误判为零发射点,已在决议 §5 落更正;

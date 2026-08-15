@@ -133,7 +133,7 @@ def write_loop_accumulate_skill(root: Path) -> None:
         iterate="""
 iterate:
   mode: loop
-  over: data.inputs.items
+  over: items
   item_var: item
   accumulate:
     var: collected
@@ -166,7 +166,7 @@ def write_batch_iterate_skill(root: Path) -> None:
         iterate="""
 iterate:
   mode: batch
-  over: data.inputs.items
+  over: items
   item_var: item
   concurrency: 2
 """,

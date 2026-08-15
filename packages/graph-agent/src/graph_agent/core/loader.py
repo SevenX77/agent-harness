@@ -2199,6 +2199,18 @@ def _validate_static_dataflow(
     root_input_keys = set(_schema_property_paths(root_inputs))
     available_after: dict[str, set[str]] = {}
 
+    if graph_iterate is not None and not _field_is_supplied(graph_iterate.over, root_input_keys):
+        diags.append(
+            _Diag(
+                graph_path,
+                _frontmatter_key_line(graph_path, "iterate"),
+                "[F-v3-iterate-over-not-list]",
+                f"graph iterate over field {graph_iterate.over!r} is not a root input "
+                "field, so it cannot resolve to a list at runtime",
+                field_path="iterate.over",
+            )
+        )
+
     local_poisoned = set(poisoned_phases)
 
     for phase_name in order:
@@ -2255,6 +2267,25 @@ def _validate_static_dataflow(
                     field_path=f"{phase_name}.io.inputs.properties.{input_key}",
                 )
             )
+        phase_iterate = getattr(doc.ast, "iterate", None)
+        over_field = getattr(phase_iterate, "over", None)
+        if (
+            isinstance(over_field, str)
+            and not _field_is_supplied(over_field, available)
+            and not _runtime_input_field_is_supplied(runtime_input_fields, phase_name, over_field)
+        ):
+            diags.append(
+                _Diag(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "iterate"),
+                    "[F-v3-iterate-over-not-list]",
+                    f"iterate over field {over_field!r} of phase {phase_name!r} has no "
+                    "root, upstream, or runtime input source, so it cannot resolve to "
+                    "a list at runtime",
+                    field_path=f"{phase_name}.iterate.over",
+                )
+            )
+
         available_after[phase_name] = available | set(_schema_property_paths(_phase_output_schema(doc)))
 
     terminal_output_keys: set[str] = set()

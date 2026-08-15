@@ -89,6 +89,10 @@ phases:
 <phase depends_on="input" output>main</phase>
 """,
     )
+    # ask_clarification is a framework tool mounted unconditionally since the
+    # 2026-08-15 migration decision §3.1 — declaring it in `tools:` is now a
+    # [F-v3-agent-tool-reserved] compile diagnostic, so the fixture exercises
+    # the real default-mount path with no local shim.
     _write(
         root / "phases" / "main" / "SKILL.md",
         """---
@@ -104,24 +108,10 @@ io:
       answer:
         type: string
 max_iterations: 3
-tools:
-  - ask_clarification
 ---
 <role>Executor.</role>
 <goal>Ask the user to choose, then finish.</goal>
 """,
-    )
-    _write(
-        root / "phases" / "main" / "tools" / "ask.py",
-        '''from __future__ import annotations
-
-def ask_clarification(
-    question: str,
-    clarification_type: str = "missing_info",
-    options: list[str] | None = None,
-) -> str:
-    return "handled by middleware"
-''',
     )
 
 

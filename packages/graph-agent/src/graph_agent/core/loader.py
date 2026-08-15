@@ -1245,7 +1245,19 @@ def _validate_agent_declared_tools(
     diags: list[_Diag],
 ) -> None:
     root_tool_names = {tool.id for tool in registry.root_tools}
-    framework_tool_names = {"finish_task", "read_reference", "read_example", "log_ambiguity"}
+    framework_tool_names = {
+        "finish_task",
+        "read_reference",
+        "read_example",
+        "log_ambiguity",
+        # Migration decision 2026-08-15: ask_clarification/update_working_memory
+        # mount unconditionally; query_working_memory/read_artifact mount via
+        # context_access opt-in — all four names are framework-owned either way.
+        "ask_clarification",
+        "update_working_memory",
+        "query_working_memory",
+        "read_artifact",
+    }
     for doc in phase_docs:
         if not isinstance(doc.ast, AgentNodeAST):
             continue

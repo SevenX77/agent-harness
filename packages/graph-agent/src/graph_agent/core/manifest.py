@@ -298,6 +298,11 @@ class AgentNodeAST(_BaseNodeAST):
     examples_inline: list[AgentExample] = Field(default_factory=list)
     max_iterations: int = Field(default=10, ge=1, le=50)
     llm_role: str | None = None
+    # Round 8 opt-in mining (migration decision 2026-08-15 §3.4): phases keep
+    # strong isolation unless they declare the context planes they may read —
+    # "working_memory" mounts query_working_memory, "artifact" mounts
+    # read_artifact. The Literal makes any other value a compile diagnostic.
+    context_access: list[Literal["working_memory", "artifact"]] = Field(default_factory=list)
 
     @field_validator("max_iterations", mode="before")
     @classmethod

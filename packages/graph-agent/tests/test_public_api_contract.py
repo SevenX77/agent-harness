@@ -290,6 +290,7 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                    ('examples_inline', 'list[graph_agent.core.manifest.AgentExample]'),
                    ('max_iterations', 'int'),
                    ('llm_role', 'str | None'),
+                   ('context_access', "list[Literal['working_memory', 'artifact']]"),
                    ('use_graph_llm_role', 'bool'),
                    ('system_prompt', 'str'))),
  'BlackboardState': ('graph_agent',

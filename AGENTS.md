@@ -160,6 +160,17 @@ defect even when all tests pass.
   wrong data, copy-pasting a workaround — are rejected even when they make the
   test green. Ask "why can this state exist at all?" before "how do I make
   the error go away?".
+- **先看成熟工程怎么解,再决定自己怎么写。** 一个需要新机制的问题——互斥、
+  租约、重试、缓存失效、迁移、进程监督——多半是别人解过几十年的老问题。
+  动手前先找到一两个**成熟工程项目**的既有解法(标准库、被广泛使用的开源
+  项目、有公开设计文档的系统),看清它的**取舍**:它记了哪些字段、为什么
+  是这些、失败时倒向哪一侧、放弃了什么。然后**明确说出这次借了什么、拒绝
+  了什么、为什么**——写进代码注释或设计文档,不留在脑子里。
+  判断标准:说不出参考对象,就是在凭直觉发明;说得出但讲不清它为什么那样
+  取舍,等于抄了个形状。这不是"照搬":本仓的约束(Windows 主力机、无守护
+  进程、Git Bash 下 PID 不可见)常常让某个成熟方案的关键前提不成立——那就
+  **写明它为什么在这里不成立**,再取它成立的那部分。呼应「论据先行」:参考
+  对象也是论据,要指名道姓,不能是"业界一般都这么做"。
 - **Module boundaries say WHERE a fix lands — they are never a reason to put
   it somewhere worse.** If root-cause analysis shows the correct change is
   inside `packages/graph-agent` (engine) or `packages/graph-agent-gateway`
@@ -402,12 +413,27 @@ not water a feature down to keep it frontend-only.
 `.gitignore` 里),整个目录删掉的代价只是当前那几条占用。
 
 ```bash
+export WT_BOARD_AGENT=<本会话 id>                                      # 报上身份,见下
 scripts/wt-board.sh claim   <resource> [--ttl <秒>] [--note "<一行>"]  # 占用;被占则非 0 退出并打印持有者
 scripts/wt-board.sh release <resource>                                 # 释放(幂等;释放别人的活占用要 --force)
 scripts/wt-board.sh renew   <resource> [--ttl <秒>]                    # 长任务续期
 scripts/wt-board.sh status                                             # 全部占用 + 各 worktree + 最近 10 条 note
+scripts/wt-board.sh holds   <resource>                                 # 只有"这块板确实是我的"才退出 0
 scripts/wt-board.sh note    "<一行>"                                   # 追加一行运行时事实
 ```
+
+**身份要到会话一级,不能只到 worktree。** 两个 agent 常常在**同一棵树**(仓根)上
+干活,worktree 路径分不开它们——2026-08-15 就是这样,两个会话在同一个调试窗口上
+互相打了几小时点击,而黑板对双方看起来都自洽。所以占用会记下 `WT_BOARD_AGENT`
+(本会话的稳定 id),`holds` 只有在**占用方和提问方都报得出身份且一致**时才答 0;
+任何一边匿名都算"证明不了",一律当作没占。这套字段照搬 Kubernetes `Lease` 的
+`holderIdentity` / Terraform 状态锁的 `ID`——租约不能指名持有者就不成其为互斥。
+
+**`holds` 是给工具用的,不是给人看的。** 真机验证里会驱动窗口的工具
+(`click.mjs`、`emulate.mjs`、两个 launcher)在动手前自己问一次,答不出就退出 4。
+只读观察(`cdp.mjs`/`shot.mjs`/`console.mjs`)不设卡——先看得见,才谈得上不抢。
+理由是实证:黑板合并当天,文档已经写着"点验前先 claim",撞车照样发生;
+**只靠文档约束的纪律,在这件事上不成立。**
 
 **约定的资源名**:
 

@@ -1,4 +1,8 @@
 // node emulate.mjs <width> <height> | node emulate.mjs clear
+import { requireCdpClaim } from './lease-guard.mjs'
+
+requireCdpClaim()
+
 const targets = await (await fetch('http://127.0.0.1:9222/json')).json()
 const page = targets.find((t) => t.type === 'page' && /:5173/.test(t.url))
 const ws = new WebSocket(page.webSocketDebuggerUrl)

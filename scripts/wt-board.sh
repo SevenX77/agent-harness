@@ -44,6 +44,7 @@ USAGE
   scripts/wt-board.sh release <resource> [--force]
   scripts/wt-board.sh renew   <resource> [--ttl <seconds>]
   scripts/wt-board.sh status
+  scripts/wt-board.sh holds   <resource>          # exit 0 only if THIS caller holds it
   scripts/wt-board.sh note    "<one line>"
   scripts/wt-board.sh help
 
@@ -68,6 +69,15 @@ RESOURCE NAMES (conventional; letters, digits, '-' and '_' only)
   port-<n>      a worktree's private Vite / sidecar port. scripts/wt-dev.sh
                 claims these for you and releases them when it exits.
 
+WHO IS HOLDING IT
+  A claim records the worktree, the branch and WT_BOARD_AGENT — a stable id for
+  the session doing the work. Set it once per session:
+      export WT_BOARD_AGENT=<your session id>
+  Two agents routinely work from the same tree (the repo root), so the worktree
+  path alone cannot separate them. `holds` refuses to answer yes unless both the
+  claim and the caller name themselves, which is what lets a tool guard itself:
+      scripts/wt-board.sh holds cdp-9222 || exit 1
+
 TTL
   Default 3600s. A claim expires on its own so a crashed holder cannot block the
   resource forever; `claim` on an expired claim takes it over and says so.
@@ -84,6 +94,14 @@ log_file="$board_dir/log"
 
 self_worktree="$(git rev-parse --show-toplevel)"
 self_branch="$(git rev-parse --abbrev-ref HEAD)"
+# Who is holding it, one level finer than the worktree. Two agents routinely work
+# from the SAME tree — the repo root — so the worktree path alone cannot tell
+# them apart, and on 2026-08-15 two of them drove the same debugged window while
+# the board looked consistent to both. Same idea as a Kubernetes Lease's
+# holderIdentity or a Terraform state lock's ID: a claim is worthless as a mutual
+# exclusion unless the holder can be named. Empty when the caller never set one,
+# which `holds` treats as "cannot prove it is mine".
+self_agent="${WT_BOARD_AGENT:-}"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -114,18 +132,19 @@ fmt_duration() { # fmt_duration <non-negative seconds> -> "2h05m" / "5m30s" / "4
 }
 
 # Metadata of the last lock read_owner() succeeded on.
-owner_branch=""; owner_worktree=""; owner_note=""
+owner_branch=""; owner_worktree=""; owner_agent=""; owner_note=""
 owner_claimed_human=""; owner_expires_epoch=""; owner_expires_human=""
 
 read_owner() { # read_owner <lock-dir> -> 1 when the metadata is missing/unusable
   local key value
-  owner_branch=""; owner_worktree=""; owner_note=""
+  owner_branch=""; owner_worktree=""; owner_agent=""; owner_note=""
   owner_claimed_human=""; owner_expires_epoch=""; owner_expires_human=""
   [ -r "$1/owner" ] || return 1
   while IFS='=' read -r key value; do
     case "$key" in
       branch) owner_branch="$value" ;;
       worktree) owner_worktree="$value" ;;
+      agent) owner_agent="$value" ;;
       claimed_at_human) owner_claimed_human="$value" ;;
       expires_at_epoch) owner_expires_epoch="$value" ;;
       expires_at_human) owner_expires_human="$value" ;;
@@ -163,6 +182,7 @@ write_owner() { # write_owner <lock-dir> <ttl> <note>
   {
     printf 'branch=%s\n' "$self_branch"
     printf 'worktree=%s\n' "$self_worktree"
+    printf 'agent=%s\n' "$self_agent"
     printf 'claimed_at_epoch=%s\n' "$start"
     printf 'claimed_at_human=%s\n' "$(now_human)"
     printf 'expires_at_epoch=%s\n' "$((start + ttl))"
@@ -353,11 +373,11 @@ cmd_status() {
         else
           state="EXPIRED $(fmt_duration "$((-remaining))") ago"
         fi
-        printf '  %-12s %-34s %-18s %s\n' \
-          "$resource" "${owner_branch:-?}" "$state" "${owner_note:-}"
+        printf '  %-12s %-28s %-14s %-18s %s\n' \
+          "$resource" "${owner_branch:-?}" "${owner_agent:-<anon>}" "$state" "${owner_note:-}"
       else
-        printf '  %-12s %-34s %-18s %s\n' \
-          "$resource" "?" "NEVER DESCRIBED" "dead claim — release --force to clear"
+        printf '  %-12s %-28s %-14s %-18s %s\n' \
+          "$resource" "?" "?" "NEVER DESCRIBED" "dead claim — release --force to clear"
       fi
     done
   fi
@@ -374,6 +394,48 @@ cmd_status() {
   fi
 }
 
+# The question a tool asks before it touches the resource. Exit 0 means "this
+# caller holds a live claim on it" and nothing else — so a guard can be a single
+# line, and a wrong answer fails closed.
+cmd_holds() {
+  local resource="${1:-}"
+  [ $# -le 1 ] || die "holds takes one resource"
+  validate_resource "$resource"
+
+  local lock="$locks_dir/$resource"
+  if [ ! -d "$lock" ] || ! read_owner_settled "$lock"; then
+    echo "✗ $resource is not claimed" >&2
+    return 1
+  fi
+
+  local remaining=$((owner_expires_epoch - $(now_epoch)))
+  if [ "$remaining" -lt 0 ]; then
+    echo "✗ the claim on $resource expired $(fmt_duration "$((-remaining))") ago" >&2
+    print_holder "$resource" "$remaining" >&2
+    return 1
+  fi
+
+  # Both sides must be able to name themselves. An anonymous claim and an
+  # anonymous caller would compare equal while being two different agents —
+  # precisely the case this identity exists to separate — so an unnamed holder
+  # is treated as unproven rather than as a match.
+  if [ -z "$self_agent" ] || [ -z "$owner_agent" ]; then
+    echo "✗ cannot prove the claim on $resource is yours" >&2
+    [ -z "$self_agent" ] && echo "  this caller set no WT_BOARD_AGENT" >&2
+    [ -z "$owner_agent" ] && echo "  the claim carries no agent identity" >&2
+    echo "  export WT_BOARD_AGENT=<stable id for this session>, then re-claim" >&2
+    print_holder "$resource" "$remaining" >&2
+    return 1
+  fi
+
+  if [ "$owner_agent" != "$self_agent" ] || [ "$owner_worktree" != "$self_worktree" ]; then
+    echo "✗ $resource is held by someone else" >&2
+    print_holder "$resource" "$remaining" >&2
+    return 1
+  fi
+  return 0
+}
+
 cmd_note() {
   [ $# -eq 1 ] || die 'note takes exactly one quoted line: scripts/wt-board.sh note "restarting app on 9222"'
   [ -n "$1" ] || die 'note text is empty'
@@ -388,6 +450,7 @@ case "$subcommand" in
   release) cmd_release "$@" ;;
   renew) cmd_renew "$@" ;;
   status) cmd_status "$@" ;;
+  holds) cmd_holds "$@" ;;
   note) cmd_note "$@" ;;
   help|-h|--help) usage ;;
   *) usage >&2; echo >&2; die "unknown command '$subcommand'" ;;

@@ -1,9 +1,9 @@
-"""CognitiveFlowMiddleware — finish_task and clarification tool interception.
+"""CognitiveFlowMiddleware — cognitive tool interception over FrameworkState.
 
-MVP-3 T8 moves the cognitive tool-call side effects into the new
-``graph_agent.middleware`` package. The legacy ``cognitive`` middleware
-chain stays in place until the follow-up cleanup, but this class is the
-new owner for two behaviours:
+MVP-3 T8 moved the cognitive tool-call side effects into the
+``graph_agent.middleware`` package; the migration decision 2026-08-15
+(§3.1-§3.4) extended the interception list to every cognitive tool, so
+this class is the single owner for:
 
 * ``finish_task``: parse and validate ``business_data_md`` with
   ``SchemaEngine``, persist the structured result in ``FrameworkState``,
@@ -14,15 +14,23 @@ new owner for two behaviours:
   graph and falls back to the existing end-turn message outside one;
   unattended mode returns a conservative auto-answer and routes back to
   the model.
+* ``update_working_memory`` / ``log_ambiguity``: write the plan text /
+  ambiguity record into ``FrameworkState`` and emit the matching typed
+  event on every accepted call.
+* ``query_working_memory`` / ``read_artifact``: opt-in context-access
+  reads (mounted only when the phase declares ``context_access``); they
+  read the request state and return a plain ``ToolMessage``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Literal
 
@@ -36,7 +44,11 @@ from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from graph_agent.callbacks.emit import _safe_emit_event
-from graph_agent.callbacks.events import FinishTaskVerdictEvent
+from graph_agent.callbacks.events import (
+    AmbiguityLoggedEvent,
+    FinishTaskVerdictEvent,
+    WorkingMemoryUpdateEvent,
+)
 from graph_agent.core.exceptions import ErrorPayload, GraphAgentError, make_error_payload
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.schema_engine import (
@@ -48,6 +60,19 @@ from graph_agent.core.state import BusinessData, FrameworkState, StateManager, W
 from graph_agent.tools.md_to_json import parse_md
 
 logger = logging.getLogger(__name__)
+
+# Cross-phase context reads are model-facing text; unbounded artifacts would
+# flood the context window (dead-side context_access semantics, kept as-is).
+_MAX_CONTEXT_RESULT_CHARS = 50_000
+_REF_RE = re.compile(r"@reference:([A-Za-z0-9_-]+)")
+_PROTOCOL_RE = re.compile(r"@protocol:([A-Za-z0-9_-]+)")
+
+
+def _truncate_context_text(text: str) -> str:
+    if len(text) > _MAX_CONTEXT_RESULT_CHARS:
+        return text[:_MAX_CONTEXT_RESULT_CHARS] + "... [truncated]"
+    return text
+
 
 ToolCallResult = ToolMessage | Command[Any]
 ToolCallHandler = Callable[[ToolCallRequest], ToolCallResult]
@@ -64,6 +89,24 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
 
     _FINISH_TOOL = "finish_task"
     _CLARIFICATION_TOOL = "ask_clarification"
+    _UPDATE_WORKING_MEMORY_TOOL = "update_working_memory"
+    _LOG_AMBIGUITY_TOOL = "log_ambiguity"
+    _QUERY_WORKING_MEMORY_TOOL = "query_working_memory"
+    _READ_ARTIFACT_TOOL = "read_artifact"
+    # Cognitive tools whose behaviour is a FrameworkState read/write handled
+    # here (finish_task and ask_clarification have their own richer paths).
+    _STATE_TOOLS = frozenset(
+        {
+            _UPDATE_WORKING_MEMORY_TOOL,
+            _LOG_AMBIGUITY_TOOL,
+            _QUERY_WORKING_MEMORY_TOOL,
+            _READ_ARTIFACT_TOOL,
+        }
+    )
+    _INTERCEPTED_TOOLS = frozenset({_FINISH_TOOL, _CLARIFICATION_TOOL}) | _STATE_TOOLS
+    # update_working_memory owns exactly one key inside the shared
+    # working_memory dict; iterate bookkeeping keys coexist beside it.
+    _WORKING_MEMORY_PLAN_KEY = "plan"
     _REJECTION_PREFIX = "[提交已被系统驳回] 当前任务仍未结束，请继续修正并重新提交！"
 
     def __init__(
@@ -357,10 +400,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> Any:
         """Pass non-cognitive tools through unchanged."""
         del state
-        if tool_name in {
-            CognitiveFlowMiddleware._FINISH_TOOL,
-            CognitiveFlowMiddleware._CLARIFICATION_TOOL,
-        }:
+        if tool_name in CognitiveFlowMiddleware._INTERCEPTED_TOOLS:
             return {"handled": False, "tool_name": tool_name, "args": args}
         return handler(tool_name, args)
 
@@ -387,6 +427,8 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 unattended=unattended,
                 interrupt_fn=self._interrupt_fn,
             )
+        if tool_name in self._STATE_TOOLS:
+            return True, self._handle_state_tool(tool_name, args, state, tool_call_id="")
         return False, self.dispatch_tool_call(
             tool_name=tool_name,
             args=args,
@@ -401,7 +443,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> ToolCallResult:
         """Intercept supported tool calls and pass all others through."""
         tool_name = str(request.tool_call.get("name") or "")
-        if tool_name not in {self._FINISH_TOOL, self._CLARIFICATION_TOOL}:
+        if tool_name not in self._INTERCEPTED_TOOLS:
             args = request.tool_call.get("args", {})
             result: ToolCallResult = self.dispatch_tool_call(
                 tool_name=tool_name,
@@ -431,8 +473,17 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
 
         state = _workflow_state_or_none(request.state)
         if state is None:
-            logger.debug("[CognitiveFlowMiddleware] finish_task pass-through without WorkflowState")
+            logger.debug(
+                "[CognitiveFlowMiddleware] %s pass-through without WorkflowState", tool_name
+            )
             return handler(request)
+        if tool_name in self._STATE_TOOLS:
+            return self._handle_state_tool(
+                tool_name,
+                parsed_args,
+                state,
+                tool_call_id=_tool_call_id(request),
+            )
         return self._handle_finish_task(
             parsed_args,
             state,
@@ -446,7 +497,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> ToolCallResult:
         """Async equivalent of :meth:`wrap_tool_call`."""
         tool_name = str(request.tool_call.get("name") or "")
-        if tool_name not in {self._FINISH_TOOL, self._CLARIFICATION_TOOL}:
+        if tool_name not in self._INTERCEPTED_TOOLS:
             return await handler(request)
 
         parsed_args = self._args_dict(request)
@@ -470,9 +521,17 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         state = _workflow_state_or_none(request.state)
         if state is None:
             logger.debug(
-                "[CognitiveFlowMiddleware] finish_task async pass-through without WorkflowState"
+                "[CognitiveFlowMiddleware] %s async pass-through without WorkflowState",
+                tool_name,
             )
             return await handler(request)
+        if tool_name in self._STATE_TOOLS:
+            return self._handle_state_tool(
+                tool_name,
+                parsed_args,
+                state,
+                tool_call_id=_tool_call_id(request),
+            )
         return self._handle_finish_task(
             parsed_args,
             state,
@@ -610,6 +669,162 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 ],
             },
         )
+
+    def _handle_state_tool(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        state: WorkflowState,
+        *,
+        tool_call_id: str,
+    ) -> ToolCallResult:
+        """Route one of ``_STATE_TOOLS`` to its FrameworkState handler."""
+        if tool_name == self._UPDATE_WORKING_MEMORY_TOOL:
+            return self._handle_update_working_memory(args, state, tool_call_id=tool_call_id)
+        if tool_name == self._LOG_AMBIGUITY_TOOL:
+            return self._handle_log_ambiguity(args, state, tool_call_id=tool_call_id)
+        if tool_name == self._QUERY_WORKING_MEMORY_TOOL:
+            return self._query_working_memory_message(state, tool_call_id=tool_call_id)
+        return ToolMessage(
+            content=self._read_artifact_content(args.get("name"), state),
+            name=self._READ_ARTIFACT_TOOL,
+            tool_call_id=tool_call_id,
+        )
+
+    def _handle_update_working_memory(
+        self,
+        args: dict[str, Any],
+        state: WorkflowState,
+        *,
+        tool_call_id: str,
+    ) -> Command[Any]:
+        plan = str(args.get("plan") or "")
+        raw_memory = state["flow"].working_memory
+        working_memory = dict(raw_memory) if isinstance(raw_memory, dict) else {}
+        working_memory[self._WORKING_MEMORY_PLAN_KEY] = plan
+        next_state = StateManager.update_framework(state, working_memory=working_memory)
+        # Glass-box tracing (migration decision §3.2): every accepted update
+        # emits — not only compaction checkpoints as on the dead path.
+        _safe_emit_event(
+            self._callbacks,
+            WorkingMemoryUpdateEvent(
+                phase_name=self._phase_name,
+                content_length=len(plan),
+                content=plan,
+            ),
+        )
+        return Command(
+            update={
+                "flow": next_state["flow"],
+                "messages": [
+                    ToolMessage(
+                        content="WORKING_MEMORY_UPDATED",
+                        name=self._UPDATE_WORKING_MEMORY_TOOL,
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+            },
+            goto="model",
+        )
+
+    def _handle_log_ambiguity(
+        self,
+        args: dict[str, Any],
+        state: WorkflowState,
+        *,
+        tool_call_id: str,
+    ) -> Command[Any]:
+        question = str(args.get("question") or "")
+        ambiguity_type = str(args.get("ambiguity_type") or "")
+        decision = str(args.get("decision") or "")
+        reason = str(args.get("reason") or "")
+        record = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "phase": self._phase_name,
+            "type": ambiguity_type,
+            "question": question,
+            "decision": decision,
+            "reason": reason,
+        }
+        reports = [*state["flow"].ambiguity_reports, record]
+        next_state = StateManager.update_framework(state, ambiguity_reports=reports)
+        haystack = f"{question} {reason}"
+        _safe_emit_event(
+            self._callbacks,
+            AmbiguityLoggedEvent(
+                phase_name=self._phase_name,
+                ambiguity_type=ambiguity_type,
+                question=question,
+                decision=decision,
+                reason=reason,
+                related_refs=_REF_RE.findall(haystack),
+                related_protocols=_PROTOCOL_RE.findall(haystack),
+            ),
+        )
+        content = json.dumps(
+            {"status": "recorded", "index": len(reports) - 1, "type": ambiguity_type},
+            ensure_ascii=False,
+        )
+        return Command(
+            update={
+                "flow": next_state["flow"],
+                "messages": [
+                    ToolMessage(
+                        content=content,
+                        name=self._LOG_AMBIGUITY_TOOL,
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+            },
+            goto="model",
+        )
+
+    def _query_working_memory_message(
+        self,
+        state: WorkflowState,
+        *,
+        tool_call_id: str,
+    ) -> ToolMessage:
+        raw_memory = state["flow"].working_memory
+        plan = (
+            raw_memory.get(self._WORKING_MEMORY_PLAN_KEY)
+            if isinstance(raw_memory, dict)
+            else None
+        )
+        text = str(plan or "")
+        content = _truncate_context_text(text) if text.strip() else "(empty)"
+        return ToolMessage(
+            content=content,
+            name=self._QUERY_WORKING_MEMORY_TOOL,
+            tool_call_id=tool_call_id,
+        )
+
+    def _read_artifact_content(self, name: Any, state: WorkflowState) -> str:
+        """Business-artifact read with the dead-side guard semantics kept.
+
+        Errors come back as tool text, not exceptions: they are feedback the
+        model can act on, exactly like the legacy context_access tool did.
+        """
+        if not isinstance(name, str) or not name:
+            return "[read_artifact Error] name must be a non-empty string"
+        if name.startswith("_"):
+            return (
+                f"[read_artifact Error] {name!r} is a framework-internal key "
+                "and cannot be read. Only business artifacts (named outputs) "
+                "are accessible."
+            )
+        business = state["data"].model_dump()
+        if name not in business:
+            visible = [key for key in business if not key.startswith("_")]
+            return (
+                f"[read_artifact Error] artifact {name!r} not found in business data. "
+                f"Available artifacts: {visible}"
+            )
+        value = business[name]
+        if value is None:
+            return "(none)"
+        text = value if isinstance(value, str) else repr(value)
+        return _truncate_context_text(text)
 
     def _validate_finish_args(self, args: dict[str, Any]) -> _FinishValidation:
         schema = self._current_phase_schema

@@ -76,7 +76,22 @@ Produce the declared output.
 
 
 @pytest.mark.parametrize(
-    "builtin", ["finish_task", "read_reference", "read_example", "log_ambiguity"]
+    "builtin",
+    [
+        "finish_task",
+        "read_reference",
+        "read_example",
+        "log_ambiguity",
+        # Migration decision 2026-08-15 §3.1/§3.2/§3.4: the revived cognitive
+        # tools are framework-owned names too — unconditionally mounted
+        # (ask_clarification / update_working_memory) or opt-in mounted via
+        # context_access (query_working_memory / read_artifact). Either way a
+        # SKILL must not claim the name for a business tool.
+        "ask_clarification",
+        "update_working_memory",
+        "query_working_memory",
+        "read_artifact",
+    ],
 )
 def test_declaring_a_builtin_tool_is_a_compile_diagnostic(
     tmp_path: Path, mock_skill_resolver: object, builtin: str

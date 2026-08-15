@@ -79,6 +79,13 @@ from graph_agent.runtime.state_mapper import (
     phase_inputs_from_state,
     schema_properties,
 )
+from graph_agent.tools.builtin.clarification_tool import ask_clarification_tool
+from graph_agent.tools.builtin.cognitive_tools import (
+    log_ambiguity_tool,
+    query_working_memory_tool,
+    read_artifact_tool,
+    update_working_memory_tool,
+)
 from graph_agent.tools.builtin.read_example import read_declared_example
 from graph_agent.tools.builtin.read_file import (
     RuntimeInputFileError,
@@ -1983,7 +1990,12 @@ def _build_skill_node(
         else:
             rewired_business_tools.append(tool)
 
-    all_tools = [*rewired_business_tools, *framework_tools, finish_task]
+    all_tools = [
+        *rewired_business_tools,
+        *framework_tools,
+        *_cognitive_framework_tools(phase_ast),
+        finish_task,
+    ]
 
     # Coerce output_schema if it's a dict to SchemaObject, then get Pydantic model
     from pydantic import BaseModel
@@ -2286,6 +2298,27 @@ def _build_agent_finish_task_tool(
         LLMMdPatchClient(chat_model) if chat_model is not None else None,
         max_patch_attempts=max_patch_attempts,
     )
+
+
+def _cognitive_framework_tools(phase_ast: AgentNodeAST) -> list[Any]:
+    """Cognitive tool shells mounted per migration decision 2026-08-15.
+
+    ask_clarification (P1-5: the escape hatch exists unconditionally),
+    update_working_memory and log_ambiguity always mount; the context-access
+    readers stay opt-in behind the phase's ``context_access`` declaration
+    (Round 8: strong isolation by default). Behaviour for all of them lives
+    in CognitiveFlowMiddleware — these shells only carry the schema.
+    """
+    tools: list[Any] = [
+        ask_clarification_tool,
+        update_working_memory_tool,
+        log_ambiguity_tool,
+    ]
+    if "working_memory" in phase_ast.context_access:
+        tools.append(query_working_memory_tool)
+    if "artifact" in phase_ast.context_access:
+        tools.append(read_artifact_tool)
+    return tools
 
 
 def _build_framework_tools(

@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 _NO_MOCK_LLM = object()
 _RUNTIME_PHASE_FAILED_CODE = "[F-v3-runtime-phase-failed]"
 _SKILL_ENTRYPOINT_FILENAME = "SKILL.md"
-_HITL_TOOL_NAMES = {"ask_clarification", "request_human_input"}
+_HITL_TOOL_NAMES = {"ask_clarification"}
 
 
 def _runtime_input_fields_from_config(

@@ -407,12 +407,12 @@ LLM 步骤体外层卡片盒已不存在(verify-well-generic-payload.png);④cop
 (scrollTop 钉底断言)——唯一非真机项,如实标注。#798 同日合并:验证方法论固化为
 `.claude/skills/studio-verify`(web 模式验证被裁决禁止),CLAUDE.md 挂载。
 
-**引擎死家族处置(2026-08-15 已裁:先迁移、后整族删;迁移四步全部合并,整族删本 PR)**:2026-08-14 定界
+**引擎死家族处置(2026-08-15 已裁:先迁移、后整族删;迁移四步 + 整族删共五个 PR 全部合并)**:2026-08-14 定界
 调查坐实整个 legacy 执行族(`graph_builder.py`/`phase_executor.py`/`core/phase_nodes/*`
 等 14 模块闭包 + 附着孤儿)对活路径零 import;用户 2026-08-15 裁决「先把第三类功能
 迁移到现在的活路径上才能整族删」,并确认迁移框架(多数入中间件)。七项冻结功能的
 出生档案(引入 commit + 设计动机 + 用户原始决策原文)已考古完成。权威决议文档:
-`docs/design/2026-08-15-legacy-cognitive-features-migration-decision.md`(本 PR)。
+`docs/design/2026-08-15-legacy-cognitive-features-migration-decision.md`(#801)。
 实施切分:PR B 认知工具回归活路径(ask_clarification/update_working_memory/
 log_ambiguity 挂载 + context_access opt-in,CognitiveFlow 拦截)→ PR C 双闸 nudge
 中间件适配(依赖 B)→ PR D compaction 中间件(SummarizationMiddleware+sidecar+
@@ -421,7 +421,16 @@ ctx 桥 `legacy_context_from_state` 族、零发射点事件类、前端死分�
 + vendor 重建 + `/studio-verify` 真机冒烟。每步过引擎门禁(mypy --strict + 3×pytest)。
 
 **进度(2026-08-15)**:PR A 决议文档 #801 · PR B 认知工具回归 #803 · PR D compaction 中间件 #805 ·
-PR C 双闸 nudge #807 **均已合并**;PR E 整族删进行中。PR E 的逐项重核推翻了决议 §5 的一条:
+PR C 双闸 nudge #807 · PR E 整族删 #810 —— **五个 PR 全部合并,代码面收官**。
+门禁(每条都在对应 worktree 内跑、输出带树路径):ruff 净 · mypy --strict 引擎 112 文件 ·
+mypy 后端 133 文件 · 引擎 1472 passed · 后端 1702 passed · gateway 618 passed ·
+前端 lint/typecheck 净 + 2111 passed + build ok。零引用证明:对删后 114 个引擎源模块重跑
+AST import 图,对已删模块/符号的 import **0 条**。
+**未完成的最后一步(不得据此认为已验证)**:vendor 重建 + `/studio-verify` 真机点验 +
+五列报告。它需要独占仓根主 app 与 CDP 9222,而该资源自 2026-08-15 09:47 起被另一会话
+(story-deconstruction 实验)在运行时资源黑板上连续续期占用,故排队等待中——按黑板规矩
+不抢占(抢占会打断对方正在跑的验证,且 vendor 重建必须先关 app)。
+PR E 的逐项重核推翻了决议 §5 的一条:
 **`DeadEndPrunedEvent` 不删**——它有活生产者(`ExecutionControlMiddleware` 经旧式
 `on_dead_end_pruned` 回调发出),决议起草时的清单误判为零发射点,已在决议 §5 落更正;
 `ThreadCleanedUpEvent` / `InternalErrorEvent` 的「待定」裁决为删(仅有类定义、零构造点)。

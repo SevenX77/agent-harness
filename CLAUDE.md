@@ -14,6 +14,11 @@ context.
 > (the moment you first read a file in that subtree), so a session starting at
 > the repo root won't have it yet — load it explicitly at task start.
 
+> **真机验证一律走 `/studio-verify` skill**(`.claude/skills/studio-verify/`):
+> CDP(9222)驱动真 Tauri 窗口做逐项点验 + 截图,含启停 launcher 与五件套脚本。
+> **禁止**用浏览器直开 Vite 的 web 模式充当验证(2026-08-14 用户裁决)——web 模式下
+> Tauri 原生桥是假的、Recent 在 Rust native store 里打不开 skill,结论不算数。
+
 ## 铁律:论据先行,绝不臆测(Evidence-before-claims)
 
 抛任何观点前,必须先找到论据并把论据**原样写出来**,再下结论。禁止"我觉得/应该是/大概"式臆测。具体:

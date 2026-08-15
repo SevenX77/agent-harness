@@ -439,10 +439,36 @@ PR C 双闸 nudge #807 · PR E 整族删 #810 —— **五个 PR 全部合并,�
 mypy 后端 133 文件 · 引擎 1472 passed · 后端 1702 passed · gateway 618 passed ·
 前端 lint/typecheck 净 + 2111 passed + build ok。零引用证明:对删后 114 个引擎源模块重跑
 AST import 图,对已删模块/符号的 import **0 条**。
-**未完成的最后一步(不得据此认为已验证)**:vendor 重建 + `/studio-verify` 真机点验 +
-五列报告。它需要独占仓根主 app 与 CDP 9222,而该资源自 2026-08-15 09:47 起被另一会话
+**收尾件 #823**:PR E 在前端立了一张手抄的引擎事件类型表(`utils/engine-events.ts`,35 条),
+用来区分"这个 build 认识的事件"与"没听说过的事件",好让按名字猜(含 `error` 就算失败)
+只作用于未来事件、不推翻已知事件的真实含义。手抄件没有闸就会悄悄漂,于是补了
+`apps/studio/backend/tests/test_engine_event_catalog_mirror.py`:内省引擎判别联合类型
+`CallbackEvent`,与那张表**双向**比对。放在 Studio 后端是因为只有它同时看得见两边
+(import 得到 `graph_agent`,又与前端同仓);引擎不该知道有个前端文件,前端没有 Python
+可内省。三个变异验伪:删一条 / 加一条幽灵 / 改常量名,均被精确点名。
+
+**未完成的最后一步(不得据此认为已验证)**:`/studio-verify` 真机点验 + 五列报告。
+它需要独占仓根主 app 与 CDP 9222,而该资源自 2026-08-15 09:47 起被另一会话
 (story-deconstruction 实验)在运行时资源黑板上连续续期占用,故排队等待中——按黑板规矩
 不抢占(抢占会打断对方正在跑的验证,且 vendor 重建必须先关 app)。
+**排队期间已在磁盘上坐实三项**(证据源:同日 10:19 的真实 run
+`D:\coding\skills\story-deconstruction-v3-lab\.workspace\runs\2026-08-15T10-19-55_df555c19\`,
+跑在 09:39 重建的 vendor 上,该快照内容级实证含五 PR):
+- **PR B 认知工具**——`report.md` 的 Tools 表记 `log_ambiguity` ×1 / `update_working_memory` ×3,
+  即工具已挂上活路径且被模型真调用;trace 有对应的 `ambiguity_logged` / `working_memory_update`。
+- **PR C 双闸 nudge**——trace 3 条 `nudge`,文案唯一出处 `middleware/exit_control.py:204`,
+  而该文件 `:35` 从 `nudge_policy` 取策略;失败行带预算计数
+  `counts={'planning':1,'selfcheck':0,'standard':1,'total':2}, max_nudges=1`。
+- **PR E 后端失败信号重接**——`report.md` 的 Failure 段列 5 条 `segment — finish_task_verdict: …`,
+  `review` 的 accepted 不计、`tool_error_handled` 不计。这是因果证据而非时间戳推断:
+  `git log -S "finish_task_verdict" -- apps/studio/backend/app/services/run_report.py`
+  只有 #810 一个 commit,而 dev 下后端 `.py` 实时加载,故该报告只可能出自改后的代码。
+
+**另有两项没有真机可观测面,只能由单测锁定,报告里如实标注不打勾**:① `context_access`
+opt-in 门——引擎事件只记录工具**被调用**、不记录**被挂载**(`prompt_captured` 字段无 tools),
+"没挂上"从 trace 看不出来;② compaction 触发条件是上下文超窗 80%,冒烟不可控、本次未触发。
+**真正还欠窗口的只剩四项**:app 重建 vendor(含他人 PR #819)后能起、Compile 通、
+前端投影逐条对数(预期值已从 trace 预先算好)、`dead_end_pruned` 的识别。
 PR E 的逐项重核推翻了决议 §5 的一条:
 **`DeadEndPrunedEvent` 不删**——它有活生产者(`ExecutionControlMiddleware` 经旧式
 `on_dead_end_pruned` 回调发出),决议起草时的清单误判为零发射点,已在决议 §5 落更正;

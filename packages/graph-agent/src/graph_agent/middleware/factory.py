@@ -12,6 +12,11 @@ from pydantic import BaseModel
 from graph_agent.callbacks.base import Callback
 from graph_agent.middleware import MVP0_MIDDLEWARE_ORDER_CONTRACT
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware, InterruptFn
+from graph_agent.middleware.compaction import (
+    CompactionMiddleware,
+    CompactionSidecarWriter,
+    write_compaction_sidecar,
+)
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
 from graph_agent.middleware.exit_control import ExitControlMiddleware
 from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
@@ -37,8 +42,18 @@ def build_middleware_chain(
     unattended: bool = False,
     interrupt_fn: InterruptFn | None = None,
     callbacks: Sequence[Callback] | None = None,
+    compaction_model: Any = None,
+    compaction_sidecar_writer: CompactionSidecarWriter | None = None,
 ) -> tuple[AgentMiddleware[AgentState[Any]], ...]:
-    """Instantiate the seven middleware slots in the γ0 contract order."""
+    """Instantiate the eight middleware slots in the contract order.
+
+    ``compaction_model`` powers the Compaction slot's summarizer (the
+    assembler passes the phase's resolved chat model); ``None`` leaves the
+    slot inert so bare chains keep the contract shape. The sidecar writer
+    is injected explicitly — the assembler passes the default
+    ``write_compaction_sidecar`` — so tests can substitute a fake storage
+    face without patching module globals.
+    """
     by_contract_name: dict[str, AgentMiddleware[AgentState[Any]]] = {
         "ProtocolValidation": ProtocolValidationMiddleware(
             schema_engine=schema_engine,
@@ -59,6 +74,12 @@ def build_middleware_chain(
         "ExecutionControl": ExecutionControlMiddleware(
             callbacks=callbacks,
             phase_name=phase_name,
+        ),
+        "Compaction": CompactionMiddleware(
+            model=compaction_model,
+            phase_name=phase_name,
+            callbacks=callbacks,
+            sidecar_writer=compaction_sidecar_writer or write_compaction_sidecar,
         ),
         "Tracing": TracingMiddleware(
             callbacks=callbacks,

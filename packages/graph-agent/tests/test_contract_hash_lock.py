@@ -23,7 +23,12 @@ EXPECTED_CONTRACT_HASHES = {
     "docs/engine/mvp0/skill-spec/11-error-code-spec.md": "e51c09b196950c20d83ab658a8a02a17256aa24cc2922c376f7554d90055981c",
     "docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md": "0c632cbc7edbad3e741bf4a3676d08e68852ea2311f10624503d20f84d598223",
     "docs/engine/mvp0/skill-spec/README.md": "dc16c4c4caade48e027700f91ce666779b07f9a053ed3b8bda9f957fa6053b30",
-    "docs/engine/mvp0/public-api-contract.md": "051aafdf82f4fe2e14d529b04cff93ce596001f0a0a6930c1f6bbe5778651b4e",
+    # Re-pinned 2026-08-15 (PR #803 + PR D compaction middleware): AgentNodeAST
+    # gained `context_access`, and CompactionEvent's `removed_pairs` became
+    # `removed_message_count` — summarization-based compaction removes N
+    # messages, not pairs (decision doc §3.4/§3.6; pre-release,
+    # no-backward-compat, all consumers updated in the same PRs).
+    "docs/engine/mvp0/public-api-contract.md": "f1d368395c62c747cd779a31bd7d99a1eb580c8f60073ac05d76a4643bd1e42f",
     "docs/engine/mvp0/feature-compliance-checklist.md": "77ea3efd4c6dfed5a09f496a82a1ba7ff3d2832ad1dc92ba9ac1f5cb759dc5c7",
     "packages/graph-agent/spec/round28-manifest-schema.yaml": "bcdf70ea0469fe02adff8e2c20e03f813195c1eaa0e4c325f8987cb6cfed5481",
 }

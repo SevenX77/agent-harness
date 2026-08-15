@@ -103,7 +103,7 @@ _MIN_CTOR: dict[type, dict] = {
     NudgeEvent: {"phase_name": "p", "nudge_count": 1},
     WorkingMemoryUpdateEvent: {"phase_name": "p", "content_length": 100},
     DeadEndPrunedEvent: {"phase_name": "p", "summary": "s"},
-    CompactionEvent: {"phase_name": "p", "removed_pairs": 3},
+    CompactionEvent: {"phase_name": "p", "removed_message_count": 3},
     AmbiguityReportEvent: {
         "phase_name": "p",
         "ambiguity_type": "a",

@@ -198,6 +198,7 @@ def test_γ0_3_middleware_order_contract_constant_exists() -> None:
         "ProtocolValidation",
         "CognitiveFlow",
         "ExecutionControl",
+        "Compaction",
         "Tracing",
         "ToolError",
         "LoopDetection",

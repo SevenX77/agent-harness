@@ -34,6 +34,7 @@ unattended clarification, ``create_custom_middlewares``).
 from __future__ import annotations
 
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
+from graph_agent.middleware.compaction import CompactionMiddleware
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
 from graph_agent.middleware.exit_control import ExitControlMiddleware
 from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
@@ -56,10 +57,16 @@ DEFAULT_MIDDLEWARE_ORDER: tuple[type, ...] = (
     ExecutionControlMiddleware,
 )
 
+# Compaction (decision 2026-08-15 §3.6) sits right after the MVP-3 core trio:
+# it acts through ``before_model`` (guaranteed to land before the model call
+# wherever it sits), and ToolHistoryIntegrity repairs the outgoing request
+# later inside ``wrap_model_call``, so the slot only needs to stay behind the
+# ProtocolValidation state guard and keep the core trio a contract prefix.
 MVP0_MIDDLEWARE_ORDER_CONTRACT: tuple[str, ...] = (
     "ProtocolValidation",
     "CognitiveFlow",
     "ExecutionControl",
+    "Compaction",
     "Tracing",
     "ToolError",
     "LoopDetection",
@@ -81,6 +88,7 @@ __all__ = [
     "MIDDLEWARE_ORDER_CONTRACT",
     "MVP0_MIDDLEWARE_ORDER_CONTRACT",
     "CognitiveFlowMiddleware",
+    "CompactionMiddleware",
     "ExecutionControlMiddleware",
     "ExitControlMiddleware",
     "LoopDetectionMiddleware",

@@ -2099,7 +2099,15 @@ def _run_v030_skill_dict(
                 "run_id": run_id,
                 "thread_id": run_id,
                 "unattended": unattended,
-                "persistent_storage_config": {"workspace_dir": str(workspace_dir)},
+                # ``run_dir`` is the storage face for run-scoped observability
+                # files (compaction sidecars): the runner is the one caller
+                # that knows whether this execution files under ``runs/`` or
+                # ``predicts/`` (io/run_layout.py), so the resolved directory
+                # travels in state instead of being re-derived downstream.
+                "persistent_storage_config": {
+                    "workspace_dir": str(workspace_dir),
+                    "run_dir": str(trace_output),
+                },
             }),
             messages=[],
         )

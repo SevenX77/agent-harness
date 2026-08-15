@@ -2041,6 +2041,7 @@ def _build_skill_node(
         current_phase_schema = engine.get_pydantic_model(coerced_schema)
 
     from graph_agent.core.io_manager import IODef, IOManager
+    from graph_agent.middleware.compaction import write_compaction_sidecar
     from graph_agent.middleware.factory import build_middleware_chain
     io_specs = []
     if isinstance(output_schema, dict):
@@ -2067,6 +2068,12 @@ def _build_skill_node(
         unattended=False,  # dynamically resolved in middleware
         interrupt_fn=None,
         callbacks=_callback_tuple(callbacks),
+        # The phase's own resolved model writes the compaction summary; the
+        # sidecar writer is the storage face for the removed messages' full
+        # text (explicit injection — the run dir itself travels in
+        # ``flow.persistent_storage_config`` at invoke time).
+        compaction_model=phase_chat_model,
+        compaction_sidecar_writer=write_compaction_sidecar,
     )
 
     from graph_agent.middleware.runtime_input import RuntimeInputMiddleware
@@ -2137,7 +2144,13 @@ def _build_skill_node(
             nodes_per_turn = len(all_nodes) if all_nodes else 6
         else:
             nodes_per_turn = 6
-        inner_config["recursion_limit"] = max_turns * nodes_per_turn + 1
+        # Budget = max_turns full turns PLUS one whole node-count of slack: the
+        # (max_turns+1)-th turn must still reach ExitControl.before_model so it
+        # can raise the budget-exhausted fatal. A "+1" slack only covered the
+        # before_model prefix by coincidence of the old node count — one more
+        # before_model slot made GraphRecursionError fire first, and the
+        # backstop below would swallow the run into a silent partial success.
+        inner_config["recursion_limit"] = (max_turns + 1) * nodes_per_turn
 
         token = parent_state_var.set(state)
         try:

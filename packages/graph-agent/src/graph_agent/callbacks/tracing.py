@@ -375,15 +375,19 @@ class TracingCallback(Callback):
     def on_compaction(
         self,
         phase_name: str,
-        removed_pairs: int,
+        removed_message_count: int,
     ) -> None:
         """Record history compaction in the trace."""
         self._write_event(
             EVENT_COMPACTION,
             phase_name,
-            {"removed_pairs": removed_pairs},
+            {"removed_message_count": removed_message_count},
         )
-        self._write_typed_event(CompactionEvent(phase_name=phase_name, removed_pairs=removed_pairs))
+        self._write_typed_event(
+            CompactionEvent(
+                phase_name=phase_name, removed_message_count=removed_message_count
+            )
+        )
 
     def on_ambiguity_report(
         self,

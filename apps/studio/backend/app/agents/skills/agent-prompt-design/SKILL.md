@@ -64,6 +64,13 @@ contradiction at worst.
 *   `io.outputs` declares the fields the agent itself must author via
     `finish_task`. Steps and examples must agree with it — never instruct the
     model to submit a subset or superset of the declared required fields.
+    **Check this mechanically, do not eyeball it**: write down
+    `io.outputs.required`, write down every output field the body names, and
+    require the two lists to be equal. A body that names one field while
+    `required` declares four is the common shape, and it survives review
+    because each half reads perfectly on its own — the contradiction exists
+    only between them, and the model meets it as a rendered `<exit_contract>`
+    demanding four fields under a `<goal>` that asked for one.
 *   Do not hand-write format instructions in the body; the exit contract
     renders the schema. (`<exit_contract>` in the body is forbidden by spec.)
 *   `validator.py` (`validator: true`) is for shape only: types, enums,
@@ -104,6 +111,13 @@ contradiction at worst.
     `<protocols>`, `<examples>`) — forbidden by spec.
 *   ❌ **Semantic assertions in validator.py** (exact line counts, quality
     thresholds on real content) — they belong to review prompts and golden.
-*   ❌ **Pasting upstream payloads into the prompt** — use input variables;
-    the engine injects them.
+*   ❌ **Putting input payload content in the body — pasted OR expanded.**
+    The engine already hands the model the phase's entire declared input slice
+    as a JSON message on the first turn (`[[KB-02-io-dataflow]]` §2), so a
+    `{some_input}` reference written in `<goal>` is not "how the data gets
+    there" — it is a SECOND full copy of a value the model already has. Name
+    the variable and say what it is for; never expand it. Expanding a large
+    field (a chapter, a document, a transcript) also splits the sentence it
+    sits in: the reader — and the model — meets the verb, then thousands of
+    characters of payload, then finally the object it was supposed to act on.
 *   ❌ **Conversational filler** that does not change model output behavior.

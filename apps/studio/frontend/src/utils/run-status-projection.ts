@@ -1,5 +1,6 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
 import type { SkillNodeStatus } from "@/components/GraphCanvas"
+import { ENGINE_EVENT_TYPES } from "./engine-events"
 
 // ————————————————————————————————————————————————————————————————————————————
 // run-status-projection (decision 2026-08-13 D7): the ONE module that turns
@@ -91,13 +92,6 @@ export function runVerdict(
   return fromEvents ?? "running"
 }
 
-// Engine event_types that mark a phase as failed (see
-// packages/graph-agent/src/graph_agent/callbacks/events.py):
-//   - validation_fail   — a phase validator returned errors for this attempt
-//   - retry_exhausted   — retries ran out and the phase was force-degraded
-// Neither contains the substring "error", so the older `.includes("error")`
-// check left their node green. They are matched explicitly here.
-const FAILURE_EVENT_TYPES: ReadonlySet<string> = new Set(["validation_fail", "retry_exhausted"])
 const PAUSED_EVENT_TYPES: ReadonlySet<string> = new Set([
   "hitl",
   "human_input_required",
@@ -107,18 +101,44 @@ const PAUSED_EVENT_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * The two engine events that mean THIS phase failed.
+ *
+ * `protocol_violation` is a middleware finding the WorkflowState in breach of a
+ * framework contract, emitted as it breaks the agent loop. A
+ * `finish_task_verdict` carrying `verdict: "rejected"` is a submission failing
+ * its checks and the model being sent back to redo it — the live successor of
+ * the deleted `validation_fail`. The verdict, not the type, is the failure: the
+ * same event also reports accepted and duplicate submissions.
+ *
+ * `tool_error_handled` is deliberately absent. The engine caught the tool
+ * exception, handed it to the model as feedback and carried on, so the phase
+ * has not failed — only its name suggests otherwise.
+ */
+function isKnownFailureEvent(event: CallbackEvent, type: string): boolean {
+  if (type === "protocol_violation") return true
+  return type === "finish_task_verdict" && event.verdict === "rejected"
+}
+
+/**
  * Decide whether a single trace event should mark its phase as failed (red).
  *
- * A phase fails when the event is an engine failure event (validation_fail /
- * retry_exhausted), when its event_type carries "error"/"fail" (covers
- * internal_error and any future failure types), or when its `status` field is
- * "failed"/"error".
+ * Three clauses, and the order between them is the point:
+ *
+ * 1. `status` is the event stating its own outcome, so it is believed for any
+ *    event type — it is a report, not a guess about one.
+ * 2. For a type this build knows the engine emits, the explicit table above is
+ *    the WHOLE answer. What a known event means is never overruled by what its
+ *    name looks like.
+ * 3. Only a type this build has never heard of falls through to the name-shaped
+ *    guess, so a failure event added to the engine after this build still turns
+ *    its node red instead of passing unnoticed.
  */
-function isFailureEvent(type: string, status: string | null | undefined): boolean {
-  if (FAILURE_EVENT_TYPES.has(type)) return true
-  if (type.includes("error") || type.includes("fail")) return true
+function isFailureEvent(event: CallbackEvent): boolean {
+  const type = event.event_type || ""
+  const status = event.status
   if (status === "failed" || status === "error") return true
-  return false
+  if (ENGINE_EVENT_TYPES.has(type)) return isKnownFailureEvent(event, type)
+  return type.includes("error") || type.includes("fail")
 }
 
 function isPausedEvent(type: string, status: string | null | undefined): boolean {
@@ -128,30 +148,12 @@ function isPausedEvent(type: string, status: string | null | undefined): boolean
   return false
 }
 
-function numberField(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function eventAttempt(event: CallbackEvent): number | null {
-  return numberField(event.attempt)
-    ?? numberField(event.attempt_number)
-    ?? numberField(event.retry_count)
-    ?? numberField(event.metadata?.attempt)
-    ?? numberField(event.metadata?.attempt_number)
-}
-
 /**
  * Derive the per-node status map from an ordered trace event stream.
  *
  * Events are applied in arrival order, last-event-wins per phase. This lets a
- * phase that fails validation but then retries and passes (validation_fail →
- * validation_pass / phase_end) end up green, while a phase whose final state is
- * a failure (validation_fail with no recovery, or retry_exhausted) ends up red.
+ * phase that reports a failure and then progresses anyway end up green, while a
+ * phase whose final state is a failure ends up red.
  *
  * The run's verdict then closes out whatever is still marked running: the run
  * owns "is anything executing", and its verdict reaches here even when the
@@ -164,7 +166,6 @@ export function deriveNodeStatuses(
   metadata?: RunMetadata | null,
 ): Record<string, SkillNodeStatus> {
   const statuses: Record<string, SkillNodeStatus> = {}
-  const attempts: Record<string, number> = {}
   if (!events) return statuses
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
@@ -174,11 +175,7 @@ export function deriveNodeStatuses(
     if (type === "run_ended") continue
     const phaseName = event.phase_name || event.current_phase
     if (!phaseName) continue
-    const attempt = eventAttempt(event)
-    const latestAttempt = attempts[phaseName]
-    if (attempt !== null && latestAttempt !== undefined && attempt < latestAttempt) continue
-    if (attempt !== null) attempts[phaseName] = attempt
-    if (isFailureEvent(type, event.status)) {
+    if (isFailureEvent(event)) {
       statuses[phaseName] = "error"
     } else if (isPausedEvent(type, event.status)) {
       statuses[phaseName] = "paused"
@@ -197,29 +194,40 @@ export function deriveNodeStatuses(
   return statuses
 }
 
+function reasonList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+}
+
 /**
- * Extract the human-readable failure reason from a failure event. Mirrors the
- * engine event shapes (events.py): internal_error carries `error_message`,
- * validation_fail carries `errors: list[str]`, retry_exhausted carries
- * `final_errors: list[str]`. Returns null when no usable text is present.
+ * Extract the human-readable failure reason from a failure event.
+ *
+ * The two live failure events name their reasons in different fields — a
+ * rejected `finish_task_verdict` lists why the submission was refused in
+ * `errors`, a `protocol_violation` lists the contracts it broke in
+ * `violations` — and both also carry a whole-sentence `message` that stands in
+ * when the list is empty.
+ *
+ * The field order is the backend's, deliberately: the run report's per-phase
+ * error ledger reads the same waterfall in
+ * `apps/studio/backend/app/services/run_report.py` (`_error_line`). One failure
+ * described by two surfaces must not have them quoting different halves of it.
+ * Returns null when no usable text is present.
  */
 function failureMessageFromEvent(event: CallbackEvent): string | null {
-  const direct = event.error_message
-  if (typeof direct === "string" && direct.trim() !== "") return direct.trim()
-  for (const list of [event.final_errors, event.errors]) {
-    if (Array.isArray(list)) {
-      const msgs = list.filter((item): item is string => typeof item === "string" && item.trim() !== "")
-      if (msgs.length > 0) return msgs.join("; ")
-    }
+  for (const list of [event.errors, event.violations]) {
+    const reasons = reasonList(list)
+    if (reasons.length > 0) return reasons.join("; ")
   }
-  return null
+  const message = event.message
+  return typeof message === "string" && message.trim() !== "" ? message.trim() : null
 }
 
 /**
  * Derive the per-node failure-message map from an ordered trace event stream,
  * in lockstep with `deriveNodeStatuses`: same last-event-wins + run filter, so a
- * phase that fails then recovers (validation_fail -> phase_end) clears its
- * message, and a phase whose final state is a failure keeps the reason. This is
+ * phase that fails then recovers (a failure event followed by phase_end) clears
+ * its message, and a phase whose final state is a failure keeps the reason. This is
  * the PRODUCER for SkillNode's inline error text (data.errorMessage); without it
  * the failed-node red-light message has no source.
  */
@@ -228,7 +236,6 @@ export function deriveNodeErrorMessages(
   runId?: string | null,
 ): Record<string, string> {
   const messages: Record<string, string> = {}
-  const attempts: Record<string, number> = {}
   if (!events) return messages
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
@@ -236,12 +243,8 @@ export function deriveNodeErrorMessages(
     if (runId && eventRun && eventRun !== runId) continue
     const phaseName = event.phase_name || event.current_phase
     if (!phaseName) continue
-    const attempt = eventAttempt(event)
-    const latestAttempt = attempts[phaseName]
-    if (attempt !== null && latestAttempt !== undefined && attempt < latestAttempt) continue
-    if (attempt !== null) attempts[phaseName] = attempt
     const type = event.event_type || ""
-    if (isFailureEvent(type, event.status)) {
+    if (isFailureEvent(event)) {
       const message = failureMessageFromEvent(event)
       if (message) {
         messages[phaseName] = message

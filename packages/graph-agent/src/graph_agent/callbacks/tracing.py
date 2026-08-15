@@ -1,13 +1,10 @@
 """Phase-aware structured tracer. Builds trace in-memory, writes to JSON on save().
 
-Replaces the old TraceExporter (LangSmith-based). Phase structure is a first-class
-
-citizen — no heuristic guessing.
+Phase structure is a first-class citizen — no heuristic guessing.
 
 Usage::
     tracer = TracingCallback()
-    harness = GraphAgentHarness(phases=..., callbacks=[tracer])
-    result = harness.run(...)
+    result = run_skill(..., event_subscriber=tracer.on_event)
     tracer.save("/path/to/output")
 """
 
@@ -22,32 +19,24 @@ from pathlib import Path
 from typing import Any
 
 from graph_agent.callbacks.base import (
-    EVENT_AMBIGUITY_REPORT,
     EVENT_COMPACTION,
     EVENT_DEAD_END_PRUNED,
-    EVENT_FINISH_TASK,
     EVENT_LLM_CALL,
     EVENT_NUDGE,
     EVENT_PHASE_END,
     EVENT_PHASE_START,
-    EVENT_RETRY,
     EVENT_TOOL_CALL,
-    EVENT_VALIDATION_FAIL,
     EVENT_WORKING_MEMORY_UPDATE,
     Callback,
 )
 from graph_agent.callbacks.events import (
-    AmbiguityReportEvent,
     CallbackEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
-    FinishTaskEvent,
     NudgeEvent,
     PhaseEndEvent,
     PhaseStartEvent,
-    RetryEvent,
     ToolCallEvent,
-    ValidationFailEvent,
     WorkingMemoryUpdateEvent,
 )
 
@@ -141,7 +130,6 @@ class TracingCallback(Callback):
                 "output_tokens": 0,
                 "llm_calls": [],
                 "tool_calls": [],
-                "validation": {"passed": True, "retries": 0, "errors": []},
             }
         )
         self._write_event(
@@ -259,75 +247,6 @@ class TracingCallback(Callback):
             )
         )
 
-    def on_validation_fail(
-        self,
-        phase_name: str,
-        errors: list[str],
-        retry_count: int,
-    ) -> None:
-        """Record validator failure in the trace."""
-        # Harden against validators that return str / tuple / iterable
-        # instead of list[str] — surfaced from the first real story-
-        # deconstruction run; old behaviour silently appended a str which
-        # the typed event rightfully rejects.
-        if isinstance(errors, str):
-            errors_list = [errors]
-        elif errors is None:
-            errors_list = []
-        else:
-            try:
-                errors_list = [str(e) for e in errors]
-            except TypeError:
-                errors_list = [str(errors)]
-
-        active_phase = self._active_phase()
-        if active_phase:
-            active_phase["validation"]["passed"] = False
-            active_phase["validation"]["errors"].extend(errors_list)
-        self._write_event(
-            EVENT_VALIDATION_FAIL,
-            phase_name,
-            {"passed": False, "errors": errors_list, "retry_count": retry_count},
-        )
-        self._write_typed_event(
-            ValidationFailEvent(phase_name=phase_name, errors=errors_list, retry_count=retry_count)
-        )
-
-    def on_retry(
-        self,
-        phase_name: str,
-        target_phase: str,
-        feedback: list[str],
-    ) -> None:
-        """Record retry routing in the trace."""
-        active_phase = self._active_phase()
-        if active_phase:
-            active_phase["validation"]["retries"] += 1
-        self._write_event(
-            EVENT_RETRY,
-            phase_name,
-            {"target_phase": target_phase, "feedback": feedback},
-        )
-        self._write_typed_event(
-            RetryEvent(phase_name=phase_name, target_phase=target_phase, feedback=feedback)
-        )
-
-    def on_finish_task(
-        self,
-        phase_name: str,
-        reasoning: str,
-        evidence: list[str],
-    ) -> None:
-        """Record finish_task output in the trace."""
-        self._write_event(
-            EVENT_FINISH_TASK,
-            phase_name,
-            {"reasoning": reasoning, "evidence": evidence},
-        )
-        self._write_typed_event(
-            FinishTaskEvent(phase_name=phase_name, reasoning=reasoning, evidence=evidence)
-        )
-
     def on_nudge(
         self,
         phase_name: str,
@@ -386,32 +305,6 @@ class TracingCallback(Callback):
         self._write_typed_event(
             CompactionEvent(
                 phase_name=phase_name, removed_message_count=removed_message_count
-            )
-        )
-
-    def on_ambiguity_report(
-        self,
-        phase_name: str,
-        ambiguity_type: str,
-        question: str,
-        decision: str,
-    ) -> None:
-        """Record ambiguity feedback in the trace."""
-        self._write_event(
-            EVENT_AMBIGUITY_REPORT,
-            phase_name,
-            {
-                "ambiguity_type": ambiguity_type,
-                "question": question,
-                "decision": decision,
-            },
-        )
-        self._write_typed_event(
-            AmbiguityReportEvent(
-                phase_name=phase_name,
-                ambiguity_type=ambiguity_type,
-                question=question,
-                decision=decision,
             )
         )
 

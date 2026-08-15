@@ -16,7 +16,7 @@ from app.services.run_manager import run_manager
 from app.services.skills import resolve_skill_dir
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
-    FinishTaskEvent,
+    FinishTaskVerdictEvent,
     LLMCallEvent,
     PhaseEndEvent,
     PhaseStartEvent,
@@ -639,7 +639,7 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         "phase_start",
         "llm_call",
         "phase_end",
-        "finish_task",
+        "finish_task_verdict",
         "run_ended",
     ]
     assert [event["schema_version"] for event in stream_events] == ["studio.event.v1"] * 6
@@ -710,7 +710,7 @@ def test_ws_replays_a_finished_run_from_disk(
         "phase_start",
         "llm_call",
         "phase_end",
-        "finish_task",
+        "finish_task_verdict",
         "run_ended",
     ]
     assert [event["seq"] for event in replayed] == [1, 2, 3, 4, 5, 6]
@@ -1434,7 +1434,12 @@ def fake_run_worker(
             response_data={"content": "ok"},
         ),
         PhaseEndEvent(phase_name="setup", context={}, metrics={}),
-        FinishTaskEvent(phase_name="setup", reasoning="done"),
+        FinishTaskVerdictEvent(
+            phase_name="setup",
+            verdict="accepted",
+            message="finish_task accepted: 1 item parsed and schema-checked",
+            item_count=1,
+        ),
         RunEndedEvent(
             run_id=run_dir.name,
             thread_id="thread",

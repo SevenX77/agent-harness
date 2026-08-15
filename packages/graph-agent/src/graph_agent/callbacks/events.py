@@ -1,25 +1,15 @@
 """Typed CallbackEvent union for graph_agent runs.
 
-Each of the 14 callback hook payloads is modelled as a standalone Pydantic
-class with a ``Literal[event_type]`` tag, then brought together as the
-discriminated union :data:`CallbackEvent`. Studio / downstream tooling can
-now deserialise ``trace.jsonl`` into a well-typed object instead of the
-ad-hoc dict shape that ``base.py`` historically passed around.
-
-Backward compatibility: ``callbacks/base.py`` emits both the new Pydantic
-event and the legacy dict for a transition period (see Task 3.5).
-
-New events introduced by this revision:
-
-* ``prompt_captured`` — fired by the chat model right before an
-  LLM call so Studio can show the exact ``(template_source, variables,
-  resolved_prompt)`` triple that reached the model.
-* ``llm_route_decision`` — fired by the gateway when the primary provider
-  fails and a peer-group fallback takes over.
+Every observable runtime event is modelled as a standalone Pydantic class
+with a ``Literal[event_type]`` tag, then brought together as the
+discriminated union :data:`CallbackEvent`. Studio / downstream tooling
+deserialise ``trace.jsonl`` into well-typed objects through this union;
+every variant listed here has at least one live emission point in the
+engine or gateway.
 
 Parallel-map grouping: every event optionally carries ``sub_run_id`` /
 ``group_key`` so the Studio timeline can fold concurrent child runs that
-share a ``parallel_map`` invocation (see Task 4.3).
+share a ``parallel_map`` invocation.
 
 Note: this module intentionally does **not** use ``from __future__ import
 annotations`` — Pydantic needs the ``Literal`` tag expressions to be
@@ -148,27 +138,6 @@ class ToolCallEvent(_EventBase):
     node_type: str | None = None
 
 
-class ValidationFailEvent(_EventBase):
-    event_type: Literal["validation_fail"] = "validation_fail"
-    phase_name: str
-    errors: list[str] = Field(default_factory=list)
-    retry_count: int
-
-
-class RetryEvent(_EventBase):
-    event_type: Literal["retry"] = "retry"
-    phase_name: str
-    target_phase: str
-    feedback: list[str] = Field(default_factory=list)
-
-
-class FinishTaskEvent(_EventBase):
-    event_type: Literal["finish_task"] = "finish_task"
-    phase_name: str
-    reasoning: str
-    evidence: list[str] = Field(default_factory=list)
-
-
 class NudgeEvent(_EventBase):
     event_type: Literal["nudge"] = "nudge"
     phase_name: str
@@ -215,14 +184,6 @@ class CompactionEvent(_EventBase):
     removed_message_count: int
     removed_summary: str | None = None  # short readable summary
     content_ref: str | None = None  # path to the sidecar JSON file
-
-
-class AmbiguityReportEvent(_EventBase):
-    event_type: Literal["ambiguity_report"] = "ambiguity_report"
-    phase_name: str
-    ambiguity_type: str
-    question: str
-    decision: str
 
 
 class AmbiguityLoggedEvent(_EventBase):
@@ -551,43 +512,6 @@ class RuntimeInputInjectedEvent(_EventBase):
     message: str
 
 
-class ValidationPassEvent(_EventBase):
-    """Fired when a phase validator returns (True, []). Complements ValidationFail."""
-
-    event_type: Literal["validation_pass"] = "validation_pass"
-    phase_name: str
-    retry_count: int  # how many retries were consumed before the pass (0 = first-try)
-    #: Full sentence naming the validator and what it concluded.
-    message: str = ""
-
-
-class RetryExhaustedEvent(_EventBase):
-    """Fired when `current_retries >= max_retries` and the phase is force-degraded."""
-
-    event_type: Literal["retry_exhausted"] = "retry_exhausted"
-    phase_name: str
-    max_retries: int
-    final_errors: list[str] = Field(default_factory=list)
-
-
-class ModelResolvedEvent(_EventBase):
-    """Fired by the harness after resolver.resolve() picks a model.
-
-    Tier 1 Commit B (T-B2). Lets Studio show *why* a phase ended up on a
-    specific model/provider (which tier, whether model_override was used,
-    which call chain the resolver actually picked).
-    """
-
-    event_type: Literal["model_resolved"] = "model_resolved"
-    phase_name: str
-    tier: str  # phase.tier
-    role_name: str  # tier or synthetic "_model_override::..."
-    resolved_model: str | None = None  # model code from llm_roles.yaml
-    thinking_enabled: bool | None = None
-    model_override: str | None = None
-    call_chain: list[str] = Field(default_factory=list)  # ["OC_CL/claude-sonnet-4-6", ...]
-
-
 class ArtifactSavedEvent(_EventBase):
     """Fired by StorageManager after persisting an artifact to disk.
 
@@ -689,48 +613,6 @@ class ResumedEvent(_EventBase):
     ns: str | None = None
 
 
-class HeartbeatEvent(_EventBase):
-    """Periodic pulse during a long-running phase.
-
-    Tier 1 Commit D (T-B13). Gemini-approved purpose: keep Studio's
-    frontend WebSocket alive + surface memory-pressure symptoms on
-    tasks where 30+ seconds between "real" events is common (video
-    generation, multi-chapter long-form analysis, DeepSeek high-
-    reasoning turns). 30-second cadence, sourced from a threading-
-    based timer inside harness.run so it keeps ticking even while the
-    main loop is blocked in a synchronous tool call.
-    """
-
-    event_type: Literal["heartbeat"] = "heartbeat"
-    current_phase: str | None = None  # None when between phases / during startup
-    elapsed_seconds: float
-    memory_usage_mb: float | None = None  # None when psutil / resource reading fails
-
-
-class ThreadCleanedUpEvent(_EventBase):
-    """Fired after runner.run_skill deletes successful-run checkpoints."""
-
-    event_type: Literal["thread_cleaned_up"] = "thread_cleaned_up"
-    thread_id: str
-    checkpoint_count_at_cleanup: int | None = None
-
-
-class InternalErrorEvent(_EventBase):
-    """Non-business Python exception (OOM / NetworkTimeout / unexpected).
-
-    Distinguishes engine-layer crashes from ValidationFail / RetryExhausted
-    which are business-domain failures. Emitted at the three harness entry
-    points Gemini flagged (Q2): ``harness.run`` / ``harness.resume`` /
-    ``subgraph.run``, right before the exception is re-raised.
-    """
-
-    event_type: Literal["internal_error"] = "internal_error"
-    entry_point: Literal["run", "resume", "subgraph"]
-    error_type: str  # exception class name (e.g. "RuntimeError")
-    error_message: str  # str(exc)
-    traceback: str  # traceback.format_exc()
-
-
 CallbackEvent = Annotated[
     PhaseStartEvent
     | PredictChainStartEvent
@@ -739,14 +621,10 @@ CallbackEvent = Annotated[
     | LLMDeltaEvent
     | ToolCallStartedEvent
     | ToolCallEvent
-    | ValidationFailEvent
-    | RetryEvent
-    | FinishTaskEvent
     | NudgeEvent
     | WorkingMemoryUpdateEvent
     | DeadEndPrunedEvent
     | CompactionEvent
-    | AmbiguityReportEvent
     | AmbiguityLoggedEvent
     | BuiltinSubagentEnterEvent
     | BuiltinSubagentExitEvent
@@ -762,15 +640,9 @@ CallbackEvent = Annotated[
     | ToolErrorHandledEvent
     | ToolHistoryRepairedEvent
     | RuntimeInputInjectedEvent
-    | ValidationPassEvent
-    | RetryExhaustedEvent
-    | InternalErrorEvent
-    | ModelResolvedEvent
     | ArtifactSavedEvent
     | ParallelMapGroupStartedEvent
     | ParallelMapGroupEndedEvent
-    | HeartbeatEvent
-    | ThreadCleanedUpEvent
     | InterruptedEvent
     | ResumedEvent
     | AgentLoopIterationEvent
@@ -791,14 +663,10 @@ __all__ = [
     "LLMDeltaEvent",
     "ToolCallStartedEvent",
     "ToolCallEvent",
-    "ValidationFailEvent",
-    "RetryEvent",
-    "FinishTaskEvent",
     "NudgeEvent",
     "WorkingMemoryUpdateEvent",
     "DeadEndPrunedEvent",
     "CompactionEvent",
-    "AmbiguityReportEvent",
     "AmbiguityLoggedEvent",
     "BuiltinSubagentEnterEvent",
     "BuiltinSubagentExitEvent",
@@ -808,21 +676,15 @@ __all__ = [
     "LLMRouteDecisionEvent",
     "RunStartedEvent",
     "RunEndedEvent",
-    "ValidationPassEvent",
     "FinishTaskVerdictEvent",
     "LoopDetectedEvent",
     "ProtocolViolationEvent",
     "ToolErrorHandledEvent",
     "ToolHistoryRepairedEvent",
     "RuntimeInputInjectedEvent",
-    "RetryExhaustedEvent",
-    "InternalErrorEvent",
-    "ModelResolvedEvent",
     "ArtifactSavedEvent",
     "ParallelMapGroupStartedEvent",
     "ParallelMapGroupEndedEvent",
-    "HeartbeatEvent",
-    "ThreadCleanedUpEvent",
     "InterruptedEvent",
     "ResumedEvent",
     "AgentLoopIterationEvent",

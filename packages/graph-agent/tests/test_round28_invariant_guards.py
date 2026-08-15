@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from graph_agent.cognitive.middlewares import create_custom_middlewares
 from graph_agent.cognitive.prompt import apply_v030_cognitive_template
 from graph_agent.core.error_registry import ERROR_REGISTRY
 from graph_agent.core.exceptions import GraphAgentFatalError
@@ -43,18 +42,6 @@ def test_round28_prompt_template_keeps_eight_named_slots() -> None:
         assert f"<{slot}>" in prompt
         assert f"</{slot}>" in prompt
     assert prompt.rstrip().endswith("</exit_contract>")
-
-
-def test_round28_middleware_order_keeps_observation_before_control() -> None:
-    middlewares = create_custom_middlewares(phase_name="round28", callbacks=[])
-
-    names = [type(middleware).__name__ for middleware in middlewares]
-    assert names[:4] == [
-        "AgentLoopIterationMiddleware",
-        "WorkingMemoryMiddleware",
-        "DeadEndPruningMiddleware",
-        "ClarificationMiddleware",
-    ]
 
 
 def test_round28_tool_sandbox_blocks_write_and_escape_shapes(tmp_path: Path) -> None:

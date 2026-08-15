@@ -35,7 +35,7 @@ live 实现 = `middleware/compaction.py` 的 `CompactionMiddleware`(顺序契约
 - **profile 兜底**:model 缺 `profile["max_input_tokens"]` 时包 `_SummarizationReadyModel` shim(fallback 32_000,`SUMMARIZATION_FALLBACK_MAX_INPUT_TOKENS`,语义自死侧 `_ensure_summarization_profile` 迁移),否则 fraction trigger 构造即炸。
 - **装配注入**:`graph_assembler.py:2036-2037` 把 phase 已解析 chat model 与 sidecar writer 显式传入工厂。
 
-死侧原实现(PR E 整族删,行号已按 2026-08-15 决议 §6.2 校正):配置 `phase_nodes/llm_phase_node.py:277-282`、底座构造 `cognitive/middlewares.py:467-476`、sidecar 写 `llm_phase_node.py:383`、CompactionEvent 构造 `:813`。`execution_control.py` 的 `_summarize_recent_failures` 是"失败摘要"(不同于 messages compaction)。
+死侧原实现(`phase_nodes/llm_phase_node.py` 的配置与 sidecar 写入、`cognitive/middlewares.py` 的底座构造)已随 2026-08-15 决议 §5 的整族删除移除,查阅原样以 git 历史为准。`execution_control.py` 的 `_summarize_recent_failures` 是"失败摘要"(不同于 messages compaction)。
 
 ### 3. HITL / resume(Engine live,Studio route 未接)
 `interrupt()` **原语 live**(`cognitive_flow.py:33` import / `:95` `_interrupt_fn or interrupt` / `:292` 调用 / `:300` `source="human_interrupt"`)。WS-E7 后,Engine `resume_skill` 要求 `human_response={content, tool_call_id?}`,会校验 selected checkpoint 内存在 pending tool call,并通过 `ToolMessage(content=..., tool_call_id=...)` 更新 state 后重 invoke。Studio `resume_run` 端点仍 501(`apps/studio/backend/app/routers/runs.py:70` `raise_not_implemented`),`ResumeReq.context_overrides` 字段定义了但零消费(见 `03-api-contract`)。
@@ -57,7 +57,7 @@ live 实现 = `middleware/compaction.py` 的 `CompactionMiddleware`(顺序契约
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
 | messages 持久化 | DeltaChannel 已 live(`state.py:237`);AGENT 内层经 `agent:<phase>` / `iter{k}.agent:<phase>` 挂共享 base | HITL/resume 能消费这些 checkpoint 从内层断点续跑 |
-| compaction | **已 live**(`middleware/compaction.py`,契约第 4 槽;超窗摘要 + sidecar 全文 + CompactionEvent) | 保持;死侧副本随 PR E 删除 |
+| compaction | **已 live**(`middleware/compaction.py`,契约第 4 槽;超窗摘要 + sidecar 全文 + CompactionEvent) | 保持;死侧副本已随整族删除移除 |
 | HITL/resume | Engine `resume_skill` 已消费 pending tool call + overrides;Studio HTTP route 仍 501 | Studio 薄接 Engine resume 并提供用户态 checkpoint/HITL 工作流 |
 
 > **验"是否按 mvp1 改了"**:① 同一 base/thread 是否能区分外层 `""` 和 AGENT `agent:<phase>` checkpoint;② graph iterate 内 AGENT checkpoint 是否保留 `iter{k}.agent:<phase>`;③ Engine `resume_skill` 能注入 HITL response 并从对话断点恢复;④ Studio HTTP/UI resume 是否闭环(仍未 live);⑤ messages summarization 触发后有界、sidecar 存全文、CompactionEvent.content_ref 指向 sidecar(已 live,行为测试 `tests/middleware/test_compaction.py`)。

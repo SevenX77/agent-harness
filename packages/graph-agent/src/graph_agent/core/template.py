@@ -6,8 +6,6 @@ import logging
 import re
 from typing import Any
 
-from graph_agent.core.types import Phase
-
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"(?<!\{)\{(\w+)\}(?!\})")
@@ -57,17 +55,4 @@ def _safe_render_template(
     return _PLACEHOLDER_RE.sub(_replace, template)
 
 
-def _render_user_prompt(phase: Phase, context: dict[str, Any]) -> str:
-    """Render the phase's user_prompt_template with context values."""
-    template = phase.user_prompt_template
-    if not template:
-        return "请根据当前上下文完成本阶段任务。"
-    return _safe_render_template(
-        template,
-        context,
-        phase_name=phase.name,
-        strict=True,
-    )
-
-
-__all__ = ["MissingContextError", "_render_user_prompt", "_safe_render_template"]
+__all__ = ["MissingContextError", "_safe_render_template"]

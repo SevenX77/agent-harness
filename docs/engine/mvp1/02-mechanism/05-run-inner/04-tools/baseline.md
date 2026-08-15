@@ -22,7 +22,7 @@ N/A。
 > **StructuredTool 第一次出现需定义**:LangChain 带 args schema 的工具对象,LLM 按 schema 生成调用参数。
 
 ### 2. builtin 工具集(skill 可引用 `builtin.<name>`)
-`tools/builtin/__init__.py` 导出 **11 个**:`ask_clarification_tool`、`update_working_memory_tool`、`log_ambiguity_tool`、`query_working_memory_tool`、`read_artifact_tool`(后四个在 `tools/builtin/cognitive_tools.py`,空壳、行为归 CognitiveFlowMiddleware,见 `03-cognitive`)、`query_working_memory`、`read_artifact`(死侧 ctx 版,待整族删)、`parallel_map`、`make_read_file_tool`(read_file)、`read_declared_example`、`read_declared_reference`。loader 特判 `builtin.` 前缀的引用到这里。
+`tools/builtin/__init__.py` 导出 **9 个**:`ask_clarification_tool`、`update_working_memory_tool`、`log_ambiguity_tool`、`query_working_memory_tool`、`read_artifact_tool`(后四个在 `tools/builtin/cognitive_tools.py`,空壳、行为归 CognitiveFlowMiddleware,见 `03-cognitive`)、`parallel_map`、`make_read_file_tool`(read_file)、`read_declared_example`、`read_declared_reference`。loader 特判 `builtin.` 前缀的引用到这里。
 > 注:`parallel_map` 既是 builtin 工具(内层 LLM 可调的"子 skill 并行展开")又与外层声明式 `iterate`/batch 重叠——两条 fan-out 路的取舍归 mvp1-alignment(断层#3)。
 
 ### 2b. 认知框架工具挂载面(2026-08-15 迁移决议 PR B,代码现实)

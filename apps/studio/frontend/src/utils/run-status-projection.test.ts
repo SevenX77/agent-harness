@@ -132,7 +132,7 @@ describe("deriveNodeErrorMessages / runningPhaseOf — migrated behaviors", () =
   it("keeps the failure reason for a failed phase", () => {
     const events = [
       event({ event_type: "phase_start", phase_name: "review" }),
-      event({ event_type: "validation_fail", phase_name: "review", errors: ["bad output"] }),
+      event({ event_type: "protocol_violation", phase_name: "review", violations: ["bad output"] }),
     ]
     expect(deriveNodeErrorMessages(events)).toEqual({ review: "bad output" })
   })

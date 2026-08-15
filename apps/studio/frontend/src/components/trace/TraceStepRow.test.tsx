@@ -33,27 +33,30 @@ function renderRow(event: CallbackEvent, expanded = false): string {
   )
 }
 
-describe('TraceStepRow retry badge (D10)', () => {
-  it('renders a 2/3 retry badge for a validation_fail with attempt info', () => {
-    const html = renderRow(event({ event_type: 'validation_fail', attempt: 2, max_attempts: 3, error_message: 'schema mismatch' }))
+// The row's red tint and the rail dot beside it must answer to the SAME
+// authority (utils/trace eventSeverity). They used to disagree: the dot read
+// severity while the tint carried its own hand-kept list of type names, so a
+// protocol_violation got a red dot on an untinted row.
+describe('TraceStepRow error tint follows the one severity authority', () => {
+  // `hover:bg-destructive/15` is asserted rather than `bg-destructive/10`
+  // because only the row carries it: the severity PILL also uses
+  // bg-destructive/10, so that substring is present with or without the tint
+  // and would make this test pass against a row that has none.
+  const ROW_TINT = 'hover:bg-destructive/15'
 
-    expect(html).toContain('aria-label="Retry attempt 2/3"')
-    expect(html).toContain('2/3')
-    // The error stack message is still surfaced for the failed attempt.
-    expect(html).toContain('schema mismatch')
+  it('tints the row for an event severity calls an error', () => {
+    const html = renderRow(event({ event_type: 'protocol_violation', phase_name: 'draft', violations: ['bad state'] }))
+
+    expect(html).toContain(ROW_TINT)
+    // Same input as the tint — the dot cannot disagree with the row it sits on.
+    expect(html).toContain('border-background bg-destructive"')
   })
 
-  it('marks the final attempt badge with the exhausted (destructive) styling', () => {
-    const html = renderRow(event({ event_type: 'validation_fail', attempt: 3, max_attempts: 3 }))
-
-    expect(html).toContain('aria-label="Retry attempt 3/3"')
-    expect(html).toContain('text-destructive')
-  })
-
-  it('omits the retry badge entirely for events without attempt info', () => {
-    const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }))
-
-    expect(html).not.toContain('Retry attempt')
+  it('leaves an ordinary row and a merely-warning row untinted', () => {
+    expect(renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }))).not.toContain(ROW_TINT)
+    expect(
+      renderRow(event({ event_type: 'loop_detected', phase_name: 'draft', tool_name: 'Read', count: 3 })),
+    ).not.toContain(ROW_TINT)
   })
 })
 
@@ -109,31 +112,6 @@ describe('TraceStepRow has one expander, not two (decision 2026-08-09 D4)', () =
     expect(collapsed).not.toContain('execution subtree')
     expect(collapsed).toContain('Explored · Read')
     expect(opened).toContain('Result')
-  })
-})
-
-describe('TraceStepRow retry-exhausted Error Stack (D10, n4-trace #25)', () => {
-  it('renders an Error Stack listing each prior failure reason when retries are exhausted', () => {
-    const html = renderRow(
-      event({ event_type: 'retry_exhausted', phase_name: 'draft', max_retries: 3, final_errors: ['schema mismatch', 'missing field x'] }),
-    )
-
-    expect(html).toContain('Error Stack (2)')
-    expect(html).toContain('schema mismatch')
-    expect(html).toContain('missing field x')
-  })
-
-  it('surfaces the per-attempt errors list for a validation_fail event', () => {
-    const html = renderRow(event({ event_type: 'validation_fail', phase_name: 'draft', errors: ['line 3 invalid'] }))
-
-    expect(html).toContain('Error Stack (1)')
-    expect(html).toContain('line 3 invalid')
-  })
-
-  it('omits the Error Stack entirely for a passing phase event', () => {
-    const html = renderRow(event({ event_type: 'phase_end', phase_name: 'draft' }))
-
-    expect(html).not.toContain('Error Stack')
   })
 })
 

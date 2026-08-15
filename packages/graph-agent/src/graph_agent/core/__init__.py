@@ -17,11 +17,9 @@ from graph_agent.core.manifest import ContextBridge
 from graph_agent.core.run_context import RunContext
 from graph_agent.core.runner import run_skill
 from graph_agent.core.state import WorkflowState
-from graph_agent.core.types import Phase
 
 __all__ = [
     "ContextBridge",
-    "Phase",
     "WorkflowState",
     "GraphAgentError",
     "GraphAgentFatalError",

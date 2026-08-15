@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import type { CallbackEvent } from '../api/types'
 import {
   countRouteDegradations,
-  errorStack,
   eventColor,
   eventMessageIsRedundant,
   eventMessage,
@@ -13,7 +12,6 @@ import {
   eventTimeLabel,
   isRunScopedEvent,
   routeDecisionDetails,
-  retryBadge,
   RUN_SCOPE,
   toolCallSummary,
 } from './trace'
@@ -25,43 +23,6 @@ function event(partial: Partial<CallbackEvent> & { event_type: string }): Callba
     ...partial,
   } as CallbackEvent
 }
-
-describe('retryBadge (D10 validator retry nudge)', () => {
-  it('returns null for events that carry no attempt information', () => {
-    expect(retryBadge(event({ event_type: 'phase_start' }))).toBeNull()
-  })
-
-  it('derives an attempt/limit badge from attempt + max_attempts', () => {
-    const badge = retryBadge(event({ event_type: 'validation_fail', attempt: 2, max_attempts: 3 }))
-    expect(badge).not.toBeNull()
-    expect(badge?.label).toBe('2/3')
-    expect(badge?.exhausted).toBe(false)
-  })
-
-  it('reads retry_count and max_retries when attempt fields are absent', () => {
-    const badge = retryBadge(event({ event_type: 'validation_fail', retry_count: 1, max_retries: 3 }))
-    // retry_count is zero-based attempts already spent → human-facing attempt is +1.
-    expect(badge?.label).toBe('2/3')
-  })
-
-  it('flags the badge as exhausted when the final attempt is reached', () => {
-    const badge = retryBadge(event({ event_type: 'validation_fail', attempt: 3, max_attempts: 3 }))
-    expect(badge?.exhausted).toBe(true)
-  })
-
-  it('reads nested attempt info from metadata when not at the top level', () => {
-    const badge = retryBadge(
-      event({ event_type: 'validation_fail', metadata: { attempt: 1, max_attempts: 2 } }),
-    )
-    expect(badge?.label).toBe('1/2')
-  })
-
-  it('shows a bare attempt count when no limit is known', () => {
-    const badge = retryBadge(event({ event_type: 'validation_fail', attempt: 2 }))
-    expect(badge?.label).toBe('#2')
-    expect(badge?.exhausted).toBe(false)
-  })
-})
 
 describe('toolCallSummary (D1/P2 agent tool-call folding, n4-trace #16/#24)', () => {
   it('returns null for events that are not tool_call', () => {
@@ -99,31 +60,6 @@ describe('toolCallSummary (D1/P2 agent tool-call folding, n4-trace #16/#24)', ()
   it('exposes a rounded duration label when duration_ms is present', () => {
     const summary = toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Read', result: '', duration_ms: 12.7 }))
     expect(summary?.durationLabel).toBe('13 ms')
-  })
-})
-
-describe('errorStack (D10 retry-exhausted error stack, n4-trace #25)', () => {
-  it('returns the final_errors list for a retry_exhausted event', () => {
-    const stack = errorStack(
-      event({ event_type: 'retry_exhausted', max_retries: 3, final_errors: ['schema mismatch', 'missing field x'] }),
-    )
-    expect(stack).toEqual(['schema mismatch', 'missing field x'])
-  })
-
-  it('returns the per-attempt errors list for a validation_fail event', () => {
-    const stack = errorStack(event({ event_type: 'validation_fail', errors: ['line 3 invalid'], retry_count: 1 }))
-    expect(stack).toEqual(['line 3 invalid'])
-  })
-
-  it('drops non-string and blank entries from the error list', () => {
-    const stack = errorStack(
-      event({ event_type: 'retry_exhausted', final_errors: ['real', '', '   ', 7 as unknown as string] }),
-    )
-    expect(stack).toEqual(['real'])
-  })
-
-  it('returns an empty array for events that are neither failure type', () => {
-    expect(errorStack(event({ event_type: 'phase_end', phase_name: 'draft' }))).toEqual([])
   })
 })
 
@@ -207,8 +143,7 @@ describe('llm_route_decision visibility (trace-observability F7)', () => {
   })
 
   it('colors only failures as destructive', () => {
-    expect(eventColor(event({ event_type: 'internal_error' }))).toBe('bg-destructive')
-    expect(eventColor(event({ event_type: 'validation_fail' }))).toBe('bg-destructive')
+    expect(eventColor(event({ event_type: 'protocol_violation', phase_name: 'draft' }))).toBe('bg-destructive')
   })
 
   it('extracts the route identity, reason and status code from the event', () => {
@@ -283,23 +218,11 @@ describe('eventModelName (which model a call actually used)', () => {
     expect(model).toBe('claude-sonnet-4-6')
   })
 
-  it('reads resolved_model from model_resolved', () => {
-    const model = eventModelName(
-      event({ event_type: 'model_resolved', phase_name: 'draft', resolved_model: 'gpt-4o', role_name: 'writer' }),
-    )
-    expect(model).toBe('gpt-4o')
-  })
-
   it('reads the provider-reported model_name from llm_call response_data', () => {
     const model = eventModelName(
       event({ event_type: 'llm_call', phase_name: 'draft', response_data: { model_name: 'glm-4.7' } }),
     )
     expect(model).toBe('glm-4.7')
-  })
-
-  it('renders the model into the model_resolved timeline message', () => {
-    expect(eventMessage(event({ event_type: 'model_resolved', phase_name: 'draft', resolved_model: 'gpt-4o' })))
-      .toBe('Model resolved: gpt-4o')
   })
 
   it('returns null when the model is missing or blank', () => {

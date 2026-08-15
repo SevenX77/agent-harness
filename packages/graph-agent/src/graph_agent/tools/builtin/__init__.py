@@ -1,9 +1,8 @@
 """graph_agent builtin tools.
 
-Tools under this package are loadable from any SKILL.md by writing
-``tools: [builtin.<tool_name>]`` — the loader special-cases references
-beginning with ``builtin.`` to look here instead of inside the calling
-skill's directory.
+Framework-owned tools mounted by the assembler (`graph_assembler`): the
+cognitive tool shells intercepted by CognitiveFlowMiddleware, the declared
+reference/example readers, and the ``parallel_map`` fan-out tool.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from graph_agent.tools.builtin.cognitive_tools import (
     read_artifact_tool,
     update_working_memory_tool,
 )
-from graph_agent.tools.builtin.context_access import query_working_memory, read_artifact
 from graph_agent.tools.builtin.parallel_map import parallel_map
 from graph_agent.tools.builtin.read_example import read_declared_example
 from graph_agent.tools.builtin.read_file import make_read_file_tool
@@ -26,9 +24,7 @@ __all__ = [
     "log_ambiguity_tool",
     "parallel_map",
     "make_read_file_tool",
-    "query_working_memory",
     "query_working_memory_tool",
-    "read_artifact",
     "read_artifact_tool",
     "read_declared_example",
     "read_declared_reference",

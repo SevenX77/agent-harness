@@ -192,8 +192,6 @@ def _build_metrics_text(
         lines.append(f"data_keys={sorted(data_dump.keys())}")
         lines.append(f"current_phase={flow.current_phase}")
         lines.append(f"io_errors={list(flow.io_errors)}")
-        lines.append(f"validation_warnings={list(flow.validation_warnings)}")
-        lines.append(f"retry_counts={dict(flow.retry_counts)}")
         lines.append(f"metrics={dict(flow.metrics)}")
     if error_text:
         lines.append("error=<see error.txt>")
@@ -323,9 +321,7 @@ def synthetic_post_run_state() -> WorkflowState:
         run_id="r-mvp1-smoke",
         unattended=True,
         current_phase="review",
-        retry_counts={"segment": 0},
         metrics={"total_input_tokens": 1234, "total_output_tokens": 567},
-        validation_warnings=[],
         io_errors=[],
     )
     messages: list[StateMessage] = [HumanMessage(content="kickoff for MVP-1 smoke")]

@@ -294,7 +294,12 @@ def predict_skill(  # noqa: C901
     from graph_agent.core._predict_internal.exporter import assemble_phase_record
     from graph_agent.core._predict_internal.path_diff import compute_diff
     from graph_agent.core._predict_internal.strategy import MockStrategy
-    from graph_agent.core._predict_internal.tracing import PredictTracingCallback
+    from graph_agent.core._predict_internal.tracing import (
+        PredictTracingCallback,
+        clear_mock_source_cache,
+        clear_validator_downgrades,
+        get_validator_downgrade,
+    )
     from graph_agent.core.compiler import compile_skill
 
     resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
@@ -334,6 +339,10 @@ def predict_skill(  # noqa: C901
         strategy._phase_schemas.update(phase_schemas)
 
     # 3. Setup Predict interception context & tracing
+    # Both records are process-local and keyed by phase name, so a previous
+    # predict in the same process would otherwise bleed into this one.
+    clear_mock_source_cache()
+    clear_validator_downgrades()
     predict_context = SDKPredictContext(strategy, copilot_predict)
     tracing_callback = PredictTracingCallback()
     tracing_callback.on_chain_start(metadata={})
@@ -366,6 +375,13 @@ def predict_skill(  # noqa: C901
     # 5. Extract results, path & deadlocks
     final_context = dict(raw.get("context", {}))
     raw_phases = tracing_callback.phases or []
+    # Validator downgrades land after the trace stamper has already finalized the
+    # phase (the validator runs downstream of phase end), so they are folded in
+    # here rather than at stamping time.
+    for item in raw_phases:
+        downgrade = get_validator_downgrade(str(item.get("phase_name") or item.get("name") or ""))
+        if downgrade is not None:
+            item["validator_downgraded"] = downgrade
     phases = [assemble_phase_record(item) for item in raw_phases]
     actual_path = [phase.phase_name for phase in phases]
 

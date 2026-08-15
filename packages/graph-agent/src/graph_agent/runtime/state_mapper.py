@@ -126,6 +126,12 @@ class StateMapper:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     phase_id: str = "unknown"
+    #: Predict-only escape hatch. Called with (phase_id, message) when an author
+    #: validator rejects the phase output; returning True means the caller took
+    #: responsibility for the rejection (recorded it) and the flight continues on
+    #: the unvalidated output. Absent or returning False keeps the failure fatal,
+    #: which is the real-run contract.
+    validator_downgrade_hook: Callable[[str, str], bool] | None = None
 
     def build_phase_input(self, state: WorkflowState) -> WorkflowState:
         """Filter global business data to only what is declared in the input schema."""
@@ -261,6 +267,7 @@ class StateMapper:
                 phase_id=self.phase_id,
                 output_schema=self.output_schema,
                 code=validator_error_code or "[F-v3-agent-validator-failed]",
+                downgrade_hook=self.validator_downgrade_hook,
             )
 
         # Business fields must not use the framework _ prefix (same rule
@@ -355,12 +362,19 @@ def _run_phase_validator(
     phase_id: str,
     output_schema: dict[str, Any] | None,
     code: str,
+    downgrade_hook: Callable[[str, str], bool] | None = None,
 ) -> dict[str, Any]:
     try:
         result = validator(dict(output), dict(state_slice), phase_name=phase_id)
     except Exception as exc:  # noqa: BLE001 - user validator failures become runtime contract errors
+        detail = f"phase validator failed: {type(exc).__name__}: {exc}"
+        if downgrade_hook is not None and downgrade_hook(phase_id, detail):
+            # Predict flying on a P2 placeholder stub: the validator judges
+            # semantics the stub cannot have, so its rejection says nothing about
+            # the skill. The hook recorded it; keep flying on the stub output.
+            return dict(output)
         _phase_mapping_fatal(
-            f"phase validator failed: {type(exc).__name__}: {exc}",
+            detail,
             code=code,
             phase_id=phase_id,
         )

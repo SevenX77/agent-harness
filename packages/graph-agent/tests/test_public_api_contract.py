@@ -364,7 +364,8 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                   ('inputs', 'dict[str, Any]'),
                   ('outputs', 'dict[str, Any]'),
                   ('mocked_source',
-                   "Optional[Literal['golden_case', 'copilot', 'heuristic_stub', 'manual']]"))),
+                   "Optional[Literal['golden_case', 'copilot', 'heuristic_stub', 'manual']]"),
+                  ('validator_downgraded', 'str | None'))),
 
  'SkillManifest': ('graph_agent',
                    (('schema_version', "Literal['v0.3.0']"),

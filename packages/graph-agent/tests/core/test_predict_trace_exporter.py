@@ -27,6 +27,7 @@ def test_assemble_phase_record_outputs_business_fields_only() -> None:
         "inputs",
         "outputs",
         "mocked_source",
+        "validator_downgraded",
     }
 
 

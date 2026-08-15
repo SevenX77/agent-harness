@@ -55,10 +55,25 @@ class PredictMockSourceCache:
 _DEFAULT_SOURCE_CACHE = PredictMockSourceCache()
 
 
+#: Durable per-run log of the mock source chosen for each phase. The cache above
+#: is CONSUMED (popped) by the trace stamper at phase end, which happens before
+#: the phase's output validator runs — so anything downstream of the model call
+#: that needs to know which mock source produced this output reads the log, not
+#: the cache.
+_MOCK_SOURCE_LOG: dict[str, MockedSource] = {}
+
+
 def record_mock_source(phase_name: str, source: MockedSource) -> None:
     """Record the source selected by the Predict interception layer."""
 
     _DEFAULT_SOURCE_CACHE.record(phase_name, source)
+    _MOCK_SOURCE_LOG[phase_name] = source
+
+
+def get_recorded_mock_source(phase_name: str) -> MockedSource | None:
+    """Return the mock source chosen for a phase, surviving trace stamping."""
+
+    return _MOCK_SOURCE_LOG.get(phase_name)
 
 
 def get_mock_source(phase_name: str) -> MockedSource | None:
@@ -68,9 +83,33 @@ def get_mock_source(phase_name: str) -> MockedSource | None:
 
 
 def clear_mock_source_cache() -> None:
-    """Clear process-local Predict source cache between tests or runs."""
+    """Clear process-local Predict source caches between tests or runs."""
 
     _DEFAULT_SOURCE_CACHE.clear()
+    _MOCK_SOURCE_LOG.clear()
+
+
+_VALIDATOR_DOWNGRADES: dict[str, str] = {}
+
+
+def record_validator_downgrade(phase_name: str, message: str) -> None:
+    """Record that a phase's author validator rejected its P2 placeholder stub
+    output and the predict flight continued anyway (decision doc 2026-08-15
+    predict-stub-validator-downgrade)."""
+
+    _VALIDATOR_DOWNGRADES[phase_name] = message
+
+
+def get_validator_downgrade(phase_name: str) -> str | None:
+    """Return the recorded downgrade message for a phase, if any."""
+
+    return _VALIDATOR_DOWNGRADES.get(phase_name)
+
+
+def clear_validator_downgrades() -> None:
+    """Clear process-local downgrade records between tests or runs."""
+
+    _VALIDATOR_DOWNGRADES.clear()
 
 
 class PredictTracingCallback(TracingCallback):
@@ -142,6 +181,9 @@ class PredictTracingCallback(TracingCallback):
             phase["metrics"] = zeroed_metrics
             if source is not None:
                 phase["mocked_source"] = source
+            downgrade = get_validator_downgrade(phase_name)
+            if downgrade is not None:
+                phase["validator_downgraded"] = downgrade
 
     def on_llm_call(
         self,
@@ -187,6 +229,10 @@ __all__ = [
     "PredictMockSourceCache",
     "PredictTracingCallback",
     "clear_mock_source_cache",
+    "clear_validator_downgrades",
     "get_mock_source",
+    "get_recorded_mock_source",
+    "get_validator_downgrade",
     "record_mock_source",
+    "record_validator_downgrade",
 ]

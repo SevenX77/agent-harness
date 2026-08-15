@@ -61,6 +61,7 @@ def test_export_predict_diagnostics_preserves_predict_result_contract() -> None:
                 "inputs": {"topic": "predict"},
                 "outputs": {"text": "manual"},
                 "mocked_source": "manual",
+                "validator_downgraded": None,
             },
             {
                 "phase_name": "validate",
@@ -68,6 +69,7 @@ def test_export_predict_diagnostics_preserves_predict_result_contract() -> None:
                 "inputs": {"text": "manual"},
                 "outputs": {"passed": True},
                 "mocked_source": None,
+                "validator_downgraded": None,
             },
         ],
         "path_diff": {

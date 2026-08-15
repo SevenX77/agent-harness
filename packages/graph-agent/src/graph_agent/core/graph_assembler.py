@@ -298,6 +298,7 @@ def _build_phase_node(
             node_kind="logic",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            predict_context=predict_context,
             runtime_config=runtime_config,
         )
     if isinstance(ast, SubgraphNodeAST):
@@ -321,6 +322,7 @@ def _build_phase_node(
             node_kind="subgraph",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            predict_context=predict_context,
             runtime_config=runtime_config,
         )
     if isinstance(ast, AgentNodeAST):
@@ -346,6 +348,7 @@ def _build_phase_node(
             node_kind="agent",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            predict_context=predict_context,
             runtime_config=runtime_config,
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
@@ -1066,6 +1069,34 @@ def _run_graph_loop_iterate(
     return _with_graph_iterate_signal(final_state, mode="loop", namespaces=namespaces)
 
 
+def _predict_stub_validator_downgrade_hook(
+    predict_context: Any,
+) -> Callable[[str, str], bool] | None:
+    """Build the predict-only validator downgrade hook, or None outside predict.
+
+    Only a P2 placeholder stub earns the downgrade: its output is schema-conform
+    but semantically invented, so an author validator judging semantics can never
+    accept it. P0 golden and P1 manual/Copilot outputs are real, so a validator
+    rejecting THEM is a true signal and stays fatal (decision doc 2026-08-15
+    predict-stub-validator-downgrade).
+    """
+    if predict_context is None:
+        return None
+
+    from graph_agent.core._predict_internal.tracing import (
+        get_recorded_mock_source,
+        record_validator_downgrade,
+    )
+
+    def _hook(phase_id: str, message: str) -> bool:
+        if get_recorded_mock_source(phase_id) != "heuristic_stub":
+            return False
+        record_validator_downgrade(phase_id, message)
+        return True
+
+    return _hook
+
+
 def _wrap_phase_runtime_node(
     phase_id: str,
     phase_ast: Any,
@@ -1075,6 +1106,7 @@ def _wrap_phase_runtime_node(
     source_path: Path,
     callbacks: Any | None,
     runtime_config: dict[str, Any] | None = None,
+    predict_context: Any = None,
 ) -> Any:
     io = getattr(phase_ast, "io", None)
     input_schema = getattr(io, "inputs", None) if io is not None else None
@@ -1083,7 +1115,12 @@ def _wrap_phase_runtime_node(
     if _phase_uses_batch_item_outputs(phase_ast):
         mapper_output_schema = _batch_item_output_schema(output_schema)
 
-    mapper = StateMapper(input_schema, mapper_output_schema, phase_id=phase_id)
+    mapper = StateMapper(
+        input_schema,
+        mapper_output_schema,
+        phase_id=phase_id,
+        validator_downgrade_hook=_predict_stub_validator_downgrade_hook(predict_context),
+    )
     validator = _load_phase_validator(
         phase_id=phase_id,
         source_path=source_path,

@@ -63,6 +63,10 @@ class PhaseRecord(BaseModel):
     inputs: dict[str, Any]
     outputs: dict[str, Any]
     mocked_source: Literal["golden_case", "copilot", "heuristic_stub", "manual"] | None = None
+    #: Set only in predict: the author validator rejected the P2 placeholder
+    #: stub output and the flight continued anyway. A predict whose phases
+    #: carry this has NOT had its validators satisfied.
+    validator_downgraded: str | None = None
 
 
 class RunResult(BaseModel):

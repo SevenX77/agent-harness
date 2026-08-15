@@ -35,6 +35,7 @@ def assemble_phase_record(
         inputs=_sanitize_mapping(raw_phase.get("inputs", {}), max_field_chars=max_field_chars),
         outputs=_sanitize_mapping(raw_phase.get("outputs", {}), max_field_chars=max_field_chars),
         mocked_source=mocked_source,
+        validator_downgraded=_optional_str(raw_phase.get("validator_downgraded")),
     )
 
 
@@ -49,6 +50,10 @@ def assemble_phase_records(
         assemble_phase_record(raw_phase, max_field_chars=max_field_chars)
         for raw_phase in raw_phases
     ]
+
+
+def _optional_str(value: Any) -> str | None:
+    return str(value) if isinstance(value, str) and value else None
 
 
 def _phase_type(

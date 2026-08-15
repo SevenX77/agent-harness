@@ -2286,7 +2286,7 @@ def _validate_static_dataflow(
                 )
             )
 
-        available_after[phase_name] = available | set(_schema_property_paths(_phase_output_schema(doc)))
+        available_after[phase_name] = available | _phase_blackboard_output_keys(doc)
 
     terminal_output_keys: set[str] = set()
     for phase_name in output_phases:
@@ -2306,6 +2306,27 @@ def _validate_static_dataflow(
                 field_path=f"io.outputs.required.{required_key}",
             )
         )
+
+
+def _phase_blackboard_output_keys(doc: PhaseDocument) -> set[str]:
+    """What a phase leaves on the blackboard for phases downstream of it.
+
+    For most phases that is exactly its declared ``io.outputs``. A
+    ``iterate.mode=loop`` phase is the exception: its ``io.outputs`` is the
+    contract for ONE round of the body — validated on every round, and required
+    to carry ``accumulate.from`` — while the only value the phase writes when
+    the loop ends is the accumulator (``_build_loop_iterate_phase``). Reading
+    ``io.outputs`` as the provided set here would make the compile-time
+    dataflow disagree with the runtime in both directions at once, leaving the
+    author no way to declare a loop that a downstream phase can consume.
+    """
+    iterate = getattr(doc.ast, "iterate", None)
+    if getattr(iterate, "mode", None) == "loop":
+        accumulate = getattr(iterate, "accumulate", None)
+        # A loop without accumulate is already fatal from
+        # _validate_iterate_compile_contracts, and provides nothing here.
+        return {accumulate.var} if accumulate is not None else set()
+    return set(_schema_property_paths(_phase_output_schema(doc)))
 
 
 def _phase_input_schema(doc: PhaseDocument) -> dict[str, Any]:

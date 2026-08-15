@@ -2018,13 +2018,28 @@ fn studio_ah_file_path(workspace_root: &Path, relative_path: &str) -> PathBuf {
         })
 }
 
-fn write_studio_managed_file(path: &Path, body: &str) -> Result<(), String> {
+/// Why a path was left alone. Both variants mean the same thing — the file on
+/// disk is not ours to replace — and neither is a failure of the refresh.
+enum ManagedWriteSkip {
+    /// No managed marker: the user (or `ah init`) wrote this file, not Studio.
+    Unowned,
+    /// Marker present but the body no longer hashes to it: the user edited our
+    /// file. Their edit wins; silently clobbering it would lose real work.
+    UserEdited,
+}
+
+enum ManagedWriteOutcome {
+    Written,
+    Skipped(ManagedWriteSkip),
+}
+
+/// Write one Studio-managed asset, refusing to touch anything Studio does not
+/// own. Only genuine IO failures are errors: ownership conflicts are a normal,
+/// expected state of a workspace the user also edits by hand.
+fn write_studio_managed_file(path: &Path, body: &str) -> Result<ManagedWriteOutcome, String> {
     if path.exists() {
         if !path.is_file() {
-            return Err(format!(
-                "refusing to overwrite non-file ah path: {}",
-                path.display()
-            ));
+            return Ok(ManagedWriteOutcome::Skipped(ManagedWriteSkip::Unowned));
         }
         let existing = std::fs::read_to_string(path).map_err(|error| {
             format!(
@@ -2032,19 +2047,12 @@ fn write_studio_managed_file(path: &Path, body: &str) -> Result<(), String> {
                 path.display()
             )
         })?;
-        let previous_hash = extract_studio_managed_hash(&existing).ok_or_else(|| {
-            format!(
-                "refusing to overwrite unmanaged ah file: {}",
-                path.display()
-            )
-        })?;
+        let Some(previous_hash) = extract_studio_managed_hash(&existing) else {
+            return Ok(ManagedWriteOutcome::Skipped(ManagedWriteSkip::Unowned));
+        };
         let existing_body = strip_studio_managed_marker(&existing);
-        let actual_hash = sha256_hex(&existing_body);
-        if previous_hash != actual_hash {
-            return Err(format!(
-                "refusing to overwrite modified Studio-managed ah file: {}",
-                path.display()
-            ));
+        if previous_hash != sha256_hex(&existing_body) {
+            return Ok(ManagedWriteOutcome::Skipped(ManagedWriteSkip::UserEdited));
         }
     }
     let parent = path
@@ -2053,15 +2061,50 @@ fn write_studio_managed_file(path: &Path, body: &str) -> Result<(), String> {
     std::fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create ah file dir {}: {error}", parent.display()))?;
     std::fs::write(path, with_studio_managed_marker(body))
-        .map_err(|error| format!("failed to write ah file {}: {error}", path.display()))
+        .map_err(|error| format!("failed to write ah file {}: {error}", path.display()))?;
+    Ok(ManagedWriteOutcome::Written)
 }
 
-fn prepare_studio_ah_workspace(workspace_root: &Path) -> Result<(), String> {
+/// Bring every Studio-managed asset in `<workspace>/.ah/` up to the shipped
+/// version. Idempotent by construction (each file carries the hash of the body
+/// Studio last wrote), so it is safe — and required — on every launch.
+///
+/// One conflicting file no longer aborts the pass: the loop used to bail on the
+/// first path Studio could not own, leaving every asset after it stale.
+fn refresh_studio_ah_assets(workspace_root: &Path) -> Result<(), String> {
     for (relative_path, body) in studio_ah_managed_payloads()? {
         let path = studio_ah_file_path(workspace_root, &relative_path);
-        write_studio_managed_file(&path, &body)?;
+        match write_studio_managed_file(&path, &body)? {
+            ManagedWriteOutcome::Written => {}
+            ManagedWriteOutcome::Skipped(reason) => log::info!(
+                "phase=studio-ah-assets action=skip path={} reason={}",
+                path.display(),
+                match reason {
+                    ManagedWriteSkip::Unowned => "not-studio-managed",
+                    ManagedWriteSkip::UserEdited => "user-edited",
+                }
+            ),
+        }
     }
     Ok(())
+}
+
+/// Refresh the `.ah/` assets of a workspace that already has them, and do
+/// nothing at all for one that does not. Opening a workspace must not grow an
+/// `.ah/` tree the user never asked for; provisioning stays with the CLI launch
+/// path, which is what the tree exists for.
+///
+/// This is the moment that matters: an `.ah/` tree arrives in a workspace by
+/// ways that never run the CLI launch path — most plainly by copying a skill
+/// directory, which carries the previous release's assets with it. On
+/// 2026-08-15 exactly that happened, and the agent working in the copy read a
+/// `agent-prompt-design` skill whose guidance was the opposite of the shipped
+/// one, next to a current copy of the same skill under `.claude/skills/`.
+pub(crate) fn refresh_studio_ah_assets_if_present(workspace_root: &Path) -> Result<(), String> {
+    if !workspace_root.join(".ah").is_dir() {
+        return Ok(());
+    }
+    refresh_studio_ah_assets(workspace_root)
 }
 
 /// Serialize one TOML basic string.
@@ -2161,10 +2204,13 @@ fn ah_config_for_workspace(
     mode: MasterLaunchMode,
     session: &CliSessionLaunchConfig,
 ) -> Result<PathBuf, String> {
+    // A user-owned ah.toml means the user drives their own ah setup, so Studio
+    // neither patches their config nor scatters its managed assets into their
+    // tree (same principle as wsl_payload_never_patches_a_user_owned_ah_toml).
     if let Some(config) = find_ah_config(workspace_root) {
         return Ok(config);
     }
-    prepare_studio_ah_workspace(workspace_root)?;
+    refresh_studio_ah_assets(workspace_root)?;
     let config = transient_ah_config_path(workspace_root, assistant);
     let parent = config
         .parent()
@@ -8783,35 +8829,95 @@ sessions
     }
 
     #[test]
-    fn generated_workspace_files_refuse_unmanaged_collisions() {
+    fn refresh_leaves_files_studio_does_not_own() {
         let root = temp_path("moirai-collision");
         let rules = root.join(".ah").join("rules");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&rules).unwrap();
         std::fs::write(rules.join("master.md"), "user-owned rules\n").unwrap();
 
-        let error = prepare_studio_ah_workspace(&root).expect_err("collision must fail");
+        refresh_studio_ah_assets(&root).expect("an unowned file is not an error");
 
-        assert!(error.contains("refusing to overwrite unmanaged ah file"));
-        assert!(error.contains("master.md"));
+        assert_eq!(
+            std::fs::read_to_string(rules.join("master.md")).unwrap(),
+            "user-owned rules\n",
+            "a file without the managed marker belongs to the user and stays untouched"
+        );
+        assert!(
+            root.join(".ah")
+                .join("skills")
+                .join("agent-prompt-design")
+                .join("SKILL.md")
+                .is_file(),
+            "one unowned file must not stop the other assets from materializing"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn generated_workspace_files_refuse_modified_managed_files() {
+    fn refresh_preserves_user_edits_to_managed_files() {
         let root = temp_path("moirai-modified-managed");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        prepare_studio_ah_workspace(&root).expect("initial managed files");
+        refresh_studio_ah_assets(&root).expect("initial managed files");
         let master_rules = root.join(".ah").join("rules").join("master.md");
         let mut edited = std::fs::read_to_string(&master_rules).unwrap();
         edited.push_str("\nuser edit\n");
-        std::fs::write(&master_rules, edited).unwrap();
+        std::fs::write(&master_rules, &edited).unwrap();
 
-        let error = prepare_studio_ah_workspace(&root).expect_err("modified managed file fails");
+        refresh_studio_ah_assets(&root).expect("a user-edited file is not an error");
 
-        assert!(error.contains("modified Studio-managed ah file"));
-        assert!(error.contains("master.md"));
+        assert_eq!(
+            std::fs::read_to_string(&master_rules).unwrap(),
+            edited,
+            "once the user edits a managed file their copy wins"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The defect this fixes: assets were written once and never again, so a
+    /// workspace kept serving whatever shipped the day it was first launched.
+    /// MoirAI then read a `.ah/skills/agent-prompt-design/SKILL.md` whose rules
+    /// contradicted the shipped ones (2026-08-15).
+    #[test]
+    fn refresh_replaces_stale_managed_content() {
+        let root = temp_path("moirai-stale-asset");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        refresh_studio_ah_assets(&root).expect("initial managed files");
+        let skill = root
+            .join(".ah")
+            .join("skills")
+            .join("agent-prompt-design")
+            .join("SKILL.md");
+        let shipped = std::fs::read_to_string(&skill).unwrap();
+        // A previous release's body, marked with ITS hash — exactly what an old
+        // launch leaves behind.
+        let stale_body = "---\nname: agent-prompt-design\n---\nold rules\n";
+        std::fs::write(&skill, with_studio_managed_marker(stale_body)).unwrap();
+
+        refresh_studio_ah_assets(&root).expect("refresh");
+
+        assert_eq!(
+            std::fs::read_to_string(&skill).unwrap(),
+            shipped,
+            "an untouched managed file must be brought back to the shipped body"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refresh_if_present_skips_workspaces_without_an_ah_tree() {
+        let root = temp_path("moirai-no-ah-tree");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        refresh_studio_ah_assets_if_present(&root).expect("no-op");
+
+        assert!(
+            !root.join(".ah").exists(),
+            "a workspace that never launched a CLI must not grow an .ah tree"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

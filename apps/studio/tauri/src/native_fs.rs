@@ -1049,8 +1049,14 @@ fn write_recent(path: &Path, list: &[RecentWorkspace]) -> Result<(), String> {
     std::fs::write(path, raw).map_err(|error| format!("cannot write recent workspaces: {error}"))
 }
 
-fn recent_workspaces_file() -> PathBuf {
-    crate::sidecar::default_user_config_dir().join("recent_workspaces.json")
+/// The recent list lives in the config dir the caller resolved — it is never
+/// allowed to resolve one of its own. Reaching past `resolve_config_dir` to the
+/// OS default is what made this the one piece of state that ignored
+/// `STUDIO_CONFIG_DIR`, so a second instance pointed at its own config dir still
+/// shared — and raced on — this file. Taking the directory as an argument makes
+/// that mistake unwritable rather than merely tested-for.
+fn recent_workspaces_file(config_dir: &Path) -> PathBuf {
+    config_dir.join("recent_workspaces.json")
 }
 
 #[tauri::command]
@@ -1106,7 +1112,7 @@ pub fn add_recent_workspace(
     identity: String,
     last_opened_at: String,
 ) -> Result<(), String> {
-    let file = recent_workspaces_file();
+    let file = recent_workspaces_file(&crate::resolve_config_dir());
     let updated = upsert_recent(
         read_recent(&file),
         RecentWorkspace {
@@ -1121,12 +1127,12 @@ pub fn add_recent_workspace(
 
 #[tauri::command]
 pub fn list_recent_workspaces() -> Vec<RecentWorkspace> {
-    read_recent(&recent_workspaces_file())
+    read_recent(&recent_workspaces_file(&crate::resolve_config_dir()))
 }
 
 #[tauri::command]
 pub fn remove_recent_workspace(identity: String) -> Result<(), String> {
-    let file = recent_workspaces_file();
+    let file = recent_workspaces_file(&crate::resolve_config_dir());
     let updated = remove_recent(read_recent(&file), &identity);
     write_recent(&file, &updated)
 }
@@ -1201,6 +1207,10 @@ pub fn clear_workspace_checkpoint(workspace_root: String, path: String) -> Resul
     clear_workspace_checkpoint_impl(&resolved.to_string_lossy(), &path)
 }
 
+/// Make the Studio-owned support files of a freshly opened workspace current:
+/// the copilot scratch dirs, and the packaged agent assets under `.ah/` when
+/// that tree exists. Both are Studio's to maintain and both are read the moment
+/// the workspace opens, so both are refreshed at the same single moment.
 #[tauri::command]
 pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<(), String> {
     let config_dir = crate::resolve_config_dir();
@@ -1209,7 +1219,8 @@ pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<(), Strin
     std::fs::create_dir_all(copilot.join("sessions"))
         .map_err(|error| format!("cannot create support dirs: {error}"))?;
     std::fs::create_dir_all(copilot.join("checkpoints"))
-        .map_err(|error| format!("cannot create support dirs: {error}"))
+        .map_err(|error| format!("cannot create support dirs: {error}"))?;
+    crate::refresh_studio_ah_assets_if_present(&root)
 }
 
 // ── New-skill / Open-folder native-fs (D12: Rust sole writer for build-dir +
@@ -1682,6 +1693,19 @@ mod tests {
     #[cfg(unix)]
     fn symlink_path(target: &Path, link: &Path) {
         std::os::unix::fs::symlink(target, link).expect("symlink");
+    }
+
+    #[test]
+    fn recent_list_lives_in_the_config_dir_it_is_given() {
+        let isolated = temp_root("recent-config-dir");
+
+        assert_eq!(
+            recent_workspaces_file(&isolated),
+            isolated.join("recent_workspaces.json"),
+            "the recent list must follow the caller's config dir, so an instance \
+             running with STUDIO_CONFIG_DIR keeps its own list"
+        );
+        let _ = std::fs::remove_dir_all(&isolated);
     }
 
     #[test]

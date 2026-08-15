@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Response, status
@@ -70,8 +71,15 @@ async def predict_run(skill_id: str, request: PredictRunRequest) -> PredictDiagn
     # N4 atom #30: project the in-process diagnostic export (is_predict / status /
     # phases / path_diff) instead of leaking the raw RunResult. The frontend reads
     # which agent nodes ran from `phases` to drive the golden 🟡 logic-OK middle state.
+    # dispatch_predict_job runs the whole engine synchronously, and the engine's
+    # batch-iterate path calls asyncio.run() internally — which raises outright on
+    # the event loop thread, and would stall every other request even when it does
+    # not. Hand it to a worker thread, exactly as the copilot tool already does
+    # (services/copilot_tools.py). This is Starlette's own answer for blocking work
+    # in an async path operation.
     try:
-        result = predictor_service.dispatch_predict_job(
+        result = await asyncio.to_thread(
+            predictor_service.dispatch_predict_job,
             skill_id,
             request.mock_llm,
             input_data=request.input_data,

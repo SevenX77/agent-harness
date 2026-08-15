@@ -163,14 +163,27 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 | W2-4 | predict 占位 mock 下的相位校验器降级(不再当致命,记 `validator_downgraded`) | ✅ 已合并(#809) | 决议 `.kiro/specs/decision-2026-08-15-predict-stub-validator-downgrade.md`。**只在这一轮用的是启发式占位 mock 时**降级;有 golden case 的相位照常严校——predict 仍要能发现真问题。降级记录挂持久 `_MOCK_SOURCE_LOG`(trace stamper 在 `on_phase_end` 就 pop 掉 cache,而校验器在其后才跑) |
 | W2-5 | predict 桩拿得到子图内相位的 output schema | ✅ 已合并(#811) | 决议 `.kiro/specs/decision-2026-08-15-predict-nested-phase-schema.md`。根因:runner 只遍历**根 skill** 的 `compiled.nodes` 收集 schema,子图是装配期另起一次 `compile_skill` 编出来的,其相位从不进这份名单 → 桩退化成 `{"value": "<mock_unknown>"}` → 跑满 `max_iterations` 抛 `[F-v3-agent-exit-control-failed]`。schema 改挂相位自己的 `PredictGatewayChatModel` 实例(第一版按相位名建注册表,两个子图里同名 `review` 互相串味,生产 trace 实证) |
 | W2-6 | `depends_on` 多前驱 = 汇合闸(LangGraph 列表形边),不是 N 条触发线 | ✅ 已合并(#812) | 决议 `.kiro/specs/decision-2026-08-15-engine-multi-dep-join-waits-for-all.md`。普通边是触发线不是栅栏(`langgraph/graph/state.py:915-920`:单起点等一个、起点列表等全部)。只有前驱**同超步结束**时两种写法才等价——常见菱形扇出扇入正好满足,所以长期未暴露。深度不齐则汇合相位抢跑;必填字段碰巧齐了则更坏:**静默多跑 N 次**,run 路径多烧 N 次真 token 且后一次覆盖前一次 |
-| W2-7 | loop 相位的"提供集"=`accumulate.var`(编译期对齐运行期) | 进行中(fix/engine-loop-accumulator-dataflow,PR #813) | 决议 `.kiro/specs/decision-2026-08-15-engine-loop-accumulator-dataflow.md`。运行期 `final_payload = {accumulate.var: acc}`(与设计源 `docs/engine/mvp1/02-mechanism/04-run-outer/02-iterate/baseline.md:48` 一致),而 `io.outputs` 是**每一轮**的契约;编译期却把 `io.outputs` 当提供集 → 作者无解:写累积器名则每轮输出校验必挂,不写则下游消费累积器编译必挂。顺带收紧另一半:下游消费 loop 的**每轮**输出字段,从前编译放行、运行读不到,现在编译期直接拦 |
+| W2-7 | loop 相位的"提供集"=`accumulate.var`(编译期对齐运行期) | ✅ 已合并(#813) | 决议 `.kiro/specs/decision-2026-08-15-engine-loop-accumulator-dataflow.md`。运行期 `final_payload = {accumulate.var: acc}`(与设计源 `docs/engine/mvp1/02-mechanism/04-run-outer/02-iterate/baseline.md:48` 一致),而 `io.outputs` 是**每一轮**的契约;编译期却把 `io.outputs` 当提供集 → 作者无解:写累积器名则每轮输出校验必挂,不写则下游消费累积器编译必挂。顺带收紧另一半:下游消费 loop 的**每轮**输出字段,从前编译放行、运行读不到,现在编译期直接拦 |
 
-> **W2-3 ~ W2-7 是一条因果链,不是五个独立缺陷。** 它们是在用 MoirAI 修真实复杂 skill
+| W2-8 | predict 端点把引擎交给工作线程,不在事件循环上跑 | ✅ 已合并(#818) | 决议 `.kiro/specs/decision-2026-08-15-predict-off-the-event-loop.md`。端点是 `async def` 却直接调同步的 `dispatch_predict_job`,引擎批处理路径内部的 `asyncio.run()`(`core/graph_assembler.py` `_run_batch_iterate_payload` 与 subagent 批处理路径)在事件循环线程上必然抛 RuntimeError → **任何用 `iterate.mode=batch` 的 skill,从界面点 Predict 一定失败**;同函数在 `services/copilot_tools.py:543` 已包 `asyncio.to_thread`,所以 copilot 路径一直能 predict、界面按钮一直不能 |
+| W2-9 | 引擎归不了类的异常不再冒充 LLM provider 失败(`engine.unexpected_error`) | ✅ 已合并(#819) | 决议 `.kiro/specs/decision-2026-08-15-engine-unclassified-error-code.md`。`runner.py` 两处 `except Exception` 包的是**整张图的一次执行**,兜底码却是 `llm.provider_invoke_failed`;而真 provider 异常全都自带 code(`LLMProviderError.__init__` 把 `error_code` 列为必填构造参数、`LLMProviderMissingError` 类级写死),兜底分支执行本身就证明"它不是 provider 异常"——这个默认值每次生效都是错的。同函数三行外的 `_safe_provider_error_message` 用的正是相反判据。不动 `adapters/engine.py:392`:那处包的是 `model.stream(...)` 内部,默认诚实 |
+
+> **W2-3 ~ W2-9 是一条因果链,不是七个独立缺陷。** 它们是在用 MoirAI 修真实复杂 skill
 > (`story-deconstruction`:子图嵌两层 + 六路并行 + loop 累积 + 图级 batch)的过程中
-> 逐个撞出来的——前一个不修,后一个根本暴露不出来。六个全修完后,该 skill 的 predict
-> 在补丁副本上跑通全链(42 次相位执行,`success = True`,产出 `story_framework`)。
-> 剩余唯一拦路石在 skill 侧(`global-synthesis/phases/export` 用异常做质量判断,
-> 使 predict 结构上不可能通过),归 MoirAI 修。
+> 逐个撞出来的——前一个不修,后一个根本暴露不出来。W2-1~W2-7 修完后,该 skill 的 predict
+> 在补丁副本上跑通全链(42 次相位执行,`success = True`,产出 `story_framework`);
+> W2-8 是把这个成果送到界面上的最后一环(真机复验:`predict-2026-08-15T10-19-17_aaac658c`
+> `status: success`,2.4 秒)。
+> **但"predict 绿"的分量要说清楚**:同一次 predict 里 **16 条相位校验器被静默降级**
+> (10 个不同相位名),因为占位数据满足不了语义校验器。准确的说法是"图的形状、连线与
+> logic 节点的执行链路通了",不是"这个 skill 验过了"。
+> **首次真跑(DeepSeek V4 Flash,2 章样例)失败**,`.workspace/runs/2026-08-15T10-19-55_df555c19`,
+> 197 秒 7 相位后 `[F-v3-agent-exit-control-failed] Phase 'segment' failed: nudge budget
+> exhausted (counts={'planning': 1, 'selfcheck': 0, 'standard': 1, 'total': 2}, max_nudges=1)
+> after 8 iteration(s)`。trace 显示 batch 的两个条目**共用同一份 agent 循环预算**
+> (迭代计数器 1→8 之后条目 2 从 **9** 接着数),且条目 2 的输出是条目 1 的内容
+> (输入 `chapter_number=2` + 第 2 章原文,输出却是第 1 章剧情)——**这一条不报错、出错数据**。
+> 根因排查与最小复现另开,不在本行结论内。
 > **踩坑记录**:桌面 app 的 sidecar 永远从冻结 vendor 快照导入引擎,这五个 PR 合并期间
 > 未重建 vendor,导致 MoirAI 一直在对落后 3 个 PR 的旧引擎做推理并报"32 errors",
 > 而同一时刻当前源码离线编译是 `COMPILE OK`。评估 agent 表现前必须先按 AGENTS.md

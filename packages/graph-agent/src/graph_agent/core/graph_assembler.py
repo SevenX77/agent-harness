@@ -65,7 +65,13 @@ from graph_agent.core.manifest import (
 from graph_agent.core.skill_resolver_protocol import (
     SkillResolverProtocol,
 )
-from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
+from graph_agent.core.state import (
+    BusinessData,
+    FrameworkState,
+    StateManager,
+    WorkflowState,
+    coerce_business_data,
+)
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
     assert_subagent_depth_allowed,
@@ -349,13 +355,7 @@ _MISSING = object()
 
 
 def _coerce_workflow_state(state: WorkflowState | dict[str, Any]) -> WorkflowState:
-    data_obj = state.get("data") if isinstance(state, dict) else None
-    if isinstance(data_obj, BusinessData):
-        data = data_obj
-    elif isinstance(data_obj, dict):
-        data = BusinessData.model_validate(data_obj)
-    else:
-        data = BusinessData()
+    data = coerce_business_data(state.get("data") if isinstance(state, dict) else None)
 
     flow_obj = state.get("flow") if isinstance(state, dict) else None
     if isinstance(flow_obj, FrameworkState):
@@ -369,64 +369,25 @@ def _coerce_workflow_state(state: WorkflowState | dict[str, Any]) -> WorkflowSta
     return WorkflowState(data=data, flow=flow, messages=messages)
 
 
-def _resolve_path_value(state: WorkflowState, path_str: str) -> Any:
-    curr: Any = state
-    for part in path_str.split("."):
-        if isinstance(curr, dict):
-            if part not in curr:
-                return _MISSING
-            curr = curr[part]
-            continue
-        if hasattr(curr, "model_dump"):
-            dumped = curr.model_dump()
-            if isinstance(dumped, dict) and part in dumped:
-                curr = dumped[part]
-                continue
-        if hasattr(curr, part):
-            curr = getattr(curr, part)
-            continue
-        get = getattr(curr, "get", None)
-        if callable(get):
-            next_value = get(part, _MISSING)
-            if next_value is not _MISSING:
-                curr = next_value
-                continue
-        return _MISSING
-    return curr
+def _resolve_iterate_items(state: WorkflowState, field_name: str) -> list[Any]:
+    """Resolve ``iterate.over`` — a bare business-field name — on the blackboard.
 
-
-def _resolve_iterate_items(state: WorkflowState, path_str: str) -> list[Any]:
-    value = _resolve_path_value(state, path_str)
-    if value is _MISSING:
-        value = _resolve_legacy_data_input_path(state, path_str)
+    The over contract is the field name alone (KB-06-iterate / skill-syntax);
+    state-rooted paths are not part of it (decision doc 2026-08-15
+    engine-iterate-over-business-field).
+    """
+    value = coerce_business_data(state.get("data")).get(field_name, _MISSING)
     if not isinstance(value, list):
-        detail = f"iterate over path {path_str!r} must resolve to list"
+        detail = f"iterate over field {field_name!r} must resolve to list"
         raise GraphAgentFatalError(
             detail,
             payload=make_error_payload(
                 "[F-v3-iterate-over-not-list]",
                 detail,
-                field_path=path_str,
+                field_path=field_name,
             ),
         )
     return value
-
-
-def _resolve_legacy_data_input_path(state: WorkflowState, path_str: str) -> Any:
-    if not path_str.startswith("data.") or path_str.startswith("data.inputs."):
-        return _MISSING
-    inputs = _resolve_path_value(state, "data.inputs")
-    if not isinstance(inputs, dict):
-        return _MISSING
-    legacy_tail = path_str.removeprefix("data.")
-    return _resolve_path_value(
-        WorkflowState(
-            data=BusinessData.model_validate(inputs),
-            flow=state["flow"],
-            messages=state["messages"],
-        ),
-        f"data.{legacy_tail}",
-    )
 
 
 def _apply_iterate_range(items: list[Any], range_spec: tuple[int, int] | None) -> list[Any]:

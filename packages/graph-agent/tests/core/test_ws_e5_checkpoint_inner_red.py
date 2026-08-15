@@ -224,7 +224,7 @@ def test_agent_inside_graph_iterate_preserves_iteration_namespace(
             """
             iterate:
               mode: batch
-              over: data.topics
+              over: topics
               item_var: topic
               concurrency: 1
             """
@@ -390,7 +390,7 @@ def test_graph_loop_iterate_does_not_leak_iteration_namespace_to_later_agent_che
         )
         iterate = IterateSpec(
             mode="loop",
-            over="data.topics",
+            over="topics",
             item_var="topic",
             accumulate=IterateAccumulateSpec(
                 var="answers",

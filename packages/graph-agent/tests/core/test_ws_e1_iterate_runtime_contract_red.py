@@ -115,7 +115,7 @@ def test_legacy_batch_field_remains_supported_while_iterate_becomes_primary(
         },
         phase_iterate="""
 batch:
-  iterator: data.items
+  iterator: items
   item_var: item
   concurrency: 2
 """,
@@ -142,7 +142,7 @@ def test_node_batch_iterate_one_based_closed_range_runs_selected_items_and_aggre
         phase_iterate="""
 iterate:
   mode: batch
-  over: data.inputs.items
+  over: items
   item_var: item
   range: [2, 3]
   concurrency: 2
@@ -226,7 +226,7 @@ def test_node_loop_iterate_accumulates_serially_with_declared_merge_mode(
         phase_iterate=f"""
 iterate:
   mode: loop
-  over: data.inputs.items
+  over: items
   item_var: item
   accumulate:
     var: collected
@@ -256,7 +256,7 @@ def test_node_loop_iterate_next_iteration_reads_previous_accumulator_value(
         phase_iterate="""
 iterate:
   mode: loop
-  over: data.inputs.items
+  over: items
   item_var: item
   accumulate:
     var: collected
@@ -310,7 +310,7 @@ def test_loop_iterate_requires_item_and_accumulator_in_phase_inputs(
         phase_iterate="""
 iterate:
   mode: loop
-  over: data.inputs.items
+  over: items
   item_var: item
   accumulate:
     var: collected
@@ -343,7 +343,7 @@ def test_iterate_over_must_resolve_to_list_at_runtime(
         phase_iterate="""
 iterate:
   mode: batch
-  over: data.inputs.title
+  over: title
   item_var: item
 """,
         action_body="""
@@ -356,7 +356,7 @@ iterate:
         _invoke(tmp_path, mock_skill_resolver, {"title": "not-a-list"})
 
     assert exc_info.value.payload.code == "[F-v3-iterate-over-not-list]"
-    assert "data.inputs.title" in str(exc_info.value)
+    assert "'title'" in str(exc_info.value)
 
 
 def test_node_batch_iterate_empty_list_returns_empty_aggregate_without_calling_action(
@@ -371,7 +371,7 @@ def test_node_batch_iterate_empty_list_returns_empty_aggregate_without_calling_a
         phase_iterate="""
 iterate:
   mode: batch
-  over: data.inputs.items
+  over: items
   item_var: item
 """,
         action_body="""
@@ -399,7 +399,7 @@ def test_node_loop_iterate_empty_list_returns_accumulate_init_without_calling_ac
         phase_iterate="""
 iterate:
   mode: loop
-  over: data.inputs.items
+  over: items
   item_var: item
   accumulate:
     var: collected
@@ -431,7 +431,7 @@ def test_graph_level_batch_iterate_runs_the_whole_dag_inside_one_graph_invoke(
         graph_iterate="""
 iterate:
   mode: batch
-  over: data.inputs.items
+  over: items
   item_var: item
   concurrency: 2
 """,
@@ -464,7 +464,7 @@ def test_graph_level_loop_iterate_is_one_thread_loop_body_not_test_side_reinvoke
         graph_iterate="""
 iterate:
   mode: loop
-  over: data.inputs.rounds
+  over: rounds
   item_var: round
   accumulate:
     var: count

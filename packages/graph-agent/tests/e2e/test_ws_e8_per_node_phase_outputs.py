@@ -197,7 +197,7 @@ io:
 actions: [worker]
 validator: false
 batch:
-  iterator: data.items
+  iterator: items
   item_var: item
   concurrency: 2
 ---

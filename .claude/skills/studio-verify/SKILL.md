@@ -72,5 +72,8 @@ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9222/json/version --max-
 4. **一次采样,不要轮询截图**:瞬态(loading 相位、流式增量)用 cdp.mjs 里的 async
    循环 100ms 读状态返回时间线,截图轮询追不上。
 5. **报告纪律**:没实测的行不许标 ✅;每行附截图文件名;跨多 PR 的会话报告要汇总全部交付项。
+   **给用户看的截图/报告必须发布成 claude.ai Artifact 页**(图片压 JPEG 内嵌 data URI,
+   同一文件路径复发布保持同一 URL)——用户常在远端看会话,发本地盘文件路径等于没交付
+   (用户裁决 2026-08-14:「给我的截图不要用本地盘,看不见」)。
 6. 背景原理与非 Windows 场景见 `docs/development/RUN_AND_SCREENSHOT.md` §4;本 skill
    是它在本仓 Windows 主力机上的可执行实例。

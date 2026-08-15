@@ -13,6 +13,10 @@ class CopilotWsRequestPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     user_message: str
+    # 会话身份契约(COPILOT_ASSIST-5):消息属于哪个前端会话标签。后端以
+    # (skill, session) 隔离 SDK 对话;没有归属的消息在边界拒绝,绝不落进
+    # "当前恰好活跃的对话"。
+    session_id: str = Field(min_length=1)
     model_override: str | None = None
     # The selected copilot role (one per `role_kind=="copilot"` role in settings,
     # each auto-matched to its model group). Defaults to copilot_chat.
@@ -181,3 +185,21 @@ class CopilotInterruptResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     interrupted: bool
+
+
+class CopilotSessionCloseRequest(BaseModel):
+    """Close one frontend tab's backend SDK conversation (COPILOT_ASSIST-5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1)
+
+
+class CopilotSessionCloseResponse(BaseModel):
+    """``closed`` counts dropped SDK clients — 0 when the tab never talked to
+    the backend (a draft tab closed before its first message), which is a
+    harmless no-op, not an error."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    closed: int

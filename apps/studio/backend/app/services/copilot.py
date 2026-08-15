@@ -86,7 +86,10 @@ from app.services import agent_assets
 from app.services.copilot_tools import build_copilot_mcp_servers
 
 SessionKey = tuple[str, str, str]
-SessionCacheKey = tuple[str, str, str, str]
+# (skill_id, frontend session_id, model:provider, api_key hash, workspace hash)
+# — 会话身份契约(COPILOT_ASSIST-5):一个前端标签一条 SDK 对话,session_id
+# 是缓存键的一部分,不同标签绝不共享 client。
+SessionCacheKey = tuple[str, str, str, str, str]
 logger = logging.getLogger(__name__)
 
 _ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill"]
@@ -724,6 +727,7 @@ def make_session_key(
 
 def _make_session_cache_key(
     skill_id: str,
+    session_id: str,
     model_code: str,
     provider_code: str,
     api_key: str,
@@ -738,7 +742,7 @@ def _make_session_cache_key(
     workspace_hash = hashlib.sha256(
         str(Path(workspace_dir).resolve(strict=False)).encode("utf-8")
     ).hexdigest()[:16]
-    return (base_skill_id, model_provider, api_key_hash, workspace_hash)
+    return (base_skill_id, session_id, model_provider, api_key_hash, workspace_hash)
 
 
 def build_options(
@@ -1078,14 +1082,17 @@ def _contains_sensitive_error_text(value: str) -> bool:
 async def stream_query(
     skill_id: str,
     user_message: str,
+    *,
+    session_id: str,
     model_override: str | None = None,
     workspace_dir: str | Path | None = None,
     role: str | None = None,
     workspace_root: str | Path | None = None,
     judge_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[CopilotEvent]:
-    """Stream one Copilot query using the selected copilot role (default
-    copilot_chat) plus an optional finer-grained route override."""
+    """Stream one Copilot query inside one frontend tab's conversation
+    (``session_id``), using the selected copilot role (default copilot_chat)
+    plus an optional finer-grained route override."""
 
     copilot_role = role or "copilot_chat"
     try:
@@ -1161,6 +1168,7 @@ async def stream_query(
         try:
             client = await get_or_create_session(
                 skill_id=skill_id,
+                session_id=session_id,
                 model_code=route.provider_model_id,
                 provider_code=route.endpoint_id,
                 base_url=base_url,
@@ -1320,6 +1328,8 @@ def _all_copilot_routes_failed_message(
 
 async def get_or_create_session(
     skill_id: str,
+    *,
+    session_id: str,
     model_code: str,
     provider_code: str | None = None,
     base_url: str | Path | None = None,
@@ -1327,13 +1337,18 @@ async def get_or_create_session(
     env_overrides: Mapping[str, str] | None = None,
     workspace_dir: str | Path | None = None,
 ) -> ClaudeSDKClient:
-    """Return a cached SDK client for the skill/model/provider/credential tuple."""
+    """Return the cached SDK client for one frontend tab's conversation.
+
+    The cache key is (skill, session, model, provider, credential, workspace) —
+    COPILOT_ASSIST-5: two tabs never share a client, so a message can only ever
+    continue its own tab's conversation."""
 
     if provider_code is None or api_key is None or workspace_dir is None:
         raise TypeError("provider_code, api_key, and workspace_dir are required")
 
     session_key = _make_session_cache_key(
         skill_id,
+        session_id,
         model_code,
         provider_code,
         api_key,
@@ -1361,15 +1376,21 @@ async def get_or_create_session(
 async def reset_session(
     skill_id: str | None,
     model_code: str | None = None,
+    session_id: str | None = None,
 ) -> int:
-    """Drop cached sessions matching skill and/or model filters."""
+    """Drop cached sessions matching skill / model / frontend-session filters.
+
+    ``session_id`` narrows to one tab's conversation (the session-close
+    endpoint); None keeps the broad shapes (ws disconnect resets the whole
+    skill, settings changes reset by model)."""
 
     async with _session_lock:
         matched_keys = [
             session_key
             for session_key in _sessions
             if (skill_id is None or session_key[0] == skill_id)
-            and (model_code is None or session_key[1] == model_code or session_key[1].startswith(f"{model_code}:"))
+            and (session_id is None or session_key[1] == session_id)
+            and (model_code is None or session_key[2] == model_code or session_key[2].startswith(f"{model_code}:"))
         ]
         sessions = [_sessions.pop(session_key) for session_key in matched_keys]
 

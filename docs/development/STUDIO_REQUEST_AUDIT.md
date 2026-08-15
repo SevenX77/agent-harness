@@ -162,6 +162,7 @@ BACKEND POST /api/skills/{skill_id}/compile
 BACKEND POST /api/skills/{skill_id}/copilot/dispatch
 BACKEND POST /api/skills/{skill_id}/copilot/interrupt
 BACKEND POST /api/skills/{skill_id}/copilot/judge
+BACKEND POST /api/skills/{skill_id}/copilot/session-close
 BACKEND POST /api/skills/{skill_id}/copilot/tool-approval
 BACKEND POST /api/skills/{skill_id}/files/{file_path:path}
 BACKEND POST /api/skills/{skill_id}/fork
@@ -266,6 +267,7 @@ FRONTEND POST /api/media/providers/{endpoint_id}/probe
 FRONTEND POST /api/skills/{skill_id}/compile
 FRONTEND POST /api/skills/{skill_id}/copilot/interrupt
 FRONTEND POST /api/skills/{skill_id}/copilot/judge
+FRONTEND POST /api/skills/{skill_id}/copilot/session-close
 FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval
 FRONTEND POST /api/skills/{skill_id}/files/{file_path:path}
 FRONTEND POST /api/skills/{skill_id}/golden
@@ -390,6 +392,7 @@ BACKEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Co
 BACKEND POST /api/skills/{skill_id}/copilot/dispatch | ok | specific | Unimplemented dispatch scaffold returns 501 and does not store view context or trigger revalidation.
 BACKEND POST /api/skills/{skill_id}/copilot/interrupt | ok | specific | Explicit stop command for one skill's active Copilot stream; idempotent when no stream is active.
 BACKEND POST /api/skills/{skill_id}/copilot/judge | ok | specific | Explicit judge-context preparation for one compare result; returns refs only and does not start a background sync.
+BACKEND POST /api/skills/{skill_id}/copilot/session-close | ok | specific | Explicit close of ONE frontend tab's backend SDK conversation (COPILOT_ASSIST-5 会话身份契约); reclaims that conversation's CLI subprocess only, touches no truth cache.
 BACKEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Explicit approval resolution for one held Copilot tool_use_id; no broad truth cache is invalidated.
 BACKEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser fallback for explicit file save with expected-hash semantics; Tauri native-fs remains the normal sole writer.
 BACKEND POST /api/skills/{skill_id}/fork | ok | specific | Explicit fork command; returns the new SkillSummary and does not re-read all skills as a side effect.
@@ -494,6 +497,7 @@ FRONTEND POST /api/media/providers/{endpoint_id}/probe | ok | specific | Explici
 FRONTEND POST /api/skills/{skill_id}/compile | ok | specific | Explicit manual Compile command; client projects CompileSuccess.detail into the shared skill-detail cache with revalidate:false and performs no broad /skills/{skill_id} follow-up read.
 FRONTEND POST /api/skills/{skill_id}/copilot/interrupt | ok | specific | Explicit Copilot Stop button command; it interrupts only the active skill stream and never revalidates registry/roles/settings/skill truth.
 FRONTEND POST /api/skills/{skill_id}/copilot/judge | ok | specific | Explicit Copilot Judge preparation from a compare result; it returns scoped refs for the next Copilot message and is not a background context sync.
+FRONTEND POST /api/skills/{skill_id}/copilot/session-close | ok | specific | Fired only by the user closing a copilot session tab; scoped to that session_id, best-effort (ws disconnect reset is the fallback), never revalidates any truth dataset.
 FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Explicit approve/reject action for one held Copilot tool call; result is scoped to that tool_use_id.
 FRONTEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser-only explicit file-save fallback; Tauri uses native-fs as sole writer, and editor/panel saves are user edits with expected-hash conflict handling.
 FRONTEND POST /api/skills/{skill_id}/golden | ok | specific | Browser-only explicit Promote to Golden fallback; Tauri uses the plan endpoint plus native-fs writes, and callers project the returned baseline.

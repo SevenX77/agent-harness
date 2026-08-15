@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
-import { interruptCopilot, wsUrl } from '../api/client'
+import { closeCopilotSession, interruptCopilot, wsUrl } from '../api/client'
 import { nextBackoffMs } from '../lib/websocket'
 import { selectFile } from '../lib/tauri'
 import { copilotSessionDirectoryPath, copilotStore } from '../store/copilotStore'
@@ -31,6 +31,9 @@ function nextId(prefix: string) {
 
 export interface CopilotSendPayload {
   user_message: string
+  // 会话身份契约(COPILOT_ASSIST-5):消息归属的前端会话标签;后端以
+  // (skill, session) 隔离 SDK 对话,缺失会被边界拒绝(ws close 4400)。
+  session_id: string
   model_override?: string
   role?: string
   workspace_root?: string
@@ -53,12 +56,13 @@ export interface CopilotJudgeContext {
 /** Build the ws send payload, attaching model_override / role only when present. */
 export function buildCopilotSendPayload(
   userMessage: string,
+  sessionId: string,
   modelOverride?: string | null,
   role?: string | null,
   workspaceRoot?: string | null,
   judgeContext?: CopilotJudgeContext | null,
 ): CopilotSendPayload {
-  const payload: CopilotSendPayload = { user_message: userMessage }
+  const payload: CopilotSendPayload = { user_message: userMessage, session_id: sessionId }
   if (modelOverride) {
     payload.model_override = modelOverride
   }
@@ -169,6 +173,10 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
   const socketRef = useRef<WebSocket | null>(null)
   const assistantMessageIdRef = useRef<string | null>(null)
   const deltaQueueRef = useRef<Array<{ messageId: string, event: CopilotDeltaEvent }>>([])
+  // 会话身份契约(COPILOT_ASSIST-5):每次发送把归属会话 id 入队;后端在一条
+  // 连接内串行处理查询,所以流式事件按 FIFO 归属队首会话,与"当前激活标签"
+  // 无关——切标签不串流。done/error 结束一轮时出队。
+  const pendingQuerySessionsRef = useRef<string[]>([])
 
   const appendAssistantEvent = useCallback((event: CopilotEvent) => {
     let messageId = assistantMessageIdRef.current
@@ -176,7 +184,8 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       const message = createMessage('assistant', '', 'running')
       messageId = message.id
       assistantMessageIdRef.current = messageId
-      copilotStore.appendMessage(message)
+      const owningSessionId = pendingQuerySessionsRef.current[0] ?? copilotStore.ensureActiveSession()
+      void copilotStore.appendMessage(message, owningSessionId)
     }
 
     if (event.type === 'text_delta' || event.type === 'thinking_delta') {
@@ -193,6 +202,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
 
     if (event.type === 'done' || event.type === 'error') {
       assistantMessageIdRef.current = null
+      pendingQuerySessionsRef.current.shift()
       setIsStreaming(false)
     }
   }, [])
@@ -284,6 +294,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       socketRef.current?.close()
       socketRef.current = null
       deltaQueueRef.current = []
+      pendingQuerySessionsRef.current = []
     }
   }, [skillId, appendAssistantEvent])
 
@@ -298,9 +309,11 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       return false
     }
 
+    const sessionId = copilotStore.ensureActiveSession()
     assistantMessageIdRef.current = null
-    copilotStore.appendMessage(createMessage('user', trimmed, 'success'))
-    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, modelOverride, role, workspaceRoot, judgeContext)))
+    pendingQuerySessionsRef.current.push(sessionId)
+    void copilotStore.appendMessage(createMessage('user', trimmed, 'success'), sessionId)
+    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, sessionId, modelOverride, role, workspaceRoot, judgeContext)))
     setIsStreaming(true)
     return true
   }, [workspaceRoot])
@@ -352,7 +365,14 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     newSession: () => copilotStore.newSession(),
     restoreSession,
     switchSession: (id: string) => copilotStore.switchSession(id),
-    closeSession: (id: string) => { void copilotStore.closeSession(id) },
+    closeSession: (id: string) => {
+      // 关标签 = 结束它的后端 SDK 对话(每条对话一个 CLI 子进程)。尽力而为:
+      // 调用失败时 ws 断连的 reset_session 仍会兜底回收整个 skill 的会话。
+      if (skillId) {
+        void closeCopilotSession(skillId, id).catch(() => undefined)
+      }
+      void copilotStore.closeSession(id)
+    },
   }
 }
 

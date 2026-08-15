@@ -404,6 +404,20 @@ CompactionEvent)→ PR E 整族删(含 ModelResolvedEvent「已被替代不迁�
 ctx 桥 `legacy_context_from_state` 族、零发射点事件类、前端死分支、spec 清单条目)
 + vendor 重建 + `/studio-verify` 真机冒烟。每步过引擎门禁(mypy --strict + 3×pytest)。
 
+### 用户缺陷批次 2026-08-15:copilot 多会话后端路由(会话身份契约)
+
+**缺陷(2026-08-15 真机实测)**:面板 "New chat" 只换前端视图——`newSession()` 纯前端
+(`copilotStore.ts`),发送报文无 session 标识(`useCopilot.ts` `buildCopilotSendPayload`),
+后端 ws 端点按 skill_id 只存一条 SDK 对话、仅断连 reset(`routers/copilot.py`)。后果:
+生成中新建标签发的消息被注入正在跑的会话;流式事件渲染进"当时激活的标签"。
+
+**修复(进行中 fix/copilot-session-routing)**:会话身份显式进契约(设计已落
+`copilot-assist` mvp1-alignment COPILOT_ASSIST-5 + copilot region F1 约束):ws 报文必带
+`session_id`(缺失 close 4400);SDK client 缓存键加入 session;事件按发起查询的会话 FIFO
+归属;关标签走新端点 `POST /copilot/session-close` 结束对应 client;断连整 skill reset 与
+单活跃查询不变式不变。过门 = 后端 pytest 全量 + 前端四件套 + 合并后真机点验
+(两标签并行互不串 + 关标签后端 client 归零)。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from pydantic import ValidationError
 
 from app.core.exceptions import raise_not_implemented
 from app.models.copilot import (
     CopilotInterruptResponse,
+    CopilotSessionCloseRequest,
+    CopilotSessionCloseResponse,
     CopilotToolApprovalRequest,
     CopilotToolApprovalResponse,
     CopilotWsRequestPayload,
@@ -114,6 +117,23 @@ async def post_copilot_interrupt(skill_id: str) -> CopilotInterruptResponse:
     return CopilotInterruptResponse(interrupted=interrupted)
 
 
+@router.post(
+    "/api/skills/{skill_id}/copilot/session-close",
+    response_model=CopilotSessionCloseResponse,
+)
+async def post_copilot_session_close(
+    skill_id: str, payload: CopilotSessionCloseRequest
+) -> CopilotSessionCloseResponse:
+    """Close one frontend tab's backend SDK conversation (COPILOT_ASSIST-5).
+
+    Each conversation holds a CLI subprocess; closing the tab without this call
+    would leak it until the ws disconnects. Idempotent for draft tabs that
+    never sent a message (closed=0)."""
+
+    closed = await reset_session(skill_id=skill_id, model_code=None, session_id=payload.session_id)
+    return CopilotSessionCloseResponse(closed=closed)
+
+
 @router.websocket("/api/skills/{skill_id}/copilot/ws")
 async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
     """Stream Copilot events for user messages over one persistent connection."""
@@ -128,10 +148,17 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
     await websocket.accept()
     try:
         while True:
-            payload = CopilotWsRequestPayload.model_validate(await websocket.receive_json())
+            try:
+                payload = CopilotWsRequestPayload.model_validate(await websocket.receive_json())
+            except ValidationError as exc:
+                # 边界校验:没有 session_id 的消息没有合法归属(会话身份契约,
+                # COPILOT_ASSIST-5)——拒绝整条连接,绝不落进"当前活跃的对话"。
+                await websocket.close(code=4400, reason=f"invalid payload: {exc.error_count()} error(s)")
+                return
             async for event in stream_query(
                 skill_id=skill_id,
                 user_message=payload.user_message,
+                session_id=payload.session_id,
                 model_override=payload.model_override,
                 role=payload.role,
                 workspace_root=payload.workspace_root,

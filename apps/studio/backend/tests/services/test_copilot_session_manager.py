@@ -25,9 +25,11 @@ async def get_session(
     workspace_dir: Path,
     provider_code: str = "OC_CL_ANT",
     base_url: str | None = None,
+    session_id: str = "tab-1",
 ) -> FakeClient:
     return await copilot.get_or_create_session(
         skill_id=skill_id,
+        session_id=session_id,
         model_code=model_code,
         provider_code=provider_code,
         base_url=base_url,
@@ -149,6 +151,61 @@ def test_reset_session_can_delete_all_skill_sessions(
         removed = await copilot.reset_session("skill-a", None)
 
         assert removed == 2
+
+    asyncio.run(scenario())
+
+
+def test_distinct_frontend_sessions_get_distinct_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 会话身份契约(COPILOT_ASSIST-5):一个前端标签 = 一条独立 SDK 对话。
+    # 同 skill/model/credential/workspace 下,不同 session_id 绝不共享 client
+    # ——共享即是"New chat 消息注入正在跑的对话"缺陷本体。
+    created: list[FakeClient] = []
+
+    def factory(options: ClaudeAgentOptions) -> FakeClient:
+        client = FakeClient(options)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(copilot, "_session_factory", factory)
+
+    async def scenario() -> None:
+        tab1 = await get_session("skill-a", "CL46T", "same-key", tmp_path, session_id="tab-1")
+        tab2 = await get_session("skill-a", "CL46T", "same-key", tmp_path, session_id="tab-2")
+        tab1_again = await get_session("skill-a", "CL46T", "same-key", tmp_path, session_id="tab-1")
+
+        assert tab1 is not tab2
+        assert tab1 is tab1_again
+
+    asyncio.run(scenario())
+    assert len(created) == 2
+
+
+def test_reset_session_can_close_one_frontend_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 关闭一个标签只结束它自己的对话;邻居标签的 client 原样保留。
+    created: list[FakeClient] = []
+
+    def factory(options: ClaudeAgentOptions) -> FakeClient:
+        client = FakeClient(options)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(copilot, "_session_factory", factory)
+
+    async def scenario() -> None:
+        await get_session("skill-a", "CL46T", "same-key", tmp_path, session_id="tab-1")
+        await get_session("skill-a", "CL46T", "same-key", tmp_path, session_id="tab-2")
+
+        removed = await copilot.reset_session("skill-a", session_id="tab-1")
+
+        assert removed == 1
+        assert sum(client.disconnect_calls for client in created) == 1
+
+        await get_session("skill-a", "CL46T", "same-key", tmp_path, session_id="tab-2")
+        assert len(created) == 2
 
     asyncio.run(scenario())
 

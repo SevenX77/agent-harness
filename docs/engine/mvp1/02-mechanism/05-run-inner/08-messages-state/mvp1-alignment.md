@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: mvp1-alignment
-status: audited-ready（**U5 单元锁定 2026-06-05**;WS-E5/E7 回写:WorkflowState.messages DeltaChannel + AGENT namespace checkpoint + Engine HITL resume_skill 已 live;compaction/Studio resume 产品仍待实现;文件未 FROZEN）
+status: audited-ready（**U5 单元锁定 2026-06-05**;WS-E5/E7 回写:WorkflowState.messages DeltaChannel + AGENT namespace checkpoint + Engine HITL resume_skill 已 live;PR D 回写 2026-08-15:compaction(summarization + sidecar)已迁入活路径,gap #1 关闭;Studio resume 产品仍待实现;文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
 # 08-messages-state — 机制 B · 内层 messages 状态(运行内层)
 
-> **Tier**: 机制层 B · 运行·内层 | **Owns**: 内层 messages 持久化(DeltaChannel)· summarization(摘要有界化)· HITL/interrupt/resume | **现状**: Delta + AGENT namespace checkpoint + Engine HITL resume live;compaction/Studio route 后续 | **Related**: `04-run-outer/03-checkpoint`(共享 base,**双向**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)
+> **Tier**: 机制层 B · 运行·内层 | **Owns**: 内层 messages 持久化(DeltaChannel)· summarization(摘要有界化)· HITL/interrupt/resume | **现状**: Delta + AGENT namespace checkpoint + Engine HITL resume + compaction(CompactionMiddleware)live;Studio route 后续 | **Related**: `04-run-outer/03-checkpoint`(共享 base,**双向**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)
 
 ## 1. 定义
 messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外层 `03-checkpoint` 的 blackboard):messages 持久化(DeltaChannel)+ summarization(messages 增长时摘要有界化)+ HITL(经 `interrupt()` 中断、人改 context 后 resume)。WS-E5 后,AGENT messages 已经经 `agent:<phase>` / `iter{k}.agent:<phase>` namespace 挂 `03-checkpoint` 的共享 base;WS-E7 后,Engine `resume_skill` 已能注入 HITL ToolMessage。两层共享 base、各管各 state(外 blackboard / 内 messages,双向引用)。
@@ -15,10 +15,10 @@ messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外
 ## 2. 数据流 / 机制
 承接共享 checkpoint 的**内层/messages 部分** + agent-loop 的 summarization。
 
-> **现状 vs 目标**:**live 今天已有** `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:214`)、AGENT namespace checkpoint、`interrupt()` 原语(`cognitive_flow.py:292`)以及 Engine `resume_skill` 的 HITL ToolMessage 注入。**仍未 live**:summarization/compaction 在 live `assemble_graph` 路径;Studio HTTP `resume_run` 仍是 501 桩(`runs.py:70`)。
+> **现状 vs 目标**:**live 今天已有** `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:237`)、AGENT namespace checkpoint、`interrupt()` 原语(`cognitive_flow.py:292`)、Engine `resume_skill` 的 HITL ToolMessage 注入,以及 **summarization/compaction**(PR D 2026-08-15:`middleware/compaction.py` 的 `CompactionMiddleware`,顺序契约第 4 槽,fraction 0.8 / keep 20 + sidecar 全文 + `CompactionEvent.content_ref`)。**仍未 live**:Studio HTTP `resume_run` 仍是 501 桩(`runs.py:70`)。
 
 messages 两条存储纪律(与 `03-checkpoint` blackboard 同构、各管各;**下为目标模型**):
-- **delta(去体积,无损)**:`DeltaChannel`(`state.py:214`,`_messages_delta_reducer:28`,**`snapshot_frequency=50`**——每 50 步存全量 snapshot、中间存 diff;经 ns 入共享 base,每 model/tool 步存档)。snapshot 频率 = 平衡旋钮(小=体积大、大=回放/resume 慢,需实测)。
+- **delta(去体积,无损)**:`DeltaChannel`(`state.py:237`,`_messages_delta_reducer:28`,**`snapshot_frequency=50`**——每 50 步存全量 snapshot、中间存 diff;经 ns 入共享 base,每 model/tool 步存档)。snapshot 频率 = 平衡旋钮(小=体积大、大=回放/resume 慢,需实测)。
 - **compact(有界,有损/外移)**:summarization——超窗触发的摘要中间件(实现在 `02-middleware`,逻辑本域)+ sidecar 存全文(`CompactionEvent.content_ref`)。
 - **compact 是 1000 章可行性前提(= `03-checkpoint` CK6)**:不 compact 则上下文 O(N²) 爆窗口(第 1000 章塞 999 章超所有模型);compact 后 O(N)。
 - HITL:`interrupt()`(`cognitive_flow.py:292`;`:95` `_interrupt_fn or interrupt`、`:300` `source="human_interrupt"`)中断 → `update_state` 套 context_overrides / 注入 ToolMessage → 带该 checkpoint 重 invoke。
@@ -48,7 +48,7 @@ messages 经 `agent:<phase>` / `iter{k}.agent:<phase>` namespace 挂 `03-checkpo
 engine 全权;HITL 暴露给 studio debug/续跑(`03-api-contract`)。
 
 ## 8. gaps / 待设计
-1. summarization middleware + sidecar **从 legacy 死簇搬回 live**(legacy 配置 `phase_nodes/llm_phase_node.py:275`(`summarization=True`/`trigger_fraction=0.8`/`keep_messages=20`;底座 `SummarizationMiddleware` `cognitive/middlewares.py:466`)+ sidecar 写 `:381`(`_write_compaction_sidecar`→`:392`)、`CompactionEvent.content_ref` `:809`;**live assemble_graph 只挂单槽 cognitive_flow `graph_assembler.py:481`、无 compaction**)。
+1. ~~summarization middleware + sidecar 从 legacy 死簇搬回 live~~ **已关闭(PR D,2026-08-15 决议 §3.6)**:live 实现 = `middleware/compaction.py` 的 `CompactionMiddleware`(顺序契约第 4 槽,包装 langchain `SummarizationMiddleware`,fraction 0.8 / keep 20 + sidecar 全文落盘 + `CompactionEvent.content_ref`;代码现实见本单元 baseline §2)。live 装配已非「单槽 cognitive_flow」——现实为契约 8 槽 + 前置 2 槽的 10 槽链(`02-middleware` baseline)。死侧原实现待 PR E 整族删,行号按决议 §6.2 校正为:配置 `phase_nodes/llm_phase_node.py:277-282`、底座 `cognitive/middlewares.py:467`、sidecar 写 `llm_phase_node.py:383`、CompactionEvent 构造 `:813`。
 2. Studio `resume_run` thin route + context 篡改边界(与 `03-checkpoint`/`02-iterate`)。
 3. **持久化边界(源 uncovered #3)**:messages 通道只写可序列化的 messages + 标记;middleware 内 callback/runtime/compiled graph **不得入 checkpoint state**(与 `03-checkpoint` §8 #4 共,防 nested state 污染)。
 

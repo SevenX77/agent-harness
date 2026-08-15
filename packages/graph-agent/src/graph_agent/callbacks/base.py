@@ -122,7 +122,7 @@ class Callback:
     def on_compaction(
         self,
         phase_name: str,
-        removed_pairs: int,
+        removed_message_count: int,
     ) -> None:
         """Handle history compaction."""
 
@@ -306,7 +306,7 @@ def _dispatch_dead_end_pruned(callback: Callback, event: Any) -> None:
 
 
 def _dispatch_compaction(callback: Callback, event: Any) -> None:
-    callback.on_compaction(event.phase_name, event.removed_pairs)
+    callback.on_compaction(event.phase_name, event.removed_message_count)
 
 
 def _dispatch_ambiguity_report(callback: Callback, event: Any) -> None:

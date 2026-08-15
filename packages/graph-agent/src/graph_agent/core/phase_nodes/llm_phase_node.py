@@ -362,13 +362,13 @@ class LLMPhaseNode(PhaseNode):
             return _LoopDecision()
         loop_state.checkpoint_count += 1
         loop_state.wm_snapshot = wm_current
-        removed_pairs = max((len(loop_state.current_messages) - 2) // 2, 0)
+        removed_message_count = max(len(loop_state.current_messages) - 2, 0)
         _emit_working_memory_update(phase, runtime.active_callbacks, wm_current)
         sidecar_ref = self._write_compaction_sidecar(runtime, loop_state)
         _emit_compaction_event(
             phase,
             runtime.active_callbacks,
-            removed_pairs,
+            removed_message_count,
             loop_state.checkpoint_count,
             sidecar_ref,
         )
@@ -797,7 +797,7 @@ def _emit_working_memory_update(phase: Phase, callbacks: list[Callback], wm_text
 def _emit_compaction_event(
     phase: Phase,
     callbacks: list[Callback],
-    removed_pairs: int,
+    removed_message_count: int,
     checkpoint_count: int,
     sidecar_ref: str | None,
 ) -> None:
@@ -805,14 +805,14 @@ def _emit_compaction_event(
     from graph_agent.callbacks.events import CompactionEvent
 
     removed_summary = (
-        f"Compacted {removed_pairs} message pair(s) at checkpoint "
+        f"Compacted {removed_message_count} message(s) at checkpoint "
         f"#{checkpoint_count} in phase '{phase.name}'."
     )
     _safe_emit_event(
         callbacks,
         CompactionEvent(
             phase_name=phase.name,
-            removed_pairs=removed_pairs,
+            removed_message_count=removed_message_count,
             removed_summary=removed_summary,
             content_ref=sidecar_ref,
         ),

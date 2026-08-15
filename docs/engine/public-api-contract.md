@@ -292,7 +292,7 @@ Family mapping summary:
 - **Source module**: `graph_agent.callbacks.events`
 - **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['compaction']`, `phase_name: str`, `removed_pairs: int`, `removed_summary: str | None`, `content_ref: str | None`
+- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['compaction']`, `phase_name: str`, `removed_message_count: int`, `removed_summary: str | None`, `content_ref: str | None`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.

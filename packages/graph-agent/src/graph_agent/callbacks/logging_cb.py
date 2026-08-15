@@ -124,10 +124,12 @@ class LoggingCallback(Callback):
     def on_compaction(
         self,
         phase_name: str,
-        removed_pairs: int,
+        removed_message_count: int,
     ) -> None:
         """Log history compaction."""
-        logger.info("[Compaction] %s | removed=%d pairs", phase_name, removed_pairs)
+        logger.info(
+            "[Compaction] %s | removed=%d message(s)", phase_name, removed_message_count
+        )
 
     def on_ambiguity_report(
         self,

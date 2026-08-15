@@ -486,6 +486,7 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
         "ProtocolValidationMiddleware",
         "CognitiveFlowMiddleware",
         "ExecutionControlMiddleware",
+        "CompactionMiddleware",
         "TracingMiddleware",
         "ToolErrorHandlingMiddleware",
         "LoopDetectionMiddleware",

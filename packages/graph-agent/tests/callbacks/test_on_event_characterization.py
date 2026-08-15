@@ -113,9 +113,9 @@ class RecordingCallback(Callback):
     def on_compaction(
         self,
         phase_name: str,
-        removed_pairs: int,
+        removed_message_count: int,
     ) -> None:
-        self.calls.append(("on_compaction", phase_name, removed_pairs))
+        self.calls.append(("on_compaction", phase_name, removed_message_count))
 
     def on_ambiguity_report(
         self,
@@ -208,7 +208,7 @@ class RecordingCallback(Callback):
         (
             CompactionEvent(
                 phase_name="research",
-                removed_pairs=4,
+                removed_message_count=4,
                 removed_summary="summary ignored by legacy hook",
                 content_ref="sidecar.json",
             ),

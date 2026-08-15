@@ -125,7 +125,7 @@ class MetricsCallback(Callback):
     def on_compaction(
         self,
         phase_name: str,
-        removed_pairs: int,
+        removed_message_count: int,
     ) -> None:
         """Count history compactions."""
         self.total_compactions += 1

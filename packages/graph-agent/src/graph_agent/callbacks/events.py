@@ -200,20 +200,21 @@ class DeadEndPrunedEvent(_EventBase):
 
 
 class CompactionEvent(_EventBase):
-    """History compaction occurred — some message pairs were dropped.
+    """History compaction occurred — messages were summarized out of context.
 
-    Tier 1 Commit B (T-A2) — Gemini Q3 external-link scheme: the event
-    itself carries a short ``removed_summary`` (human-readable, a few
-    hundred chars) and a ``content_ref`` pointing at a sidecar JSON file
-    holding the full dropped messages. The sidecar path is written by
-    StorageManager so it lives under the normal run-retention policy.
+    External-link scheme (T-A2 Gemini Q3): the event itself carries a short
+    ``removed_summary`` (human-readable, a few hundred chars) and a
+    ``content_ref`` pointing at a sidecar JSON file holding the removed
+    messages in full. The sidecar lives under the run directory, so it is
+    covered by whatever retention applies to the run itself.
     """
 
     event_type: Literal["compaction"] = "compaction"
     phase_name: str
-    removed_pairs: int
-    removed_summary: str | None = None  # T-A2: short readable summary
-    content_ref: str | None = None  # T-A2: relative path to sidecar JSON
+    #: How many messages left the context window in this compaction.
+    removed_message_count: int
+    removed_summary: str | None = None  # short readable summary
+    content_ref: str | None = None  # path to the sidecar JSON file
 
 
 class AmbiguityReportEvent(_EventBase):

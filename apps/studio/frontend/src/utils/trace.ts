@@ -250,8 +250,8 @@ export function retryBadge(event: CallbackEvent): RetryBadge | null {
 }
 
 // The ~2KB byte-threshold payload preview that used to live here was replaced
-// outright by the line-based fold primitive `ui/folded-text` (decision
-// 2026-08-13 D3): folding belongs to the text, not to a byte budget.
+// outright by the fixed-height well primitive `ui/text-well` (decision
+// 2026-08-14): long text scrolls inside one capped box, not a byte budget.
 
 // ── Agent tool-call folding (D1/P2, n4-trace #16) ───────────────────────────
 // The engine emits a `tool_call` event (packages/graph-agent .../events.py

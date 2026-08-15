@@ -660,8 +660,16 @@ def _phase_batch_runner(
     output_keys: set[str] | None,
 ) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
     async def _invoke_child(index: int, child_state: WorkflowState) -> Any:
-        return await _run_with_branch_index_async(
+        # An item needs an iteration IDENTITY, not just a branch label. The branch
+        # index only names events; `active_outer_ns` is what gives the item its own
+        # checkpoint lane and its own agent-loop budget, exactly as the graph-level
+        # twin `_graph_batch_runner` already does. Without it every item presents the
+        # agent the same (thread_id, checkpoint_ns), so item N resumes item N-1's
+        # conversation and inherits its spent budget (field evidence: run
+        # 2026-08-15T10-19-55_df555c19, where chapter 2 re-submitted chapter 1's work).
+        return await _run_with_iteration_context_async(
             index,
+            _iteration_namespace(index),
             lambda: asyncio.to_thread(node, child_state),
         )
 
@@ -899,7 +907,11 @@ def _build_loop_iterate_phase(
             def _invoke_node(child: WorkflowState = child_state) -> Any:
                 return node(child)
 
-            result = _run_with_branch_index(index, _invoke_node)
+            # Same rule as the batch path: a round is its own invocation, so it needs
+            # its own iteration identity. With only a branch label, round N resumes
+            # round N-1's checkpoint (its whole conversation) and inherits its spent
+            # agent-loop budget — the graph-level loop below already gets this right.
+            result = _run_with_iteration_context(index, _iteration_namespace(index), _invoke_node)
             payload = _phase_result_payload(child_state, result, output_keys)
             if accumulate.from_ not in payload:
                 _iterate_merge_fatal(
@@ -2142,7 +2154,19 @@ def _build_skill_node(
 
         thread_id = inner_configurable.get("thread_id") or state["flow"].thread_id or "default"
         inner_configurable["thread_id"] = thread_id
-        inner_configurable["checkpoint_ns"] = f"agent:{phase_id}"
+        # `thread_id` is a run constant, so the phase name alone cannot separate two
+        # iterations of the same phase. Carry the active iteration namespace so each
+        # batch/loop item gets its own checkpoint lane — otherwise item N resumes item
+        # N-1's conversation. NamespaceCheckpointer prefixes the same value at save
+        # time and guards against doubling it.
+        outer_ns = active_outer_ns.get()
+        agent_ns = f"agent:{phase_id}"
+        inner_configurable["checkpoint_ns"] = f"{outer_ns}.{agent_ns}" if outer_ns else agent_ns
+        # The same identity, on a channel a middleware can actually read. What
+        # LangGraph exposes to a hook as `checkpoint_ns` is the per-hook namespace
+        # (`ExitControlMiddleware.before_model:<uuid>`), not this one — so the budget
+        # scope travels as its own key, alongside `max_iterations` just below.
+        inner_configurable["agent_invocation_id"] = inner_configurable["checkpoint_ns"]
         inner_configurable["max_iterations"] = phase_ast.max_iterations
         inner_config["configurable"] = inner_configurable
 

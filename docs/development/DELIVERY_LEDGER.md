@@ -157,8 +157,9 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 
 | # | 项 | 状态 | 关键坐标 |
 |---|---|---|---|
-| W2-1 | 并联拓扑编译期诊断(暂不支持并联执行,`[F-v3-*]` 码 + 指位) | 待开工 | 校验落点 `packages/graph-agent/src/graph_agent/core/loader.py:1777-1814`;诊断出口 `core/compiler.py` |
-| W2-2 | 并联真修:执行态写入迁 delta + 接 `blackboard_data_merge`;同 PR 接 `recursion_limit`;撤 W2-1 拦截 | 待开工 | 裸通道 `core/state.py:226-237`;现成合并器 `runtime/state.py:39-93`;全量写病灶 `runtime/state_mapper.py:207-321`;invoke 点 `core/runner.py:2081` |
+| W2-1 | 并联拓扑编译期诊断(暂不支持并联执行,`[F-v3-*]` 码 + 指位) | ✅ 被真修吸收(#804) | "暂不支持并联"的临时拦截不再需要(并联已可执行);编译期保护改为其残余真问题:无依赖关系的两 phase 声明写同一 output 字段 → `[F-v3-parallel-write-conflict]`(错误码全表 98→99) |
+| W2-2 | 并联真修:执行态写入迁 delta + reducer 通道 | ✅ 已合并(#804) | 实现取 WorkflowState reducer 方案而非接 BlackboardState 的 `blackboard_data_merge`(该状态类未投用;决议文档 `.kiro/specs/decision-2026-08-15-engine-parallel-fanout-state-channels.md`):phase 节点回 delta,`data`/`flow` 通道 `merge_business_channel`/`merge_flow_channel` 折叠,`phase_outputs` 按 key 合并;invoke 入口包装形 `{"inputs": …}` 由 `coerce_business_data` 单一权威展平。**遗留**:`recursion_limit` 接线(`core/runner.py` invoke 点)未随本 PR,单独排期 |
+| W2-3 | iterate.over 契约统一:裸业务字段名(KB 契约)——运行时黑板解析 + 编译期 over 来源校验(`[F-v3-iterate-over-not-list]` 编译相)+ 状态路径形删除 | 进行中(fix/engine-iterate-over-business-field) | 决议 `.kiro/specs/decision-2026-08-15-engine-iterate-over-business-field.md`;根因链:KB-06 教裸名/真实 skill 全裸名/引擎只解析 `data.*`/编译零校验/Studio 吞 fatal 成 crashed/`RUN_REQUIRES_PREDICT` 连坐锁死 run。predict_probe 在 story-deconstruction lab 上已过 over 关(现暴露 skill 层父子 io 缺陷,归 MoirAI 修) |
 
 #### 第三波 · 人看的面(闭环"看懂"半边)
 

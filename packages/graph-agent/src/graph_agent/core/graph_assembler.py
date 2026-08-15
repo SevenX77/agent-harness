@@ -1860,6 +1860,7 @@ def _build_skill_node(
         callbacks=_callback_tuple(callbacks),
         predict_context=predict_context,
         system_prompt=system_prompt,
+        output_schema=_phase_declared_output_schema(phase_ast),
     )
     business_tools = compiled.tools.for_phase(phase_id)
     business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
@@ -2235,6 +2236,17 @@ def _build_skill_node(
     return _skill_node
 
 
+def _phase_declared_output_schema(phase_ast: Any) -> dict[str, Any] | None:
+    io = getattr(phase_ast, "io", None)
+    outputs = getattr(io, "outputs", None) if io is not None else None
+    if outputs is None:
+        return None
+    if hasattr(outputs, "model_dump"):
+        dumped = outputs.model_dump()
+        return dumped if isinstance(dumped, dict) else None
+    return outputs if isinstance(outputs, dict) else None
+
+
 def _resolve_phase_chat_model(
     phase_id: str,
     llm_role: str,
@@ -2245,6 +2257,7 @@ def _resolve_phase_chat_model(
     callbacks: tuple[Any, ...],
     predict_context: Any = None,
     system_prompt: _AgentSystemPrompt,
+    output_schema: dict[str, Any] | None = None,
 ) -> Any:
     # ``llm_role`` is the phase's EFFECTIVE role, already resolved through the
     # use_graph_llm_role / graph-default chain (manifest.effective_llm_role).
@@ -2260,6 +2273,10 @@ def _resolve_phase_chat_model(
             phase_name=phase_id,
             prompt_template_source=system_prompt.template_source,
             prompt_variables=system_prompt.variables,
+            # The stub can only shape output it has a schema for, and this is the
+            # one place that holds THIS phase's schema: phases compiled inside
+            # subgraphs and subagent skills never appear in the root node list.
+            phase_output_schema=output_schema,
         )
     if chat_model is not None:
         llm_provider = ChatModelProvider(chat_model)

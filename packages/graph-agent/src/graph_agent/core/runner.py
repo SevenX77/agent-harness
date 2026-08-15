@@ -316,7 +316,14 @@ def predict_skill(  # noqa: C901
     mock_llm = inputs.pop("mock_llm", None)
     current_hashes = inputs.pop("current_hashes", None) or {}
 
-    compiled = compile_skill(
+    # The compile gate for predict: this call is here to REJECT a defective
+    # skill before any of it executes, so it is used for the exception it
+    # raises, not for a value — the execution path below compiles its own graph
+    # from the same path. (Phase output schemas used to be harvested from this
+    # result, which silently covered only root phases; the assembler now hands
+    # each phase its own schema — decision doc 2026-08-15
+    # predict-nested-phase-schema.)
+    compile_skill(
         skill_path_obj,
         skill_resolver=resolver,
         runtime_input_fields=_runtime_input_fields_from_config(runtime_config),
@@ -325,18 +332,6 @@ def predict_skill(  # noqa: C901
     # 1. Strategy setup
     strategy = MockStrategy.from_param(mock_llm)
     _warn_on_stale_golden_hashes_sdk(strategy, current_hashes)
-
-    # 2. Populate phase schemas for Heuristic Stub fallback
-    phase_schemas = {}
-    for node in compiled.nodes:
-        if hasattr(node, "ast") and hasattr(node.ast, "io") and node.ast.io and node.ast.io.outputs:
-            outputs = node.ast.io.outputs
-            if hasattr(outputs, "model_dump"):
-                phase_schemas[node.phase_name] = outputs.model_dump()
-            else:
-                phase_schemas[node.phase_name] = outputs
-    if hasattr(strategy, "_phase_schemas"):
-        strategy._phase_schemas.update(phase_schemas)
 
     # 3. Setup Predict interception context & tracing
     # Both records are process-local and keyed by phase name, so a previous

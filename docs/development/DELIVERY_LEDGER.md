@@ -392,7 +392,7 @@ LLM 步骤体外层卡片盒已不存在(verify-well-generic-payload.png);④cop
 (scrollTop 钉底断言)——唯一非真机项,如实标注。#798 同日合并:验证方法论固化为
 `.claude/skills/studio-verify`(web 模式验证被裁决禁止),CLAUDE.md 挂载。
 
-**引擎死家族处置(2026-08-15 已裁:先迁移、后整族删;进行中)**:2026-08-14 定界
+**引擎死家族处置(2026-08-15 已裁:先迁移、后整族删;迁移四步全部合并,整族删本 PR)**:2026-08-14 定界
 调查坐实整个 legacy 执行族(`graph_builder.py`/`phase_executor.py`/`core/phase_nodes/*`
 等 14 模块闭包 + 附着孤儿)对活路径零 import;用户 2026-08-15 裁决「先把第三类功能
 迁移到现在的活路径上才能整族删」,并确认迁移框架(多数入中间件)。七项冻结功能的
@@ -404,6 +404,22 @@ log_ambiguity 挂载 + context_access opt-in,CognitiveFlow 拦截)→ PR C 双�
 CompactionEvent)→ PR E 整族删(含 ModelResolvedEvent「已被替代不迁移」判定、
 ctx 桥 `legacy_context_from_state` 族、零发射点事件类、前端死分支、spec 清单条目)
 + vendor 重建 + `/studio-verify` 真机冒烟。每步过引擎门禁(mypy --strict + 3×pytest)。
+
+**进度(2026-08-15)**:PR A 决议文档 #801 · PR B 认知工具回归 #803 · PR D compaction 中间件 #805 ·
+PR C 双闸 nudge #807 **均已合并**;PR E 整族删进行中。PR E 的逐项重核推翻了决议 §5 的一条:
+**`DeadEndPrunedEvent` 不删**——它有活生产者(`ExecutionControlMiddleware` 经旧式
+`on_dead_end_pruned` 回调发出),决议起草时的清单误判为零发射点,已在决议 §5 落更正;
+`ThreadCleanedUpEvent` / `InternalErrorEvent` 的「待定」裁决为删(仅有类定义、零构造点)。
+删除的连带面按同一映射重接,保证后端报告与前端 trace 给同一份说法:被删的
+`validation_fail` 的活继承者是 `finish_task_verdict`(verdict=rejected,带 `errors`),
+硬失败是 `protocol_violation`(带 `violations`);`tool_error_handled` 不算 phase 失败
+(引擎已把工具异常吞成模型反馈、运行继续)。
+
+**在册漂移(先于本次删除,未在 PR E 处理,待排期)**:① `spec/source_file_map.yaml` 另有三条
+指向不存在文件的条目(`core/harness.py`、`tools/providers.py`、`tools/synthesize_speech.py`);
+② 前端 `api/types.ts` 的 `LlmPhase` 仍声明 `max_retries`/`retry_target`/`validator_optional`/
+`dead_end_threshold`/`max_nudges`,而活的 `AgentNodeAST`(`core/manifest.py`)这些字段一个都没有
+——它们当年长在死侧 `core/types.Phase` 上,活路径从未读过。
 
 在册风险:flow 通道并行写——同一超步两个写 flow 的认知工具并行调用会
 InvalidUpdateError(PR #803 实施报告发现,先于该 PR 的引擎级限制);first-principles

@@ -8,6 +8,7 @@ import type {
   RunDetail,
   TokensMetrics,
 } from '../api/types'
+import { eventSeverity } from './trace'
 
 export type ExportFormat = 'markdown' | 'html'
 
@@ -180,7 +181,10 @@ function tracePayloads(events: EventEnvelope[] | CallbackEvent[]): CallbackEvent
 
 function traceSummary(events: EventEnvelope[] | CallbackEvent[]): string[] {
   const payloads = tracePayloads(events)
-  const errors = payloads.filter((event) => event.event_type === 'internal_error' || event.event_type === 'validation_fail')
+  // Which events count as errors is decided in exactly one place (utils/trace
+  // eventSeverity); a second hand-kept list here would drift from the one the
+  // timeline colours by, and the report would omit failures the panel showed.
+  const errors = payloads.filter((event) => eventSeverity(event) === 'error')
   const firstEvents = payloads.slice(0, TRACE_LIMIT)
   const merged = [...firstEvents]
   for (const event of errors) {

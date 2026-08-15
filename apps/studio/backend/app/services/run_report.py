@@ -166,7 +166,17 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
             account.tool_calls += 1
         elif event_type == "agent_loop_iteration":
             account.iterations = max(account.iterations, _as_int(event.get("iteration")))
-        elif event_type in {"validation_fail", "retry_exhausted", "internal_error"}:
+        elif event_type == "finish_task_verdict":
+            # A rejected submission is the live successor of the removed
+            # validation_fail event: the attempt failed its checks and the
+            # model was sent back to fix it.
+            if event.get("verdict") == "rejected":
+                account.errors.append(_error_line(event))
+        elif event_type == "protocol_violation":
+            # The hard failure: the state broke a framework contract and the
+            # agent loop is about to be cut. tool_error_handled is deliberately
+            # NOT counted — the engine turned that exception into feedback the
+            # model reads, and the run carries on.
             account.errors.append(_error_line(event))
 
     return list(accounts.values())
@@ -181,9 +191,9 @@ def _error_line(event: dict[str, Any]) -> str:
     errors = event.get("errors")
     if isinstance(errors, list) and errors:
         return f"{event_type}: " + "; ".join(str(item) for item in errors)
-    final_errors = event.get("final_errors")
-    if isinstance(final_errors, list) and final_errors:
-        return f"{event_type}: " + "; ".join(str(item) for item in final_errors)
+    violations = event.get("violations")
+    if isinstance(violations, list) and violations:
+        return f"{event_type}: " + "; ".join(str(item) for item in violations)
     message = event.get("message")
     return f"{event_type}: {message}" if message else event_type
 

@@ -38,7 +38,9 @@ engine 全权。
 
 ## 8. gaps / 待设计
 1. "耗尽未提交 finish_task" 的 V4 错误码定义。
-2. NudgeInjector 策略收口(从 04 迁)。
+2. ~~NudgeInjector 策略收口(从 04 迁)。~~ **已关闭**(2026-08-15 决议 §3.5,PR C):策略语义迁入
+   `middleware/nudge_policy.py` 成为唯一策略源,`ExitControlMiddleware` 是它的唯一适配器;
+   死侧 `core/nudge_injector.py` 已随 §5 整族删除移除。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §3 · `02-middleware`(本域=after_agent 中间件)· `03-cognitive`(finish_task marker,双向)· `07-subagent`(对称)

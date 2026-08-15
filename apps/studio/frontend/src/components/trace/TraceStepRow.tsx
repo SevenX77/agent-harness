@@ -1,4 +1,4 @@
-import { AlertOctagon, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, RotateCcw, TerminalSquare, Wrench } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, TerminalSquare, Wrench } from 'lucide-react'
 import type { CallbackEvent } from '../../api/types'
 import type {
   CallSettingsDetails,
@@ -10,7 +10,6 @@ import {
   answerContent,
   answerReasoning,
   answerToolCallsText,
-  errorStack,
   eventColor,
   eventSeverity,
   eventMessage,
@@ -26,13 +25,11 @@ import {
   routeDecisionDetails,
   mockedSourceClass,
   mockedSourceLabel,
-  retryBadge,
   tokenText,
   toolCallSummary,
 } from '../../utils/trace'
 import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { EventTypeBadge } from './EventTypeBadge'
 import { TraceText } from './TraceText'
 
@@ -80,12 +77,14 @@ export function TraceStepRow({
   const settled = step.end?.event ?? step.start.event
   const tokens = tokenText(settled)
   const mockedSource = eventMockedSource(settled)
-  const retry = retryBadge(settled)
-  const isError = settled.event_type === 'internal_error' || settled.event_type === 'validation_fail'
-  const failures = errorStack(settled)
+  // Whether the row itself reads as a failure is decided by the ONE authority
+  // that decides it everywhere (eventSeverity), not by a second list of type
+  // names kept here — the rail dot beside this row reads the same answer
+  // through eventColor, so the two can never disagree about one event.
+  const ownSeverity = eventSeverity(settled)
   // A warning buried in an attached verdict must still tint the collapsed row.
   const severity = maxSeverity([
-    eventSeverity(settled),
+    ownSeverity,
     ...step.verdicts.map(({ event }) => eventSeverity(event)),
   ])
   const modelName = eventModelName(settled)
@@ -111,7 +110,7 @@ export function TraceStepRow({
         className={`block w-full rounded-md border-0 px-2.5 py-1.5 text-left transition-colors ${
           selected
             ? 'bg-accent'
-            : isError
+            : ownSeverity === 'error'
               ? 'bg-destructive/10 hover:bg-destructive/15'
               : 'hover:bg-accent/50'
         }`}
@@ -151,26 +150,6 @@ export function TraceStepRow({
               <span className="truncate">{modelName}</span>
             </span>
           ) : null}
-          {retry ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  aria-label={`Retry attempt ${retry.label}`}
-                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                    retry.exhausted
-                      ? 'border-destructive-border bg-destructive/10 text-destructive'
-                      : 'border-warning-border bg-warning/10 text-warning'
-                  }`}
-                >
-                  <RotateCcw className="h-3 w-3" />
-                  {retry.label}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {retry.exhausted ? `Final attempt (${retry.label})` : `Retry attempt ${retry.label}`}
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
           {mockedSource ? (
             <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${mockedSourceClass(mockedSource)}`}>
               {mockedSourceLabel(mockedSource)}
@@ -182,18 +161,12 @@ export function TraceStepRow({
             {eventMessage(settled)}
           </p>
         )}
-        {isError && typeof settled.error_message === 'string' ? (
-          <p className="mt-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive">
-            {settled.error_message}
-          </p>
-        ) : null}
         {ownRouteDecision ? <RouteDecisionBlock details={ownRouteDecision} severity={severity} /> : null}
         {ownCallSettings ? <CallSettingsBlock details={ownCallSettings} severity={severity} /> : null}
         {/* Collapsed rows keep only verdicts that went WRONG in sight; the
             healthy ones read in flow order inside the expanded body (D1). */}
         {expanded ? null : <VerdictBlocks verdicts={step.verdicts} onlyProblems />}
         <ToolHeadline step={step} />
-        {failures.length > 0 ? <ErrorStack failures={failures} /> : null}
       </button>
       {/* Outside the row button: these carry their own interactive fold
           controls, and a button inside a button is not a thing. */}
@@ -473,31 +446,6 @@ function RouteDecisionBlock({
       {details.reason ? (
         <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground">{details.reason}</p>
       ) : null}
-    </div>
-  )
-}
-
-// n4-trace #25: each prior attempt's failure reason, surfaced as an explicit
-// Error Stack when retries are exhausted (retry_exhausted.final_errors) or for
-// a single failed attempt (validation_fail.errors).
-function ErrorStack({ failures }: { failures: string[] }) {
-  return (
-    <div className="mt-2 rounded border border-destructive-border/60 bg-destructive/10 p-2">
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-destructive">
-        <AlertOctagon className="h-3.5 w-3.5" />
-        Error Stack ({failures.length})
-      </div>
-      <ol className="mt-1.5 space-y-1">
-        {failures.map((reason, position) => (
-          <li
-            key={`${position}-${reason.slice(0, 24)}`}
-            className="flex gap-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-xs text-destructive"
-          >
-            <span className="font-mono text-destructive/70">#{position + 1}</span>
-            <span className="whitespace-pre-wrap">{reason}</span>
-          </li>
-        ))}
-      </ol>
     </div>
   )
 }

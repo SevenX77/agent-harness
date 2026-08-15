@@ -24,7 +24,7 @@ N/A。
 纯决策逻辑,无 IO、无事件、无 message 构造(注入与事件归适配器)。承载:
 
 - **三闸**:`try_planning`(有文本输出、无 tool_calls、`working_memory` 无 "plan" 键)/ `try_selfcheck`(finish payload:schema failed → 原样回显校验错误文本且**不计数**;过结构化自检 bar → 不 nudge;否则 SELFCHECK_NUDGE)/ `try_standard`(有文本无 tool_calls 的兜底,`build_standard_nudge_text` 递进文案:1→温和,2→"[系统警告] 这是第二次提醒"+600 字截断回显,3+→严重警告)。
-- **文案常量**:PLANNING_NUDGE / SELFCHECK_NUDGE / MIN_FINISH_REASONING_LEN=30 从死侧 `cognitive/finish.py` 迁入本模块(死侧文件不动,随 PR E 整删)。
+- **文案常量**:PLANNING_NUDGE / SELFCHECK_NUDGE / MIN_FINISH_REASONING_LEN=30 从死侧 `cognitive/finish.py` 迁入本模块(死侧文件已随整族删除移除)。
 - **预算**:统一 check-before-increment——条件命中但预算不足时**不**计数(死侧 planning/standard 的 increment-before-check FIXME quirk 已按迁移决议 §3.5 目标设计 5 修复,`tests/middleware/test_nudge_policy.py` 钉死反例序列);per-kind 上限 `max_nudges`(默认 1,用户裁决 Task 6.5),全局上限 `max_nudges * 2`。
 - **结构化自检判定** `_has_structured_selfcheck`:business_data_md 非空且 schema passed、或 diagnostics_md ≥30 字、或 reasoning ≥30 字,任一满足即放行。
 
@@ -74,7 +74,7 @@ N/A。
 
 - 不是 checkpoint / resume / state migration 方案。
 - 不替代 CognitiveFlow 的 finish_task 校验驳回流(见分工)。
-- 死侧 `core/nudge_injector.py` / `cognitive/finish.py` 未删除也未被引用,随 PR E 整删。
+- 死侧 `core/nudge_injector.py` / `cognitive/finish.py` 已随 2026-08-15 决议 §5 的整族删除移除;本模块是 nudge 策略的唯一所在。
 
 ## baseline / alignment 差异（测试锚点）
 

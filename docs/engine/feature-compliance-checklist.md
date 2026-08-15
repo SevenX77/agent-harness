@@ -50,7 +50,7 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: public-api, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/core/actions.py, packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py
 - **Primary contracts**: 15 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/core/test_phase_node.py::test_phase_node_execute_returns_updated_state]`
+- `[Covered By: packages/graph-agent/tests/core/test_context_facade_logic_action.py::test_logic_action_receives_plain_dict_not_context_facade]`
 
 ### F-subgraph-delegation: Compile and execute nested subgraphs while preserving parent-child IO boundaries.
 - **Boundary**: lifecycle-behavior - SUBGRAPH skill spec
@@ -183,21 +183,21 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: skill-spec, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/tools/builtin/context_access.py, packages/graph-agent/src/graph_agent/tools/builtin/read_file.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/tools/test_context_access.py::TestQueryWorkingMemory::test_returns_working_memory]`
+- `[Covered By: packages/graph-agent/tests/tools/test_read_file.py::TestReadFileBuiltin::test_path_traversal_blocked]`
 
 ### F-middleware-ordering: Mount cognitive middleware in the required observation-before-control order.
 - **Boundary**: lifecycle-behavior - middleware ordering
 - **Sources**: skill-spec, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/cognitive/middlewares.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/test_round28_invariant_guards.py::test_round28_middleware_order_keeps_observation_before_control]`
+- `[Covered By: packages/graph-agent/tests/middleware/test_chain_topology.py::test_middleware_chain_topological_order_is_fixed]`
 
 ### F-middleware-mounting: Enable and disable runtime middleware based on attended, unattended, and configuration modes.
 - **Boundary**: lifecycle-behavior - middleware factory
 - **Sources**: skill-spec, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py, packages/graph-agent/src/graph_agent/middleware/execution_control.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/cognitive/test_middlewares.py::TestCreateCustomMiddlewaresPR5::test_clarification_enabled_by_default]`
+- `[Covered By: packages/graph-agent/tests/core/test_cognitive_tools_mounting.py::test_cognitive_tools_mounted_unconditionally]`
 
 ### F-predict-internal-mocking: Provide deterministic prediction and golden-case mocks for offline execution and tests.
 - **Boundary**: lifecycle-behavior - predict internal gateway
@@ -239,7 +239,7 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: public-api, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/cognitive/ambiguity.py, packages/graph-agent/src/graph_agent/cognitive/clarification_middleware.py
 - **Primary contracts**: 0 error codes, 2 events
-- `[Covered By: packages/graph-agent/tests/cognitive/test_middlewares.py::TestUnattendedClarificationMiddleware::test_intercepts_ask_clarification_in_unattended_mode]`
+- `[Covered By: packages/graph-agent/tests/middleware/test_beta_clarification_and_runtime_integration.py::test_ask_clarification_unattended_path_returns_conservative_auto_answer]`
 
 ### F-parallel-map-tools: Run parallel map and builtin tool providers through stable tool contracts.
 - **Boundary**: lifecycle-behavior - parallel map builtin tool

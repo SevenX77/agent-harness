@@ -16,11 +16,11 @@
     "02-mechanism/02-resolver/mvp1-alignment.md": "9eb8c25b602471bf2613492b3e2a84bda878751c62289531e3f1d18dd0ced5d8",
     "02-mechanism/04-run-outer/03-checkpoint/baseline.md": "3a0e8d5bbf8fa594d040f7d4315238a907a2fb4c5b7cd5923e07e2992e098337",
     "02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md": "ce34ac54a4d725b6a5860ac948b68c5537bf5091489d5866339836cda875fde8",
-    "02-mechanism/05-run-inner/05-exit-control/baseline.md": "35e1aaf3a31c705a7184b9fa4b30fd1a168e98510a6bcd2b0113fdb0f895f33d",
-    "02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md": "f45e788e15cf7b6fdeb9306cbc8882675f39edd6cbf8a414e5f8af7e34e394fb",
+    "02-mechanism/05-run-inner/05-exit-control/baseline.md": "293e9233dac364118d0b9280889081ac8ab0aa54e2f55b55f944cc3c0188fb82",
+    "02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md": "36fca24edee4b9e065d182f7da7f9b36ddf5a69c42142a8317f02608ec885150",
     "02-mechanism/05-run-inner/06-golden-eval/baseline.md": "27c3e17a8dca0dc6e833ff81fe21960727d83ae3bfcc6313fe4ae4e6835cf442",
     "02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md": "a4659649b3170c0729673453c37e99fefd0f2a3036977152b8ae18175be4470a",
-    "02-mechanism/05-run-inner/08-messages-state/baseline.md": "d066ab6cafd958317a436a65b4023cd3db5457d37a4d0d5d06ad269c0635f6f3",
+    "02-mechanism/05-run-inner/08-messages-state/baseline.md": "9df2538b10635fb65de699db96bbc34761d261857c911db3b38a7f1e8f8ee3e6",
     "02-mechanism/05-run-inner/08-messages-state/mvp1-alignment.md": "5cce3f66201ea0aed8f82f493d0bba871ae6e6f26ef976320dc2641cdd6f8d10"
   }
 }

@@ -321,6 +321,14 @@ ask_clarification、log_ambiguity、update_working_memory、query_working_memory
 1. 14 模块死家族闭包 + 附着孤儿(§1.1 清单)。其中 `cognitive/finish.py` 内被 §3.5 收编的常量迁至活侧后,整文件删除。
 2. ctx 桥:`state.py` 的 `legacy_context_from_state` / `workflow_state_from_legacy_context` 及辅助函数(`_add_not_none_framework_values` / `_add_non_empty_framework_values` / `_add_copied_framework_values` / `_not_none_framework_pairs`)+ `packages/graph-agent/tests/core/test_state_legacy_context_characterization.py`。
 3. 零发射点事件类(删前逐一核证):ValidationPassEvent、ValidationFailEvent、RetryEvent、RetryExhaustedEvent、ModelResolvedEvent、FinishTaskEvent(FinishTaskVerdictEvent 是活的,保留)、DeadEndPrunedEvent、AmbiguityReportEvent(AmbiguityLoggedEvent 迁活,保留)、HeartbeatEvent。ThreadCleanedUpEvent / InternalErrorEvent 零构造,但需核对公共 API 承诺后再定(**待定**)。
+
+   **2026-08-15 PR E 重核结论(本节要求的逐项重核推翻了其中一条)**:
+   - **DeadEndPrunedEvent 不删,保留**——它有活生产者:`ExecutionControlMiddleware`(活链第 3 槽)在
+     `middleware/execution_control.py` 里经旧式 `on_dead_end_pruned` 回调发出,`_TraceCallback`
+     再把它打包成 typed 事件写入 trace。本节起草时的清单把它误判为零发射点。
+   - ThreadCleanedUpEvent / InternalErrorEvent 的**待定已裁决:删**——两者在删除前的源码树里只有类定义、
+     零构造点,公共 API 契约文档同批收缩。
+   - 其余七类经重核确认零发射点,按本节删除。
 4. `callbacks/tracing.py` 中把旧式 on_* 回调重打包成上述死事件的分支(`:252-406` 区间逐个核对);`callbacks/base.py` 相应 dispatch 注册;公共 API `EXPECTED_CALLBACK_EVENT_VARIANTS` frozenset 同步收缩。
 5. FrameworkState 死字段核对:ambiguity_reports 届时已被 §3.3 救活、working_memory 已被 §3.2 救活——两者不删;其余字段逐个重核。
 6. Phase 死字段(`types.py` 中 retry_target 等设计取消项);`runner._HITL_TOOL_NAMES` 中的 "request_human_input"(若 PR B 未删)。

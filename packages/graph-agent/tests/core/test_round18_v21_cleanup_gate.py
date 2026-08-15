@@ -207,7 +207,6 @@ def test_round18_semantic_grep_gate_has_no_real_legacy_usage() -> None:
 
 def test_round18_cognitive_modules_remain_importable() -> None:
     for module_name in (
-        "graph_agent.cognitive.finish",
         "graph_agent.cognitive.finish_task",
         "graph_agent.cognitive.md2json",
         "graph_agent.cognitive.md_patch",

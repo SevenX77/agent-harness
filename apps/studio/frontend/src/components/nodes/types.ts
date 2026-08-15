@@ -26,7 +26,7 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   status: SkillNodeStatus
   /**
    * N5 atom #1 (spec F1): one-line error summary for a failed/halted node, derived
-   * from this phase's last failure event (validation_fail / retry_exhausted) by the
+   * from this phase's last failure event by the
    * same event→node-status derivation that drives the red light. Rendered in-place on
    * the node so the user sees *why* the run stopped without opening the Properties
    * panel. Only meaningful when `status === 'error'`.

@@ -68,12 +68,8 @@ export function eventMessage(event: CallbackEvent): string {
       return typeof event.resolved_model === 'string' && event.resolved_model !== ''
         ? `LLM call completed · ${event.resolved_model}`
         : 'LLM call completed'
-    case 'finish_task':
-      return typeof event.reasoning === 'string' ? event.reasoning : 'Task finished'
     case 'run_ended':
       return `Run ended: ${event.status ?? 'completed'}`
-    case 'internal_error':
-      return typeof event.error_message === 'string' ? event.error_message : 'Internal error'
     case 'llm_route_decision': {
       const details = routeDecisionDetails(event)
       return details ? routeDecisionMessage(details) : event.event_type
@@ -82,10 +78,6 @@ export function eventMessage(event: CallbackEvent): string {
       const details = callSettingsDetails(event)
       return details ? callSettingsMessage(details) : event.event_type
     }
-    case 'model_resolved':
-      return typeof event.resolved_model === 'string' && event.resolved_model !== ''
-        ? `Model resolved: ${event.resolved_model}`
-        : 'Model resolved'
     default:
       // The machinery-speaks contract (decision 2026-08-13 D4): every internal
       // decision event carries a full-sentence `message`. Rendering it here
@@ -121,11 +113,7 @@ export type TraceSeverity = 'error' | 'warning' | 'normal'
  * pill — ask this one function rather than each keeping a list of types.
  */
 export function eventSeverity(event: CallbackEvent): TraceSeverity {
-  if (
-    event.event_type === 'internal_error'
-    || event.event_type === 'validation_fail'
-    || event.event_type === 'protocol_violation'
-  ) {
+  if (event.event_type === 'protocol_violation') {
     return 'error'
   }
   if (event.event_type === 'loop_detected') {
@@ -203,50 +191,6 @@ export function mockedSourceClass(source: MockedSource): string {
     return 'border-success-border bg-success/10 text-success'
   }
   return 'border-primary/50 bg-primary/10 text-foreground'
-}
-
-export interface RetryBadge {
-  /** Human-facing label, e.g. "2/3" when a limit is known or "#2" when it is not. */
-  label: string
-  /** Current attempt number, 1-based. */
-  attempt: number
-  /** Max attempts when the engine reported a limit; null otherwise. */
-  limit: number | null
-  /** True once this is the final allowed attempt (attempt === limit). */
-  exhausted: boolean
-}
-
-function numericField(value: JsonValue | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function readAttemptFields(source: Record<string, JsonValue | undefined>): { attempt: number | null; limit: number | null } {
-  // attempt/max_attempts are 1-based; retry_count is 0-based attempts already spent.
-  const attemptDirect = numericField(source.attempt)
-  const retryCount = numericField(source.retry_count)
-  const attempt = attemptDirect ?? (retryCount !== null ? retryCount + 1 : null)
-  const limit = numericField(source.max_attempts) ?? numericField(source.max_retries) ?? numericField(source.retry_limit)
-  return { attempt, limit }
-}
-
-export function retryBadge(event: CallbackEvent): RetryBadge | null {
-  let { attempt, limit } = readAttemptFields(event)
-  if (attempt === null && isJsonObject(event.metadata)) {
-    ({ attempt, limit } = readAttemptFields(event.metadata))
-  }
-  if (attempt === null && isJsonObject(event.metrics)) {
-    ({ attempt, limit } = readAttemptFields(event.metrics))
-  }
-  if (attempt === null) {
-    return null
-  }
-  const label = limit !== null ? `${attempt}/${limit}` : `#${attempt}`
-  return {
-    label,
-    attempt,
-    limit,
-    exhausted: limit !== null && attempt >= limit,
-  }
 }
 
 // The ~2KB byte-threshold payload preview that used to live here was replaced
@@ -328,33 +272,16 @@ export function toolCallSummary(event: CallbackEvent): ToolCallSummary | null {
   }
 }
 
-// ── Retry-exhausted Error Stack (D10, n4-trace #25) ─────────────────────────
-// When retries run out, the engine's retry_exhausted event carries
-// `final_errors: list[str]` (each prior attempt's failure reason); a
-// validation_fail carries `errors: list[str]` for that single attempt. The row
-// surfaces these as an explicit, expandable Error Stack so the user sees *why*
-// each attempt failed rather than just a red light.
-
+/**
+ * The usable strings out of an engine list field. Blank and non-string entries
+ * are dropped rather than rendered, so a list that carried padding does not
+ * become empty bullets on screen.
+ */
 function stringList(value: JsonValue | undefined): string[] {
   if (!Array.isArray(value)) {
     return []
   }
   return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
-}
-
-/**
- * Collect the per-attempt failure reasons carried by a retry_exhausted /
- * validation_fail event. Returns an empty array when the event is neither, or
- * carries no error list.
- */
-export function errorStack(event: CallbackEvent): string[] {
-  if (event.event_type === 'retry_exhausted') {
-    return stringList(event.final_errors)
-  }
-  if (event.event_type === 'validation_fail') {
-    return stringList(event.errors)
-  }
-  return []
 }
 
 // ── Gateway routing visibility (trace-observability F7) ─────────────────────
@@ -479,12 +406,12 @@ export function countRouteDegradations(events: CallbackEvent[]): number {
 
 /**
  * The model a trace row is known to have used: `resolved_model` on
- * prompt_captured / model_resolved is the resolution-time answer, while
+ * prompt_captured is the resolution-time answer, while
  * `response_data.model_name` on llm_call is the provider-reported post-call
  * answer — the one that survives a mid-call fallback.
  */
 export function eventModelName(event: CallbackEvent): string | null {
-  if (event.event_type === 'prompt_captured' || event.event_type === 'model_resolved') {
+  if (event.event_type === 'prompt_captured') {
     return typeof event.resolved_model === 'string' && event.resolved_model !== '' ? event.resolved_model : null
   }
   if (event.event_type === 'llm_call' && isJsonObject(event.response_data)) {

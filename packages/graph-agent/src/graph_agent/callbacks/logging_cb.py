@@ -56,42 +56,6 @@ class LoggingCallback(Callback):
         preview = result[:200] + "..." if len(result) > 200 else result
         logger.info("[Tool Call] %s.%s | result=%s", phase_name, tool_name, preview)
 
-    def on_validation_fail(
-        self,
-        phase_name: str,
-        errors: list[str],
-        retry_count: int,
-    ) -> None:
-        """Log validator failure."""
-        logger.warning(
-            "[Validation Fail] %s | retry=%d | errors=%s",
-            phase_name,
-            retry_count,
-            errors,
-        )
-
-    def on_retry(
-        self,
-        phase_name: str,
-        target_phase: str,
-        feedback: list[str],
-    ) -> None:
-        """Log retry routing."""
-        logger.info("[Retry] %s → %s", phase_name, target_phase)
-
-    def on_finish_task(
-        self,
-        phase_name: str,
-        reasoning: str,
-        evidence: list[str],
-    ) -> None:
-        """Log finish_task completion."""
-        logger.info(
-            "[Finish Task] %s | evidence=%d items",
-            phase_name,
-            len(evidence),
-        )
-
     def on_nudge(
         self,
         phase_name: str,
@@ -129,19 +93,4 @@ class LoggingCallback(Callback):
         """Log history compaction."""
         logger.info(
             "[Compaction] %s | removed=%d message(s)", phase_name, removed_message_count
-        )
-
-    def on_ambiguity_report(
-        self,
-        phase_name: str,
-        ambiguity_type: str,
-        question: str,
-        decision: str,
-    ) -> None:
-        """Log one ambiguity report."""
-        logger.info(
-            "[Ambiguity Report] %s | type=%s | decision=%s",
-            phase_name,
-            ambiguity_type,
-            decision,
         )

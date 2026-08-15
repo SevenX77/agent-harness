@@ -27,12 +27,10 @@ Responsibilities consolidated from the legacy ``cognitive/middlewares.py``:
   totals from ``state['flow'].metrics`` for the LoggingMiddleware /
   TracingCallback consumers.
 
-The middleware deliberately does *not* mutate retry counters or
-``state['flow'].retry_feedback``: those flow through ``RetryRouter``
-at the LangGraph conditional-edge layer (see
-``core/retry_router.py``) and the ValidationPhaseNode at the
-phase-executor layer. ExecutionControl observes and reports; the
-retry decision is made elsewhere by design.
+The middleware deliberately does *not* drive any retry loop of its
+own: ExecutionControl observes and reports (dead-end warnings, loop
+detection, metrics), while recovery is the model's job — the injected
+warning message tells it to change course.
 """
 
 from __future__ import annotations
@@ -81,12 +79,8 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
        ``(tool_name, args_hash)`` pair fires ``loop_threshold`` times
        within ``loop_window`` recent ToolMessages, emit a
        ``LoopDetectedEvent`` callback for operators. The middleware
-       does not abort the loop — that is the framework's
-       ``max_iterations`` ceiling at the harness level.
-
-    Retry-counter management lives in ``RetryRouter`` and
-    ``ValidationPhaseNode``; this middleware does not touch
-    ``state['flow'].retry_counts`` or ``retry_feedback`` directly.
+       does not abort the loop — that is the agent loop's
+       ``max_iterations`` ceiling.
     """
 
     def __init__(

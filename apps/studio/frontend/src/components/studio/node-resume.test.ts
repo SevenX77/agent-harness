@@ -16,11 +16,11 @@ function envelope(seq: number, phaseName: string, checkpointId: string, runId = 
     seq,
     cursor: `run:${runId}:${seq}`,
     run_id: runId,
-    event_type: 'validation_fail',
+    event_type: 'interrupted',
     timestamp: '2026-06-18T00:00:00Z',
     payload: {
       schema_version: '1.0',
-      event_type: 'validation_fail',
+      event_type: 'interrupted',
       timestamp: '2026-06-18T00:00:00Z',
       run_id: runId,
       phase_name: phaseName,
@@ -31,7 +31,7 @@ function envelope(seq: number, phaseName: string, checkpointId: string, runId = 
 }
 
 describe('nodeResumeCheckpointFromEvents', () => {
-  it('discovers the latest checkpoint identity for a failed node without enumerating phase names', () => {
+  it('discovers the latest checkpoint identity for a node without enumerating phase names', () => {
     const result = nodeResumeCheckpointFromEvents([
       envelope(1, 'draft', 'checkpoint-draft'),
       envelope(2, 'review', 'checkpoint-review-old'),

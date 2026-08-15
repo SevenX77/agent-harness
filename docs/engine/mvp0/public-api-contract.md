@@ -256,16 +256,6 @@ Family mapping summary:
 - **Postconditions**: The symbol remains documented as vendor-only contract debt; PR1 freezes the observed consumer dependency without changing engine source.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is vendor-only, removing or reviving it requires explicit inventory and contract review.
 
-## AmbiguityReportEvent
-
-- **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['ambiguity_report']`, `phase_name: str`, `ambiguity_type: str`, `question: str`, `decision: str`
-- **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
 ## BaseMockStrategy
 
 - **De Facto Contract / Known Debt** — PR1 only freezes current behavior; PR2 owns boundary cleanup.
@@ -282,7 +272,7 @@ Family mapping summary:
 - **Source module**: `graph_agent.callbacks.events`
 - **Consumer files**: apps/studio/backend/app/models/runs.py:8; apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/models/runs.py:8; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `Union variants: AgentLoopIterationEvent, AmbiguityLoggedEvent, AmbiguityReportEvent, ArtifactSavedEvent, BuiltinSubagentEnterEvent, BuiltinSubagentExitEvent, BuiltinSubagentFallbackEvent, CompactionEvent, DeadEndPrunedEvent, FinishTaskEvent, HeartbeatEvent, InternalErrorEvent, InterruptedEvent, LLMCallEvent, LLMFallbackEvent, ModelResolvedEvent, NudgeEvent, ParallelMapGroupEndedEvent, ParallelMapGroupStartedEvent, PhaseEndEvent, PhaseStartEvent, PredictChainStartEvent, PromptCapturedEvent, ResumedEvent, RetryEvent, RetryExhaustedEvent, RunEndedEvent, RunStartedEvent, ThreadCleanedUpEvent, ToolCallEvent, ValidationFailEvent, ValidationPassEvent, WorkingMemoryUpdateEvent`
+- **Fields**: `Union variants: AgentLoopIterationEvent, AmbiguityLoggedEvent, ArtifactSavedEvent, BlackboardReduceEvent, BuiltinSubagentEnterEvent, BuiltinSubagentExitEvent, BuiltinSubagentFallbackEvent, CompactionEvent, DeadEndPrunedEvent, FinishTaskVerdictEvent, InputDispatchEvent, InputFileInjectedEvent, InterruptedEvent, LLMCallEvent, LLMCallSettingsEvent, LLMDeltaEvent, LLMRouteDecisionEvent, LoopDetectedEvent, NudgeEvent, ParallelMapGroupEndedEvent, ParallelMapGroupStartedEvent, PhaseEndEvent, PhaseStartEvent, PredictChainStartEvent, PromptCapturedEvent, ProtocolViolationEvent, ResumedEvent, RunEndedEvent, RunStartedEvent, RuntimeInputInjectedEvent, ToolCallEvent, ToolCallStartedEvent, ToolErrorHandledEvent, ToolHistoryRepairedEvent, WorkingMemoryUpdateEvent`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -326,16 +316,6 @@ Family mapping summary:
 - **Signature**: `ExecutionError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## FinishTaskEvent
-
-- **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['finish_task']`, `phase_name: str`, `reasoning: str`, `evidence: list[str]`
-- **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
 ## GoldenCase
@@ -423,16 +403,6 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## LLMFallbackEvent
-
-- **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py:8
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['llm_fallback']`, `phase_name: str`, `from_provider: str`, `to_provider: str`, `reason: str`, `code: str | None`, `context: dict[str, Any]`
-- **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
 ## LogicNodeAST
 
 - **Source module**: `graph_agent.core.manifest`
@@ -464,7 +434,6 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-
 ## PersonaSkillDef
 
 - **vendor-only / 待核实是否仍需**
@@ -486,24 +455,12 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-
 ## PhaseStartEvent
 
 - **Source module**: `graph_agent.callbacks.events`
 - **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
 - **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['phase_start']`, `phase_name: str`, `context: dict[str, Any]`
-- **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-
-## RetryEvent
-
-- **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['retry']`, `phase_name: str`, `target_phase: str`, `feedback: list[str]`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -554,16 +511,6 @@ Family mapping summary:
 - **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
 - **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['tool_call']`, `phase_name: str`, `tool_name: str`, `args: dict[str, Any]`, `result: str`, `duration_ms: float | None`
-- **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## ValidationFailEvent
-
-- **Source module**: `graph_agent.callbacks.events`
-- **Consumer files**: apps/studio/backend/app/services/run_manager.py:22; apps/studio/tauri/vendor/backend/app/services/run_manager.py:20
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `schema_version: Literal['1.0']`, `timestamp: str`, `sub_run_id: str | None`, `group_key: str | None`, `event_type: Literal['validation_fail']`, `phase_name: str`, `errors: list[str]`, `retry_count: int`
 - **Preconditions**: Consumers must construct, validate, or serialize payloads using the frozen field names, field types, and event discriminator values.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.

@@ -85,7 +85,7 @@ describe('buildTraceSteps (decision 2026-08-09 D4)', () => {
   it('leaves unpaired events exactly as they are, one row each', () => {
     const steps = buildTraceSteps(indexed([
       { event_type: 'phase_start', phase_name: 'draft' },
-      { event_type: 'validation_fail', phase_name: 'draft' },
+      { event_type: 'nudge', phase_name: 'draft' },
       { event_type: 'phase_end', phase_name: 'draft' },
     ]))
 

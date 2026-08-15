@@ -1,36 +1,22 @@
 import { describe, expect, it } from 'vitest'
+import { ENGINE_EVENT_TYPES } from '../../utils/engine-events'
 import { TRACE_CATEGORIES, traceEventCategory } from './trace-category'
 
-// Every event type the engine can emit today. The filter must account for all of
-// them: a type that fell outside every bucket would be silently unfilterable.
-const KNOWN_EVENT_TYPES = [
-  'run_started',
-  'run_ended',
-  'phase_start',
-  'phase_end',
-  'input_dispatch',
-  'agent_loop_iteration',
-  'predict_chain_start',
-  'finish_task',
-  'llm_call',
-  'prompt_captured',
-  'llm_route_decision',
-  'tool_call',
-  'internal_error',
-  'validation_fail',
-]
-
 describe('traceEventCategory', () => {
-  it('sorts every known event type into exactly one bucket', () => {
-    for (const eventType of KNOWN_EVENT_TYPES) {
+  // The filter must account for every event type the engine emits: one that
+  // fell outside every bucket would be silently unfilterable. The list is read
+  // from ENGINE_EVENT_TYPES rather than copied here, so this test cannot pass
+  // by testing a stale idea of what the engine emits.
+  it('sorts every event type the engine emits into exactly one bucket', () => {
+    expect(ENGINE_EVENT_TYPES.size).toBeGreaterThan(0)
+    for (const eventType of ENGINE_EVENT_TYPES) {
       const category = traceEventCategory(eventType)
       expect(TRACE_CATEGORIES).toContain(category)
     }
   })
 
   it('groups failures under errors', () => {
-    expect(traceEventCategory('internal_error')).toBe('errors')
-    expect(traceEventCategory('validation_fail')).toBe('errors')
+    expect(traceEventCategory('protocol_violation')).toBe('errors')
   })
 
   it('groups model interaction under llm', () => {

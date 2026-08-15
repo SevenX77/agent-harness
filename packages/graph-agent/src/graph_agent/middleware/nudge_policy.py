@@ -6,8 +6,8 @@ lived in the dead family (``core/nudge_injector.py`` gates +
 that decides when to nudge and with which words; the live
 ``ExitControlMiddleware`` stays a middleware-side adapter over it
 (WS-E8 constraint: adapter over the existing policy, never a second
-unexplainable policy). The dead-side modules are untouched and fall
-with the family in the follow-up removal PR.
+unexplainable policy). The dead-side modules were removed with the
+rest of the legacy execution family once this policy went live.
 
 Two deliberate divergences from the dead side, both mandated by §3.5:
 

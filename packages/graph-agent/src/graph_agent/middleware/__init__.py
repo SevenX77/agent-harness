@@ -1,34 +1,34 @@
-"""MVP-3 middleware package: core middleware and MVP0 order contracts.
+"""Middleware package: the live chain's classes and its order contract.
 
-The package replaces the legacy decorator-style middleware chain that
-used to live in ``cognitive/middlewares.py`` with four single-purpose
-classes the framework wires in a fixed topological order:
+Every behaviour the agent loop layers on top of a plain ``create_agent``
+call lives here, as single-purpose middleware classes the assembler
+wires in a fixed topological order:
 
-1. :class:`ProtocolValidationMiddleware` (T7) — state contract guards
+1. :class:`ProtocolValidationMiddleware` — state contract guards
    (BusinessData / FrameworkState invariants + SchemaEngine validate
    on the after-model boundary). Runs first because every later
    middleware assumes the state shape is already valid.
-2. :class:`CognitiveFlowMiddleware` (T8) — finish_task interception
-   plus attended/unattended clarification handling.
-3. :class:`ExecutionControlMiddleware` (T9) — iteration counter,
-   dead-end detection, lightweight loop detection, metrics
-   aggregation.
-4. (TBD) Tracing / ToolError / LoopDetection — PR γ0 locks their
-   future order as string contracts; PR β wires the runtime classes.
+2. :class:`CognitiveFlowMiddleware` — cognitive tool interception:
+   finish_task, ask_clarification, and the working-memory / ambiguity /
+   context-access tools that read and write ``FrameworkState``.
+3. :class:`ExecutionControlMiddleware` — iteration counter, dead-end
+   detection, lightweight loop detection, metrics aggregation.
+4. :class:`CompactionMiddleware` — summarizes messages out of context
+   before the window overflows, writing the removed text to a sidecar.
+5. :class:`TracingMiddleware` · 6. :class:`ToolErrorHandlingMiddleware`
+   · 7. :class:`LoopDetectionMiddleware` — observation and tool-error
+   handling.
+8. :class:`ExitControlMiddleware` — exit governance plus the nudge
+   policy adapter; runs last because it decides whether the loop ends.
 
-The fixed list :data:`DEFAULT_MIDDLEWARE_ORDER` exists so callers can
-construct the chain without re-deriving the order. A regression test
-in ``tests/graph_agent/conftest.py`` pins the sequence — silently
-re-ordering middleware is precisely the kind of latent bug MVP-3 set
-out to make impossible.
-
-Note: Phase 3 M7 retired the legacy ``cognitive/middlewares.py``
-parallel pipeline (PHASE3_DESIGN.md §3); after Strategy C gave every
-live LLM phase a strongly-typed ``output_schema``, all finish_task
-routing flows through this MVP-3 middleware chain exclusively. The
-remaining helpers in ``cognitive/middlewares.py`` are shared utilities
-only (working memory, dead-end pruning, agent-loop iteration,
-unattended clarification, ``create_custom_middlewares``).
+:data:`MVP0_MIDDLEWARE_ORDER_CONTRACT` is that order as strings, so
+callers construct the chain without re-deriving it. The assembler
+prepends two more slots outside this contract (RuntimeInput,
+ToolHistoryIntegrity) — see ``core/graph_assembler.py``. Order
+regression tests (``tests/middleware/test_chain_topology.py``,
+``tests/core/test_gamma0_contract_tdd.py``) pin the sequence: silently
+re-ordering middleware is precisely the kind of latent bug this
+package exists to make impossible.
 """
 
 from __future__ import annotations

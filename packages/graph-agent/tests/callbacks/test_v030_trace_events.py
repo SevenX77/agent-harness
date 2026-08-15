@@ -15,37 +15,6 @@ from graph_agent.callbacks.events import (
     CallbackEvent,
 )
 from graph_agent.callbacks.tracing import TracingCallback
-from graph_agent.cognitive.ambiguity import log_ambiguity
-
-
-class Collector:
-    def __init__(self) -> None:
-        self.events: list[object] = []
-
-    def on_event(self, event: object) -> None:
-        self.events.append(event)
-
-
-def test_log_ambiguity_emits_v030_ambiguity_logged_event() -> None:
-    collector = Collector()
-    ctx = {"_current_phase": "main", "_callbacks": [collector]}
-
-    result = json.loads(
-        log_ambiguity(
-            question="How should @reference:R1 be interpreted?",
-            ambiguity_type="ambiguous_requirement",
-            decision="Use conservative reading.",
-            reason="Protocol @protocol:P1 is closest.",
-            ctx=ctx,
-        )
-    )
-
-    assert result["status"] == "recorded"
-    event = collector.events[0]
-    assert isinstance(event, AmbiguityLoggedEvent)
-    assert event.phase_name == "main"
-    assert event.related_refs == ["R1"]
-    assert event.related_protocols == ["P1"]
 
 
 def test_builtin_subagent_trace_events_round_trip_through_callback_union() -> None:

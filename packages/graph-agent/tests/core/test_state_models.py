@@ -39,10 +39,7 @@ class TestFrameworkState:
         """所有字段都有合理默认值."""
         fs = FrameworkState()
         assert fs.finish_task_result is None
-        assert fs.md_id is None
-        assert fs.hop_count == 0
         assert fs.current_phase == ""
-        assert fs.retry_counts == {}
         assert fs.metrics == {}
         assert fs.unattended is False
 
@@ -52,17 +49,9 @@ class TestFrameworkState:
         fs2 = FrameworkState.model_validate(dumped)
         assert fs1 == fs2
 
-    def test_framework_state_retry_feedback_default(self) -> None:
-        fs = FrameworkState()
-        assert fs.retry_feedback is None
-
     def test_framework_state_trace_path_default(self) -> None:
         fs = FrameworkState()
         assert fs.trace_path is None
-
-    def test_framework_state_validation_middleware_phase_default(self) -> None:
-        fs = FrameworkState()
-        assert fs.validation_middleware_phase is None
 
 
 class TestWorkflowStateTypedDict:
@@ -103,8 +92,8 @@ class TestStateManager:
             "flow": FrameworkState(),
             "messages": [],
         }
-        new_state = StateManager.update_framework(state, hop_count=5, current_phase="p1")
-        assert new_state["flow"].hop_count == 5
+        new_state = StateManager.update_framework(state, subagent_depth=5, current_phase="p1")
+        assert new_state["flow"].subagent_depth == 5
         assert new_state["flow"].current_phase == "p1"
 
         with pytest.raises(ValidationError):

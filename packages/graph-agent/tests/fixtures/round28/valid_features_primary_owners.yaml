@@ -164,7 +164,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/core/actions.py
-  - path: packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py
   error_codes_primary:
   - '[F-v3-logic-action-dir-missing]'
   - '[F-v3-logic-action-entrypoint-missing]'
@@ -186,7 +185,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/core/test_phase_node.py::test_phase_node_execute_returns_updated_state
+  - tests/core/test_context_facade_logic_action.py::test_logic_action_receives_plain_dict_not_context_facade
   public_api_symbols:
   - LogicNodeAST
 - id: F-subgraph-delegation
@@ -353,7 +352,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/core/compiler.py
-  - path: packages/graph-agent/src/graph_agent/core/graph_builder.py
   error_codes_primary:
   - '[F-v3-compile-depth-exceeded]'
   - '[F-v3-compile-recursion-cycle]'
@@ -376,7 +374,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/cognitive/context_facade.py
-  - path: packages/graph-agent/src/graph_agent/core/callback_bridge.py
   error_codes_primary:
   - '[F-v3-runtime-phase-failed]'
   error_codes_secondary: []
@@ -479,7 +476,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/callbacks/tracing.py
-  - path: packages/graph-agent/src/graph_agent/core/tracing_proxy.py
   error_codes_primary: []
   error_codes_secondary: []
   events_primary: []
@@ -535,7 +531,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/cognitive/critic.py
-  - path: packages/graph-agent/src/graph_agent/cognitive/memory.py
   error_codes_primary:
   - '[F-v3-cognitive-output-schema-invalid]'
   - '[F-v3-cognitive-output-schema-render-failed]'
@@ -617,7 +612,6 @@ features:
   - public-api
   - source-file-map
   core_paths:
-  - path: packages/graph-agent/src/graph_agent/cognitive/finish.py
   - path: packages/graph-agent/src/graph_agent/cognitive/finish_task.py
   error_codes_primary: []
   error_codes_secondary: []
@@ -659,7 +653,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/core/module_sandbox.py
-  - path: packages/graph-agent/src/graph_agent/core/tool_wrapper.py
   error_codes_primary: []
   error_codes_secondary: []
   events_primary: []
@@ -681,7 +674,6 @@ features:
   - skill-spec
   - source-file-map
   core_paths:
-  - path: packages/graph-agent/src/graph_agent/tools/builtin/context_access.py
   - path: packages/graph-agent/src/graph_agent/tools/builtin/read_file.py
   error_codes_primary: []
   error_codes_secondary: []
@@ -689,7 +681,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/tools/test_context_access.py::TestQueryWorkingMemory::test_returns_working_memory
+  - tests/tools/test_read_file.py::TestReadFileBuiltin::test_path_traversal_blocked
 - id: F-middleware-ordering
   description: Mount cognitive middleware in the required observation-before-control
     order.
@@ -700,7 +692,8 @@ features:
   - skill-spec
   - source-file-map
   core_paths:
-  - path: packages/graph-agent/src/graph_agent/cognitive/middlewares.py
+  - path: packages/graph-agent/src/graph_agent/middleware/__init__.py
+  - path: packages/graph-agent/src/graph_agent/middleware/factory.py
   error_codes_primary: []
   error_codes_secondary: []
   events_primary: []
@@ -711,7 +704,7 @@ features:
     description: Round 28 invariant guard protects this behavior from silent drift.
     evidence: tests/test_round28_invariant_guards.py::test_round28_middleware_order_keeps_observation_before_control
   targeted_tests:
-  - tests/test_round28_invariant_guards.py::test_round28_middleware_order_keeps_observation_before_control
+  - tests/middleware/test_chain_topology.py::test_middleware_chain_topological_order_is_fixed
 - id: F-middleware-mounting
   description: Enable and disable runtime middleware based on attended, unattended,
     and configuration modes.
@@ -735,7 +728,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/cognitive/test_middlewares.py::TestCreateCustomMiddlewaresPR5::test_clarification_enabled_by_default
+  - tests/core/test_cognitive_tools_mounting.py::test_cognitive_tools_mounted_unconditionally
 - id: F-predict-internal-mocking
   description: Provide deterministic prediction and golden-case mocks for offline
     execution and tests.
@@ -800,7 +793,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/core/graph_assembler.py
-  - path: packages/graph-agent/src/graph_agent/core/phase_nodes/_helpers.py
   error_codes_primary: []
   error_codes_secondary: []
   events_primary: []
@@ -867,7 +859,6 @@ features:
   - public-api
   - source-file-map
   core_paths:
-  - path: packages/graph-agent/src/graph_agent/cognitive/ambiguity.py
   - path: packages/graph-agent/src/graph_agent/cognitive/clarification_middleware.py
   error_codes_primary: []
   error_codes_secondary: []
@@ -877,7 +868,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/cognitive/test_middlewares.py::TestUnattendedClarificationMiddleware::test_intercepts_ask_clarification_in_unattended_mode
+  - tests/middleware/test_beta_clarification_and_runtime_integration.py::test_ask_clarification_unattended_path_returns_conservative_auto_answer
   public_api_symbols:
   - AmbiguityReportEvent
 - id: F-parallel-map-tools

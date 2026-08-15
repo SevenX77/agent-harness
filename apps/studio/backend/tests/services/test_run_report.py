@@ -177,6 +177,72 @@ def test_report_states_why_a_failed_run_failed(tmp_path: Path) -> None:
     assert "All providers failed for role=analyst" in report
 
 
+def test_report_names_the_phase_problems_the_live_engine_reports(tmp_path: Path) -> None:
+    """Per-phase problems come from the two live failure events, and only those.
+
+    The engine's legacy validation_fail / retry_exhausted / internal_error
+    events were deleted with the legacy execution family (decision
+    docs/design/2026-08-15-legacy-cognitive-features-migration-decision.md §5).
+    A rejected finish_task_verdict is the live successor of validation_fail;
+    protocol_violation is the hard failure. tool_error_handled is not a
+    failure at all — the engine turned that exception into feedback the model
+    reads and the run carried on — so it must not show up as a phase problem.
+    """
+    from app.services.run_report import build_run_report
+
+    run_dir = tmp_path / "runs" / "run-problems"
+    _seal_run(run_dir)
+    trace = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines() if line.strip()]
+    events.extend(
+        [
+            {
+                "event_type": "finish_task_verdict",
+                "timestamp": "2026-08-08T10:00:06+00:00",
+                "phase_name": "draft",
+                "verdict": "rejected",
+                "message": "submission rejected",
+                "errors": ["chapter.title: field required"],
+            },
+            {
+                "event_type": "finish_task_verdict",
+                "timestamp": "2026-08-08T10:00:07+00:00",
+                "phase_name": "draft",
+                "verdict": "accepted",
+                "message": "submission accepted",
+            },
+            {
+                "event_type": "tool_error_handled",
+                "timestamp": "2026-08-08T10:00:08+00:00",
+                "phase_name": "draft",
+                "tool_name": "fetch_page",
+                "error": "TimeoutError: read timed out",
+                "message": "tool error handed back to the model",
+            },
+            {
+                "event_type": "protocol_violation",
+                "timestamp": "2026-08-08T10:00:09+00:00",
+                "phase_name": "review",
+                "boundary": "after_model",
+                "violations": ["business_data: unknown field 'draft_text'"],
+                "message": "state broke a framework contract",
+            },
+        ]
+    )
+    events.sort(key=lambda event: str(event.get("timestamp") or ""))
+    trace.write_text(
+        "\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    report = build_run_report(run_dir)
+
+    assert "chapter.title: field required" in report
+    assert "business_data: unknown field 'draft_text'" in report
+    assert "read timed out" not in report
+    assert "submission accepted" not in report
+
+
 def test_report_is_stable_for_the_same_sealed_run(tmp_path: Path) -> None:
     from app.services.run_report import build_run_report
 

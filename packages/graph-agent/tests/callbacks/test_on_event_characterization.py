@@ -10,20 +10,16 @@ import pytest
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import (
     AgentLoopIterationEvent,
-    AmbiguityReportEvent,
+    AmbiguityLoggedEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
-    FinishTaskEvent,
-    HeartbeatEvent,
     LLMCallEvent,
     NudgeEvent,
     PhaseEndEvent,
     PhaseStartEvent,
     PromptCapturedEvent,
-    RetryEvent,
     RunStartedEvent,
     ToolCallEvent,
-    ValidationFailEvent,
     WorkingMemoryUpdateEvent,
 )
 
@@ -64,30 +60,6 @@ class RecordingCallback(Callback):
     ) -> None:
         self.calls.append(("on_tool_call", phase_name, tool_name, args, result, duration_ms))
 
-    def on_validation_fail(
-        self,
-        phase_name: str,
-        errors: list[str],
-        retry_count: int,
-    ) -> None:
-        self.calls.append(("on_validation_fail", phase_name, errors, retry_count))
-
-    def on_retry(
-        self,
-        phase_name: str,
-        target_phase: str,
-        feedback: list[str],
-    ) -> None:
-        self.calls.append(("on_retry", phase_name, target_phase, feedback))
-
-    def on_finish_task(
-        self,
-        phase_name: str,
-        reasoning: str,
-        evidence: list[str],
-    ) -> None:
-        self.calls.append(("on_finish_task", phase_name, reasoning, evidence))
-
     def on_nudge(
         self,
         phase_name: str,
@@ -116,17 +88,6 @@ class RecordingCallback(Callback):
         removed_message_count: int,
     ) -> None:
         self.calls.append(("on_compaction", phase_name, removed_message_count))
-
-    def on_ambiguity_report(
-        self,
-        phase_name: str,
-        ambiguity_type: str,
-        question: str,
-        decision: str,
-    ) -> None:
-        self.calls.append(
-            ("on_ambiguity_report", phase_name, ambiguity_type, question, decision)
-        )
 
 
 @pytest.mark.parametrize(
@@ -166,30 +127,6 @@ class RecordingCallback(Callback):
             ("on_tool_call", "draft", "read_file", {"path": "a.md"}, "ok", 12.5),
         ),
         (
-            ValidationFailEvent(
-                phase_name="validate",
-                errors=["missing evidence"],
-                retry_count=2,
-            ),
-            ("on_validation_fail", "validate", ["missing evidence"], 2),
-        ),
-        (
-            RetryEvent(
-                phase_name="validate",
-                target_phase="draft",
-                feedback=["add citation"],
-            ),
-            ("on_retry", "validate", "draft", ["add citation"]),
-        ),
-        (
-            FinishTaskEvent(
-                phase_name="finish",
-                reasoning="complete",
-                evidence=["artifact.md"],
-            ),
-            ("on_finish_task", "finish", "complete", ["artifact.md"]),
-        ),
-        (
             NudgeEvent(phase_name="draft", nudge_count=3, nudge_type="deadline"),
             ("on_nudge", "draft", 3, "deadline"),
         ),
@@ -213,15 +150,6 @@ class RecordingCallback(Callback):
                 content_ref="sidecar.json",
             ),
             ("on_compaction", "research", 4),
-        ),
-        (
-            AmbiguityReportEvent(
-                phase_name="review",
-                ambiguity_type="scope",
-                question="which file?",
-                decision="use current file",
-            ),
-            ("on_ambiguity_report", "review", "scope", "which file?", "use current file"),
         ),
     ],
 )
@@ -253,7 +181,12 @@ def test_on_event_dispatches_nudge_default_type_to_legacy_hook() -> None:
             resolved_prompt=[{"role": "user", "content": "hello"}],
         ),
         RunStartedEvent(run_id="run-1", thread_id="thread-1", initial_context={"x": 1}),
-        HeartbeatEvent(current_phase="draft", elapsed_seconds=30.0, memory_usage_mb=None),
+        AmbiguityLoggedEvent(
+            phase_name="draft",
+            ambiguity_type="scope",
+            question="which file?",
+            decision="use current file",
+        ),
     ],
 )
 def test_on_event_typed_only_events_log_debug_without_legacy_hook(

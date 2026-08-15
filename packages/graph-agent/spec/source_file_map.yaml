@@ -47,10 +47,6 @@ files:
 - path: packages/graph-agent/src/graph_agent/cognitive/__init__.py
   classification: detail
   feature_id: F-public-api-surface
-- path: packages/graph-agent/src/graph_agent/cognitive/ambiguity.py
-  classification: feature
-  feature_ids:
-  - F-clarification-flow
 - path: packages/graph-agent/src/graph_agent/cognitive/clarification_middleware.py
   classification: feature
   feature_ids:
@@ -63,10 +59,6 @@ files:
   classification: feature
   feature_ids:
   - F-llm-prompt-assembly
-- path: packages/graph-agent/src/graph_agent/cognitive/finish.py
-  classification: feature
-  feature_ids:
-  - F-finish-task-validation
 - path: packages/graph-agent/src/graph_agent/cognitive/finish_task.py
   classification: feature
   feature_ids:
@@ -79,14 +71,6 @@ files:
   classification: feature
   feature_ids:
   - F-md-patch
-- path: packages/graph-agent/src/graph_agent/cognitive/memory.py
-  classification: feature
-  feature_ids:
-  - F-llm-prompt-assembly
-- path: packages/graph-agent/src/graph_agent/cognitive/middlewares.py
-  classification: feature
-  feature_ids:
-  - F-middleware-ordering
 - path: packages/graph-agent/src/graph_agent/cognitive/prompt.py
   classification: detail
   feature_id: F-llm-prompt-assembly
@@ -144,10 +128,6 @@ files:
   classification: feature
   feature_ids:
   - F-checkpoint-persistence
-- path: packages/graph-agent/src/graph_agent/core/callback_bridge.py
-  classification: feature
-  feature_ids:
-  - F-runtime-execution
 - path: packages/graph-agent/src/graph_agent/core/checkpointer.py
   classification: feature
   feature_ids:
@@ -168,10 +148,6 @@ files:
   classification: feature
   feature_ids:
   - F-graph-assembly
-- path: packages/graph-agent/src/graph_agent/core/graph_builder.py
-  classification: feature
-  feature_ids:
-  - F-compile-runtime-flow
 - path: packages/graph-agent/src/graph_agent/core/graph_serializer.py
   classification: feature
   feature_ids:
@@ -203,51 +179,16 @@ files:
   classification: feature
   feature_ids:
   - F-tool-sandbox-permission
-- path: packages/graph-agent/src/graph_agent/core/nudge_injector.py
-  classification: detail
-  feature_id: F-error-code-recovery
 - path: packages/graph-agent/src/graph_agent/core/parser.py
   classification: feature
   feature_ids:
   - F-md-frontmatter-parsing
-- path: packages/graph-agent/src/graph_agent/core/phase_executor.py
-  classification: detail
-  feature_id: F-runtime-execution
-- path: packages/graph-agent/src/graph_agent/core/phase_node.py
-  classification: detail
-  feature_id: F-compile-runtime-flow
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/__init__.py
-  classification: detail
-  feature_id: F-graph-assembly
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/_helpers.py
-  classification: feature
-  feature_ids:
-  - F-graph-assembly
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/base.py
-  classification: detail
-  feature_id: F-graph-assembly
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py
-  classification: feature
-  feature_ids:
-  - F-logic-action-execution
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/factory.py
-  classification: detail
-  feature_id: F-graph-assembly
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py
-  classification: detail
-  feature_id: F-compile-runtime-flow
-- path: packages/graph-agent/src/graph_agent/core/phase_nodes/validation_phase_node.py
-  classification: detail
-  feature_id: F-compile-runtime-flow
 - path: packages/graph-agent/src/graph_agent/core/purity.py
   classification: detail
   feature_id: F-logic-action-execution
 - path: packages/graph-agent/src/graph_agent/core/result.py
   classification: detail
   feature_id: F-runtime-execution
-- path: packages/graph-agent/src/graph_agent/core/retry_router.py
-  classification: detail
-  feature_id: F-error-code-recovery
 - path: packages/graph-agent/src/graph_agent/core/run_context.py
   classification: feature
   feature_ids:
@@ -279,17 +220,6 @@ files:
 - path: packages/graph-agent/src/graph_agent/core/template.py
   classification: detail
   feature_id: F-compile-runtime-flow
-- path: packages/graph-agent/src/graph_agent/core/tool_wrapper.py
-  classification: feature
-  feature_ids:
-  - F-tool-sandbox-permission
-- path: packages/graph-agent/src/graph_agent/core/tracing_proxy.py
-  classification: feature
-  feature_ids:
-  - F-callback-tracing
-- path: packages/graph-agent/src/graph_agent/core/types.py
-  classification: detail
-  feature_id: F-runtime-execution
 - path: packages/graph-agent/src/graph_agent/core/validator_contract.py
   classification: detail
   feature_id: F-logic-action-execution
@@ -381,10 +311,6 @@ files:
 - path: packages/graph-agent/src/graph_agent/tools/builtin/clarification_tool.py
   classification: detail
   feature_id: F-clarification-flow
-- path: packages/graph-agent/src/graph_agent/tools/builtin/context_access.py
-  classification: feature
-  feature_ids:
-  - F-tool-sandbox-isolation
 - path: packages/graph-agent/src/graph_agent/tools/builtin/parallel_map.py
   classification: feature
   feature_ids:

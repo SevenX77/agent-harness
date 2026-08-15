@@ -1053,6 +1053,14 @@ def _safe_provider_error_message(exc: Exception) -> str:
     return "[redacted]" if _contains_sensitive_error_text(message) else message
 
 
+def _engine_error_payload(exc: Exception) -> dict[str, Any] | None:
+    """Return the structured payload an engine error raised itself with, if any."""
+    payload = getattr(exc, "error_payload", None)
+    if isinstance(payload, dict) and payload.get("code"):
+        return payload
+    return None
+
+
 def _artifact_error_result(exc: Exception, *, run_id: str) -> RunArtifactErrorResult:
     """Report a run that died of an exception, without inventing a cause for it.
 
@@ -1062,9 +1070,27 @@ def _artifact_error_result(exc: Exception, *, run_id: str) -> RunArtifactErrorRe
     not a provider failure — defaulting to an `llm.*` code told whoever read the
     payload to go look at the gateway for a fault that lives in the engine.
     `_safe_provider_error_message` already draws exactly this line one line below.
+
+    The engine's own fail-fast path DOES classify itself, just through a different
+    attribute: `GraphAgentError.__init__` builds an `ErrorPayload` (an `[F-v3-*]`
+    code plus the phase and field it happened in) and exposes it as `.payload` /
+    `.error_payload`, never as `.error_code` / `.details`. Reading only the
+    provider-shaped attributes flattened every such fatal to "unexpected" and
+    dropped the location with it, so a phase-contract failure arrived with no
+    phase name attached. Prefer the classification the raiser already made; the
+    fallback stays for exceptions that never named themselves.
     """
-    error_code = str(getattr(exc, "error_code", "") or "engine.unexpected_error")
-    details = _safe_provider_error_details(getattr(exc, "details", {}))
+    payload = _engine_error_payload(exc)
+    if payload is not None:
+        error_code = str(payload["code"])
+        details = _safe_provider_error_details(payload.get("details") or {})
+        for key in ("phase_id", "field_path", "skill_id", "source_path"):
+            value = payload.get(key)
+            if value:
+                details.setdefault(key, value)
+    else:
+        error_code = str(getattr(exc, "error_code", "") or "engine.unexpected_error")
+        details = _safe_provider_error_details(getattr(exc, "details", {}))
     details.setdefault("exception_type", type(exc).__name__)
     retryable = bool(getattr(exc, "retryable", False))
     return RunArtifactErrorResult(

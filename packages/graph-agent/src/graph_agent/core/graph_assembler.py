@@ -246,10 +246,19 @@ def assemble_graph(
         if not graph_deps:
             builder.add_edge(START, phase_id)
             edges.append(("START", phase_id))
+        elif len(graph_deps) == 1:
+            builder.add_edge(graph_deps[0], phase_id)
+            edges.append((graph_deps[0], phase_id))
         else:
-            for dep in graph_deps:
-                builder.add_edge(dep, phase_id)
-                edges.append((dep, phase_id))
+            # `depends_on` with several predecessors is a JOIN: the phase runs
+            # once, after every predecessor has landed. One plain edge per
+            # predecessor would express a trigger instead of a barrier — the
+            # phase would start on whichever predecessor commits first and
+            # start again for each later one. LangGraph's list form is the
+            # barrier; it is only equivalent to N plain edges when all the
+            # predecessors happen to finish in the same superstep.
+            builder.add_edge(graph_deps, phase_id)
+            edges.extend((dep, phase_id) for dep in graph_deps)
 
     for phase_id in _terminal_phase_ids(compiled.manifest, compiled):
         builder.add_edge(phase_id, END)

@@ -29,7 +29,7 @@ class NoFinishChatModel:
 class NudgeThenFinishChatModel:
     def __init__(self) -> None:
         self.invocations = 0
-        self.saw_finish_nudge = False
+        self.saw_nudge = False
 
     def bind_tools(self, tools: list[Any], **kwargs: Any) -> NudgeThenFinishChatModel:
         del tools, kwargs
@@ -40,9 +40,12 @@ class NudgeThenFinishChatModel:
         if self.invocations == 1:
             return AIMessage(content="I have enough information and forgot the tool call.")
 
-        self.saw_finish_nudge = any(
+        # 迁移决议 §3.5 后,纯文本且无 plan 的第一记 nudge 是 planning 闸的
+        # PLANNING_NUDGE(要求先调 update_working_memory),不再是旧的最小
+        # "please use finish_task" 文案。
+        self.saw_nudge = any(
             type(message).__name__ == "HumanMessage"
-            and "finish_task" in str(getattr(message, "content", ""))
+            and "update_working_memory" in str(getattr(message, "content", ""))
             for message in messages
         )
         return AIMessage(
@@ -223,7 +226,7 @@ def test_no_tool_calls_gets_nudged_back_to_model_before_success(
     )
 
     assert chat.invocations >= 2
-    assert chat.saw_finish_nudge is True
+    assert chat.saw_nudge is True
     assert result.success is True
     assert result.context.get("answer") == "after-nudge"
 

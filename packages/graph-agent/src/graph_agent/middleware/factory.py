@@ -20,6 +20,7 @@ from graph_agent.middleware.compaction import (
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
 from graph_agent.middleware.exit_control import ExitControlMiddleware
 from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
+from graph_agent.middleware.nudge_policy import DEFAULT_MAX_NUDGES
 from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
 from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
 from graph_agent.middleware.tracing import TracingMiddleware
@@ -44,6 +45,7 @@ def build_middleware_chain(
     callbacks: Sequence[Callback] | None = None,
     compaction_model: Any = None,
     compaction_sidecar_writer: CompactionSidecarWriter | None = None,
+    max_nudges: int = DEFAULT_MAX_NUDGES,
 ) -> tuple[AgentMiddleware[AgentState[Any]], ...]:
     """Instantiate the eight middleware slots in the contract order.
 
@@ -90,6 +92,7 @@ def build_middleware_chain(
         "ExitControl": ExitControlMiddleware(
             phase_name=phase_name,
             callbacks=callbacks,
+            max_nudges=max_nudges,
         ),
     }
     return tuple(by_contract_name[name] for name in MIDDLEWARE_ORDER_CONTRACT)

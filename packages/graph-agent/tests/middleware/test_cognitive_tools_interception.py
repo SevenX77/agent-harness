@@ -85,7 +85,10 @@ class TestUpdateWorkingMemory:
         result = middleware.wrap_tool_call(request, _handler)
 
         assert isinstance(result, Command)
-        assert result.goto == "model"
+        # goto 必须为空:ToolNode 内的 Command goto 会与 tools→model 常规边
+        # 双路由,把 loop 分叉成两条并行 model 车道(2026-08-15 实测);回灌
+        # model 由常规边负责。
+        assert result.goto == ()
         next_flow = result.update["flow"]
         assert next_flow.working_memory["plan"] == "step 1: draft"
         assert next_flow.working_memory["iterate_executions"] == [{"loop": 1}]
@@ -127,7 +130,8 @@ class TestLogAmbiguity:
         result = middleware.wrap_tool_call(request, _handler)
 
         assert isinstance(result, Command)
-        assert result.goto == "model"
+        # goto 必须为空——理由同 TestUpdateWorkingMemory(双路由分叉)。
+        assert result.goto == ()
         reports = result.update["flow"].ambiguity_reports
         assert len(reports) == 1
         record = reports[0]

@@ -159,7 +159,22 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 |---|---|---|---|
 | W2-1 | 并联拓扑编译期诊断(暂不支持并联执行,`[F-v3-*]` 码 + 指位) | ✅ 被真修吸收(#804) | "暂不支持并联"的临时拦截不再需要(并联已可执行);编译期保护改为其残余真问题:无依赖关系的两 phase 声明写同一 output 字段 → `[F-v3-parallel-write-conflict]`(错误码全表 98→99) |
 | W2-2 | 并联真修:执行态写入迁 delta + reducer 通道 | ✅ 已合并(#804) | 实现取 WorkflowState reducer 方案而非接 BlackboardState 的 `blackboard_data_merge`(该状态类未投用;决议文档 `.kiro/specs/decision-2026-08-15-engine-parallel-fanout-state-channels.md`):phase 节点回 delta,`data`/`flow` 通道 `merge_business_channel`/`merge_flow_channel` 折叠,`phase_outputs` 按 key 合并;invoke 入口包装形 `{"inputs": …}` 由 `coerce_business_data` 单一权威展平。**遗留**:`recursion_limit` 接线(`core/runner.py` invoke 点)未随本 PR,单独排期 |
-| W2-3 | iterate.over 契约统一:裸业务字段名(KB 契约)——运行时黑板解析 + 编译期 over 来源校验(`[F-v3-iterate-over-not-list]` 编译相)+ 状态路径形删除 | 进行中(fix/engine-iterate-over-business-field) | 决议 `.kiro/specs/decision-2026-08-15-engine-iterate-over-business-field.md`;根因链:KB-06 教裸名/真实 skill 全裸名/引擎只解析 `data.*`/编译零校验/Studio 吞 fatal 成 crashed/`RUN_REQUIRES_PREDICT` 连坐锁死 run。predict_probe 在 story-deconstruction lab 上已过 over 关(现暴露 skill 层父子 io 缺陷,归 MoirAI 修) |
+| W2-3 | iterate.over 契约统一:裸业务字段名(KB 契约)——运行时黑板解析 + 编译期 over 来源校验(`[F-v3-iterate-over-not-list]` 编译相)+ 状态路径形删除 | ✅ 已合并(#806) | 决议 `.kiro/specs/decision-2026-08-15-engine-iterate-over-business-field.md`;根因链:KB-06 教裸名/真实 skill 全裸名/引擎只解析 `data.*`/编译零校验/Studio 吞 fatal 成 crashed/`RUN_REQUIRES_PREDICT` 连坐锁死 run。顺带修掉 `BusinessData.get` 走 `model_dump()` 不认别名导致路径静默取空 |
+| W2-4 | predict 占位 mock 下的相位校验器降级(不再当致命,记 `validator_downgraded`) | ✅ 已合并(#809) | 决议 `.kiro/specs/decision-2026-08-15-predict-stub-validator-downgrade.md`。**只在这一轮用的是启发式占位 mock 时**降级;有 golden case 的相位照常严校——predict 仍要能发现真问题。降级记录挂持久 `_MOCK_SOURCE_LOG`(trace stamper 在 `on_phase_end` 就 pop 掉 cache,而校验器在其后才跑) |
+| W2-5 | predict 桩拿得到子图内相位的 output schema | ✅ 已合并(#811) | 决议 `.kiro/specs/decision-2026-08-15-predict-nested-phase-schema.md`。根因:runner 只遍历**根 skill** 的 `compiled.nodes` 收集 schema,子图是装配期另起一次 `compile_skill` 编出来的,其相位从不进这份名单 → 桩退化成 `{"value": "<mock_unknown>"}` → 跑满 `max_iterations` 抛 `[F-v3-agent-exit-control-failed]`。schema 改挂相位自己的 `PredictGatewayChatModel` 实例(第一版按相位名建注册表,两个子图里同名 `review` 互相串味,生产 trace 实证) |
+| W2-6 | `depends_on` 多前驱 = 汇合闸(LangGraph 列表形边),不是 N 条触发线 | ✅ 已合并(#812) | 决议 `.kiro/specs/decision-2026-08-15-engine-multi-dep-join-waits-for-all.md`。普通边是触发线不是栅栏(`langgraph/graph/state.py:915-920`:单起点等一个、起点列表等全部)。只有前驱**同超步结束**时两种写法才等价——常见菱形扇出扇入正好满足,所以长期未暴露。深度不齐则汇合相位抢跑;必填字段碰巧齐了则更坏:**静默多跑 N 次**,run 路径多烧 N 次真 token 且后一次覆盖前一次 |
+| W2-7 | loop 相位的"提供集"=`accumulate.var`(编译期对齐运行期) | 进行中(fix/engine-loop-accumulator-dataflow,PR #813) | 决议 `.kiro/specs/decision-2026-08-15-engine-loop-accumulator-dataflow.md`。运行期 `final_payload = {accumulate.var: acc}`(与设计源 `docs/engine/mvp1/02-mechanism/04-run-outer/02-iterate/baseline.md:48` 一致),而 `io.outputs` 是**每一轮**的契约;编译期却把 `io.outputs` 当提供集 → 作者无解:写累积器名则每轮输出校验必挂,不写则下游消费累积器编译必挂。顺带收紧另一半:下游消费 loop 的**每轮**输出字段,从前编译放行、运行读不到,现在编译期直接拦 |
+
+> **W2-3 ~ W2-7 是一条因果链,不是五个独立缺陷。** 它们是在用 MoirAI 修真实复杂 skill
+> (`story-deconstruction`:子图嵌两层 + 六路并行 + loop 累积 + 图级 batch)的过程中
+> 逐个撞出来的——前一个不修,后一个根本暴露不出来。六个全修完后,该 skill 的 predict
+> 在补丁副本上跑通全链(42 次相位执行,`success = True`,产出 `story_framework`)。
+> 剩余唯一拦路石在 skill 侧(`global-synthesis/phases/export` 用异常做质量判断,
+> 使 predict 结构上不可能通过),归 MoirAI 修。
+> **踩坑记录**:桌面 app 的 sidecar 永远从冻结 vendor 快照导入引擎,这五个 PR 合并期间
+> 未重建 vendor,导致 MoirAI 一直在对落后 3 个 PR 的旧引擎做推理并报"32 errors",
+> 而同一时刻当前源码离线编译是 `COMPILE OK`。评估 agent 表现前必须先按 AGENTS.md
+> Workflow Pipeline 第 7 条重建 vendor,否则整段观察作废。
 
 #### 第三波 · 人看的面(闭环"看懂"半边)
 

@@ -378,6 +378,30 @@ tool_calls=1(finish_task),UI 展开为 THINKING → TOOL CALLS 无 ANSWER 段,�
 (`graph_builder.py:87` code-only 分支)。按 no-backward-compat 建议删除死路径并把判据 5
 改写到 verdict 通道;属引擎契约变更,待用户裁决后另开任务。
 
+**G-WELL(#797)真机点验完成(2026-08-14,CDP 真窗口,`/studio-verify` skill 首用)**:
+①长文本井:LLM 步骤展开体 18 个 `data-slot="text-well"`,`max-height:160px` + `overflow:auto`
+(实测 scrollHeight 2590 > clientHeight 150,井内滚动),全屏零 `Expand (`、零旧
+`folded-text`(截图 verify-well-llm-step.png);②View full text:点击后**编辑器 overlay**
+按常态打开(标题 Rendered prompt + json 语言徽章 + Monaco),行为级只读实测——CDP
+`Input.insertText` 注入文本未落地且出现 read-only 提示(verify-well-fulltext-editor.png +
+typetest 输出);③无盒中盒:generic payload 井的父容器为裸 `mt-2`(无边框、透明底),
+LLM 步骤体外层卡片盒已不存在(verify-well-generic-payload.png);④copilot 同源:hello 会话
+13 个 Thought 块全部渲染为同一 `text-well`(160px 同款,verify-well-copilot-thought5.png);
+⑤流式跟底(autoFollow)未真机跑流式(需真 run),由 `text-well.test.tsx` 单测锁定
+(scrollTop 钉底断言)——唯一非真机项,如实标注。#798 同日合并:验证方法论固化为
+`.claude/skills/studio-verify`(web 模式验证被裁决禁止),CLAUDE.md 挂载。
+
+**引擎死家族发现(2026-08-14,判据5「删」执行前的定界调查带出,待裁决)**:用户已裁
+「第三个东西(校验节点)收编中间件了当然删」;定界时坐实**整个 legacy 执行族都是死码**——
+`GraphBuilder` 在 src 内零构造点,活路径是 `assemble_graph`(`loader.py:494` /
+`runner.py:72` / 公共 API `__init__.py:40-41`),而 `graph_builder.py`、`phase_executor.py`、
+`core/phase_nodes/*`(llm/code/validation 节点、base、factory、_helpers)对活路径零 import
+(仓内引用全为 docstring/注释),仅靠自家测试维持绿灯。建议把判据5 的删除并入**一次性
+拆除整个死家族**(免得同一批文件删两遍);频谱另一端是仅删 ValidationPass/FailEvent +
+校验节点。前端 `validation_fail`/`validation_pass` 分支(run-status-projection
+FAILURE_EVENT_TYPES、TraceStepRow isError、trace-category 等)随引擎事件消亡同批清理。
+等用户裁范围后执行(独立 engine PR + vendor 重建)。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

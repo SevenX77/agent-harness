@@ -383,6 +383,49 @@ not water a feature down to keep it frontend-only.
   (design tokens, `components/ui/`) conflict across parallel PRs — sequence
   those changes or assign one owner.
 
+### 并行任务的运行时资源黑板(`scripts/wt-board.sh`)
+
+三个 agent 在三棵 worktree 上同时开工时,冲突的不是代码而是**这台机器上此刻的
+运行时资源**:端口号、CDP 调试口、正在跑的主 app。黑板就是这些占用的公示栏——
+一棵树在动手前宣告"我现在占着它",别的树看得见,于是让开而不是撞上去。
+
+**黑板管什么(只有这一件事)**:此刻谁占着哪个端口、谁握着 CDP 9222、哪棵树正在
+跑长任务。占用是有时限的:每条占用带 TTL(默认 3600 秒),到点自动过期,所以崩掉的
+持有者不会把资源永久锁死;下一个 `claim` 直接接管并在输出里说明"回收了谁的过期占用"。
+
+**黑板不管什么**:任务进度、PR 状态、待办清单、"我在做什么"——这些的唯一真相源是
+`docs/development/DELIVERY_LEDGER.md`(仓规:文档事实唯一所有权)。黑板上再写一份
+只会立刻和台账对不上,而两份互相矛盾的状态比没有状态更坏。`note` 命令是给邻居看的
+一行运行时事实(「我在重启 9222 的 app」),不是进度汇报。
+
+**存放位置**:`.worktrees/.board/`。机器本地、易失、不入库(`.worktrees/` 已在
+`.gitignore` 里),整个目录删掉的代价只是当前那几条占用。
+
+```bash
+scripts/wt-board.sh claim   <resource> [--ttl <秒>] [--note "<一行>"]  # 占用;被占则非 0 退出并打印持有者
+scripts/wt-board.sh release <resource>                                 # 释放(幂等;释放别人的活占用要 --force)
+scripts/wt-board.sh renew   <resource> [--ttl <秒>]                    # 长任务续期
+scripts/wt-board.sh status                                             # 全部占用 + 各 worktree + 最近 10 条 note
+scripts/wt-board.sh note    "<一行>"                                   # 追加一行运行时事实
+```
+
+**约定的资源名**:
+
+| 资源名 | 指什么 | 谁来 claim |
+|---|---|---|
+| `cdp-9222` | 真机验证的 WebView2 调试口。**全局唯一**:一台机器一个带调试口的窗口一个口,两个 agent 同时驱动必然互相把点击打进对方的会话 | 做真机点验的人,手动 claim / release(见 `.claude/skills/studio-verify/SKILL.md`) |
+| `main-app` | 仓根那一个完整 app(Vite 5173 + sidecar 8787) | 要重启/独占主 app 的人,手动 |
+| `port-<数字>` | 某棵 worktree 私有的 Vite / sidecar 端口 | `scripts/wt-dev.sh` 自动 claim,退出时自动 release;被别人占了就顺延到下一个空闲端口 |
+
+**和真机验证的分工**:worktree 阶段本来就**不做**真机点验——那一阶段的验证物是本地
+CI 门禁加单测(vitest / pytest)。真机逐项点验在**合并之后**、在仓根那一个主 app 上
+做,而且是**串行**的:谁验证谁先 `claim cdp-9222`,验完 `release`。这条分工不是黑板
+带来的新规矩,是既有 SOP(`.claude/skills/studio-verify/SKILL.md` 流程位置一节);
+黑板只是让"轮到谁"这件事看得见。
+
+改了 `wt-board.sh` 之后跑一遍它的自测:`bash scripts/tests/wt-board-selftest.sh`
+(CI 的 pytest testpaths 到不了 `scripts/`,所以这一步是手动门禁)。
+
 ## Studio Tauri Dev
 
 - Standard startup is documented in `apps/studio/tauri/README.md`: from repo

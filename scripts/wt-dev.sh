@@ -17,6 +17,11 @@
 # keeps browser requests same-origin (they ride the Vite proxy), so no CORS
 # config is needed regardless of the port.
 #
+# Every port this script takes is announced on the shared runtime board
+# (scripts/wt-board.sh) and released when the script exits, so a neighbouring
+# worktree picks a different number instead of colliding. `wt-board.sh status`
+# shows who holds what right now.
+#
 # Browser: open  http://localhost:<vite-port>/#tkn=<token>
 # (default mode: the main sidecar's token; --backend: the token printed below).
 set -euo pipefail
@@ -34,6 +39,28 @@ wt_top="$(git rev-parse --show-toplevel)"
 repo_root="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 fe_dir="$wt_top/apps/studio/frontend"
 wt_name="$(basename "$wt_top")"
+
+board="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wt-board.sh"
+# Long enough to outlive a dev session, because the claim is released by the
+# EXIT trap below — the TTL only matters when this script dies without running
+# it, and then a stale claim just pushes the next worktree one port along.
+board_ttl=14400
+claimed_resources=""
+claimed_port=""
+side_pid=""
+
+cleanup() {
+  for resource in $claimed_resources; do
+    "$board" release "$resource" >/dev/null 2>&1 || true
+  done
+  [ -n "$side_pid" ] && kill "$side_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+# Ctrl-C is how this script normally ends. These handlers turn the signal into a
+# plain exit so teardown always runs through the one cleanup above, instead of
+# depending on whether bash runs EXIT traps for a given signal.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 free_port() { # free_port <from> <to>
   node -e '
@@ -58,6 +85,34 @@ free_port() { # free_port <from> <to>
   ' "$1" "$2"
 }
 
+# Answers through the global $claimed_port instead of stdout, because a caller
+# writing `p="$(claim_free_port ...)"` would run it in a subshell — and the
+# claim it recorded in $claimed_resources would die with that subshell, leaving
+# the EXIT trap with nothing to release. (Observed: the port stayed claimed on
+# the board for its full 4h TTL after wt-dev.sh had exited.)
+claim_free_port() { # claim_free_port <from> <to> <note>; sets $claimed_port
+  local from="$1" to="$2" note="$3" p
+  claimed_port=""
+  while [ "$from" -le "$to" ]; do
+    p="$(free_port "$from" "$to")" || return 1
+    # free_port only proves nobody is LISTENING yet. A neighbouring worktree
+    # that picked the same number a second ago and has not bound it yet is
+    # invisible to that probe; the board's claim is what closes the gap.
+    # Losing this claim is a normal, handled event, so the board's full
+    # "who holds it" block is silenced here — it reads like a failure, and the
+    # one-liner below says everything the auto-pick path needs. Run
+    # `scripts/wt-board.sh status` to see who actually has it.
+    if "$board" claim "port-$p" --ttl "$board_ttl" --note "$note" >/dev/null 2>&1; then
+      claimed_resources="$claimed_resources port-$p"
+      claimed_port="$p"
+      return 0
+    fi
+    echo "• :$p is claimed on the board by another worktree — taking the next free port" >&2
+    from=$((p + 1))
+  done
+  return 1
+}
+
 # --- frontend deps: wait for the background npm ci from wt-new.sh, or run it ---
 cd "$fe_dir"
 marker="node_modules/.wt-install-done"
@@ -78,7 +133,6 @@ if [ ! -f "$marker" ]; then
 fi
 
 # --- backend: private sidecar from this worktree's code (--backend only) ---
-side_pid=""
 if [ "$with_backend" = "1" ]; then
   # wait for the background uv sync from wt-new.sh if it's still running
   uv_pid_file="$repo_root/.worktrees/.$wt_name.uv-sync.pid"
@@ -86,7 +140,9 @@ if [ "$with_backend" = "1" ]; then
     echo "• waiting for background uv sync to finish ..."
     while kill -0 "$(cat "$uv_pid_file")" 2>/dev/null; do sleep 2; done
   fi
-  bport="$(free_port 8788 8799)"
+  claim_free_port 8788 8799 "wt-dev sidecar ($wt_name)" \
+    || { echo "error: no free, unclaimed sidecar port in 8788-8799 — scripts/wt-board.sh status" >&2; exit 1; }
+  bport="$claimed_port"
   token="$(node -e 'console.log(require("crypto").randomBytes(24).toString("hex"))')"
   side_log="$repo_root/.worktrees/.$wt_name.sidecar.log"
   (
@@ -95,7 +151,6 @@ if [ "$with_backend" = "1" ]; then
       --host 127.0.0.1 --port "$bport" >"$side_log" 2>&1
   ) &
   side_pid=$!
-  trap '[ -n "$side_pid" ] && kill "$side_pid" 2>/dev/null || true' EXIT
   echo "• private sidecar (THIS worktree's backend) starting on :$bport (log: $side_log)"
   until curl -s -o /dev/null "http://127.0.0.1:$bport/api/health"; do
     kill -0 "$side_pid" 2>/dev/null || { echo "sidecar died — see $side_log" >&2; exit 1; }
@@ -107,7 +162,17 @@ else
 fi
 
 # --- vite: own port, proxy to the chosen sidecar ---
-[ -n "$port" ] || port="$(free_port 5174 5199)"
+if [ -n "$port" ]; then
+  # An explicitly requested port is a requirement, not a preference: silently
+  # moving to another number would send the user to a URL they did not ask for.
+  "$board" claim "port-$port" --ttl "$board_ttl" --note "wt-dev vite ($wt_name, requested)" >/dev/null \
+    || { echo "error: :$port was requested but is claimed on the board (above)" >&2; exit 1; }
+  claimed_resources="$claimed_resources port-$port"
+else
+  claim_free_port 5174 5199 "wt-dev vite ($wt_name)" \
+    || { echo "error: no free, unclaimed Vite port in 5174-5199 — scripts/wt-board.sh status" >&2; exit 1; }
+  port="$claimed_port"
+fi
 export VITE_STUDIO_API_BASE_URL="/api"
 # Git Bash (MSYS) rewrites env values that look like POSIX paths when spawning
 # native Windows programs ("/api" → "C:/Program Files/Git/api"), which breaks

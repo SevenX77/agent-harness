@@ -26,12 +26,23 @@ web 模式**唯一**允许的用途:自己开发途中肉眼扫一眼样式;它�
    `AGENTS.md` Workflow Pipeline 第 7 条)→ 用本 skill 的 CDP launcher 重启 app →
    逐项点验 + 截图 → 五列验证报告(格式见 `apps/studio/frontend/CLAUDE.md` Phase 7)。
 
-## 9222 生命周期(启动 → 验证 → 必须关闭)
+## 9222 生命周期(占黑板 → 启动 → 验证 → 必须关闭 → 释放)
 
 WebView2 只对**由设置了环境变量的进程启动的**实例生效,所以开/关调试口都要重启 app。
 重启 Studio 桌面 app 已获用户长期授权,不必每次问。
 
+**9222 是全局独占资源,动它之前先在运行时资源黑板上占位。** 一台机器只有一个带调试口
+的窗口、一个 9222;两个 agent 同时驱动它,双方的 `Runtime.evaluate` 和
+`Input.dispatchMouseEvent` 打进的是同一个页面——点击落在别人正在验的界面上,采样读到
+别人刚改的状态,两边的结论同时失真而且都察觉不到。并行 worktree 是常态(见 `AGENTS.md`
+「并行任务的运行时资源黑板」),所以这一步不是可选的礼貌。
+
 ```bash
+# -1) 占住 9222。已被占用时退出码非 0 并打印当前持有者与剩余时间——等对方验完,不要抢。
+scripts/wt-board.sh claim cdp-9222 --ttl 3600 --note "点验 PR #NNN"
+# 点验超过 1 小时就续期,别让占用先过期被别人接管:
+#   scripts/wt-board.sh renew cdp-9222 --ttl 3600
+
 # 0) 认路:现在谁占着 8787(认 PID 父链,不要按进程名过滤——会静默空结果)
 powershell -Command "Get-NetTCPConnection -LocalPort 8787 -State Listen | Select-Object -ExpandProperty OwningProcess -Unique"
 
@@ -46,10 +57,13 @@ until curl -s -o /dev/null http://127.0.0.1:9222/json/version; do sleep 5; done
 
 # 5) 验完必关:关 app → 用 launch-studio-clean.ps1 重启无调试口的实例 → 验证真关了
 curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9222/json/version --max-time 3   # 必须 000
+
+# 6) 关干净之后再还黑板——顺序不能反,否则下一个 agent 会对着还开着的旧窗口开工
+scripts/wt-board.sh release cdp-9222
 ```
 
-「我重启了」不等于「它关了」——最后那条 curl 是验证的一部分,9222 开着等于本机任意
-进程都能完全控制 app。
+「我重启了」不等于「它关了」——第 5 步那条 curl 是验证的一部分,9222 开着等于本机任意
+进程都能完全控制 app。第 6 步同理:占位没还等于别人只能干等。
 
 ## 五件套脚本(`scripts/`,一律用绝对路径调用——cwd 会在后台任务边界漂回仓根)
 

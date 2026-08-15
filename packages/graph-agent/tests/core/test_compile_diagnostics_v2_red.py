@@ -659,11 +659,11 @@ def test_reference_has_no_path_missing_code_example_does() -> None:
 
 
 def test_error_registry_len_unchanged_97() -> None:
-    # LOCK (R4.3 / design §6.5): the 98-code freeze and the round28 catalog
+    # LOCK (R4.3 / design §6.5): the 99-code freeze and the round28 catalog
     # bijection must not move — this spec revives dead codes, never adds/removes.
-    assert len(ERROR_REGISTRY) == 98
+    assert len(ERROR_REGISTRY) == 99
     catalog = export_error_catalog()
-    assert len(catalog["items"]) == 98
+    assert len(catalog["items"]) == 99
     assert all(item["remediation"] for item in catalog["items"])
 
 
@@ -771,6 +771,7 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-tool-argument-invalid]': ('FATAL', ('运行期',)),
     '[F-v3-runtime-state-mapping-failed]': ('FATAL', ('运行期',)),
     '[F-v3-runtime-phase-failed]': ('FATAL', ('运行期',)),
+    '[F-v3-parallel-write-conflict]': ('FATAL', ('编译期',)),
     '[F-v3-sequential-overwrite-unauthorized]': ('FATAL', ('编译期',)),
     '[F-v3-agent-exit-control-failed]': ('FATAL', ('运行期',)),
 }

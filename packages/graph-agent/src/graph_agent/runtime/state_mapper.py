@@ -12,7 +12,12 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
-from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
+from graph_agent.core.state import (
+    BusinessData,
+    FrameworkState,
+    WorkflowState,
+    coerce_business_data,
+)
 
 logger = logging.getLogger(__name__)
 PhaseValidator = Callable[..., dict[str, Any] | None]
@@ -124,21 +129,7 @@ class StateMapper:
 
     def build_phase_input(self, state: WorkflowState) -> WorkflowState:
         """Filter global business data to only what is declared in the input schema."""
-        data_obj = state.get("data")
-        if isinstance(data_obj, dict):
-            if "inputs" in data_obj or "phase_outputs" in data_obj:
-                flat_data = {}
-                if "inputs" in data_obj and isinstance(data_obj["inputs"], dict):
-                    flat_data.update(data_obj["inputs"])
-                if "phase_outputs" in data_obj and isinstance(data_obj["phase_outputs"], dict):
-                    for p_val in data_obj["phase_outputs"].values():
-                        if isinstance(p_val, dict):
-                            flat_data.update(p_val)
-                data_obj = BusinessData.model_validate(flat_data)
-            else:
-                data_obj = BusinessData.model_validate(data_obj)
-        elif data_obj is None:
-            data_obj = BusinessData()
+        data_obj = coerce_business_data(state.get("data"))
             
         flow_obj = state.get("flow")
         if isinstance(flow_obj, dict):
@@ -180,23 +171,16 @@ class StateMapper:
         state_slice: dict[str, Any] | None = None,
         validator: PhaseValidator | None = None,
         validator_error_code: str | None = None,
-    ) -> WorkflowState:
-        """Validate updates against the output schema and merge into WorkflowState."""
-        data_obj = state.get("data")
-        if isinstance(data_obj, dict):
-            if "inputs" in data_obj or "phase_outputs" in data_obj:
-                flat_data = {}
-                if "inputs" in data_obj and isinstance(data_obj["inputs"], dict):
-                    flat_data.update(data_obj["inputs"])
-                if "phase_outputs" in data_obj and isinstance(data_obj["phase_outputs"], dict):
-                    for p_val in data_obj["phase_outputs"].values():
-                        if isinstance(p_val, dict):
-                            flat_data.update(p_val)
-                data_obj = BusinessData.model_validate(flat_data)
-            else:
-                data_obj = BusinessData.model_validate(data_obj)
-        elif data_obj is None:
-            data_obj = BusinessData()
+    ) -> dict[str, Any]:
+        """Validate updates against the output schema and return a channel delta.
+
+        The delta holds only this phase's declared output fields (plus its
+        `phase_outputs` entry and a flow delta). Returning deltas instead of
+        the merged full state is what lets parallel phases in one superstep
+        fold through the reducer channels instead of colliding (decision doc
+        2026-08-15 engine-parallel-fanout-state-channels).
+        """
+        data_obj = coerce_business_data(state.get("data"))
             
         flow_obj = state.get("flow")
         if isinstance(flow_obj, dict):
@@ -233,7 +217,7 @@ class StateMapper:
             }
 
         if not isinstance(updates, dict):
-            return state
+            return {"data": {"phase_outputs": {self.phase_id: {}}}, "flow": {"current_phase": self.phase_id}, "messages": []}
 
         # Extract only data/business updates
         updates_dict = updates.get("data", {}) if "data" in updates else {k: v for k, v in updates.items() if k not in ("flow", "messages")}
@@ -279,46 +263,49 @@ class StateMapper:
                 code=validator_error_code or "[F-v3-agent-validator-failed]",
             )
 
-        # Merge updates type-safely into the business data namespace
-        new_state = StateManager.update_business(state, **updates_dict)
-        
-        # Merge flow updates if present
+        # Business fields must not use the framework _ prefix (same rule
+        # StateManager.update_business enforces on the merge path).
+        for key in updates_dict:
+            if key.startswith("_"):
+                raise ValueError(
+                    f"BusinessData 不允许 _ 前缀字段: '{key}' (框架元字段必须用 update_framework)"
+                )
+
+        # Data delta: this phase's declared outputs plus its phase_outputs
+        # entry (D7 per-node golden). Simple linear / agent / logic / subgraph /
+        # reference phases route through wrap_phase_output exclusively;
+        # batch/iterate/loop phases populate phase_outputs via
+        # graph_assembler's delta helpers instead — mutually exclusive per
+        # phase, so no double write. The reducer dict-merges phase_outputs per
+        # phase key, so parallel branches each keep their own entry.
+        data_delta: dict[str, Any] = dict(updates_dict)
+        data_delta["phase_outputs"] = {self.phase_id: dict(updates_dict)}
+
+        # Flow delta: a full FrameworkState from the node is diffed against
+        # the pre-phase flow so only actual changes travel; dict deltas pass
+        # through. current_phase is always this phase.
         flow_updates = updates.get("flow", {})
+        flow_delta: dict[str, Any]
         if isinstance(flow_updates, FrameworkState):
-            new_state = WorkflowState(
-                data=new_state["data"],
-                flow=flow_updates,
-                messages=new_state["messages"],
-            )
-        elif isinstance(flow_updates, dict) and flow_updates:
-            new_state = StateManager.update_framework(new_state, **flow_updates)
-            
-        # Merge messages updates if present
+            before_flow = state["flow"].model_dump()
+            after_flow = flow_updates.model_dump()
+            flow_delta = {
+                key: value
+                for key, value in after_flow.items()
+                if before_flow.get(key) != value
+            }
+        elif isinstance(flow_updates, dict):
+            flow_delta = dict(flow_updates)
+        else:
+            flow_delta = {}
+        flow_delta["current_phase"] = self.phase_id
+
         messages_updates = updates.get("messages", [])
-        if messages_updates:
-            new_state = WorkflowState(
-                data=new_state["data"],
-                flow=new_state["flow"],
-                messages=list(messages_updates),
-            )
-
-        # Update current phase in framework state
-        new_state = StateManager.update_framework(new_state, current_phase=self.phase_id)
-
-        # Record this phase's outputs into the phase_outputs map keyed by phase_id
-        # (D7 per-node golden). Simple linear / agent / logic / subgraph / reference
-        # phases route through wrap_phase_output exclusively; batch/iterate/loop
-        # phases populate phase_outputs via graph_assembler._with_phase_outputs
-        # instead — the two sets are mutually exclusive per phase, so no double write.
-        # This MUST be the final mutation: phase_outputs is not an output-schema key,
-        # so it is written after the schema gate (above) and bypasses the updates
-        # flatten path, mirroring _with_phase_outputs' accumulate semantics. An empty
-        # phase records an empty entry (consistent with the batch/terminal path).
-        existing_outputs = new_state["data"].model_dump().get("phase_outputs")
-        merged_outputs = dict(existing_outputs) if isinstance(existing_outputs, dict) else {}
-        merged_outputs[self.phase_id] = dict(updates_dict)
-        new_state = StateManager.update_business(new_state, phase_outputs=merged_outputs)
-        return new_state
+        return {
+            "data": data_delta,
+            "flow": flow_delta,
+            "messages": list(messages_updates) if messages_updates else [],
+        }
 
 
 def _validate_phase_updates_against_schema(
@@ -438,7 +425,7 @@ class PhaseWrapper:
     def wrap(
         self,
         node: Callable[[WorkflowState], dict[str, Any] | WorkflowState],
-    ) -> Callable[[WorkflowState], WorkflowState]:
+    ) -> Callable[[WorkflowState], dict[str, Any]]:
         if getattr(node, "__graph_agent_phase_wrapped__", False):
             wrapped_kind = getattr(node, "__graph_agent_phase_node_kind__", "unknown")
             detail = f"double-wrap rejected: {wrapped_kind} node is already wrapped"
@@ -447,7 +434,7 @@ class PhaseWrapper:
                 payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
             )
 
-        def _wrapped(state: WorkflowState) -> WorkflowState:
+        def _wrapped(state: WorkflowState) -> dict[str, Any]:
             try:
                 # Prepare filtered type-safe inputs
                 phase_input = self.mapper.build_phase_input(state)

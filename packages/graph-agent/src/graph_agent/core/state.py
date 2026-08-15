@@ -167,7 +167,12 @@ class BusinessData(BaseModel):
         return isinstance(key, str) and key in self.model_dump()
 
     def get(self, key: str, default: Any = None) -> Any:
-        return self.model_dump().get(key, default)
+        # Must answer through __getitem__ so the reserved aliases
+        # (inputs / phase_outputs / scratch) resolve the same way here as via
+        # [] and `in` — path walkers rely on one consistent mapping facade.
+        if key in self:
+            return self[key]
+        return default
 
     def setdefault(self, key: str, default: Any = None) -> Any:
         if key in self:
@@ -223,17 +228,110 @@ class FrameworkState(BaseModel):
     timeout_s: int | None = None
 
 
+# flow fields that are per-key counters/maps: parallel branches touch disjoint
+# keys (their own phase name), so a per-key merge loses nothing. Scalar flow
+# fields are last-writer-wins — under fan-out they are display metadata with no
+# single-value semantics and superstep ordering is accepted as nondeterministic.
+_FLOW_DICT_MERGE_FIELDS = (
+    "retry_counts",
+    "metrics",
+    "critic_metrics",
+    "subagent_validation_retries",
+    "working_memory",
+)
+
+
+def coerce_business_data(value: BusinessData | dict[str, Any] | None) -> BusinessData:
+    """Single authority for normalizing a data payload into `BusinessData`.
+
+    Graph inputs may arrive in the wrapper shape
+    ``{"inputs": {...}, "phase_outputs": {...}}`` (the public invoke
+    convention); the wrapper is flattened so everything downstream only ever
+    sees flat business fields. ``inputs`` / ``phase_outputs`` are reserved
+    keys of that convention and never business field names.
+    """
+    if isinstance(value, BusinessData):
+        return value
+    if value is None:
+        return BusinessData()
+    if "inputs" in value or "phase_outputs" in value:
+        flat_data: dict[str, Any] = {}
+        inputs = value.get("inputs")
+        if isinstance(inputs, dict):
+            flat_data.update(inputs)
+        phase_outputs = value.get("phase_outputs")
+        if isinstance(phase_outputs, dict):
+            for phase_payload in phase_outputs.values():
+                if isinstance(phase_payload, dict):
+                    flat_data.update(phase_payload)
+        return BusinessData.model_validate(flat_data)
+    return BusinessData.model_validate(value)
+
+
+def merge_business_channel(
+    current: BusinessData, update: BusinessData | dict[str, Any]
+) -> BusinessData:
+    """Reducer for the `data` channel.
+
+    Phase nodes write field deltas (dicts holding only their declared outputs
+    plus their `phase_outputs` entry), so parallel branches with disjoint
+    fields fold without conflict — the reason this channel stopped being a
+    LastValue channel. A full `BusinessData` (the graph input, or an iterate
+    wrapper's rebuilt state) replaces the channel value wholesale, as does a
+    dict in the invoke-input wrapper shape (its `inputs` key marks it — phase
+    deltas never carry one, their `phase_outputs` entry keeps the map form).
+    """
+    if isinstance(update, BusinessData):
+        return update
+    if "inputs" in update:
+        return coerce_business_data(update)
+    delta = dict(update)
+    phase_outputs_delta = delta.pop("phase_outputs", None)
+    merged = current.model_copy(update=delta) if delta else current
+    if isinstance(phase_outputs_delta, dict):
+        existing = merged.model_dump().get("phase_outputs")
+        combined = dict(existing) if isinstance(existing, dict) else {}
+        for phase_id, payload in phase_outputs_delta.items():
+            combined[phase_id] = payload
+        merged = merged.model_copy(update={"phase_outputs": combined})
+    return merged
+
+
+def merge_flow_channel(
+    current: FrameworkState, update: FrameworkState | dict[str, Any]
+) -> FrameworkState:
+    """Reducer for the `flow` channel: full state replaces, dict deltas fold.
+
+    Dict-shaped fields merge per key so parallel phases each keep their own
+    counters; everything else is last-writer-wins.
+    """
+    if isinstance(update, FrameworkState):
+        return update
+    merged = current.model_dump()
+    delta = dict(update)
+    for key in _FLOW_DICT_MERGE_FIELDS:
+        if (
+            key in delta
+            and isinstance(delta[key], dict)
+            and isinstance(merged.get(key), dict)
+        ):
+            delta[key] = {**merged[key], **delta[key]}
+    merged.update(delta)
+    return FrameworkState.model_validate(merged)
+
+
 class WorkflowState(TypedDict):
     """LangGraph compatible top-level state.
 
     Three top-level keys:
-    - data: BusinessData (user fields, dynamic schema)
-    - flow: FrameworkState (framework metadata, strict)
+    - data: BusinessData (user fields, dynamic schema) — reducer channel;
+      phase nodes write deltas so parallel fan-out folds instead of colliding
+    - flow: FrameworkState (framework metadata, strict) — reducer channel
     - messages: DeltaChannel增量快照通道
     """
 
-    data: BusinessData
-    flow: FrameworkState
+    data: Annotated[BusinessData, merge_business_channel]
+    flow: Annotated[FrameworkState, merge_flow_channel]
     messages: Annotated[list[AnyMessage], DeltaChannel(_messages_delta_reducer, snapshot_frequency=50)]
 
 

@@ -171,7 +171,7 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 | W2-10 | 一个 batch 条目 / loop 轮次是一次独立调用,有自己的迭代身份 | ✅ 已合并(#822) | 决议 `.kiro/specs/decision-2026-08-15-engine-batch-item-isolation.md`。相位级 batch 的 `_phase_batch_runner` 只设 branch index(纯事件标签)不设 `active_outer_ns`,而它的图级孪生 `_graph_batch_runner` 两个都设;`_skill_node` 又把 `checkpoint_ns` 写死成 `agent:{phase_id}`、`thread_id` 是整次 run 的常量 → 每个条目递给 agent 图的 key **完全相同**,checkpointer 让条目 2 恢复条目 1 的整段对话,`ExitControlMiddleware` 让条目 2 继承条目 1 用剩的预算。相位级 loop 同一漏点一并修。中间件身份走自定义键 `agent_invocation_id`(实测 LangGraph 递给 hook 的 `checkpoint_ns` 是**每次 hook 调用**的新 uuid,`_skill_node` 写的那个到不了) |
 | W2-11 | 校验器强制的 `business_data_md` Markdown 形状,契约里必须明说 | ✅ 已合并(#825) | 决议 `.kiro/specs/decision-2026-08-15-business-data-md-shape-in-exit-contract.md`。`parse_md` 的规则是「一个 `## ` 标题 = 一个完整输出对象」,但提示词只说 "business_data_md 遵循 output_schema **列业务字段**" 再甩一份原始 JSON Schema,工具参数描述是 "Final structured/unstructured business markdown output." ——**两处都没提 `##`**(实测:该次 run 的 `prompt_captured` 全文搜不到任何 `##` 示范)。引擎里有个函数专门说这件事(`tools/dynamic_schema.py:253` `render_dynamic_schema_output_format`),**`src/` 下零调用点**;两种写法经 `core/schema_engine.py:139` 汇成同一份 JSON Schema,所以**没有任何相位被告知过这个形状** |
 
-| W2-12 | 引擎自己定过性的致命错误,出口不得压回「不明」 | 🔄 PR 待合并 | 决议 `.kiro/specs/decision-2026-08-15-fatal-error-payload-survives-to-the-caller.md`。**这条修的是 W2-9 自己留下的洞**:`_artifact_error_result` 读 `exc.error_code` / `exc.details`,那是 `LLMProviderError` 的形状;引擎自己的 `GraphAgentFatalError` 把分类放在 `error_payload`(`core/exceptions.py:128-160` 由 `make_error_payload` 建,带 `[F-v3-*]` 码 + `phase_id` + `field_path`),两个 `getattr` 全部落空 → 一个**已经分好类、已经定位到相位和字段**的错误,到调用方手里只剩 `engine.unexpected_error` + `exception_type`。真机实证:`raw_settings_markdown is a required property` 报出来时既没有相位名,也没说是`io.outputs` 三道校验(finish_task / 相位输出 / validator 返回值)里的哪一道——而三道的修法相反 |
+| W2-12 | 引擎自己定过性的致命错误,出口不得压回「不明」 | ✅ 已合并(#826) | 决议 `.kiro/specs/decision-2026-08-15-fatal-error-payload-survives-to-the-caller.md`。**这条修的是 W2-9 自己留下的洞**:`_artifact_error_result` 读 `exc.error_code` / `exc.details`,那是 `LLMProviderError` 的形状;引擎自己的 `GraphAgentFatalError` 把分类放在 `error_payload`(`core/exceptions.py:128-160` 由 `make_error_payload` 建,带 `[F-v3-*]` 码 + `phase_id` + `field_path`),两个 `getattr` 全部落空 → 一个**已经分好类、已经定位到相位和字段**的错误,到调用方手里只剩 `engine.unexpected_error` + `exception_type`。真机实证:`raw_settings_markdown is a required property` 报出来时既没有相位名,也没说是`io.outputs` 三道校验(finish_task / 相位输出 / validator 返回值)里的哪一道——而三道的修法相反 |
 
 > **W2-3 ~ W2-9 是一条因果链,不是七个独立缺陷。** 它们是在用 MoirAI 修真实复杂 skill
 > (`story-deconstruction`:子图嵌两层 + 六路并行 + loop 累积 + 图级 batch)的过程中
@@ -194,6 +194,32 @@ exp-b-round3 北极星实测,证据在 `D:/coding/skills/_copilot-lab/rounds/exp
 > 取出铜镜」,第 2 章提交「篝火旁铜镜看到异次元宫殿、次日清晨下山」,各自对上各自的原文。
 > 流程推进到 `event_timeline` 子图,233.967 秒后崩在相位 `aggregate`,根因即 W2-11
 > (模型把一个字段写成一个 `##` 块,`parse_md` 读成三个各自缺字段的对象,连打 5 次回票)。
+> **第三次真跑跑通了**:`.workspace/runs/2026-08-15T12-40-22_bb6e358a`,`status: success`,
+> **647.75 秒 / 42 次相位执行 / 77 次 LLM 调用**,产出 `story_framework`
+> (6 个实体、2 条统一事件流、1 个场景、6 条伏笔闭合、2 条高潮排名)。
+> 四种被点名的机制真跑覆盖:subgraph(4 顶层 + 2 层嵌套)、并行节点(六路维度全跑完)、
+> loop(`stitch` 两轮累积)、batch(两章隔离正确)。**`llm compare` 这个 skill 不用**
+> (全仓 grep 只命中 golden 知识库里一句无关散文),所以这次实验对它**零覆盖**。
+> 产物里 `character_ranking` 为空,由 skill 自己的质量校验记成一条
+> `quality_findings: "L1: Empty character ranking"`——行为对(记录而不打死整条链),
+> 内容缺口归 skill。
+>
+> **skill 侧同批修掉的 7 处同类缺陷**:`outputs.required` 列的必须是**模型要提交**的字段,
+> 不是校验器**产出**的字段。用「required 里的字段,validator 是否从提交里读过」做机械审计,
+> 在同一个 skill 里查出 7 个相位(`aggregate` / `stitch` / `retroactive` /
+> `entity_and_characters` / `event-extraction:review` / `settings` / `global_analysis`)。
+> **其中 2 处第一版改错了**:`io.outputs` 这一份 schema 被**三道**校验共用——
+> `finish_task` 校验模型提交、`runtime/state_mapper.py:255` 校验相位节点原始输出、
+> `:389` 校验 validator 返回值。validator 一旦**重命名**字段(提交 `raw_settings_markdown`
+> → 输出 `chapter_event_timeline`),**任何非空 `required` 都不可能同时满足两边**;
+> 作者只剩「required 清空」(等于关掉强制)或「validator 把提交原样回传」两条路。
+> 这是引擎表达能力的缺口,**编译期完全查不出来**,只在跑到那个相位时才炸。未开单。
+>
+> **另一处已定位未开单的诊断缺陷**:`AgentLoopIterationMiddleware._iteration`
+> 是装配期建的实例属性,并行分支 / 批处理条目 / loop 轮次共用它。实测一个跑在两个并行分支上
+> 的相位,trace 里迭代号一路数到 21,而引擎报的是「after 10 iteration(s)」——两个数都对,
+> 但读者无法对账,也分不出哪条属于哪个分支(`sub_run_id` / `group_key` / `checkpoint_ns`
+> 在这些事件上全是 `null`)。不阻塞跑通,属诊断能力缺陷。
 > **踩坑记录**:桌面 app 的 sidecar 永远从冻结 vendor 快照导入引擎,这五个 PR 合并期间
 > 未重建 vendor,导致 MoirAI 一直在对落后 3 个 PR 的旧引擎做推理并报"32 errors",
 > 而同一时刻当前源码离线编译是 `COMPILE OK`。评估 agent 表现前必须先按 AGENTS.md

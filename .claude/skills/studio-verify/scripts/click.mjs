@@ -1,6 +1,10 @@
 // node click.mjs "<selector-expression>" [dblclick]
 // Real mouse events via CDP Input domain (needed for Radix/pointerdown components
 // and for ReactFlow node clicks). The expression must evaluate to an Element.
+import { requireCdpClaim } from './lease-guard.mjs'
+
+requireCdpClaim()
+
 const expr = process.argv[2]
 const dbl = process.argv[3] === 'dblclick'
 if (!expr) { console.error('usage: node click.mjs "<element expression>" [dblclick]'); process.exit(1) }

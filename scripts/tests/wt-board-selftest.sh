@@ -161,7 +161,53 @@ check "release refuses a live claim owned elsewhere" "$([ $? -ne 0 ]; echo $?)"
 "$board" release cdp-9222 --force >/dev/null 2>&1
 check "release --force clears it" $?
 
-echo "[10] note appends to the log and status shows it"
+echo "[10a] holds: the question a driving tool asks before it touches the resource"
+reset_board
+export WT_BOARD_AGENT="agent-alpha"
+"$board" claim cdp-9222 --ttl 600 --note "alpha verifying" >/dev/null
+"$board" holds cdp-9222 >/dev/null 2>&1
+check "the holder's own agent gets exit 0" $?
+
+# The case the board could not see before: two agents in the SAME worktree.
+# Both are on main in the repo root, so worktree identity matches for both and
+# only the agent identity separates them.
+WT_BOARD_AGENT="agent-beta" "$board" holds cdp-9222 >/dev/null 2>&1
+check "a different agent in the same worktree gets a non-zero exit" "$([ $? -ne 0 ]; echo $?)"
+out="$(WT_BOARD_AGENT="agent-beta" "$board" holds cdp-9222 2>&1)"
+case "$out" in *"alpha verifying"*) check "the refusal names who is actually holding it" 0 ;;
+  *) check "the refusal names who is actually holding it" 1 ;; esac
+
+"$board" release cdp-9222 >/dev/null
+"$board" holds cdp-9222 >/dev/null 2>&1
+check "an unclaimed resource is not held" "$([ $? -ne 0 ]; echo $?)"
+
+"$board" claim cdp-9222 --ttl 1 >/dev/null
+sleep 2
+"$board" holds cdp-9222 >/dev/null 2>&1
+check "an expired claim is not held" "$([ $? -ne 0 ]; echo $?)"
+unset WT_BOARD_AGENT
+
+echo "[10b] holds fails closed when identity cannot be proven"
+reset_board
+"$board" claim cdp-9222 --ttl 600 >/dev/null            # claimed with no agent identity
+"$board" holds cdp-9222 >/dev/null 2>&1
+check "an anonymous claim cannot answer 'is it mine?'" "$([ $? -ne 0 ]; echo $?)"
+out="$("$board" holds cdp-9222 2>&1)"
+case "$out" in *WT_BOARD_AGENT*) check "the refusal says which identity to set" 0 ;;
+  *) check "the refusal says which identity to set" 1 ;; esac
+
+reset_board
+WT_BOARD_AGENT="agent-alpha" "$board" claim cdp-9222 --ttl 600 >/dev/null
+"$board" holds cdp-9222 >/dev/null 2>&1
+check "an unidentified caller cannot claim someone else's claim as its own" "$([ $? -ne 0 ]; echo $?)"
+
+echo "[10c] status shows who holds it, not just which branch"
+reset_board
+WT_BOARD_AGENT="agent-alpha" "$board" claim main-app --ttl 600 >/dev/null
+case "$("$board" status)" in *agent-alpha*) check "status names the holding agent" 0 ;;
+  *) check "status names the holding agent" 1 ;; esac
+
+echo "[11] note appends to the log and status shows it"
 reset_board
 "$board" note "restarting the app on 9222" >/dev/null
 "$board" note "vendor rebuild running, sidecar will bounce" >/dev/null

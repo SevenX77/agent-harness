@@ -75,10 +75,10 @@ describe('flushDeltaQueue', () => {
 
   beforeEach(async () => {
     copilotStore.reset('skill-1')
-    copilotStore.newSession()
+    const sessionId = copilotStore.newSession()
     const message = assistantMessage()
     messageId = message.id
-    await copilotStore.appendMessage(message)
+    await copilotStore.appendMessage(message, sessionId)
   })
 
   it('coalesces same-type runs and accumulates text into message content', () => {
@@ -114,35 +114,43 @@ describe('flushDeltaQueue', () => {
 })
 
 describe('buildCopilotSendPayload', () => {
-  it('includes only the user message when no override or role is given', () => {
-    expect(buildCopilotSendPayload('hello')).toEqual({ user_message: 'hello' })
+  // 会话身份契约(COPILOT_ASSIST-5):每条报文必带发起标签的 session_id,
+  // 后端以它隔离 SDK 对话——缺了它就是"消息注入别人对话"的缺陷本体。
+  it('always carries the owning session id alongside the user message', () => {
+    expect(buildCopilotSendPayload('hello', 'session-1')).toEqual({
+      user_message: 'hello',
+      session_id: 'session-1',
+    })
   })
 
   it('attaches the selected role so the composer picker reaches the ws payload', () => {
-    expect(buildCopilotSendPayload('hello', null, 'copilot_judge')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', null, 'copilot_judge')).toEqual({
       user_message: 'hello',
+      session_id: 'session-1',
       role: 'copilot_judge',
     })
   })
 
   it('keeps model_override behavior intact alongside role', () => {
-    expect(buildCopilotSendPayload('hello', 'anthropic:claude', 'copilot_chat')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', 'anthropic:claude', 'copilot_chat')).toEqual({
       user_message: 'hello',
+      session_id: 'session-1',
       model_override: 'anthropic:claude',
       role: 'copilot_chat',
     })
   })
 
   it('attaches imported workspace root so the backend runs Copilot in that cwd', () => {
-    expect(buildCopilotSendPayload('hello', null, 'copilot_chat', '/abs/imported-skill')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', null, 'copilot_chat', '/abs/imported-skill')).toEqual({
       user_message: 'hello',
+      session_id: 'session-1',
       role: 'copilot_chat',
       workspace_root: '/abs/imported-skill',
     })
   })
 
   it('attaches structured judge context separately from the user message', () => {
-    expect(buildCopilotSendPayload('judge it', null, 'copilot_judge', null, {
+    expect(buildCopilotSendPayload('judge it', 'session-1', null, 'copilot_judge', null, {
       compare_result_ref: 'skill-1/golden/golden-1/compare/run-1/compare_result.json',
       judge_context_ref: 'skill-1/runs/run-1/copilot_judge/golden-1/judge_context.json',
       baseline_ref: 'skill-1/golden/golden-1/baseline.json',
@@ -155,6 +163,7 @@ describe('buildCopilotSendPayload', () => {
       },
     })).toEqual({
       user_message: 'judge it',
+      session_id: 'session-1',
       role: 'copilot_judge',
       judge_context: {
         compare_result_ref: 'skill-1/golden/golden-1/compare/run-1/compare_result.json',
@@ -172,7 +181,10 @@ describe('buildCopilotSendPayload', () => {
   })
 
   it('omits empty role and override values', () => {
-    expect(buildCopilotSendPayload('hello', '', '', '   ')).toEqual({ user_message: 'hello' })
+    expect(buildCopilotSendPayload('hello', 'session-1', '', '', '   ')).toEqual({
+      user_message: 'hello',
+      session_id: 'session-1',
+    })
   })
 })
 

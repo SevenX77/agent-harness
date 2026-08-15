@@ -510,6 +510,23 @@ export async function interruptCopilot(skillId: string): Promise<CopilotInterrup
   return response.data
 }
 
+export interface CopilotSessionCloseResponse {
+  /** 0 when the tab never talked to the backend (draft closed unsent) — a no-op. */
+  closed: number
+}
+
+/** 会话身份契约(COPILOT_ASSIST-5):关闭一个会话标签时结束它的后端 SDK 对话。 */
+export async function closeCopilotSession(
+  skillId: string,
+  sessionId: string,
+): Promise<CopilotSessionCloseResponse> {
+  const response = await api.post<CopilotSessionCloseResponse>(
+    `/skills/${skillId}/copilot/session-close`,
+    { session_id: sessionId },
+  )
+  return response.data
+}
+
 export interface CopilotJudgeRequest {
   runResultsRef: string
   baselineRef: string

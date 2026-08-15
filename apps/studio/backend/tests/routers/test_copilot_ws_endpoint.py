@@ -23,6 +23,7 @@ from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
 from graph_agent_gateway.registry import Protocol, ResolvedRoute
 from pydantic import SecretStr
+from starlette.websockets import WebSocketDisconnect
 
 
 def test_copilot_tool_approval_endpoint_forwards_decision(
@@ -85,7 +86,7 @@ def test_copilot_ws_streams_normal_query(
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        websocket.send_json({"user_message": "hi"})
+        websocket.send_json({"user_message": "hi", "session_id": "tab-1"})
 
         assert websocket.receive_json()["type"] == "text_delta"
         assert websocket.receive_json()["type"] == "done"
@@ -104,18 +105,88 @@ def test_copilot_ws_forwards_model_override(
     monkeypatch.setattr(copilot_router, "stream_query", stream_query)
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        websocket.send_json({"user_message": "hi", "model_override": "CL46T"})
+        websocket.send_json({"user_message": "hi", "session_id": "tab-1", "model_override": "CL46T"})
         assert websocket.receive_json()["type"] == "done"
 
     assert calls == [
         {
             "skill_id": "text-segmentation",
             "user_message": "hi",
+            "session_id": "tab-1",
             "model_override": "CL46T",
             "role": None,
             "workspace_root": None,
             "judge_context": None,
         }
+    ]
+
+
+def test_copilot_ws_forwards_session_id(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 会话身份契约(COPILOT_ASSIST-5):报文里的 session_id 必须原样到达
+    # stream_query——它是后端把 SDK 对话按标签隔离的唯一依据。
+    calls: list[dict[str, object]] = []
+
+    def stream_query(**kwargs: object) -> AsyncIterator[object]:
+        calls.append(kwargs)
+        return _events(CopilotEventDone())
+
+    monkeypatch.setattr(copilot_router, "stream_query", stream_query)
+
+    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
+        websocket.send_json({"user_message": "hi", "session_id": "tab-9"})
+        assert websocket.receive_json()["type"] == "done"
+
+    assert calls[0]["session_id"] == "tab-9"
+
+
+def test_copilot_ws_rejects_payload_without_session_id(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 边界校验:没有会话身份的消息没有合法归属,连接以 4400 拒绝,
+    # 绝不落进"当前恰好活跃的对话"。
+    def stream_query(**kwargs: object) -> AsyncIterator[object]:
+        raise AssertionError("stream_query must not run for an invalid payload")
+
+    monkeypatch.setattr(copilot_router, "stream_query", stream_query)
+
+    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
+        websocket.send_json({"user_message": "hi"})
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            websocket.receive_json()
+
+    assert excinfo.value.code == 4400
+
+
+def test_copilot_session_close_endpoint_resets_only_that_session(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 关标签 → 结束它自己的后端对话(每个 client 一个 CLI 子进程)。
+    calls: list[dict[str, object]] = []
+
+    async def reset_session(
+        skill_id: str | None = None,
+        model_code: str | None = None,
+        session_id: str | None = None,
+    ) -> int:
+        calls.append({"skill_id": skill_id, "model_code": model_code, "session_id": session_id})
+        return 1
+
+    monkeypatch.setattr(copilot_router, "reset_session", reset_session)
+
+    response = client.post(
+        "/api/skills/text-segmentation/copilot/session-close",
+        json={"session_id": "tab-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"closed": 1}
+    assert calls == [
+        {"skill_id": "text-segmentation", "model_code": None, "session_id": "tab-1"}
     ]
 
 
@@ -134,6 +205,7 @@ def test_copilot_ws_forwards_workspace_root(
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
         websocket.send_json({
             "user_message": "hi",
+            "session_id": "tab-1",
             "workspace_root": "/abs/imported-skill",
         })
         assert websocket.receive_json()["type"] == "done"
@@ -142,6 +214,7 @@ def test_copilot_ws_forwards_workspace_root(
         {
             "skill_id": "text-segmentation",
             "user_message": "hi",
+            "session_id": "tab-1",
             "model_override": None,
             "role": None,
             "workspace_root": "/abs/imported-skill",
@@ -177,6 +250,7 @@ def test_copilot_ws_forwards_structured_judge_context(
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
         websocket.send_json({
             "user_message": "judge it",
+            "session_id": "tab-1",
             "role": "copilot_judge",
             "judge_context": judge_context,
         })
@@ -186,6 +260,7 @@ def test_copilot_ws_forwards_structured_judge_context(
         {
             "skill_id": "text-segmentation",
             "user_message": "judge it",
+            "session_id": "tab-1",
             "model_override": None,
             "role": "copilot_judge",
             "workspace_root": None,
@@ -237,7 +312,7 @@ def test_copilot_ws_does_not_read_legacy_copilot_json(
     assert not hasattr(copilot_router, "read_credentials")
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        websocket.send_json({"user_message": "hi"})
+        websocket.send_json({"user_message": "hi", "session_id": "tab-1"})
         assert websocket.receive_json()["type"] == "done"
 
 
@@ -254,7 +329,7 @@ def test_copilot_ws_disconnect_resets_skill_sessions(
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        websocket.send_json({"user_message": "hi"})
+        websocket.send_json({"user_message": "hi", "session_id": "tab-1"})
         assert websocket.receive_json()["type"] == "text_delta"
         assert websocket.receive_json()["type"] == "done"
 
@@ -272,7 +347,7 @@ def test_copilot_ws_forwards_stream_query_error(
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        websocket.send_json({"user_message": "hi"})
+        websocket.send_json({"user_message": "hi", "session_id": "tab-1"})
 
         assert websocket.receive_json() == {"type": "error", "message": "boom"}
 
@@ -291,7 +366,7 @@ def test_copilot_ws_serializes_copilot_event_discriminator(
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        websocket.send_json({"user_message": "hi"})
+        websocket.send_json({"user_message": "hi", "session_id": "tab-1"})
 
         assert websocket.receive_json() == {
             "type": "tool_use_start",
@@ -317,7 +392,7 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert calls == [None]
@@ -353,7 +428,7 @@ def test_stream_query_passes_selected_copilot_role_to_resolver(
     asyncio.run(
         _collect(
             copilot_service.stream_query(
-                "skill-a", "hi", role="copilot_opus_4_7", workspace_dir=tmp_path
+                "skill-a", "hi", session_id="tab-1", role="copilot_opus_4_7", workspace_dir=tmp_path
             )
         )
     )
@@ -361,7 +436,7 @@ def test_stream_query_passes_selected_copilot_role_to_resolver(
 
     seen.clear()
     asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
     assert seen["role"] == "copilot_chat"
 
@@ -397,7 +472,7 @@ def test_stream_query_resolves_secret_from_credential_provider(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert client.options is not None
@@ -470,7 +545,7 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert created_keys == ["first-secret", "second-secret"]
@@ -510,7 +585,7 @@ def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert client.options is not None
@@ -558,7 +633,7 @@ def test_stream_query_passes_generic_route_model_to_options(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert client.options is not None
@@ -599,7 +674,7 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
     monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert created_keys == ["first-secret", "second-secret"]
@@ -629,7 +704,7 @@ def test_stream_query_single_route_error_redacts_provider_secret_and_traceback(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert isinstance(events[-1], CopilotEventError)
@@ -687,7 +762,7 @@ def test_stream_query_all_routes_failed_redacts_provider_secret_and_traceback(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert isinstance(events[-1], CopilotEventError)
@@ -784,7 +859,7 @@ def test_stream_query_all_routes_failed_surfaces_canonical_fallback_event(
     monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert isinstance(events[0], CopilotEventContextResolved)
@@ -816,6 +891,7 @@ def test_stream_query_uses_model_override_when_provided(
             copilot_service.stream_query(
                 "skill-a",
                 "hi",
+                session_id="tab-1",
                 model_override="test-provider:claude-test",
                 workspace_dir=tmp_path,
             )
@@ -840,7 +916,7 @@ def test_stream_query_yields_error_when_no_api_key(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert isinstance(events[0], CopilotEventContextResolved)
@@ -863,7 +939,7 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
     )
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert isinstance(events[0], CopilotEventContextResolved)
@@ -894,7 +970,7 @@ def test_stream_query_surfaces_resource_terminal_error_as_copilot_error(
     monkeypatch.setattr(gateway_resolver, "build_gateway_model_resolver", lambda: _Resolver())
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert len(events) == 1
@@ -922,7 +998,7 @@ def test_stream_query_preserves_resource_terminal_error_code_and_payload(
     monkeypatch.setattr(gateway_resolver, "build_gateway_route_runtime", fail_runtime)
 
     events = asyncio.run(
-        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+        _collect(copilot_service.stream_query("skill-a", "hi", session_id="tab-1", workspace_dir=tmp_path))
     )
 
     assert len(events) == 1
@@ -1059,6 +1135,7 @@ def test_stream_query_uses_imported_workspace_root_as_sdk_cwd(
             copilot_service.stream_query(
                 "skill-a",
                 "hi",
+                session_id="tab-1",
                 workspace_root=str(imported_root),
             )
         )

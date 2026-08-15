@@ -101,11 +101,13 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 | COPILOT_ASSIST-2 | Copilot Write/Edit 自写例外 | 单元 `copilot-session-persistence`；**为什么**：MVP1 允许 SDK Write/Edit 直接读写 workspace，保留 diff/summary 审阅体验；D12 继续约束 Studio 自有写入，Bash 仍逐条审批 |
 | COPILOT_ASSIST-3 | session | 单元 `copilot-session-persistence`；**为什么**：退出再进对话一模一样、session 必须落盘不丢(D8 MUST) |
 | COPILOT_ASSIST-4 | SDK 测试 | 单元 `copilot-sdk-test-parity`；**为什么**：copilot test 必须走真实 `ClaudeSDKClient`，不能用 AsyncAnthropic 假路径 |
+| COPILOT_ASSIST-5 | 会话身份契约（2026-08-15 用户裁决） | 单元 `copilot-session-persistence`；**为什么**：每个前端会话标签对应一条**独立的后端 SDK 对话**，会话身份必须显式进契约——此前 New chat 只换前端视图，报文无 session 标识，后端按 skill 只存一条 SDK 对话，生成中新建标签发的消息被注入正在跑的对话（2026-08-15 实测缺陷）。目标契约：① ws 报文必带 `session_id`（前端标签的 session id，缺失即边界拒绝）；② 后端 SDK client 缓存键 = (skill, **session**, model, provider, credential, workspace)，不同标签绝不共享对话；③ 流式事件按**发起查询的会话**归属渲染，与"当前激活标签"无关，切标签不串流；④ 关闭标签经 `POST /api/skills/{skill_id}/copilot/session-close` 结束对应后端 client（每 client 一个 CLI 子进程，不关则漏资源）；⑤ ws 断连仍重置该 skill 全部会话、一条连接内查询仍串行（单活跃查询不变式不变，审批/中断继续按 skill 键） |
 
 ## 6. 测试关键点
 1. ThinkingBlock: baseline 现状为 `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标为 thinking/tool call 全量流式，折叠但不省略。
 2. Copilot Write/Edit 自写例外: baseline 现状为 SDK `acceptEdits` 直写；目标为 允许直写 workspace，同时回显工具事件与 diff/summary，Bash 仍 human-in-the-loop。
 3. session: 现状为 一 skill 多 session 历史持久化，并用 `_window.json` 恢复上次打开的 tab 集合与活跃 tab；空窗口状态合法,首条消息才把临时草稿物化为真实 session。
+3a. 会话身份契约: 不同 `session_id` 的两次查询得到两个不同的 SDK client、同 `session_id` 复用同一个；ws 报文缺 `session_id` 被拒；`session-close` 只关掉指定会话的 client；事件落在发起查询的标签，切换激活标签不改变归属。
 4. SDK 测试: baseline 现状为 Settings probe 走 `AsyncAnthropic` ⚠️；目标为 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 
 ## 7. 涉及 region / platform

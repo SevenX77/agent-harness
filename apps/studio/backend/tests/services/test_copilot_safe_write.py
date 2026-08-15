@@ -463,7 +463,7 @@ def test_approval_event_streams_and_resolves_mid_stream(
     async def scenario() -> list[object]:
         events: list[object] = []
         async for event in copilot.stream_query(
-            "skill-mid-stream", "run it", workspace_dir=tmp_path
+            "skill-mid-stream", "run it", session_id="tab-1", workspace_dir=tmp_path
         ):
             events.append(event)
             if isinstance(event, CopilotEventToolApprovalRequired):

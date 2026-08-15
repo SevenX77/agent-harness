@@ -183,13 +183,22 @@ describe('copilotStore streamed-turn persistence', () => {
   it('materializes an empty window only when the first message is appended', async () => {
     copilotStore.setContext(WS, SKILL)
 
-    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
+    const sessionId = copilotStore.ensureActiveSession()
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never, sessionId)
 
     const snapshot = copilotStore.getSnapshot()
     expect(snapshot.sessions).toHaveLength(1)
-    expect(snapshot.activeSessionId).toBe(snapshot.sessions[0].id)
-    expect(lastWrittenSession(snapshot.sessions[0].id)).toEqual(snapshot.sessions[0])
-    expect(lastWrittenWindow()).toEqual(windowState([snapshot.sessions[0].id], snapshot.sessions[0].id))
+    expect(snapshot.activeSessionId).toBe(sessionId)
+    expect(lastWrittenSession(sessionId)).toEqual(snapshot.sessions[0])
+    expect(lastWrittenWindow()).toEqual(windowState([sessionId], sessionId))
+  })
+
+  it('ensureActiveSession reuses the existing active session instead of minting one', () => {
+    copilotStore.setContext(WS, SKILL)
+    const created = copilotStore.newSession()
+
+    expect(copilotStore.ensureActiveSession()).toBe(created)
+    expect(copilotStore.getSnapshot().sessions).toHaveLength(1)
   })
 
   it('persists new empty sessions and window state under the .workspace copilot support tree', async () => {
@@ -236,8 +245,8 @@ describe('copilotStore streamed-turn persistence', () => {
     copilotStore.setContext(WS, SKILL)
     const sessionId = copilotStore.newSession()
 
-    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
-    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never)
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never, sessionId)
+    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never, sessionId)
 
     const writesBeforeDone = writeWorkspaceFile.mock.calls.length
     copilotStore.updateMessage('a1', (m) => ({ ...m, content: `${m.content}Hello `, status: 'running' }))
@@ -258,11 +267,42 @@ describe('copilotStore streamed-turn persistence', () => {
     expect(assistant?.events.some((e) => (e as { type: string }).type === 'done')).toBe(true)
   })
 
+  it('appends to the owning session even when another tab is active', async () => {
+    // 会话身份契约(COPILOT_ASSIST-5):流回来的消息落进发起查询的会话,
+    // 用户切到别的标签不改变归属——旧实现按"当前激活会话"落,正是串流缺陷。
+    copilotStore.setContext(WS, SKILL)
+    const origin = copilotStore.newSession()
+    const other = copilotStore.newSession()
+    copilotStore.switchSession(other)
+
+    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 1 } as never, origin)
+
+    const sessions = copilotStore.getSnapshot().sessions
+    expect(sessions.find((s) => s.id === origin)?.messages.map((m) => m.id)).toEqual(['a1'])
+    expect(sessions.find((s) => s.id === other)?.messages).toEqual([])
+  })
+
+  it('updates a message wherever it lives, not only in the active session', async () => {
+    copilotStore.setContext(WS, SKILL)
+    const origin = copilotStore.newSession()
+    const other = copilotStore.newSession()
+    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 1 } as never, origin)
+    copilotStore.switchSession(other)
+    await settleWrites()
+
+    copilotStore.updateMessage('a1', (m) => ({ ...m, content: 'streamed', status: 'success' }))
+    await settleWrites()
+
+    const originSession = copilotStore.getSnapshot().sessions.find((s) => s.id === origin)
+    expect(originSession?.messages[0].content).toBe('streamed')
+    expect(lastWrittenSession(origin)?.messages[0].content).toBe('streamed')
+  })
+
   it('hydrate round-trips persisted assistant content through _window.json', async () => {
     copilotStore.setContext(WS, SKILL)
     const sessionId = copilotStore.newSession()
-    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'q', events: [], status: 'success', createdAt: 1 } as never)
-    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never)
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'q', events: [], status: 'success', createdAt: 1 } as never, sessionId)
+    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never, sessionId)
     copilotStore.updateMessage('a1', (m) => ({ ...m, content: 'streamed answer', status: 'success' }))
     await settleWrites()
 

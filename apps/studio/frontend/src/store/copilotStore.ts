@@ -397,7 +397,9 @@ export const copilotStore = {
       return false
     }
   },
-  async appendMessage(message: CopilotMessage) {
+  ensureActiveSession(): string {
+    // 临时草稿在首条发送时物化(R17);返回消息应归属的会话 id,供发送方
+    // 钉住归属(会话身份契约,COPILOT_ASSIST-5)。
     const hasActiveSession = Boolean(
       state.activeSessionId && state.sessions.some((session) => session.id === state.activeSessionId),
     )
@@ -407,9 +409,15 @@ export const copilotStore = {
       if (state.workspaceId && state.skillId) {
         persistWindowState(state.workspaceId, state.skillId, state.sessions, state.activeSessionId)
       }
+      emit()
     }
+    return state.activeSessionId as string
+  },
+  async appendMessage(message: CopilotMessage, sessionId: string) {
+    // 消息落进它归属的会话,而不是"当前恰好激活的会话"——事件流回来时
+    // 用户可能已切到别的标签(会话身份契约,COPILOT_ASSIST-5)。
     state.sessions = state.sessions.map((s) => {
-      if (s.id === state.activeSessionId) {
+      if (s.id === sessionId) {
         return { ...s, messages: [...s.messages, message] }
       }
       return s
@@ -417,35 +425,36 @@ export const copilotStore = {
     syncCurrentContext()
     emit()
 
-    const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
-    if (state.workspaceId && state.skillId && activeSession) {
-      await persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
+    const owningSession = state.sessions.find((s) => s.id === sessionId)
+    if (state.workspaceId && state.skillId && owningSession) {
+      await persistSessionToDisk(state.workspaceId, state.skillId, owningSession)
     }
   },
   updateMessage(messageId: string, updater: (message: CopilotMessage) => CopilotMessage) {
+    // message id 全局唯一:按 id 找到消息所在的会话再更新,激活状态无关。
     state.sessions = state.sessions.map((s) => {
-      if (s.id === state.activeSessionId) {
-        return {
-          ...s,
-          messages: s.messages.map((m) => (m.id === messageId ? updater(m) : m)),
-        }
+      if (!s.messages.some((m) => m.id === messageId)) {
+        return s
       }
-      return s
+      return {
+        ...s,
+        messages: s.messages.map((m) => (m.id === messageId ? updater(m) : m)),
+      }
     })
     syncCurrentContext()
     emit()
 
-    const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
-    const updatedMessage = activeSession?.messages.find((m) => m.id === messageId)
+    const owningSession = state.sessions.find((s) => s.messages.some((m) => m.id === messageId))
+    const updatedMessage = owningSession?.messages.find((m) => m.id === messageId)
     if (
       state.workspaceId &&
       state.skillId &&
-      activeSession &&
+      owningSession &&
       updatedMessage &&
       updatedMessage.status !== 'running' &&
       updatedMessage.status !== 'pending'
     ) {
-      void persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
+      void persistSessionToDisk(state.workspaceId, state.skillId, owningSession)
     }
   },
   clearMessages() {

@@ -63,29 +63,45 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         self._phase_name = phase_name
         self._callbacks = list(callbacks or [])
         self._max_nudges = max_nudges
-        # Per-thread iteration budget, held OUTSIDE the flow channel: a flow
+        # Per-invocation iteration budget, held OUTSIDE the flow channel: a flow
         # write from before_model races other legitimate flow writers in the
         # same superstep and the reducer-less LastValue channel raises
         # InvalidUpdateError (field evidence: runs 2026-08-01T12-16-44 /
-        # 13-14-57). Keying by thread_id keeps the pinned contract that a
-        # reused graph gives every invoke a fresh budget.
-        self._iterations_by_thread: dict[str, int] = {}
+        # 13-14-57). Keying by the invocation (see _invocation_key) keeps the pinned
+        # contract that a reused graph gives every invoke a fresh budget.
+        self._iterations_by_invocation: dict[str, int] = {}
         # Nudge counters follow the same scoping rule for the same reason:
-        # one policy instance per thread key = fresh nudge budget per invoke.
-        self._nudge_policy_by_thread: dict[str, NudgePolicy] = {}
+        # one policy instance per invocation = fresh nudge budget per invoke.
+        self._nudge_policy_by_invocation: dict[str, NudgePolicy] = {}
 
-    def _thread_key(self) -> str:
+    def _invocation_key(self) -> str:
+        """Identify ONE invocation of this phase, not one run.
+
+        `thread_id` is a run constant, so on its own it collapses every iteration of an
+        iterated phase into a single budget: item 2 of a batch opened with item 1's
+        spent nudges and its iteration count (field evidence: run
+        2026-08-15T10-19-55_df555c19, counter 1..8 for chapter 1 then 9 for chapter 2).
+
+        The assembler therefore stamps `agent_invocation_id` on the config it hands
+        `agent_graph.invoke` — the same channel `max_iterations` below already travels
+        on, which is the evidence that a custom `configurable` key reaches this hook.
+        `checkpoint_ns` cannot serve here: what LangGraph exposes to a middleware hook
+        is the PER-HOOK namespace (measured: `ExitControlMiddleware.before_model:<uuid>`,
+        a fresh uuid per call), so keying on it would reset the budget every turn.
+        """
         from langgraph.config import get_config
 
-        config = get_config()
-        return str(config.get("configurable", {}).get("thread_id") or "default")
+        configurable = get_config().get("configurable", {})
+        thread_id = str(configurable.get("thread_id") or "default")
+        invocation_id = str(configurable.get("agent_invocation_id") or "")
+        return f"{thread_id}|{invocation_id}"
 
     def _nudge_policy(self) -> NudgePolicy:
-        thread_key = self._thread_key()
-        policy = self._nudge_policy_by_thread.get(thread_key)
+        invocation_key = self._invocation_key()
+        policy = self._nudge_policy_by_invocation.get(invocation_key)
         if policy is None:
             policy = NudgePolicy(max_nudges=self._max_nudges)
-            self._nudge_policy_by_thread[thread_key] = policy
+            self._nudge_policy_by_invocation[invocation_key] = policy
         return policy
 
     def before_model(
@@ -94,9 +110,9 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         runtime: Runtime[Any],
     ) -> dict[str, Any] | None:
         del runtime
-        thread_key = self._thread_key()
-        current_iteration = self._iterations_by_thread.get(thread_key, 0) + 1
-        self._iterations_by_thread[thread_key] = current_iteration
+        invocation_key = self._invocation_key()
+        current_iteration = self._iterations_by_invocation.get(invocation_key, 0) + 1
+        self._iterations_by_invocation[invocation_key] = current_iteration
 
         # 进行预算判断
         from langgraph.config import get_config
@@ -236,7 +252,7 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         config = get_config()
         max_iterations = config.get("configurable", {}).get("max_iterations", 20)
 
-        current_iteration = self._iterations_by_thread.get(self._thread_key(), 0)
+        current_iteration = self._iterations_by_invocation.get(self._invocation_key(), 0)
 
         if current_iteration >= max_iterations:
             self._raise_fatal_error(

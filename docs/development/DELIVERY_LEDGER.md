@@ -391,16 +391,18 @@ LLM 步骤体外层卡片盒已不存在(verify-well-generic-payload.png);④cop
 (scrollTop 钉底断言)——唯一非真机项,如实标注。#798 同日合并:验证方法论固化为
 `.claude/skills/studio-verify`(web 模式验证被裁决禁止),CLAUDE.md 挂载。
 
-**引擎死家族发现(2026-08-14,判据5「删」执行前的定界调查带出,待裁决)**:用户已裁
-「第三个东西(校验节点)收编中间件了当然删」;定界时坐实**整个 legacy 执行族都是死码**——
-`GraphBuilder` 在 src 内零构造点,活路径是 `assemble_graph`(`loader.py:494` /
-`runner.py:72` / 公共 API `__init__.py:40-41`),而 `graph_builder.py`、`phase_executor.py`、
-`core/phase_nodes/*`(llm/code/validation 节点、base、factory、_helpers)对活路径零 import
-(仓内引用全为 docstring/注释),仅靠自家测试维持绿灯。建议把判据5 的删除并入**一次性
-拆除整个死家族**(免得同一批文件删两遍);频谱另一端是仅删 ValidationPass/FailEvent +
-校验节点。前端 `validation_fail`/`validation_pass` 分支(run-status-projection
-FAILURE_EVENT_TYPES、TraceStepRow isError、trace-category 等)随引擎事件消亡同批清理。
-等用户裁范围后执行(独立 engine PR + vendor 重建)。
+**引擎死家族处置(2026-08-15 已裁:先迁移、后整族删;进行中)**:2026-08-14 定界
+调查坐实整个 legacy 执行族(`graph_builder.py`/`phase_executor.py`/`core/phase_nodes/*`
+等 14 模块闭包 + 附着孤儿)对活路径零 import;用户 2026-08-15 裁决「先把第三类功能
+迁移到现在的活路径上才能整族删」,并确认迁移框架(多数入中间件)。七项冻结功能的
+出生档案(引入 commit + 设计动机 + 用户原始决策原文)已考古完成。权威决议文档:
+`docs/design/2026-08-15-legacy-cognitive-features-migration-decision.md`(本 PR)。
+实施切分:PR B 认知工具回归活路径(ask_clarification/update_working_memory/
+log_ambiguity 挂载 + context_access opt-in,CognitiveFlow 拦截)→ PR C 双闸 nudge
+中间件适配(依赖 B)→ PR D compaction 中间件(SummarizationMiddleware+sidecar+
+CompactionEvent)→ PR E 整族删(含 ModelResolvedEvent「已被替代不迁移」判定、
+ctx 桥 `legacy_context_from_state` 族、零发射点事件类、前端死分支、spec 清单条目)
++ vendor 重建 + `/studio-verify` 真机冒烟。每步过引擎门禁(mypy --strict + 3×pytest)。
 
 ### 环境 blocker(在册)
 

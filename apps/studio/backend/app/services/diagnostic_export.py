@@ -1,4 +1,4 @@
-"""In-process diagnostic export contract for Predict results."""
+"""In-process diagnostic export contracts for Compile and Predict results."""
 
 from __future__ import annotations
 
@@ -7,6 +7,32 @@ from typing import Any
 from app.core.adapters.engine import RunResult
 from app.core.exceptions import error_response, raise_error_response
 from app.models.runs import PredictDiagnosticExport
+from app.models.skills import CompileDiagnosticExport, CompileSuccess
+
+
+def export_compile_diagnostics(result: CompileSuccess) -> CompileDiagnosticExport:
+    """Project a compile result down to what an agent asked for: verdict + issues.
+
+    Same shape of move as ``export_predict_diagnostics``: one pure function owns
+    the projection, so the agent-facing surface cannot drift from the payload it
+    is derived from. ``issues`` carries the engine's full aggregated set (see
+    ``CompileDiagnosticExport``); the frontend keeps consuming ``CompileSuccess``
+    whole and is untouched by this.
+    """
+
+    lint = result.detail.lint_result
+    issues = list(lint.errors) if lint else []
+    return CompileDiagnosticExport(
+        skill_id=result.skill_id,
+        status=result.status,
+        phase_count=result.phase_count,
+        manifest_name=result.manifest_name,
+        execution_fingerprint=result.execution_fingerprint,
+        lint_status=lint.status if lint else None,
+        issue_count=len(issues),
+        issues=issues,
+        file_paths=result.detail.file_paths,
+    )
 
 
 def export_predict_diagnostics(result: RunResult) -> PredictDiagnosticExport:
@@ -57,4 +83,8 @@ def _is_predict_trace(trace_payload: dict[str, Any]) -> bool:
     return False
 
 
-__all__ = ["assert_trace_can_be_promoted_to_golden", "export_predict_diagnostics"]
+__all__ = [
+    "assert_trace_can_be_promoted_to_golden",
+    "export_compile_diagnostics",
+    "export_predict_diagnostics",
+]

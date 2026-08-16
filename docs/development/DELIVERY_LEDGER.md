@@ -602,6 +602,19 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 (含删除 `edge_transition` 幽灵分支)→ PR C 后端按段记账。每个独立过门禁、独立合并;
 合并后按 `.claude/skills/studio-verify` 真机点验交五列报告。
 
+### 用户缺陷批次 2026-08-15:compile_skill 的结果 agent 读不动
+
+**现场(真机,`story-deconstruction-v3-lab`)**:MoirAI 调 `studio:compile_skill`
+拿回 **216,838 字节 / 61,160 token** 的结果,SDK 溢写成 tool-result 文件后她
+`Read` 不动(上限 25,000 token),转 grep 被判 "too long",再转 jq / PowerShell
+拆 JSON **连着三轮卡在审批**,最后被拒。而那次编译 `status="ok"`、**0 个 issue**
+—— 全部代价只换回"没问题"三个字。操作员当场在对话里把它记成「Studio 的一个已知
+短板」,用户随后要求修掉。
+
+| # | 项 | 状态 | 处置 |
+|---|---|---|---|
+| C-1 | `compile_skill` 把前端负载原样返给 agent | ✅ 随本行同 PR | 根因在 `services/copilot_tools.py` 的 handler 直接 `result.model_dump()` 回整个 `CompileSuccess` —— 那是**前端**的负载:`detail.files`(68 个文件的完整正文)165,910 字符占 88%,`node_schema_v21` 再占 14,254,前端要它们填编辑器和画布。工具**自己的描述**写的却是「成功给编译产物摘要」——描述与实现打架,描述才是设计意图。修法照仓内既有范式(`diagnostic_export.export_predict_diagnostics`:一个纯投影函数,前端与内部判定同源):新增 `CompileDiagnosticExport` 模型 + `export_compile_diagnostics()`,只留裁决所需(status / phase_count / lint_status / **全量 issues** / file_paths / execution_fingerprint),文件正文交回 `read_skill_file`(本就分页)、图结构交回 `get_skill_overview`。**HTTP 路由与前端不动**,仍拿完整 `CompileSuccess`。诊断 SSOT 守住:`issues` 绝不截断(AGENTS.md「一趟返回引擎的 FULL aggregated defect set」),测试用 12 条错误钉死顺序与条数。**在真实那份 dump 上验证:186,276 → 799 字符,缩减 99.57%,issue 一条不少** |
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

@@ -438,6 +438,7 @@ async def get_skill_overview_tool(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def compile_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.core.backends import get_backend_config, get_metadata, get_storage
+    from app.services.diagnostic_export import export_compile_diagnostics
     from app.services.skills import CompileFailedError, compile_skill_for_studio
 
     skill_id = str(args.get("skill_id", "")).strip()
@@ -455,7 +456,7 @@ async def compile_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — 工具边界:任何失败都必须落成
         # is_error 工具结果回给模型,绝不让异常炸断 ws 事件流。
         return _text_result(f"compile_skill 失败: {exc}", is_error=True)
-    return _text_result(result.model_dump(mode="json"))
+    return _text_result(export_compile_diagnostics(result).model_dump(mode="json"))
 
 
 @tool(

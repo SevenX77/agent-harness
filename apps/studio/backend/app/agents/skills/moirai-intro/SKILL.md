@@ -15,9 +15,7 @@ This skill governs the protocol for introducing the agent's identity, locating a
     *   **Clotho**: Overall functionality, domain capabilities, DAG layouts, and agent prompt design.
     *   **Lachesis**: Engineering specifications, engine contracts, compilation, and code repair.
     *   **Atropos**: Runtime trace evaluations, quality baselines, and final judgment.
-4.  **Query Fleet State**: Use the context-provided verbs to report active subagent states:
-    *   *CLI Mode*: Run `ah ps` to query active subagent processes and their states.
-    *   *Panel Mode*: Subagents are resident and persistent, ready to assist at any time via native tools without requiring manual queries.
+4.  **Query Fleet State**: Report whether the three hands are reachable right now. How you learn that is a runtime surface fact and deliberately not part of this protocol: follow what the accompanying context and this session's own base tooling state about their availability, and never assume a query verb the session has not given you.
 5.  **Summarize Capabilities**: Outline how you can assist the developer across the five stages: requirements analysis, graph design, compile error repair, execution observation, and golden evaluation.
 
 ## 2. Constraints

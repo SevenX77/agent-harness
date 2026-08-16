@@ -561,6 +561,19 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 单活跃查询不变式不变。过门 = 后端 pytest 全量 + 前端四件套 + 合并后真机点验
 (两标签并行互不串 + 关标签后端 client 归零)。
 
+### 用户裁决批次 2026-08-15:MoirAI 两条运行位分写操作规则 + 知识库定位
+
+**裁决**:「Moirai 的规则得是拼合成的,sdk 和 cli 是两种机制,需要两种操作规则」。
+决议正本 `.kiro/specs/studio-moirai-agent-system/decision-2026-08-15-per-runtime-dispatch-operating-rules.md`(§9-13 为本批次)。
+
+| # | 项 | 状态 | 处置 |
+|---|---|---|---|
+| M-1 | 派工语义在两条路上真值相反,规则必须分写 | ✅ 随本行同 PR | `panel.md` 的「派工是只读咨询」由 `_GODDESS_TOOLS` 钉死成立;CLI 侧 Studio 生成的 `[agents.*]` 无 cmd 覆盖 → 女神吃 ah claude provider 默认命令 `claude --dangerously-skip-permissions`,可写可执行零审批(对照:master 显式丢掉该 flag 并有单测锁死)。`cli.md` 补相反的一条:派工是对工作区的动作,包里必须自带边界 |
+| M-2 | 规格自相矛盾(R5.4 要 cli.md 提供 `ah ps`,R7.5 禁止复述 ah 命令) | ✅ 随本行同 PR | 用户裁决「人类语义表述错误,你应该能判断出来」→ 按合理意图判读:R7.5 是针对 cli.md 的封闭清单且自带理由,优先;R5.4 括号里那对例子是举例,举了个被禁的例子。`moirai-intro` 去掉两路动词硬编码(真漂移,`design.md` 明写「无表面维度」),`cli.md` **不补** `ah ps`,`requirements.md` R5.4 措辞就地订正。门禁:共享技能里不得出现任何 `ah` 命令;`cli.md` 的 ah 命令集合必须恰好是 `{ask}` |
+| M-3 | **被派出去的女神在读陈旧知识库** | ✅ 随本行同 PR | `add_dirs` 是会话级 CLI 参数(SDK `subprocess_cli.py`),`AgentDefinition` **无此字段** —— 挂载给的是**读权限**不是**地址**,女神只能猜。行为实测(派 Clotho 找 `KB-00-hub.md`):修复前她 Glob 三次找到工作区里 CLI 路物化的 `.ah/knowledge/` 副本,该副本少一整篇 `KB-14` 且 `KB-02` 缺 #817 刚补的整节;修复后 Read 直达随包目录。A/B 混杂因素受控(同工作区、陈旧副本原封不动仍在,唯一变量是注入的地址)。修法:`agent_assets.knowledge_location_note()` 生成带解析后绝对路径的运行时事实,拼进面板侧仅有的两个装配产物(主线程 append + 三女神 prompt);写进代码而非 `panel.md`,因为那是随安装位置变化的路径,属资产文件头自己排除的「tool mechanics enforced in code」 |
+| M-4 | 分配判据(`roles/moirai.md` 的 "perfectly aligns") | ⏳ 待办 | 维持不动。现象是纯 prompt 设计题连跑 5 次仅 1 次派工,但**没有证据**表明判据措辞是原因——§7 已经有过一次教训(技能挂载漂移看着像根因,实测 1/5 vs 1/5 无差别)。下一步是先测再改:用 `dispatch-rate.sh` 对「scope 契合改为可对照技能映射表机械核对」跑 n≥5 的 A/B。独立任务,不夹带 |
+| M-5 | SDK/CLI 对等审计的其余分叉 | 📌 记档 | 三路审计 + 三路对抗核验共 32 条:应有差异 7 / 已登记已知差距(R8.8)3 / 本批次修 3 / 其余留档。留待后续四项见决议 §12:CLI 侧三 worker 拿不到 MCP 却读着声称 studio 工具可用的 `cli.md`;`web-research` 在映射表里无归属;atropos 面板侧派工拿不到 `<judge_context>` 契约;**codex 的沙箱兜底前提不成立**(R8.8 接受该差距的前提是「靠沙盒物理隔离兜底」,而 codex 带 `--dangerously-bypass-approvals-and-sandbox` 关掉了自身沙箱)。对抗核验推翻了审计的四条判定,同样记在 §12 以免下轮重复踩 |
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

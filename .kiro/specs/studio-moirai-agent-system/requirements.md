@@ -87,7 +87,7 @@
 1. The 六个技能 shall 全部以 `app/agents/skills/<name>/SKILL.md` 为唯一源;SDK 路经 `.claude/skills/` 物化,ah 路经 `.ah/skills/` 物化,内容一致。
 2. The 技能内容 shall 限于方法论与工作流程(怎么干);涉及格式/契约/错误码等事实时 shall 以 `[[KB-xx]]` 引用知识库,不得复写事实本体。
 3. The 角色↔技能映射 shall 集中声明于 `agent-skill-map.json` 单处,允许一个技能映射给多个角色;默认映射:moirai=moirai-intro;clotho=domain-analysis+graph-design+agent-prompt-design;lachesis=compile-error-repair+graph-design(交叉);atropos=eval-judgement+agent-prompt-design(交叉)。
-4. The `moirai-intro` 技能 shall 重写为表面中立(自报协议:身份/工作区现状/三只手职责与状态/能做什么),编队状态查询动词由 contexts 提供(cli=`ah ps`;panel=三女神为常驻子 agent 随叫随到),两路装载同一份技能。
+4. The `moirai-intro` 技能 shall 重写为表面中立(自报协议:身份/工作区现状/三只手职责与状态/能做什么),两路装载同一份技能;技能自身 shall 不含任一运行位的编队状态查询动词——编队状态怎么查是表面事实,由该运行位的表面层承载:panel 由 `contexts/panel.md` 声明三女神为常驻子 agent 随叫随到,cli 由 ah 自身注入的内置技能(`ah-runtime-state` 等)承载,`contexts/cli.md` shall 不复述该动词(R7.5:复述 ah 命令必然随 ah 升级漂移)。
 5. When 映射配置变更, the ah.toml 生成与 SDK AgentDefinition.skills shall 从同一配置派生一致结果。
 
 ### Requirement 6: SDK 路装载(基座 preset + append;原生 subagent 带工具)

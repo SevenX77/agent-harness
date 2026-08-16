@@ -85,6 +85,34 @@ def knowledge_dir() -> Path:
     return _AGENTS_DIR / "knowledge"
 
 
+def knowledge_location_note() -> str:
+    """The one thing a ``[[KB-xx]]`` link cannot carry: which directory on THIS
+    machine holds the knowledge base (R3.8 — 不得因拼装组合差异而丢失知识库入口).
+
+    ``add_dirs`` mounts the packaged directory session-wide, but a mount is a
+    read grant, not an address: ``AgentDefinition`` has no ``add_dirs`` field,
+    so a dispatched Fate is never told where it landed and can only guess.
+    Measured 2026-08-15 — asked to locate ``KB-00-hub.md``, a dispatched Clotho
+    searched the skill workspace and came back with the CLI surface's
+    materialized ``.ah/knowledge/`` copy, which was a whole article short
+    (``KB-14``) and missing the ``KB-02`` section shipped in #817. Guessing
+    silently reads the wrong knowledge base, so the address is stated instead.
+
+    It is injected here rather than written into ``contexts/panel.md`` because
+    it is an install-dependent path — the "tool mechanics (enforced in code)"
+    that the asset files' own editing rule keeps out of prose.
+    """
+
+    return (
+        f"The knowledge base for this session is the directory `{knowledge_dir()}`. "
+        "A `[[KB-xx-topic]]` link resolves to `KB-xx-topic.md` inside it; start at "
+        "`KB-00-hub.md`. Read from that path. Do not substitute a `KB-*` file found "
+        "elsewhere on disk: a skill workspace may hold its own `.ah/knowledge/` copy "
+        "left behind by the CLI surface, and that copy belongs to a different session "
+        "and may be stale."
+    )
+
+
 def skill_names() -> list[str]:
     """Shipped skill pool (``skills/<name>/SKILL.md``), sorted by name."""
 

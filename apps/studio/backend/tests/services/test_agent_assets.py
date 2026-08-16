@@ -113,3 +113,38 @@ def test_assemble_inline_has_header_line_only_no_section_markers() -> None:
     assert agent_assets.load_role("moirai") in text
     assert agent_assets.load_operating_manual() in text
     assert agent_assets.load_context("panel") in text
+
+
+def test_moirai_intro_skill_carries_no_runtime_surface_verb() -> None:
+    """R5.4 + design.md:214 "无表面维度(intro 已中立)": one skill is loaded by
+    both runtimes, so it may not branch on which runtime is reading it.
+
+    It used to spell out both fleet-status verbs ("CLI Mode: run `ah ps`" /
+    "Panel Mode: subagents are resident"), which made a shared skill the
+    authority on a surface fact and put an `ah` command outside the CLI
+    surface layer. Where fleet state comes from belongs to the surface:
+    `contexts/panel.md` for the panel, ah's own injected built-in skills for
+    the CLI.
+    """
+
+    text = (agent_assets.agents_dir() / "skills" / "moirai-intro" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert not re.search(r"`ah\s+\w", text), "no ah command belongs in a shared skill"
+    for surface_word in ("CLI Mode", "Panel Mode", "ah ps"):
+        assert surface_word not in text, f"{surface_word!r} is a surface fact, not a protocol step"
+
+
+def test_cli_context_names_only_the_one_command_the_spec_allows() -> None:
+    """R7.5: `contexts/cli.md` shall 仅承载 Studio 专属的 CLI 表面 delta（女神
+    agent id 绑定，经 `ah ask <id> --wait` 派遣；与工作区事实），并 shall 不复述
+    ah 命令语法、不做命令可用性断言 —— 理由是复述可用性必然随 ah 升级漂移，而
+    ah 自己注入的内置技能才是 CLI 侧命令事实的权威基座。
+
+    `ah ask` is the single command the clause names, so it is the single
+    command this file may mention. Any other one is the drift the clause exists
+    to prevent.
+    """
+
+    commands = set(re.findall(r"`ah\s+([a-z-]+)", agent_assets.load_context("cli")))
+    assert commands == {"ask"}, f"cli.md may only name `ah ask`, found: {sorted(commands)}"

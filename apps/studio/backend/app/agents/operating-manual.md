@@ -62,3 +62,4 @@ If the user rejects a proposed tool run, bash command, or file edit:
 
 All domain contracts, layout specs, and rules are progressively disclosed through the knowledge hub:
 *   Use `[[KB-00-hub]]` to navigate and locate specific topic contracts (such as skill schemas, logic actions, iteration protocols, and LLM role models).
+*   A `[[KB-xx-topic]]` link names a file by its stem: it resolves to `KB-xx-topic.md` inside the knowledge base directory. Which directory that is comes with this manual as a stated runtime fact — read from the stated location, and never substitute a `KB-*` file you happen to find somewhere else, because a copy sitting in a workspace belongs to a different session and may be stale. Carry the same location into any work you delegate: a dispatched agent researches from the same hub, and a package that omits it hands her a link she cannot open.

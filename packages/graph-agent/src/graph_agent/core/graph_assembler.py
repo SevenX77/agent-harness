@@ -2136,7 +2136,7 @@ def _build_skill_node(
         else ()
     )
     # The system prompt is baked at assembly time, so runtime input delivery
-    # (placeholder rendering + first-turn input seeding) must happen per model
+    # (placeholder rendering + declared-input block) must happen per model
     # call — outermost in the chain, before cognitive/tracing middlewares.
     middleware_chain = (
         RuntimeInputMiddleware(

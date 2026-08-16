@@ -553,9 +553,12 @@ class ToolHistoryRepairedEvent(_EventBase):
 
 
 class RuntimeInputInjectedEvent(_EventBase):
-    """RuntimeInputMiddleware seeded the phase's first model turn with the
-    declared inputs — the model's opening view of the task is this injection,
-    so the trace says which keys it delivered."""
+    """RuntimeInputMiddleware handed a model call the phase's declared inputs.
+
+    Delivery happens per model call (the block is given to the model, never
+    written back to state), so one event marks each turn the model actually
+    received the inputs. A call that already carries the identical block is a
+    no-op and stays silent."""
 
     event_type: Literal["runtime_input_injected"] = "runtime_input_injected"
     phase_name: str

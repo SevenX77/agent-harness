@@ -58,11 +58,15 @@ def strip_outer_fence(value: str) -> str:
 
 
 def looks_like_json_literal(value: str) -> bool:
-    """True when the value opens AND closes as a JSON array or object.
+    """True when the value opens with ``[``/``{`` and closes with ``]``/``}``.
 
-    Requiring both ends is deliberate. Triggering on the opening bracket alone
-    would misread values that are genuinely comma-separated but whose first
-    item happens to be bracketed, such as ``[a](u1), [b](u2)``.
+    Requiring a delimiter at BOTH ends is deliberate. Triggering on the opening
+    bracket alone would misread values that are genuinely comma-separated but
+    whose first item happens to be bracketed, such as ``[a](u1), [b](u2)``.
+
+    The two ends are not required to match: ``[1, 2}`` announces structure just
+    as loudly as ``[1, 2]`` does, and it is malformed, so it must reach the
+    refusal path rather than be split into ``['[1', '2}']``.
     """
     stripped = strip_outer_fence(value)
     return stripped.startswith(_JSON_OPENERS) and stripped.endswith(_JSON_CLOSERS)

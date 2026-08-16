@@ -82,14 +82,16 @@ def test_v4_edge_operation_events_round_trip_through_union_and_jsonl(tmp_path: P
 
     event_payloads = [
         blackboard_reduce_cls(
-            from_phase="draft",
+            edge_transition_id="t-1",
+            from_phases=["draft"],
             to_phase="review",
             changed_keys=["summary"],
             blackboard_snapshot={"summary": "ok"},
             reducer="merge",
         ),
         input_dispatch_cls(
-            from_phase="draft",
+            edge_transition_id="t-1",
+            from_phases=["draft"],
             to_phase="review",
             changed_keys=["summary"],
             blackboard_snapshot={"summary": "ok"},
@@ -97,7 +99,8 @@ def test_v4_edge_operation_events_round_trip_through_union_and_jsonl(tmp_path: P
             branch_index=2,
         ),
         input_file_injected_cls(
-            from_phase=None,
+            edge_transition_id="t-1",
+            from_phases=[],
             to_phase="draft",
             changed_keys=["brief"],
             blackboard_snapshot={"brief": "file body"},
@@ -128,14 +131,16 @@ def test_default_callback_accepts_v4_trace_events_without_warning(caplog: pytest
     callback = Callback()
     v4_events = [
         blackboard_reduce_cls(
-            from_phase="draft",
+            edge_transition_id="t-1",
+            from_phases=["draft"],
             to_phase="review",
             changed_keys=["summary"],
             blackboard_snapshot={"summary": "ok"},
             reducer="merge",
         ),
         input_dispatch_cls(
-            from_phase="draft",
+            edge_transition_id="t-1",
+            from_phases=["draft"],
             to_phase="review",
             changed_keys=["summary"],
             blackboard_snapshot={"summary": "ok"},
@@ -143,7 +148,8 @@ def test_default_callback_accepts_v4_trace_events_without_warning(caplog: pytest
             branch_index=None,
         ),
         input_file_injected_cls(
-            from_phase=None,
+            edge_transition_id="t-1",
+            from_phases=[],
             to_phase="draft",
             changed_keys=["brief"],
             blackboard_snapshot={"brief": "file body"},

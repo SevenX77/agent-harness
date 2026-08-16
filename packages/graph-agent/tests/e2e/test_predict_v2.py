@@ -70,12 +70,13 @@ def test_predict_tracing_consumes_mock_source_cache() -> None:
     source_cache = PredictMockSourceCache()
     callback = PredictTracingCallback(source_cache=source_cache)
     callback.on_chain_start(metadata={})
-    callback.on_event(PhaseStartEvent(phase_name="draft", context={"topic": "mars"}))
+    callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={"topic": "mars"}))
     source_cache.record("draft", "heuristic_stub")
 
     callback.on_event(
         PhaseEndEvent(
             phase_name="draft",
+            phase_execution_id="exec-1",
             context={"draft": {"text": "stub"}},
             metrics={"total_input_tokens": 123},
         )

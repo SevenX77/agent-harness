@@ -120,8 +120,8 @@ describe('edge flow animation', () => {
   ] as unknown as Parameters<typeof buildEdges>[0]
 
   const dispatched = [
-    { event_type: 'input_dispatch', from_phase: 'setup', to_phase: 'segment', changed_keys: ['chapter_lines'], after: { chapter_lines: [] } },
-    { event_type: 'input_dispatch', from_phase: 'segment', to_phase: 'review', changed_keys: ['segments'], after: { segments: [] } },
+    { event_type: 'input_dispatch', from_phases: ['setup'], to_phase: 'segment', changed_keys: ['chapter_lines'], after: { chapter_lines: [] } },
+    { event_type: 'input_dispatch', from_phases: ['segment'], to_phase: 'review', changed_keys: ['segments'], after: { segments: [] } },
   ] as unknown as Parameters<typeof buildEdges>[1]
 
   it('flows only into the phase that is executing right now', () => {

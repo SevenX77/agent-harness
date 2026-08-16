@@ -55,6 +55,11 @@ class _EventBase(BaseModel):
 class PhaseStartEvent(_EventBase):
     event_type: Literal["phase_start"] = "phase_start"
     phase_name: str
+    #: Which execution of this phase — an outer iterate/batch loop runs the
+    #: same phase several times, and each run is its own segment. Distinct
+    #: from ``AgentLoopIterationEvent.iteration``, which counts model turns
+    #: INSIDE one execution (decision 2026-08-15 edge-as-run-segment, D2).
+    phase_execution_id: str
     context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -66,6 +71,7 @@ class PredictChainStartEvent(_EventBase):
 class PhaseEndEvent(_EventBase):
     event_type: Literal["phase_end"] = "phase_end"
     phase_name: str
+    phase_execution_id: str
     context: dict[str, Any] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
 
@@ -363,9 +369,52 @@ class LLMDeltaEvent(_EventBase):
     restarts_step: bool = False
 
 
+class EdgeStartEvent(_EventBase):
+    """One transition between phases began.
+
+    A transition is the run segment between an upstream phase execution
+    ending and the downstream phase execution starting — everything the
+    machinery does on the way (blackboard reduction, input dispatch, input
+    file injection) happens inside it. It is a segment in its own right,
+    peer to a phase segment, so an empty transition still opens and closes:
+    "nothing happened between these two nodes" is an observation, not a gap
+    in the record (decision 2026-08-15 edge-as-run-segment, D1).
+
+    ``from_phase_execution_ids`` is plural because a fan-in transition
+    genuinely joins several upstream executions; a single upstream is a list
+    of one, not a special case (D3).
+    """
+
+    event_type: Literal["edge_start"] = "edge_start"
+    edge_transition_id: str
+    from_phases: list[str]
+    from_phase_execution_ids: list[str]
+    to_phase: str
+    to_phase_execution_id: str
+    branch_index: int | None = None
+
+
+class EdgeEndEvent(_EventBase):
+    """The same transition closed, with what it handed the downstream phase."""
+
+    event_type: Literal["edge_end"] = "edge_end"
+    edge_transition_id: str
+    from_phases: list[str]
+    from_phase_execution_ids: list[str]
+    to_phase: str
+    to_phase_execution_id: str
+    branch_index: int | None = None
+    changed_keys: list[str] = Field(default_factory=list)
+    blackboard_snapshot: dict[str, Any] = Field(default_factory=dict)
+    #: How many edge operations ran inside this transition. Zero is a valid
+    #: and meaningful answer.
+    operation_count: int = 0
+
+
 class BlackboardReduceEvent(_EventBase):
     event_type: Literal["blackboard_reduce"] = "blackboard_reduce"
-    from_phase: str | None
+    edge_transition_id: str
+    from_phases: list[str]
     to_phase: str
     changed_keys: list[str]
     blackboard_snapshot: dict[str, Any]
@@ -374,7 +423,8 @@ class BlackboardReduceEvent(_EventBase):
 
 class InputDispatchEvent(_EventBase):
     event_type: Literal["input_dispatch"] = "input_dispatch"
-    from_phase: str | None
+    edge_transition_id: str
+    from_phases: list[str]
     to_phase: str
     changed_keys: list[str]
     blackboard_snapshot: dict[str, Any]
@@ -384,7 +434,8 @@ class InputDispatchEvent(_EventBase):
 
 class InputFileInjectedEvent(_EventBase):
     event_type: Literal["input_file_injected"] = "input_file_injected"
-    from_phase: str | None
+    edge_transition_id: str
+    from_phases: list[str]
     to_phase: str
     changed_keys: list[str]
     blackboard_snapshot: dict[str, Any]
@@ -646,6 +697,8 @@ CallbackEvent = Annotated[
     | InterruptedEvent
     | ResumedEvent
     | AgentLoopIterationEvent
+    | EdgeStartEvent
+    | EdgeEndEvent
     | BlackboardReduceEvent
     | InputDispatchEvent
     | InputFileInjectedEvent,
@@ -656,6 +709,8 @@ CallbackEvent = Annotated[
 __all__ = [
     "SCHEMA_VERSION",
     "CallbackEvent",
+    "EdgeStartEvent",
+    "EdgeEndEvent",
     "PhaseStartEvent",
     "PredictChainStartEvent",
     "PhaseEndEvent",

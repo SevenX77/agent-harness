@@ -23,13 +23,13 @@ describe('eventInScope', () => {
 
   it('edge scope admits exactly the edge-op events of that transition (D5)', () => {
     const scope: TraceScope = { kind: 'edge', source: 'draft', target: 'review' }
-    expect(eventInScope(event({ event_type: 'input_dispatch', from_phase: 'draft', to_phase: 'review' }), scope)).toBe(true)
-    expect(eventInScope(event({ event_type: 'blackboard_reduce', from_phase: 'draft', to_phase: 'review' }), scope)).toBe(true)
-    expect(eventInScope(event({ event_type: 'input_file_injected', from_phase: 'draft', to_phase: 'review' }), scope)).toBe(true)
+    expect(eventInScope(event({ event_type: 'input_dispatch', from_phases: ['draft'], to_phase: 'review' }), scope)).toBe(true)
+    expect(eventInScope(event({ event_type: 'blackboard_reduce', from_phases: ['draft'], to_phase: 'review' }), scope)).toBe(true)
+    expect(eventInScope(event({ event_type: 'input_file_injected', from_phases: ['draft'], to_phase: 'review' }), scope)).toBe(true)
     // artifact_saved carries only phase_name: it belongs to the edge whose
     // UPSTREAM phase persisted it (same attribution edge-context.ts used).
     expect(eventInScope(event({ event_type: 'artifact_saved', phase_name: 'draft' }), scope)).toBe(true)
-    expect(eventInScope(event({ event_type: 'input_dispatch', from_phase: 'other', to_phase: 'review' }), scope)).toBe(false)
+    expect(eventInScope(event({ event_type: 'input_dispatch', from_phases: ['other'], to_phase: 'review' }), scope)).toBe(false)
     expect(eventInScope(event({ event_type: 'phase_start', phase_name: 'review' }), scope)).toBe(false)
   })
 
@@ -39,13 +39,13 @@ describe('eventInScope', () => {
     // dispatches crossing the Input boundary edge.
     const scope: TraceScope = { kind: 'edge', source: '__global_input__', target: 'draft' }
     expect(eventInScope(event({ event_type: 'input_dispatch', to_phase: 'draft' }), scope)).toBe(true)
-    expect(eventInScope(event({ event_type: 'input_dispatch', from_phase: 'other', to_phase: 'draft' }), scope)).toBe(false)
+    expect(eventInScope(event({ event_type: 'input_dispatch', from_phases: ['other'], to_phase: 'draft' }), scope)).toBe(false)
   })
 
   it('Input scope shows what leaves the input boundary; Output what arrives at it', () => {
     expect(eventInScope(event({ event_type: 'input_dispatch', to_phase: 'draft' }), { kind: 'input' })).toBe(true)
-    expect(eventInScope(event({ event_type: 'input_dispatch', from_phase: 'draft', to_phase: 'review' }), { kind: 'input' })).toBe(false)
-    expect(eventInScope(event({ event_type: 'blackboard_reduce', from_phase: 'review', to_phase: 'output' }), { kind: 'output' })).toBe(true)
+    expect(eventInScope(event({ event_type: 'input_dispatch', from_phases: ['draft'], to_phase: 'review' }), { kind: 'input' })).toBe(false)
+    expect(eventInScope(event({ event_type: 'blackboard_reduce', from_phases: ['review'], to_phase: 'output' }), { kind: 'output' })).toBe(true)
     expect(eventInScope(event({ event_type: 'phase_end', phase_name: 'review' }), { kind: 'output' })).toBe(false)
   })
 })

@@ -36,11 +36,12 @@ def test_phase_end_backfills_mocked_source_from_interception_cache() -> None:
     clear_mock_source_cache()
     callback = PredictTracingCallback()
 
-    callback.on_event(PhaseStartEvent(phase_name="draft", context={"topic": "mars"}))
+    callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={"topic": "mars"}))
     record_mock_source("draft", "heuristic_stub")
     callback.on_event(
         PhaseEndEvent(
             phase_name="draft",
+            phase_execution_id="exec-1",
             context={"story": "stub"},
             metrics={"input_tokens": 41, "output_tokens": 19, "total_cost": 3.14},
         )
@@ -59,11 +60,11 @@ def test_phase_source_cache_is_consumed_after_backfill() -> None:
     clear_mock_source_cache()
     callback = PredictTracingCallback()
 
-    callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
+    callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
     record_mock_source("draft", "manual")
-    callback.on_event(PhaseEndEvent(phase_name="draft", context={}, metrics={}))
-    callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
-    callback.on_event(PhaseEndEvent(phase_name="draft", context={}, metrics={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}, metrics={}))
+    callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}, metrics={}))
 
     assert callback.phases[0]["mocked_source"] == "manual"
     assert "mocked_source" not in callback.phases[1]
@@ -72,7 +73,7 @@ def test_phase_source_cache_is_consumed_after_backfill() -> None:
 def test_predict_llm_call_forces_zero_usage() -> None:
     callback = PredictTracingCallback()
 
-    callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
+    callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
     callback.on_event(
         LLMCallEvent(
             step_id="step-1",

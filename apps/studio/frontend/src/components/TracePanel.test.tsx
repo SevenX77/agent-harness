@@ -673,7 +673,7 @@ describe('TracePanel scope (D6 选中即范围)', () => {
       payload: {
         schema_version: '1.0',
         event_type: 'input_dispatch',
-        from_phase: 'draft',
+        from_phases: ['draft'],
         to_phase: 'review',
         dispatched_keys: ['topic'],
         timestamp: '2026-06-14T00:00:02Z',

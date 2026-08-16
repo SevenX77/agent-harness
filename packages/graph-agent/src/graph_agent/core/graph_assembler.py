@@ -49,6 +49,13 @@ from graph_agent.cognitive.prompt import (
 )
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
+from graph_agent.core.edge_transition import (
+    active_phase_execution_id,
+    close_edge_transition,
+    record_edge_operation,
+    transition_identity,
+    wrap_edge_transition,
+)
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.llm_provider import ChatModelProvider, LLMProvider, LLMProviderChatModel
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
@@ -237,6 +244,7 @@ def assemble_graph(
                 _compilation_cache,
                 predict_context=predict_context,
                 runtime_config=runtime_config,
+                upstream_phases=[dep for dep in topology[phase_id] if dep != "input"],
             ),
         )
         phase_ids.append(phase_id)
@@ -297,8 +305,10 @@ def _build_phase_node(
     _compilation_cache: dict[str, CompiledSkill],
     predict_context: Any = None,
     runtime_config: dict[str, Any] | None = None,
+    upstream_phases: list[str] | None = None,
 ) -> Any:
     ast = phase_doc.ast
+    upstreams = list(upstream_phases or [])
     if isinstance(ast, LogicNodeAST):
         return _wrap_phase_runtime_node(
             phase_id,
@@ -307,6 +317,7 @@ def _build_phase_node(
             node_kind="logic",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            upstream_phases=upstreams,
             predict_context=predict_context,
             runtime_config=runtime_config,
         )
@@ -331,6 +342,7 @@ def _build_phase_node(
             node_kind="subgraph",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            upstream_phases=upstreams,
             predict_context=predict_context,
             runtime_config=runtime_config,
         )
@@ -357,6 +369,7 @@ def _build_phase_node(
             node_kind="agent",
             source_path=phase_doc.path,
             callbacks=callbacks,
+            upstream_phases=upstreams,
             predict_context=predict_context,
             runtime_config=runtime_config,
         )
@@ -764,29 +777,20 @@ def _emit_blackboard_reduce(
     changed_key: str,
     reducer: str,
 ) -> None:
+    transition_id, from_phases, _ = transition_identity()
+    snapshot = state["data"].model_dump()
+    record_edge_operation([changed_key], snapshot)
     _safe_emit_event(
         callbacks,
         BlackboardReduceEvent(
-            from_phase=None,
+            edge_transition_id=transition_id,
+            from_phases=from_phases,
             to_phase=to_phase,
             changed_keys=[changed_key],
-            blackboard_snapshot=state["data"].model_dump(),
+            blackboard_snapshot=snapshot,
             reducer=reducer,
         ),
     )
-
-
-def _current_phase_from_state(state: WorkflowState) -> str | None:
-    flow_obj = state.get("flow")
-    if not flow_obj:
-        return None
-    if hasattr(flow_obj, "current_phase"):
-        phase = flow_obj.current_phase
-    elif isinstance(flow_obj, dict):
-        phase = flow_obj.get("current_phase")
-    else:
-        phase = None
-    return phase if isinstance(phase, str) and phase else None
 
 
 def _emit_input_dispatch(
@@ -799,10 +803,13 @@ def _emit_input_dispatch(
     raw_data = phase_inputs_from_state(mapper.build_phase_input(state))
     keys = schema_properties(mapper.input_schema)
     dispatched_keys = [key for key in keys if key in raw_data] if keys else list(raw_data.keys())
+    transition_id, from_phases, _ = transition_identity()
+    record_edge_operation(dispatched_keys, raw_data)
     _safe_emit_event(
         callbacks,
         InputDispatchEvent(
-            from_phase=_current_phase_from_state(state),
+            edge_transition_id=transition_id,
+            from_phases=from_phases,
             to_phase=phase_id,
             changed_keys=dispatched_keys,
             blackboard_snapshot=raw_data,
@@ -1126,6 +1133,7 @@ def _wrap_phase_runtime_node(
     node_kind: str,
     source_path: Path,
     callbacks: Any | None,
+    upstream_phases: list[str],
     runtime_config: dict[str, Any] | None = None,
     predict_context: Any = None,
 ) -> Any:
@@ -1150,9 +1158,17 @@ def _wrap_phase_runtime_node(
     )
 
     def _node_with_lifecycle(state: WorkflowState) -> dict[str, Any]:
+        # The transition that led here ends where this phase begins: the two
+        # segments are peers and must not overlap.
+        close_edge_transition(callbacks)
+        execution_id = active_phase_execution_id()
         _safe_emit_event(
             callbacks,
-            PhaseStartEvent(phase_name=phase_id, context=_observable_data_context(state)),
+            PhaseStartEvent(
+                phase_name=phase_id,
+                phase_execution_id=execution_id,
+                context=_observable_data_context(state),
+            ),
         )
         response_state: dict[str, Any] | None = None
         try:
@@ -1163,6 +1179,7 @@ def _wrap_phase_runtime_node(
                 callbacks,
                 PhaseEndEvent(
                     phase_name=phase_id,
+                    phase_execution_id=execution_id,
                     context=_phase_end_context(phase_id, state, response_state or {}),
                 ),
             )
@@ -1183,6 +1200,15 @@ def _wrap_phase_runtime_node(
         _dispatch_and_run,
         callbacks=callbacks,
         runtime_config=runtime_config,
+    )
+    # Inside the iterate/batch wrapper on purpose: each loop pass walks the
+    # edge again, and each pass is its own transition (D4).
+    wrapped = wrap_edge_transition(
+        phase_id,
+        wrapped,
+        upstream_phases=upstream_phases,
+        callbacks=callbacks,
+        branch_index_of=active_branch_index_var.get,
     )
     iterate = getattr(phase_ast, "iterate", None)
     if iterate is not None:
@@ -1432,13 +1458,17 @@ def _inject_declared_input_files(
                 cause=exc,
             )
         next_state = StateManager.update_business(next_state, **{spec.field: content})
+        transition_id, from_phases, _ = transition_identity()
+        snapshot = next_state["data"].model_dump()
+        record_edge_operation([spec.field], snapshot)
         _safe_emit_event(
             callbacks,
             InputFileInjectedEvent(
-                from_phase=state["flow"].current_phase or None,
+                edge_transition_id=transition_id,
+                from_phases=from_phases,
                 to_phase=phase_id,
                 changed_keys=[spec.field],
-                blackboard_snapshot=next_state["data"].model_dump(),
+                blackboard_snapshot=snapshot,
                 file_ref=source_ref,
                 target_field=spec.field,
             ),

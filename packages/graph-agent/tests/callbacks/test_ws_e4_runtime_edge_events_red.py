@@ -79,13 +79,17 @@ def test_serial_graph_emits_input_dispatch_for_each_phase_before_execution(
     assert [event.to_phase for event in dispatches] == ["prepare", "finish"]
 
     first, second = dispatches
-    assert first.from_phase is None
+    # The first phase has no predecessor in the graph, so the transition into
+    # it joins nothing -- an empty list, not a null "unknown".
+    assert first.from_phases == []
+    assert first.edge_transition_id
     assert first.dispatched_keys == ["source"]
     assert first.changed_keys == ["source"]
     assert first.branch_index is None
     assert first.blackboard_snapshot["source"] == "seed"
 
-    assert second.from_phase == "prepare"
+    assert second.from_phases == ["prepare"]
+    assert second.edge_transition_id != first.edge_transition_id
     assert second.dispatched_keys == ["prepared"]
     assert second.changed_keys == ["prepared"]
     assert second.branch_index is None

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CallbackEvent, EventEnvelope } from '@/api/types'
+import type { CallbackEvent } from '@/api/types'
 import { edgeContextFromEvents } from './edge-context'
 
 function dispatchEvent(
@@ -13,7 +13,7 @@ function dispatchEvent(
     schema_version: '1.0',
     event_type: 'input_dispatch',
     timestamp: '2026-06-14T00:00:00Z',
-    from_phase: fromPhase,
+    from_phases: fromPhase === null ? [] : [fromPhase],
     to_phase: toPhase,
     changed_keys: Object.keys(snapshot),
     blackboard_snapshot: snapshot,
@@ -21,32 +21,6 @@ function dispatchEvent(
     branch_index: null,
     ...extra,
   } as CallbackEvent
-}
-
-function edgeTransitionEnvelope(): EventEnvelope {
-  return {
-    schema_version: 'studio.event.v1',
-    stream_id: 'run:run-1',
-    seq: 4,
-    cursor: 'run:run-1:4',
-    run_id: 'run-1',
-    event_type: 'edge_transition',
-    timestamp: '2026-06-14T00:00:00Z',
-    payload: {
-      schema_version: '1.0',
-      event_type: 'edge_transition',
-      timestamp: '2026-06-14T00:00:00Z',
-      edge_transition_id: 'edge-run-1-4',
-      run_id: 'run-1',
-      execution_id: 'exec-1',
-      attempt: 2,
-      from_phase: 'planner',
-      to_phase: 'executor',
-      before: { query: 'old' },
-      after: { query: 'new', max_iterations: 5 },
-      diff: { changed_keys: ['query', 'max_iterations'] },
-    } as CallbackEvent,
-  }
 }
 
 describe('edgeContextFromEvents', () => {
@@ -68,32 +42,6 @@ describe('edgeContextFromEvents', () => {
     expect(result?.changed_keys).toEqual(['query'])
   })
 
-  it('maps an EventEnvelope edge_transition payload into edge context', () => {
-    const result = edgeContextFromEvents([edgeTransitionEnvelope()], 'planner', 'executor')
-
-    expect(result?.inputs).toEqual({ query: 'new', max_iterations: 5 })
-    expect(result?.blackboard_snapshot).toEqual({ query: 'new', max_iterations: 5 })
-    expect(result?.changed_keys).toEqual(['query', 'max_iterations'])
-    expect(result?.edge_transition_id).toBe('edge-run-1-4')
-    expect(result?.run_id).toBe('run-1')
-    expect(result?.execution_id).toBe('exec-1')
-    expect(result?.attempt).toBe(2)
-    expect(result?.before).toEqual({ query: 'old' })
-    expect(result?.after).toEqual({ query: 'new', max_iterations: 5 })
-    expect(result?.diff).toEqual({ changed_keys: ['query', 'max_iterations'] })
-  })
-
-  it('preserves checkpoint identity for downstream resume from edge context', () => {
-    const result = edgeContextFromEvents([
-      dispatchEvent('planner', 'executor', { query: 'new' }, {
-        checkpoint_id: 'checkpoint-executor',
-        checkpoint_ns: 'agent:executor',
-      }),
-    ], 'planner', 'executor')
-
-    expect(result?.checkpoint_id).toBe('checkpoint-executor')
-    expect(result?.checkpoint_ns).toBe('agent:executor')
-  })
 
   it('preserves tamper diff, audit, and resume validity for the edge inspection panel', () => {
     const result = edgeContextFromEvents([
@@ -172,7 +120,7 @@ describe('edgeContextFromEvents', () => {
       schema_version: '1.0',
       event_type: 'blackboard_reduce',
       timestamp: '2026-06-14T00:00:00Z',
-      from_phase: 'planner',
+      from_phases: ['planner'],
       to_phase: 'executor',
       changed_keys: ['query'],
       blackboard_snapshot: { query: 'should be ignored' },

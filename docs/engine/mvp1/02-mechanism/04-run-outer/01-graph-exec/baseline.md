@@ -1,14 +1,14 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: baseline
-status: drafted（现状对齐 WS-E1 Step5 + WS-E1-io + WS-E4 runtime 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;phase input dispatch、loop reduce、file input injection 已发 runtime edge events;action/tool 两套注册表;子图 inputs 已放宽且 outputs 仍严校;声明式 file input lazy 注入与 file/artifact 输出落盘已接入）
+status: drafted（现状对齐 WS-E1 Step5 + WS-E1-io + WS-E4 runtime 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;phase input dispatch、loop reduce、file input injection 已发 runtime edge events;action/tool 两套注册表;子图父子 io 编译期已不再比较,边界归运行期 StateMapper;声明式 file input lazy 注入与 file/artifact 输出落盘已接入）
 binds_alignment: ./mvp1-alignment.md
 binds_code: core/graph_assembler.py（_build_logic_node, _wrap_phase_runtime_node, _wrap_declared_input_files, _GraphIterateRuntime, _build_subgraph_node）· runtime/state_mapper.py:37 · core/actions.py（18/49）· core/loader.py（_validate_subgraph_io_contracts, _validate_iterate_compile_contracts）· core/runner.py（_save_v030_declared_file_outputs, _context_with_framework_output_sources）· tools/builtin/read_file.py（read_workspace_text_file）· io/manager.py:108（save_outputs）· io/storage.py:149（save_artifact）
 ---
 
 # 01-graph-exec — Baseline(当下代码实现逻辑)
 
-> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E4 runtime 后,phase input slice/dispatch 进入节点前会发 `InputDispatchEvent`,声明式 loop accumulate merge 写回后会发 `BlackboardReduceEvent`。WS-E1 Step5 已放宽 SUBGRAPH inputs 镜像校验:父 `SUBGRAPH.md io.inputs` 不再要求与子 `GRAPH.md io.inputs` 完全相等;outputs 仍严格相等。2026-07-05 runtime_config 收敛后,phase import binding 接成目标 phase 执行前 lazy 注入普通 blackboard,成功注入时发 `InputFileInjectedEvent`,runtime_config artifacts 与 `business_data_md` 原文保存接到 runner/io。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
+> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E4 runtime 后,phase input slice/dispatch 进入节点前会发 `InputDispatchEvent`,声明式 loop accumulate merge 写回后会发 `BlackboardReduceEvent`。SUBGRAPH 父子 io 的编译期比较已全部取消:WS-E1 Step5 先放宽 inputs 镜像校验,2026-06-20 commit `cad7dbc0` 再移除 outputs 的 1:1 闸(`[F-v3-subgraph-io-mismatch]` 保留 registry 条目但**无发出点**);父 `SUBGRAPH.md` 声明的 outputs 边界改由运行期 `StateMapper` 按声明 schema 守。2026-07-05 runtime_config 收敛后,phase import binding 接成目标 phase 执行前 lazy 注入普通 blackboard,成功注入时发 `InputFileInjectedEvent`,runtime_config artifacts 与 `business_data_md` 原文保存接到 runner/io。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
 
 ## UI/UX
 N/A。

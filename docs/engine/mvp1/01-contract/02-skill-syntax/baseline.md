@@ -28,7 +28,7 @@ format_ssot: ../../../skill-spec/00-FORMAT-GROUND-TRUTH.md
 | phase id | 代码内部有 phase id | 作者不在 frontmatter 写 `phase_id` |
 | iterate | 代码中仍可能读非规范循环字段 | 新规范只允许 `iterate` |
 | LOGIC action signature | 部分路径仍按非规范 Context 形态校验 | `def <action_name>(inputs) -> dict` |
-| SUBGRAPH IO | 部分路径仍有父子 schema 相等判断 | 父图子图 IO 都是黑板切片/合并边界，不要求全集 1:1 |
+| SUBGRAPH IO | 已对齐:编译期不再有任何父子 schema 相等判断(inputs 由 WS-E1 Step5 放宽,outputs 由 `cad7dbc0` 移除) | 父图子图 IO 都是黑板切片/合并边界，不要求全集 1:1 |
 | AGENT frontmatter | 部分路径仍会提升非规范包装层字段 | 新规范只允许 skill-spec 中列出的顶层字段 |
 
 ## 2. Drift Rule

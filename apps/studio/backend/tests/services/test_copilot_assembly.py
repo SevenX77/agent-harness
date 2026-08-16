@@ -139,11 +139,24 @@ def test_probe_path_stays_bare(tmp_path: Path) -> None:
     assert options.mcp_servers == {}
 
 
-def test_chat_skills_come_from_agents_tree(tmp_path: Path) -> None:
+def test_chat_skills_are_moirai_s_row_of_the_skill_map(tmp_path: Path) -> None:
+    """MoirAI carries her own row, not the whole pool (requirements.md R5.3:
+    "默认映射:moirai=moirai-intro").
+
+    The CLI path already derives the master's skills this way
+    (`lib.rs` `skills_for_agent(&map, "moirai")`); the panel path handing her
+    `skill_names()` gave her every specialist's skill belt, which makes
+    delegation pointless — holding `agent-prompt-design` herself, "I perform it
+    myself" is the correct reading of `roles/moirai.md`'s allocation criterion,
+    so she never dispatches Clotho (measured 2026-08-15: 0 Fate dispatches in
+    5 consecutive runs of a pure prompt-design probe).
+    """
+
     options = _chat_options(tmp_path)
-    assert options.skills == agent_assets.skill_names()
+    assert options.skills == agent_assets.load_skill_map()["moirai"]
     assert "moirai-intro" in options.skills
-    assert "eval-judgement" in options.skills
+    assert "agent-prompt-design" not in options.skills
+    assert "eval-judgement" not in options.skills
 
 
 def test_materialize_copies_agents_skills_into_workspace(tmp_path: Path) -> None:
@@ -197,3 +210,32 @@ def test_turn_prompt_injects_only_explicit_judge_context() -> None:
 
 def test_turn_prompt_without_context_is_plain_user_message() -> None:
     assert copilot._prompt_with_turn_context("no-context-skill", "hello") == "hello"
+
+
+def test_dispatched_fate_can_resolve_a_knowledge_link(tmp_path: Path) -> None:
+    """R3.8: 手册内置知识库入口，使含手册的每个拼装产物（含三女神
+    AgentDefinition prompt）都自带知识入口 —— "被派遣的女神在任务包内自主
+    research，不得因拼装组合差异而丢失知识库入口"。
+
+    A Fate's prompt is role + manual only; `contexts/panel.md` is appended to
+    the main thread, not to her. So the manual is the only layer that can carry
+    the route, and it has to carry the part that is true on both surfaces: a
+    `[[KB-xx-topic]]` link resolves to that stem's file, starting at
+    `KB-00-hub`. The panel's own directory statement is a surface delta on top
+    (`add_dirs` is a session-level mount — `AgentDefinition` has no such field,
+    so the mount grants her the read but never tells her where it landed).
+    """
+
+    options = _chat_options(tmp_path)
+    where = str(agent_assets.knowledge_dir())
+
+    append = options.system_prompt["append"]  # type: ignore[index]
+    assert where in append, "the main thread is told to mount it but not where it is"
+
+    agents = options.agents
+    assert agents is not None
+    for name, definition in agents.items():
+        assert where in definition.prompt, f"{name} would have to guess the location"
+        assert "may be stale" in definition.prompt, (
+            f"{name} is not warned off the workspace's own .ah/knowledge/ copy"
+        )

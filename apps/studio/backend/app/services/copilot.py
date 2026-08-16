@@ -221,6 +221,14 @@ def _materialize_copilot_skills(workspace_dir: str | Path) -> list[str]:
     return names
 
 
+def _with_knowledge_location(assembled: str) -> str:
+    """R3.8:每个含手册的拼装产物都要自带知识入口。主线程 append 与三女神
+    AgentDefinition prompt 是面板侧仅有的两个拼装产物,两个都要带 —— 女神的
+    prompt 是 role+manual,拿不到 contexts/panel.md,所以缺了这一句她只能靠猜。"""
+
+    return f"{assembled}\n\n{agent_assets.knowledge_location_note()}"
+
+
 def _mounted_doc_dirs() -> list[tuple[str, Path]]:
     """挂载给 copilot 只读查阅的目录 —— 收敛为随包知识库一条(R4.4/4.5):
     契约事实全部在 knowledge/(KB-00 为路由入口),不再挂开发仓 docs
@@ -788,8 +796,14 @@ def build_options(
         allowed_tools = _DECLARATIVE_ALLOWED_TOOLS.copy()
         permission_mode = "default"
         # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
-        # (SDK 会自动配好 Skill 工具,types.py skills 文档)。
-        skills = agent_assets.skill_names()
+        # (SDK 会自动配好 Skill 工具,types.py skills 文档)。MoirAI 只拿她在
+        # agent-skill-map.json 里的那一行,与 CLI 路同源(lib.rs 的
+        # skills_for_agent(&map, "moirai")),规格 R5.3「默认映射:moirai=
+        # moirai-intro」。整池给她会让派工失去理由:身上挂着 agent-prompt-design
+        # 的 MoirAI,按 roles/moirai.md 的分配判据「不完美契合就自己干」,
+        # 每次都该自己干——2026-08-15 实测纯 prompt 设计题连跑 5 次零派工。
+        # 物化仍是全量:三位女神在同一 workspace 里跑,她们的技能得在盘上。
+        skills = agent_assets.load_skill_map()["moirai"]
         mcp_servers = build_copilot_mcp_servers()
         agents = _goddess_agent_definitions()
         # R8.3: 执行类(Bash/PowerShell)强制 "ask"(压掉 CLI 沙箱自动放行),
@@ -866,8 +880,10 @@ def _session_system_prompt() -> SystemPromptPreset:
     return {
         "type": "preset",
         "preset": "claude_code",
-        "append": agent_assets.assemble_inline(
-            ["roles/moirai.md", "operating-manual.md", "contexts/panel.md"]
+        "append": _with_knowledge_location(
+            agent_assets.assemble_inline(
+                ["roles/moirai.md", "operating-manual.md", "contexts/panel.md"]
+            )
         ),
     }
 
@@ -912,8 +928,10 @@ def _goddess_agent_definitions() -> dict[str, AgentDefinition]:
     return {
         name: AgentDefinition(
             description=_GODDESS_DESCRIPTIONS[name],
-            prompt=agent_assets.assemble_inline(
-                [f"roles/{name}.md", "operating-manual.md"]
+            prompt=_with_knowledge_location(
+                agent_assets.assemble_inline(
+                    [f"roles/{name}.md", "operating-manual.md"]
+                )
             ),
             tools=_GODDESS_TOOLS[name],
             skills=skill_map[name],

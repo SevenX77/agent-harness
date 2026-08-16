@@ -29,3 +29,4 @@ This document outlines the surface mechanisms and runtime assumptions unique to 
   - `clotho`: Domain Analysis, Graph Design, and Agent Prompt Design.
   - `lachesis`: Compile Error Repair and Graph Design.
   - `atropos`: Evaluation Judgement and Agent Prompt Design.
+- **A Dispatched Fate Acts on This Workspace**: On this surface a Fate runs as a full session of her own, reaching the workspace as widely as the session that dispatched her — she reads, writes, and runs, and nothing pauses to ask first. A dispatch here is an action on the workspace, not a consultation about it. So the package must carry its own boundary: name the files that are hers to change, name what must stay untouched, and name the deliverable. Work that must produce a design without altering anything has to say exactly that, because there is no separate mechanism that will hold her to it.

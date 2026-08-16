@@ -5453,9 +5453,15 @@ mod tests {
         )
         .expect("moirai-intro skill asset");
         assert!(intro.contains("name: moirai-intro"));
-        // surface-neutral (R5.4): the CLI status verb comes from the surface
-        // context, the skill itself references it without asserting mechanics
-        assert!(intro.contains("ah ps"));
+        // Surface-neutral (R5.4 + design.md "无表面维度(intro 已中立)"): both
+        // runtimes load this one skill, so it may not name either one's fleet
+        // verb. It used to spell out "CLI Mode: run `ah ps`" / "Panel Mode:
+        // resident" — which made a shared skill the authority on a surface
+        // fact and put an `ah` command outside the CLI surface layer, the very
+        // restatement R7.5 forbids because it drifts on every ah upgrade.
+        assert!(!intro.contains("ah ps"));
+        assert!(!intro.contains("CLI Mode"));
+        assert!(!intro.contains("Panel Mode"));
     }
 
     /// 决议 2026-08-05 D-F1(2026-08-05 真机修订)—— 对话记录必须经宿主 HOME 持久化,
@@ -7833,7 +7839,9 @@ mod tests {
         assert!(eval.contains("name: eval-judgement"));
         let intro = std::fs::read_to_string(intro_skill).unwrap();
         assert!(intro.contains("name: moirai-intro"));
-        assert!(intro.contains("ah ps"));
+        // materialized surface-neutral: no runtime's fleet verb inside the
+        // shared skill (R5.4 — see the neutrality test above)
+        assert!(!intro.contains("ah ps"));
         // knowledge base materializes alongside rules and skills
         let kb_hub = root.join(".ah").join("knowledge").join("KB-00-hub.md");
         assert!(kb_hub.is_file());

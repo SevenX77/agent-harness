@@ -57,7 +57,7 @@ from graph_agent.core.schema_engine import (
     dump_without_invented_nones,
 )
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
-from graph_agent.tools.md_to_json import parse_md
+from graph_agent.tools.md_to_json import UnreadLine, parse_md
 
 logger = logging.getLogger(__name__)
 
@@ -897,6 +897,10 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 story=tuple(story),
             )
 
+        parse_gap = _parse_gap_validation(blocks, story)
+        if parse_gap is not None:
+            return parse_gap
+
         parsed_items: list[dict[str, Any]] = []
         errors: list[str] = []
         for block in blocks:
@@ -919,12 +923,33 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             )
         story.append(f"Schema check against {schema_label!r}: all {len(blocks)} block(s) passed.")
 
-        # Phase 2 A2 v3 (design v4 §3.2 #3): run the per-phase business
-        # validator on the parsed items list. Pydantic has already
-        # asserted the per-item shape; the business validator owns
-        # cross-item / domain-specific rules (e.g. line-number continuity
-        # for text-segmentation, ID-uniqueness for event-extraction).
-        # Validators receive ``list[dict[str, Any]]`` per A1 §2.4.
+        business_rejection = self._business_stage_validation(parsed_items, story)
+        if business_rejection is not None:
+            return business_rejection
+
+        return _FinishValidation(
+            ok=True,
+            schema_validation="passed",
+            parsed_items=parsed_items,
+            story=tuple(story),
+        )
+
+    def _business_stage_validation(
+        self,
+        parsed_items: list[dict[str, Any]],
+        story: list[str],
+    ) -> _FinishValidation | None:
+        """Phase 2 A2 v3 (design v4 §3.2 #3): run the per-phase business
+        validator on the parsed items list. Pydantic has already asserted the
+        per-item shape; the business validator owns cross-item /
+        domain-specific rules (e.g. line-number continuity for
+        text-segmentation, ID-uniqueness for event-extraction). Validators
+        receive ``list[dict[str, Any]]`` per A1 §2.4.
+
+        Returns a rejection, or ``None`` when the stage passed — the shape
+        every rejecting stage of ``_validate_finish_args`` now uses, so the
+        pipeline body reads as the sequence of stages it is.
+        """
         business_errors = self._run_business_validator(parsed_items)
         if business_errors:
             story.append(
@@ -940,13 +965,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             story.append("No business validator is declared for this phase.")
         else:
             story.append(f"Business validator passed {len(parsed_items)} item(s).")
-
-        return _FinishValidation(
-            ok=True,
-            schema_validation="passed",
-            parsed_items=parsed_items,
-            story=tuple(story),
-        )
+        return None
 
     def _parse_finish_markdown(
         self,
@@ -1232,6 +1251,53 @@ def _finish_block_validation_errors(item_id: str, exc: PydanticValidationError) 
         msg = str(detail.get("msg", "validation error"))
         errors.append(f"item {item_id}: {loc}: {msg}")
     return errors
+
+
+def _parse_gap_validation(blocks: list[Any], story: list[str]) -> _FinishValidation | None:
+    """Refuse a submission whose Markdown was only PARTIALLY read, and say which
+    lines went unread. Returns ``None`` when the parse consumed everything.
+
+    Reported alone, ahead of the schema and business stages, because a partial
+    parse means those stages would be judging something the model never wrote.
+    Real run 09f67b86 (2026-08-16): five nested-bullet lines were dropped with
+    only a ``logger.warning``, the truncated list still satisfied the schema,
+    and the phase validator's "No segments produced. Re-analyze the chapter
+    text." sent the model to re-analyse a chapter that was never the problem.
+
+    One error entry per unread line — each quoting the line verbatim with its
+    number in business_data_md — behind one instruction naming the two shapes
+    the exit contract actually renders
+    (``cognitive/prompt.py._render_business_data_md_skeleton``), so the advice
+    cannot drift away from what the model was told to write.
+
+    ``story`` is appended to in place: it is the running narration of this
+    submission's pipeline, and the parse-gap step belongs in it in order.
+    """
+    unread: list[tuple[Any, UnreadLine]] = [
+        (block, entry) for block in blocks for entry in block.meta.unread
+    ]
+    if not unread:
+        return None
+    story.append(
+        f"parse_md left {len(unread)} line(s) of business_data_md unread; "
+        "the schema and business stages did not run on truncated data."
+    )
+    errors = [
+        f"business_data_md 有 {len(unread)} 行没有被读进任何字段，本次输出是残缺的。"
+        "请把下面每一行改写成 `- 字段名: 值`（或把整个对象改写成 `## ` 标题下的一个 "
+        "```json 代码块），然后重新提交。"
+    ]
+    errors.extend(
+        f"item {block.meta.id or 'unknown'}: business_data_md 第 {entry.line_number} 行"
+        f" {entry.text!r} 没有被读进任何字段 —— {entry.reason}"
+        for block, entry in unread
+    )
+    return _FinishValidation(
+        ok=False,
+        schema_validation="failed",
+        errors=tuple(errors),
+        story=tuple(story),
+    )
 
 
 def _has_strict_output_schema(output_schema: dict[str, Any] | SchemaObject | None) -> bool:

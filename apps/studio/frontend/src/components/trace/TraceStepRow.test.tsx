@@ -19,6 +19,7 @@ function renderRow(event: CallbackEvent, expanded = false): string {
       step={{
         key: 'evt-0',
         phase: eventPhase(event),
+        segment: null,
         stepId: null,
         status: 'done',
         start: { event, index: 0 },
@@ -155,6 +156,8 @@ describe('TraceStepRow status (decision 2026-08-09 D4)', () => {
         step={{
           key: 'evt-0',
           phase: 'draft',
+          segment: null,
+          
           stepId: null,
           status: 'running',
           start: { event: event({ event_type: 'prompt_captured', phase_name: 'draft' }), index: 0 },
@@ -178,6 +181,8 @@ describe('TraceStepRow status (decision 2026-08-09 D4)', () => {
         step={{
           key: 'evt-0',
           phase: 'draft',
+          segment: null,
+          
           stepId: null,
           status: 'done',
           start: { event: event({ event_type: 'prompt_captured', phase_name: 'draft' }), index: 0 },
@@ -208,6 +213,8 @@ describe('TraceStepRow × step status (decision 2026-08-13 D7)', () => {
         step={{
           key: 'evt-0',
           phase: 'draft',
+          segment: null,
+          
           stepId: 's1',
           status,
           start: { event: start, index: 0 },

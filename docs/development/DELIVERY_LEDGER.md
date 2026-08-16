@@ -604,8 +604,8 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 |---|---|---|
 | 0 | 发送端统一到 `_safe_emit_event` + 删 8 个旧钩子与翻译层 | ✅ #836 已合并。实测到的两个真缺陷:`execution_control.py` 调 `cb.on_dead_end_pruned` 而引擎装配的 `_EventSinkCallbackAdapter` 只有 `on_event`,AttributeError 被自吞——死胡同剪枝**从未进过任何 trace**(磁盘上每份 trace 该事件计数为 0);同文件的循环上报用未声明的 `on_loop_detected`,同样谁也收不到,删除而非补类型(活所有者是 `LoopDetectionMiddleware`,补了会双报) |
 | A | 引擎转移所有者 + `edge_start`/`edge_end` + `edge_transition_id` + `phase_execution_id` | ✅ 随本行同 PR。新模块 `core/edge_transition.py` 拥有转移段;`from_phases` 取自编译期拓扑而非 `flow.current_phase` 推断,`from_phase_execution_ids` 复数取自新的 `flow.phase_execution_ids`(挂进 `_FLOW_DICT_MERGE_FIELDS`,扇出下按 key 合并不互相覆盖)。三个边操作事件的 `from_phase` 单数字段**删除**,前端 `edge-context.ts` / `trace-scope.ts` 同批改读 `from_phases`,`edge_transition` 幽灵分支及其夹具一并删除(原属 PR B 的 D6,因同处一行代码提前落地) |
-| B | 前端分段模型:节点段与边段平级呈现、按段标识分组(D5) | ⏳ 待办 |
-| C | 后端按段记账(`run_report.py`,D8) | ⏳ 待办 |
+| B | 前端分段模型:节点段与边段平级呈现、按段标识分组(D5) | ✅ 随本行同 PR。`TraceStep` 增加 `segment: {kind:'phase'\|'edge', id}`;`edge_start`/`edge_end` 像 `prompt_captured`/`llm_call` 一样配对成**一行**分段;边操作按 `edge_transition_id` 归入边段,不再被读成"下游节点的事";同一 phase 的事件按 `phase_execution_id` 分组而非按名字——顺带修掉一个真缺陷:外层循环第二次执行同一 phase 时会继承上一次的 `agent_loop_iteration` 计数,在自己的 marker 到达前就把步骤标成「Iteration 3」 |
+| C | 后端按段记账(`run_report.py`,D8) | ✅ 随本行同 PR。`_event_node` 见到 `edge_transition_id` 就归到转移段(标签 `上游 -> 下游`,扇入用 `+` 连,无上游写 `input`),不再走 `to_phase` 兜底把边上的活与失败算到下游节点头上;`edge_start`/`edge_end` 给转移段自己的 wall time |
 
 合并后按 `.claude/skills/studio-verify` 真机点验交五列报告。
 

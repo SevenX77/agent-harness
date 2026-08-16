@@ -41,6 +41,17 @@ export function eventPhase(event: CallbackEvent): string {
   return typeof phase === 'string' && phase !== '' ? phase : RUN_SCOPE
 }
 
+/**
+ * How a transition reads: the phases it joins, in the direction it ran.
+ * A transition with no upstream phases starts at the graph's input
+ * boundary, which the reader knows as Input.
+ */
+function transitionLabel(event: CallbackEvent): string {
+  const from = Array.isArray(event.from_phases) ? (event.from_phases as string[]) : []
+  const to = typeof event.to_phase === 'string' ? event.to_phase : RUN_SCOPE
+  return `${from.length > 0 ? from.join(' + ') : 'Input'} → ${to}`
+}
+
 export function isRunScopedEvent(event: CallbackEvent): boolean {
   return eventPhase(event) === RUN_SCOPE
 }
@@ -60,6 +71,10 @@ export function eventMessage(event: CallbackEvent): string {
       return `Phase started: ${eventPhase(event)}`
     case 'phase_end':
       return `Phase finished: ${eventPhase(event)}`
+    case 'edge_start':
+      return `Transition started: ${transitionLabel(event)}`
+    case 'edge_end':
+      return `Transition finished: ${transitionLabel(event)}`
     case 'prompt_captured':
       return `Prompt captured${typeof event.template_source === 'string' ? ` from ${event.template_source}` : ''}`
     case 'llm_call':

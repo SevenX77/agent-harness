@@ -177,10 +177,10 @@ def test_optional_params_use_full_json_schema_with_required_lists() -> None:
 
 def test_every_defined_tool_is_registered() -> None:
     # 真机抓到 query_run_trace/wait_for_run/set_output_artifacts 定义了却没进注册表,
-    # 在两个面上都是死工具。防漂移:模块里每个 @tool 定义都必须在 _copilot_mcp_tools()。
+    # 在两个面上都是死工具。防漂移:模块里每个 @tool 定义都必须在 copilot_mcp_tools()。
     from app.services import copilot_tools
 
-    registered = {tool.name for tool in copilot_tools._copilot_mcp_tools()}
+    registered = {tool.name for tool in copilot_tools.copilot_mcp_tools()}
     defined = {
         obj.name
         for name, obj in vars(copilot_tools).items()
@@ -192,9 +192,9 @@ def test_every_defined_tool_is_registered() -> None:
 def test_data_read_tools_are_pre_allowed_on_both_surfaces() -> None:
     # 三面注册:MCP 工具表、免审批清单、CLI allowlist(lib.rs 由 Rust 测试锁)。
     from app.services.copilot import _DECLARATIVE_ALLOWED_TOOLS
-    from app.services.copilot_tools import _copilot_mcp_tools
+    from app.services.copilot_tools import copilot_mcp_tools
 
-    tool_names = {tool.name for tool in _copilot_mcp_tools()}
+    tool_names = {tool.name for tool in copilot_mcp_tools()}
     for name in ("read_skill_file", "get_workspace_config", "list_run_artifacts", "read_run_artifact"):
         assert name in tool_names
         assert f"mcp__studio__{name}" in _DECLARATIVE_ALLOWED_TOOLS

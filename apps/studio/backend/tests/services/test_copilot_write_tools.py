@@ -47,7 +47,7 @@ def _payload(result: dict) -> dict:
 @pytest.fixture()
 def seeded_skill(studio_roots: tuple[Path, Path]) -> Path:
     skills_dir, _ = studio_roots
-    result = asyncio.run(copilot_tools.create_skill_tool.handler({"skill_id": "write-skill"}))
+    result = asyncio.run(copilot_tools.create_skill_tool.handler({"new_skill_id": "write-skill"}))
     assert "is_error" not in result
     return skills_dir / "write-skill"
 
@@ -146,9 +146,9 @@ def test_bind_test_input_rejects_bad_names_and_non_object_content(
 
 def test_write_tools_are_registered_and_approval_gated() -> None:
     from app.services.copilot import _DECLARATIVE_ALLOWED_TOOLS, _MCP_APPROVAL_WRITE_TOOLS
-    from app.services.copilot_tools import _copilot_mcp_tools
+    from app.services.copilot_tools import copilot_mcp_tools
 
-    tool_names = {tool.name for tool in _copilot_mcp_tools()}
+    tool_names = {tool.name for tool in copilot_mcp_tools()}
     for name in ("write_skill_file", "bind_test_input"):
         assert name in tool_names
         assert f"mcp__studio__{name}" in _MCP_APPROVAL_WRITE_TOOLS

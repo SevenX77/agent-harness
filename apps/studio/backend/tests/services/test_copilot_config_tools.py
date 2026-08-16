@@ -14,6 +14,8 @@ from typing import Any
 import pytest
 from app.services import copilot_tools
 
+from tests.support.copilot_binding import binding_for
+
 
 def _payload(result: dict[str, Any]) -> Any:
     return json.loads(result["content"][0]["text"])
@@ -323,9 +325,9 @@ def test_apply_model_profile_to_role_reuses_router(
 
 
 def test_mcp_server_exposes_full_parity_toolset() -> None:
-    servers = copilot_tools.build_copilot_mcp_servers()
+    servers = copilot_tools.build_copilot_mcp_servers(binding_for("/ws"))
     assert set(servers) == {"studio"}
-    tool_names = {t.name for t in copilot_tools._copilot_mcp_tools()}
+    tool_names = {t.name for t in copilot_tools.copilot_mcp_tools()}
     assert {
         "get_llm_roles",
         "search_llm_registry",

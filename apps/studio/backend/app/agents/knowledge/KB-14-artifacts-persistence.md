@@ -48,8 +48,8 @@ was asked to persist, not just its inputs.
 | Question | Tool |
 |---|---|
 | What artifacts are declared right now? | `get_workspace_config` (projection includes `artifacts`) |
-| What did a run actually write? | `list_run_artifacts(skill_id, run_id?)` — names + sizes per run |
-| What is inside one artifact? | `read_run_artifact(skill_id, run_id, name)` — bounded (48 KB cap, truncation flagged) |
+| What did a run actually write? | `list_run_artifacts(run_id?)` — names + sizes per run |
+| What is inside one artifact? | `read_run_artifact(run_id, name)` — bounded (48 KB cap, truncation flagged) |
 | Change the declarations | `set_output_artifacts` (approval-gated write; same service as the I/O panel) |
 
 Trust the causal chain, not the declaration alone: declared ⇒ run ⇒ listed ⇒ read.

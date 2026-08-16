@@ -15,6 +15,10 @@ canonicalize/级联/领域事件全复用),copilot 绝不直改 `llm/` 配置文
   结构化错误。旧的「零审批直写 + before/after 一键撤销」已整体废除。
 - 明文密钥安全隔离:注册表读工具靠 SecretStr 自动脱敏;endpoint 写工具的审批
   明细硬脱敏 api_key。读取明文密钥的 REST 接口绝不投影给 MCP 工具面。
+- **`skill_id` 从不由模型给出**:声明了 `skill_id` 的工具,该参数在建 server 时
+  被 `copilot_skill_binding` 摘掉,值由会话打开的那个工作区注入(理由见该模块
+  docstring)。要铸一个**新** skill 的工具(create_skill)用 `new_skill_id`,那是
+  新名字而不是对已有 skill 的引用,模型无从猜起。
 """
 
 from __future__ import annotations
@@ -24,10 +28,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpServerConfig
 
 from app.services import web_access
+from app.services.copilot_skill_binding import CopilotSkillBinding, bind_tools_to_open_skill
 
 COPILOT_MCP_SERVER_NAME = "studio"
 COPILOT_MCP_TOOL_PREFIX = f"mcp__{COPILOT_MCP_SERVER_NAME}__"
@@ -589,11 +594,11 @@ async def predict_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "create_skill",
-    "新建一个 skill:落到默认 Skills 目录并登记索引(UI 立即可见)。skill_id 用"
+    "新建一个 skill:落到默认 Skills 目录并登记索引(UI 立即可见)。new_skill_id 用"
     "小写字母开头、只含小写字母/数字/连字符;files 可选(相对路径→内容),缺省时"
     "服务端自动铺可编译的骨架文件,不留裸目录。创建后用 Write/Edit 完善内容、"
     "compile_skill 验证。属于写操作, 需用户审批。",
-    {"skill_id": str, "files": dict},
+    {"new_skill_id": str, "files": dict},
 )
 async def create_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
     from pydantic import ValidationError
@@ -602,9 +607,10 @@ async def create_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
     from app.models.skills import CreateSkillReq
     from app.services.skills import create_new_skill
 
-    skill_id = str(args.get("skill_id", "")).strip()
+    # 新铸的名字,不是对已有 skill 的引用 —— 所以这一个仍由模型给出。
+    skill_id = str(args.get("new_skill_id", "")).strip()
     if not skill_id:
-        return _text_result("skill_id 不能为空", is_error=True)
+        return _text_result("new_skill_id 不能为空", is_error=True)
     try:
         # 与 POST /api/skills 同一份入参契约(CreateSkillReq 的 pattern/字段校验),
         # 拼写错误在工具边界一次拒绝,不落半成品目录。
@@ -1352,7 +1358,7 @@ async def publish_skill_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "fork_skill",
-    "把一个 skill(含只读/社区 skill)复制成自己的新 skill:new_skill_id 用小写"
+    "把**当前打开的 skill** 复制成自己的新 skill:new_skill_id 用小写"
     "字母开头、只含小写字母/数字/连字符。属于写操作, 需用户审批。",
     {"skill_id": str, "new_skill_id": str},
 )
@@ -1975,10 +1981,13 @@ async def fetch_web_page_tool(args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _copilot_mcp_tools() -> list[Any]:
+def copilot_mcp_tools() -> list[SdkMcpTool[Any]]:
     """MoirAI 面向 Settings 鼠标能力的 MCP 工具全集(读写对称 + 探测复用)。
     写工具经 can_use_tool 挂起审批(见 copilot._MCP_APPROVAL_WRITE_TOOLS),读/探测
-    工具在 copilot._DECLARATIVE_ALLOWED_TOOLS 免审批放行。"""
+    工具在 copilot._DECLARATIVE_ALLOWED_TOOLS 免审批放行。
+
+    这里返回的是**未绑定**的定义:它们仍带着 `skill_id` 参数,只有经
+    `build_copilot_mcp_servers` 绑定到会话打开的 skill 之后才允许交给模型。"""
 
     return [
         get_llm_roles_tool,
@@ -2026,15 +2035,17 @@ def _copilot_mcp_tools() -> list[Any]:
     ]
 
 
-def build_copilot_mcp_servers() -> dict[str, McpServerConfig]:
-    """Chat 会话的 in-process MCP server 集(probe 路不挂,保持探测确定性)。"""
+def build_copilot_mcp_servers(binding: CopilotSkillBinding) -> dict[str, McpServerConfig]:
+    """Chat 会话的 in-process MCP server 集(probe 路不挂,保持探测确定性)。
+
+    ``binding`` 没有默认值:一个未绑定 skill 的会话工具面根本不该存在,让调用方
+    "记得传"就是把结构性保证降级成纪律。
+    """
 
     return {
         COPILOT_MCP_SERVER_NAME: create_sdk_mcp_server(
             name=COPILOT_MCP_SERVER_NAME,
             version="1.0.0",
-            tools=[
-                *_copilot_mcp_tools(),
-            ],
+            tools=bind_tools_to_open_skill(copilot_mcp_tools(), binding),
         )
     }

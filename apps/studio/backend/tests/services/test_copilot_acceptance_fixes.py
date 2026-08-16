@@ -19,6 +19,8 @@ import pytest
 from app.services import copilot, copilot_tools
 from claude_agent_sdk import PermissionResultAllow
 
+from tests.support.copilot_binding import binding_for
+
 
 def test_tool_result_summary_unwraps_mcp_text_blocks() -> None:
     inner = '{"role_name": "writer", "before": null, "after": {}}'
@@ -123,7 +125,9 @@ def test_build_options_registers_execution_ask_matcher(tmp_path: Path) -> None:
     async def cb(name, tool_input, ctx):  # noqa: ANN001
         return PermissionResultAllow()
 
-    options = copilot.build_options(None, "key", tmp_path, can_use_tool=cb)
+    options = copilot.build_options(
+        None, "key", tmp_path, can_use_tool=cb, skill_binding=binding_for(tmp_path)
+    )
     assert options.hooks is not None
     matchers = {m.matcher: m for m in options.hooks["PreToolUse"]}
     matcher = matchers[copilot._EXECUTION_BOUNDARY_MATCHER]

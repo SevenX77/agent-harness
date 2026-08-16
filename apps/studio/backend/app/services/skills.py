@@ -347,8 +347,67 @@ def _studio_preflight_lint_errors(
     compile_errors = [
         *_validate_runtime_inputs_against_graph_input_schema(compiled, runtime_config),
         *_validate_golden_against_output_schema(skill_dir.name, str(skill_dir)),
+        *_validate_manifest_name_is_the_registered_id(compiled.manifest.name, skill_dir),
     ]
     return [_lint_error_from_compile_error(error) for error in compile_errors]
+
+
+def _validate_manifest_name_is_the_registered_id(
+    manifest_name: str,
+    skill_dir: Path,
+) -> list[CompileError]:
+    """Warn when a skill answers "who am I" two different ways.
+
+    A skill has two identities: the key it is registered under in
+    ``skill_index.json`` (derived from the directory name by the Rust writer,
+    ``native_fs.rs`` ``skill_id_from_workspace_root``) and the ``name:`` in its
+    GRAPH.md frontmatter. Nothing ever compared them, so copying a skill
+    directory — which does not rewrite ``name:`` — leaves the copy advertising
+    the SOURCE skill's id. An agent reading the open GRAPH.md then addresses the
+    wrong skill (2026-08-15 incident; the structural half of that fix is
+    ``services/copilot_skill_binding.py``, this is the half that makes the
+    ambiguity visible to the human).
+
+    The index is Studio's own registry — the engine has never heard of it — so
+    this is a Studio-owned preflight check, not an engine compile rule (AGENTS.md
+    "Compile/lint 单出口"). It is a WARNING: a registry hygiene problem is not a
+    graph defect and must not block compiling. Directories that are not in the
+    index at all stay silent: realtime lint compiles a throwaway sandbox copy in
+    the OS temp dir, and a diagnostic on every keystroke there would be noise
+    about a directory the user never opened.
+    """
+
+    registered_id = registered_skill_id_for_dir(skill_dir)
+    if registered_id is None or manifest_name == registered_id:
+        return []
+    return [
+        CompileError(
+            file="GRAPH.md",
+            line=_frontmatter_name_line(skill_dir),
+            field="name",
+            severity="warning",
+            message=(
+                f"GRAPH.md says name: {manifest_name}, but this folder is open in Studio as "
+                f"{registered_id!r}. Studio resolves {manifest_name!r} to a different skill, so "
+                f"anything addressing this skill by its manifest name edits that other skill. "
+                f"Rename it to {registered_id!r}."
+            ),
+            error_code="STUDIO_MANIFEST_NAME_NOT_REGISTERED_ID",
+        )
+    ]
+
+
+def _frontmatter_name_line(skill_dir: Path) -> int | None:
+    """1-based line of the frontmatter ``name:`` key, so the editor can mark it."""
+
+    try:
+        lines = (skill_dir / "GRAPH.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for index, line in enumerate(lines, start=1):
+        if line.startswith("name:"):
+            return index
+    return None
 
 
 def _lint_error_from_compile_error(error: CompileError) -> LintError:
@@ -2064,23 +2123,54 @@ def _has_golden(skill_dir: Path) -> bool:
     return golden_dir_for(skill_dir).exists()
 
 
-def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
+def _sync_skill_index() -> dict[str, dict[str, str]]:
     index_path = config.SKILL_INDEX_PATH
     if not index_path.exists():
-        return None
+        return {}
     try:
         raw = json.loads(index_path.read_text(encoding="utf-8"))
     except Exception:
-        return None
+        return {}
     if not isinstance(raw, dict):
-        return None
-    entry = raw.get(skill_id)
-    if not isinstance(entry, dict) or not isinstance(entry.get("absolute_path"), str):
-        return None
-    return {
-        "absolute_path": entry["absolute_path"],
-        "l2_remote_url": (entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""),
-    }
+        return {}
+    index: dict[str, dict[str, str]] = {}
+    for skill_id, entry in raw.items():
+        if not isinstance(skill_id, str) or not isinstance(entry, dict):
+            continue
+        if not isinstance(entry.get("absolute_path"), str):
+            continue
+        remote_url = entry.get("l2_remote_url")
+        index[skill_id] = {
+            "absolute_path": entry["absolute_path"],
+            "l2_remote_url": remote_url if isinstance(remote_url, str) else "",
+        }
+    return index
+
+
+def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
+    return _sync_skill_index().get(skill_id)
+
+
+def registered_skill_id_for_dir(skill_dir: Path) -> str | None:
+    """The skill id whose index entry points at this directory, if any.
+
+    The reverse of :func:`resolve_skill_dir`. Ported from the Rust writer's
+    ``registered_skill_id_for_root`` (``apps/studio/tauri/src/native_fs.rs``) —
+    the index is the registry that answers "what is this folder called here",
+    and asking it beats trusting whatever the folder's own manifest claims.
+    """
+
+    wanted = _index_path_key(skill_dir)
+    for skill_id, entry in _sync_skill_index().items():
+        if _index_path_key(Path(entry["absolute_path"])) == wanted:
+            return skill_id
+    return None
+
+
+def _index_path_key(path: Path) -> str:
+    # normcase folds Windows case + separators so D:\x and d:/x are one folder;
+    # on POSIX it is the identity, keeping case significant where it must be.
+    return os.path.normcase(str(path.expanduser().resolve(strict=False)))
 
 
 def _lint_errors_from_exception(exc: Exception, skill_dir: Path | None = None) -> list[LintError]:

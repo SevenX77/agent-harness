@@ -25,6 +25,8 @@ from claude_agent_sdk import (
 )
 from pydantic import SecretStr
 
+from tests.support.copilot_binding import binding_for
+
 
 def _drain(queue: asyncio.Queue[object]) -> list[object]:
     items: list[object] = []
@@ -86,7 +88,9 @@ def test_build_options_safe_write_routes_everything_through_callback() -> None:
     async def cb(name, tool_input, ctx):  # noqa: ANN001
         return PermissionResultAllow()
 
-    opts = copilot.build_options("https://x", "key", "/ws", can_use_tool=cb)
+    opts = copilot.build_options(
+        "https://x", "key", "/ws", can_use_tool=cb, skill_binding=binding_for(Path("/ws"))
+    )
     # R8.1: 读类三件 + 零审批 MCP 声明式直放(不再进回调);Write/Edit/Bash
     # 不在 allowlist,仍走 "ask" 路径经 can_use_tool 进审批 UX。
     assert "Read" in opts.allowed_tools

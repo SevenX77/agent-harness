@@ -9,6 +9,8 @@ from pathlib import Path
 from app.services import agent_assets, copilot
 from claude_agent_sdk import PermissionResultAllow
 
+from tests.support.copilot_binding import binding_for
+
 # Read/probe MCP tools ride the declarative allow-list (zero approval). WRITE
 # tools (config truth + skill entities) are deliberately absent — they hold for
 # approval via can_use_tool.
@@ -63,7 +65,9 @@ async def _allow(name, tool_input, ctx):  # noqa: ANN001, ANN202
 
 
 def _chat_options(tmp_path: Path):  # noqa: ANN202
-    return copilot.build_options(None, "key", tmp_path, can_use_tool=_allow)
+    return copilot.build_options(
+        None, "key", tmp_path, can_use_tool=_allow, skill_binding=binding_for(tmp_path)
+    )
 
 
 def test_system_prompt_is_preset_plus_assembled_append(tmp_path: Path) -> None:

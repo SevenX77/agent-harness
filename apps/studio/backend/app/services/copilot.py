@@ -83,6 +83,7 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
 )
 from app.services import agent_assets
+from app.services.copilot_skill_binding import CopilotSkillBinding
 from app.services.copilot_tools import build_copilot_mcp_servers
 
 SessionKey = tuple[str, str, str]
@@ -762,6 +763,7 @@ def build_options(
     env_overrides: Mapping[str, str] | None = None,
     can_use_tool: Callable[[str, dict[str, Any], ToolPermissionContext], Any] | None = None,
     write_boundary_hook: HookCallback | None = None,
+    skill_binding: CopilotSkillBinding | None = None,
 ) -> ClaudeAgentOptions:
     """Build per-session Claude Agent SDK options without mutating os.environ.
 
@@ -774,6 +776,11 @@ def build_options(
     so the SDK routes everything else through the callback. Without it (the SDK
     probe path) the legacy acceptEdits + full allow-list is kept so the probe
     applies edits without prompting.
+
+    The chat path additionally requires ``skill_binding``: the structured tool
+    surface only exists bound to the one skill this session opened. Missing it is
+    rejected here rather than silently yielding a session with no tools — a quiet
+    downgrade would be indistinguishable from "MoirAI decided not to use tools".
     """
 
     env = {"ANTHROPIC_API_KEY": api_key}
@@ -790,6 +797,8 @@ def build_options(
     agents: dict[str, AgentDefinition] | None
     hooks: dict[HookEvent, list[HookMatcher]] | None = None
     if can_use_tool is not None:
+        if skill_binding is None:
+            raise ValueError("a chat session needs skill_binding to build its MCP tool surface")
         # 声明式免审批名单直放(R8.1;这些不再进 can_use_tool);名单之外的
         # 一切工具留在 "ask" 路径:白名单圈定 + 审批 UX 照旧。硬边界由
         # PreToolUse hook 承担(每次调用必触发,不受 allowed_tools 绕过)。
@@ -804,7 +813,7 @@ def build_options(
         # 每次都该自己干——2026-08-15 实测纯 prompt 设计题连跑 5 次零派工。
         # 物化仍是全量:三位女神在同一 workspace 里跑,她们的技能得在盘上。
         skills = agent_assets.load_skill_map()["moirai"]
-        mcp_servers = build_copilot_mcp_servers()
+        mcp_servers = build_copilot_mcp_servers(skill_binding)
         agents = _goddess_agent_definitions()
         # R8.3: 执行类(Bash/PowerShell)强制 "ask"(压掉 CLI 沙箱自动放行),
         # matcher 与 can_use_tool 共用 _EXECUTION_CLASS_TOOLS;R8.2: 写类硬边界。
@@ -1385,6 +1394,13 @@ async def get_or_create_session(
                     env_overrides=env_overrides,
                     can_use_tool=_make_safe_write_can_use_tool(skill_id),
                     write_boundary_hook=_make_write_boundary_hook(skill_id),
+                    # 结构化工具面绑定到这条会话打开的那一个 skill:id 与它当时解析出
+                    # 的目录一起记下,模型再也没有"填哪个 skill"这个选择(理由见
+                    # services/copilot_skill_binding.py)。
+                    skill_binding=CopilotSkillBinding(
+                        skill_id=skill_id,
+                        workspace_root=Path(workspace_dir),
+                    ),
                 )
             )
             _sessions[session_key] = session

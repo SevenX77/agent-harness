@@ -11,9 +11,11 @@ from app.models.llm_config import ProviderEndpoint, ProviderRoute, RegistryRespo
 from app.services import copilot, copilot_tools
 from claude_agent_sdk import PermissionResultAllow
 
+from tests.support.copilot_binding import binding_for
+
 
 def test_mcp_server_exposes_tools() -> None:
-    servers = copilot_tools.build_copilot_mcp_servers()
+    servers = copilot_tools.build_copilot_mcp_servers(binding_for("/ws"))
     assert set(servers) == {"studio"}
     # 读/探测三件的免审批基线仍在(完整全集见 test_copilot_config_tools.py)。
     tool_names = {
@@ -280,7 +282,7 @@ def test_search_llm_registry_never_leaks_api_key(monkeypatch) -> None:  # noqa: 
 def test_get_llm_registry_tool_is_removed() -> None:
     # 旧的全量转储工具被彻底废除(不留别名、不进白名单)。
     assert not hasattr(copilot_tools, "get_llm_registry_tool")
-    tool_names = {t.name for t in copilot_tools._copilot_mcp_tools()}
+    tool_names = {t.name for t in copilot_tools.copilot_mcp_tools()}
     assert "get_llm_registry" not in tool_names
     assert "search_llm_registry" in tool_names
     assert "mcp__studio__get_llm_registry" not in copilot._DECLARATIVE_ALLOWED_TOOLS
@@ -291,7 +293,9 @@ def test_build_options_attaches_studio_mcp_for_chat_only(tmp_path: Path) -> None
     async def cb(name, tool_input, ctx):  # noqa: ANN001
         return PermissionResultAllow()
 
-    chat_options = copilot.build_options(None, "key", tmp_path, can_use_tool=cb)
+    chat_options = copilot.build_options(
+        None, "key", tmp_path, can_use_tool=cb, skill_binding=binding_for(tmp_path)
+    )
     probe_options = copilot.build_options(None, "key", tmp_path)
 
     assert set(chat_options.mcp_servers) == {"studio"}
@@ -301,21 +305,21 @@ def test_build_options_attaches_studio_mcp_for_chat_only(tmp_path: Path) -> None
 # ── create_skill(skill 实体写工具,经审批;审批面契约见 test_copilot_guardrails)──
 
 
-def test_create_skill_tool_requires_skill_id() -> None:
-    result = asyncio.run(copilot_tools.create_skill_tool.handler({"skill_id": "  "}))
+def test_create_skill_tool_requires_new_skill_id() -> None:
+    result = asyncio.run(copilot_tools.create_skill_tool.handler({"new_skill_id": "  "}))
 
     assert result["is_error"] is True
-    assert "skill_id" in result["content"][0]["text"]
+    assert "new_skill_id" in result["content"][0]["text"]
 
 
-def test_create_skill_tool_rejects_invalid_skill_id(
+def test_create_skill_tool_rejects_invalid_new_skill_id(
     studio_roots: tuple[Path, Path],
 ) -> None:
     # 与 POST /api/skills 相同的边界校验(CreateSkillReq pattern),拼写错误在
     # 工具边界一次拒绝,不落半成品目录。
     del studio_roots
     result = asyncio.run(
-        copilot_tools.create_skill_tool.handler({"skill_id": "Bad_Name!"})
+        copilot_tools.create_skill_tool.handler({"new_skill_id": "Bad_Name!"})
     )
 
     assert result["is_error"] is True
@@ -327,7 +331,7 @@ def test_create_skill_tool_creates_scaffold_and_registers_index(
     skills_dir, _ = studio_roots
 
     result = asyncio.run(
-        copilot_tools.create_skill_tool.handler({"skill_id": "my-new-skill"})
+        copilot_tools.create_skill_tool.handler({"new_skill_id": "my-new-skill"})
     )
 
     assert "is_error" not in result
@@ -354,7 +358,7 @@ def test_create_skill_tool_accepts_seed_files(
 
     result = asyncio.run(
         copilot_tools.create_skill_tool.handler(
-            {"skill_id": "seeded-skill", "files": seed}
+            {"new_skill_id": "seeded-skill", "files": seed}
         )
     )
 
@@ -370,7 +374,7 @@ def test_create_skill_tool_rejects_invalid_seed_manifest(
     del studio_roots
     result = asyncio.run(
         copilot_tools.create_skill_tool.handler(
-            {"skill_id": "broken-seed", "files": {"GRAPH.md": "# broken\n"}}
+            {"new_skill_id": "broken-seed", "files": {"GRAPH.md": "# broken\n"}}
         )
     )
 
@@ -386,13 +390,13 @@ def test_create_skill_tool_failed_create_rolls_back_and_id_stays_usable(
 
     bad = asyncio.run(
         copilot_tools.create_skill_tool.handler(
-            {"skill_id": "retry-skill", "files": {"GRAPH.md": "# broken\n"}}
+            {"new_skill_id": "retry-skill", "files": {"GRAPH.md": "# broken\n"}}
         )
     )
     assert bad["is_error"] is True
     assert not (skills_dir / "retry-skill").exists()
 
-    good = asyncio.run(copilot_tools.create_skill_tool.handler({"skill_id": "retry-skill"}))
+    good = asyncio.run(copilot_tools.create_skill_tool.handler({"new_skill_id": "retry-skill"}))
     assert "is_error" not in good
 
 
@@ -401,7 +405,7 @@ def test_create_skill_tool_duplicate_reports_error(
 ) -> None:
     del studio_roots
     result = asyncio.run(
-        copilot_tools.create_skill_tool.handler({"skill_id": "text-segmentation"})
+        copilot_tools.create_skill_tool.handler({"new_skill_id": "text-segmentation"})
     )
 
     assert result["is_error"] is True

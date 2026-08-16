@@ -24,6 +24,8 @@ from app.services import copilot
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from claude_agent_sdk.types import ToolPermissionContext
 
+from tests.support.copilot_binding import binding_for
+
 
 @pytest.fixture(autouse=True)
 def _clean_registries():  # noqa: ANN202
@@ -136,7 +138,12 @@ def test_build_options_wires_write_boundary_hook(tmp_path: Path) -> None:
 
     hook = copilot._make_write_boundary_hook("s-hook")
     chat = copilot.build_options(
-        None, "key", tmp_path, can_use_tool=cb, write_boundary_hook=hook
+        None,
+        "key",
+        tmp_path,
+        can_use_tool=cb,
+        write_boundary_hook=hook,
+        skill_binding=binding_for(tmp_path),
     )
     probe = copilot.build_options(None, "key", tmp_path)
 
@@ -463,7 +470,9 @@ def test_build_options_execution_ask_matcher_covers_powershell(tmp_path: Path) -
     async def cb(name, tool_input, ctx):  # noqa: ANN001
         return PermissionResultAllow()
 
-    options = copilot.build_options(None, "key", tmp_path, can_use_tool=cb)
+    options = copilot.build_options(
+        None, "key", tmp_path, can_use_tool=cb, skill_binding=binding_for(tmp_path)
+    )
 
     assert set(copilot._EXECUTION_CLASS_TOOLS) == {"Bash", "PowerShell"}
     assert options.hooks is not None

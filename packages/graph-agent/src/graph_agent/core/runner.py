@@ -81,7 +81,7 @@ from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, requ
 from graph_agent.core.state import BusinessData
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
 from graph_agent.io.artifact_manifest import write_manifest_artifacts
-from graph_agent.io.run_layout import predicts_root, runs_root
+from graph_agent.io.run_layout import TRACE_FILENAME, predicts_root, runs_root
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -411,7 +411,7 @@ def predict_skill(  # noqa: C901
         skill_id=skill_id,
         context=final_context,
         metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
-        trace_path=Path(raw["trace_path"]) if raw.get("trace_path") else trace_output / "trace.jsonl",
+        trace_path=Path(raw["trace_path"]) if raw.get("trace_path") else trace_output / TRACE_FILENAME,
         started_at=started_at,
         finished_at=finished_at,
         wall_time_sec=wall_time,
@@ -457,12 +457,27 @@ def run_skill(
         else skill_path_obj.stem
     )
 
+    # A run's identity and its home directory are decided once, here, before
+    # anything can fail — every exit below reports the same two values. They
+    # used to be decided twice: once in the ``except`` branch and once again,
+    # independently, inside ``_run_v030_skill_dict``. The success path hid that
+    # by reading the inner id back out of the returned dict, but the failure
+    # path never sees a returned dict, so a run that died without a caller
+    # ``thread_id`` filed its result under a second uuid while the trace it had
+    # already written stayed under the first (field failure 2026-08-16:
+    # ``runs/485af68a-.../trace.jsonl`` vs ``runs/a7b0aeed-.../result.json``).
+    run_id = thread_id or str(uuid.uuid4())
+    run_root = runs_root(workspace_root)
+    run_dir = run_root / run_id
+    trace_file = run_dir / TRACE_FILENAME
+
     try:
         raw = _run_skill_dict(
             skill_path,
             workspace_dir=workspace_root,
+            run_root=run_root,
             mock_llm=mock_llm,
-            thread_id=thread_id,
+            thread_id=run_id,
             unattended=unattended,
             event_subscriber=event_subscriber,
             artifact_saver=artifact_saver,
@@ -479,27 +494,29 @@ def run_skill(
         wall_time = round(time.monotonic() - started_monotonic, 3)
         failed_result = WorkflowResult(
             success=False,
-            run_id=thread_id or str(uuid.uuid4()),
+            run_id=run_id,
             skill_id=skill_id,
             context={},
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
-            trace_path=None,
+            # The trace sink creates and truncates ``trace.jsonl`` the moment it
+            # opens, so the file's presence is the honest answer to "did this
+            # run leave a trace": a run rejected before the graph was assembled
+            # never opened one, and pointing at a path that holds nothing would
+            # be worse than admitting there is nothing to read.
+            trace_path=trace_file if trace_file.exists() else None,
             error=exc.payload or make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,
         )
-        _write_workflow_result_artifacts(
-            runs_root(workspace_root) / failed_result.run_id,
-            failed_result,
-        )
+        _write_workflow_result_artifacts(run_dir, failed_result)
         return failed_result
 
     finished_at = datetime.now(UTC)
     wall_time = float(raw.get("wall_time_sec", round(time.monotonic() - started_monotonic, 3)))
     workflow_result = WorkflowResult(
         success=True,
-        run_id=str(raw.get("run_id") or thread_id or str(uuid.uuid4())),
+        run_id=run_id,
         skill_id=skill_id,
         context=dict(raw.get("context", {})),
         metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
@@ -509,7 +526,6 @@ def run_skill(
         finished_at=finished_at,
         wall_time_sec=wall_time,
     )
-    run_dir = Path(raw.get("run_dir") or runs_root(workspace_root) / workflow_result.run_id)
     _write_workflow_result_artifacts(run_dir, workflow_result)
     return workflow_result
 
@@ -650,6 +666,9 @@ def resume_skill(
             exc,
             run_id=run_id,
             skill_id=skill_id,
+            # Unlike ``run_skill``, the resume path holds its own sink, so the
+            # dead result can name the trace directly instead of inferring it.
+            trace_path=event_sink.trace_path,
             started_at=started_at,
             started_monotonic=started_monotonic,
         )
@@ -724,6 +743,7 @@ def _run_skill_dict(
     *,
     mock_llm: Any = _NO_MOCK_LLM,
     workspace_dir: Path,
+    run_root: Path,
     thread_id: str | None = None,
     unattended: bool = False,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
@@ -742,6 +762,10 @@ def _run_skill_dict(
     Args:
         skill_path: Path to SKILL.md.
         workspace_dir: Absolute workspace root for run-scoped artifacts.
+        run_root: Directory holding one subdirectory per execution, chosen by
+            the caller that knows which kind this is (``runs/`` vs
+            ``predicts/`` — see ``io/run_layout.py``). Passed in rather than
+            re-derived here so the caller's directory and this one cannot drift.
         thread_id: Optional thread_id for checkpoint resume.
         event_subscriber: Optional function called synchronously for each
             typed CallbackEvent.
@@ -769,7 +793,7 @@ def _run_skill_dict(
         return _run_v030_skill_dict(
             skill_path,
             workspace_dir=workspace_dir,
-            run_root=runs_root(workspace_dir),
+            run_root=run_root,
             mock_llm=mock_llm,
             thread_id=thread_id,
             event_subscriber=event_subscriber,
@@ -1923,6 +1947,7 @@ def _resume_failed_result(
     *,
     run_id: str,
     skill_id: str,
+    trace_path: Path | None,
     started_at: datetime,
     started_monotonic: float,
 ) -> WorkflowResult:
@@ -1933,7 +1958,7 @@ def _resume_failed_result(
         skill_id=skill_id,
         context={},
         metrics=WorkflowMetrics(wall_time_sec=wall_time),
-        trace_path=None,
+        trace_path=trace_path,
         error=_resume_error_payload(exc),
         started_at=started_at,
         finished_at=datetime.now(UTC),

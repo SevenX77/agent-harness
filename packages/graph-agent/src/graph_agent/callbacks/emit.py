@@ -9,6 +9,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from graph_agent.io.run_layout import TRACE_FILENAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,7 +18,7 @@ class _TraceJsonlSink:
     def __init__(self, trace_dir: str | Path) -> None:
         self.trace_dir = Path(trace_dir)
         self.trace_dir.mkdir(parents=True, exist_ok=True)
-        self.path = self.trace_dir / "trace.jsonl"
+        self.path = self.trace_dir / TRACE_FILENAME
         self.path.write_text("", encoding="utf-8")
         self._lock = RLock()
 

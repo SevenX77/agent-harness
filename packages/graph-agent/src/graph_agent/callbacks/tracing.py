@@ -30,6 +30,7 @@ from graph_agent.callbacks.events import (
     ToolCallEvent,
     WorkingMemoryUpdateEvent,
 )
+from graph_agent.io.run_layout import TRACE_FILENAME
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class TracingCallback(Callback):
         self._jsonl_path = self._trace_dir / f"{self._run_id}.jsonl"
         # Task 3.6: fixed-name typed-event stream. One line per Pydantic
         # CallbackEvent (model_dump_json), appended in timestamp order.
-        self._typed_jsonl_path = self._trace_dir / "trace.jsonl"
+        self._typed_jsonl_path = self._trace_dir / TRACE_FILENAME
 
     def _write_event(self, event_type: str, phase: str, data: dict[str, Any]) -> None:
         """Append one structured event line to JSONL trace (legacy shape)."""

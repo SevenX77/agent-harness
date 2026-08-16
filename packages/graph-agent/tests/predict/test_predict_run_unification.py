@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from graph_agent.callbacks.events import PhaseEndEvent, PhaseStartEvent
 from graph_agent.core import runner as runner_module
 from graph_agent.core._predict_internal.strategy import HeuristicStubStrategy
 from graph_agent.core.exceptions import GraphAgentFatalError
@@ -79,8 +80,10 @@ def test_predict_reuses_run_v030_skill_dict_single_path(
         calls.append({"args": args, "kwargs": kwargs})
         callbacks = kwargs.get("callbacks") or []
         for callback in callbacks:
-            callback.on_phase_start("draft", {})
-            callback.on_phase_end("draft", {"text": "hello"}, {})
+            callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
+            callback.on_event(
+                PhaseEndEvent(phase_name="draft", context={"text": "hello"}, metrics={})
+            )
         return {
             "run_id": kwargs.get("thread_id") or "predict-run",
             "context": {"text": "hello"},
@@ -203,8 +206,10 @@ def test_predict_wrapper_still_returns_path_diff_and_deadlock(
     def fake_run_v030_skill_dict(*_args: Any, **kwargs: Any) -> dict[str, Any]:
         callbacks = kwargs.get("callbacks") or []
         for callback in callbacks:
-            callback.on_phase_start("draft", {})
-            callback.on_phase_end("draft", {"text": "hello"}, {})
+            callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
+            callback.on_event(
+                PhaseEndEvent(phase_name="draft", context={"text": "hello"}, metrics={})
+            )
         return {
             "run_id": kwargs.get("thread_id") or "predict-run",
             "context": {"text": "hello"},
@@ -240,8 +245,10 @@ def test_predict_wrapper_still_returns_path_diff_and_deadlock(
         callbacks = kwargs.get("callbacks") or []
         for callback in callbacks:
             for _ in range(11):
-                callback.on_phase_start("loop", {})
-                callback.on_phase_end("loop", {"text": "hello"}, {})
+                callback.on_event(PhaseStartEvent(phase_name="loop", context={}))
+                callback.on_event(
+                    PhaseEndEvent(phase_name="loop", context={"text": "hello"}, metrics={})
+                )
         return {
             "run_id": kwargs.get("thread_id") or "predict-run",
             "context": {"text": "hello"},

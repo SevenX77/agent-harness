@@ -32,6 +32,7 @@ function render(
       step={{
         key: 'evt-0',
         phase: eventPhase(event),
+        segment: null,
         stepId: 'step-1',
         status,
         start: { event, index: 0 },

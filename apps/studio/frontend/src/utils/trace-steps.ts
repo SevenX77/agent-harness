@@ -12,10 +12,38 @@ import { eventPhase } from './trace'
  */
 export type TraceStepStatus = 'running' | 'done' | 'severed'
 
+/**
+ * Which kind of run segment a step belongs to.
+ *
+ * A run is a sequence of segments, and an edge is one of them: the stretch
+ * between one node's execution ending and the next one's starting (user ruling
+ * 2026-08-15: 「tracing要把edge和node作为平级的运行分段，流中的一个节点」).
+ * Peer, not nested — an edge segment is not a decoration on the node that
+ * follows it.
+ */
+export type TraceSegmentKind = 'phase' | 'edge'
+
+export interface TraceSegment {
+  kind: TraceSegmentKind
+  /**
+   * The engine's identity for this segment — `phase_execution_id` for a node,
+   * `edge_transition_id` for an edge. Grouping keys off THIS, not off the
+   * phase name: one phase run three times by an outer loop is three segments,
+   * and a name cannot tell them apart.
+   */
+  id: string
+}
+
 export interface TraceStep {
   /** Stable across the step's whole life: it is minted from the opening event. */
   key: string
   phase: string
+  /**
+   * Which run segment this step happened inside. Null for events that belong
+   * to no segment — run-level frames, and anything emitted before the first
+   * transition opened.
+   */
+  segment: TraceSegment | null
   /**
    * The engine's own identity for this step, when it has one. Distinct from
    * `key`, which is a position in THIS list: `stepId` is what the run itself
@@ -76,13 +104,30 @@ export function buildTraceSteps(
   const steps: TraceStep[] = []
   const openLlmByStepId = new Map<string, TraceStep>()
   const openToolByCallId = new Map<string, TraceStep>()
+  const openEdgeByTransitionId = new Map<string, TraceStep>()
   const iterationByPhase = new Map<string, number>()
+  // The segment a phase's events belong to, learned from its `phase_start`.
+  // Keyed by phase name because that is what the events inside a phase carry;
+  // a later execution of the same phase overwrites it, which is correct — its
+  // events come after.
+  const phaseSegmentByPhase = new Map<string, TraceSegment>()
 
   for (const entry of events) {
     const { event } = entry
     const phase = eventPhase(event)
     const callId = toolCallId(event)
     const stepId = traceStepId(event)
+    const transitionId = edgeTransitionId(event)
+
+    if (event.event_type === 'phase_start') {
+      const executionId = phaseExecutionId(event)
+      if (executionId !== null) {
+        phaseSegmentByPhase.set(phase, { kind: 'phase', id: executionId })
+        // A phase execution is its own iteration scope: the turn counter of a
+        // previous execution of the same phase is not this one's.
+        iterationByPhase.delete(phase)
+      }
+    }
 
     if (event.event_type === 'agent_loop_iteration') {
       const iteration = numericIteration(event.iteration)
@@ -90,6 +135,16 @@ export function buildTraceSteps(
         iterationByPhase.set(phase, iteration)
       }
       continue
+    }
+
+    if (event.event_type === 'edge_end' && transitionId !== null) {
+      const open = openEdgeByTransitionId.get(transitionId)
+      if (open) {
+        open.end = entry
+        open.status = 'done'
+        openEdgeByTransitionId.delete(transitionId)
+        continue
+      }
     }
 
     if (isGatewayVerdict(event)) {
@@ -122,9 +177,11 @@ export function buildTraceSteps(
 
     const opensAStep = (event.event_type === 'prompt_captured' && stepId !== null)
       || (event.event_type === 'tool_call_started' && callId !== null)
+      || (event.event_type === 'edge_start' && transitionId !== null)
     const step: TraceStep = {
       key: traceEventId(event, entry.index),
       phase,
+      segment: segmentOf(event, transitionId, phaseSegmentByPhase.get(phase) ?? null),
       stepId,
       status: opensAStep ? 'running' : 'done',
       start: entry,
@@ -138,6 +195,8 @@ export function buildTraceSteps(
       openLlmByStepId.set(stepId, step)
     } else if (event.event_type === 'tool_call_started' && callId !== null) {
       openToolByCallId.set(callId, step)
+    } else if (event.event_type === 'edge_start' && transitionId !== null) {
+      openEdgeByTransitionId.set(transitionId, step)
     }
   }
 
@@ -145,7 +204,11 @@ export function buildTraceSteps(
   // is the one non-terminal stop — its steps are suspended, not dead, and the
   // resume's closing half will still pair up.
   if (verdict !== 'running' && verdict !== 'paused') {
-    for (const open of [...openLlmByStepId.values(), ...openToolByCallId.values()]) {
+    for (const open of [
+      ...openLlmByStepId.values(),
+      ...openToolByCallId.values(),
+      ...openEdgeByTransitionId.values(),
+    ]) {
       open.status = 'severed'
     }
   }
@@ -161,6 +224,39 @@ export function buildTraceSteps(
  */
 export function traceStepId(event: CallbackEvent): string | null {
   const value = event.step_id
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+/**
+ * The segment an event happened in.
+ *
+ * An event that names a transition belongs to that edge segment — including
+ * the edge operations, which is the whole point: they used to be read as
+ * belonging to the phase that followed them. Everything else belongs to the
+ * phase segment its `phase_start` opened.
+ */
+function segmentOf(
+  event: CallbackEvent,
+  transitionId: string | null,
+  phaseSegment: TraceSegment | null,
+): TraceSegment | null {
+  if (transitionId !== null) {
+    return { kind: 'edge', id: transitionId }
+  }
+  const executionId = phaseExecutionId(event)
+  if (executionId !== null) {
+    return { kind: 'phase', id: executionId }
+  }
+  return phaseSegment
+}
+
+function edgeTransitionId(event: CallbackEvent): string | null {
+  const value = event.edge_transition_id
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+function phaseExecutionId(event: CallbackEvent): string | null {
+  const value = event.phase_execution_id
   return typeof value === 'string' && value !== '' ? value : null
 }
 

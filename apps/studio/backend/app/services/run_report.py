@@ -129,11 +129,34 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _event_node(event: dict[str, Any]) -> str | None:
+    """Which run segment an event is charged to.
+
+    An event carrying `edge_transition_id` happened in the TRANSITION between
+    two node executions, not inside the node that follows it (decision
+    2026-08-15 edge-as-run-segment, D8). Charging it to the downstream node —
+    which is what the `to_phase` fallback below did for every edge operation —
+    made a node look responsible for work and failures that happened before it
+    started. Transitions are accounted as their own rows, peer to nodes.
+    """
+    transition = event.get("edge_transition_id")
+    if isinstance(transition, str) and transition:
+        return _transition_label(event)
     for key in ("phase_name", "current_phase", "to_phase"):
         value = event.get(key)
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def _transition_label(event: dict[str, Any]) -> str:
+    """How a transition row reads: the phases it joins, in the direction it ran."""
+    raw_from = event.get("from_phases")
+    from_phases = [item for item in raw_from if isinstance(item, str)] if isinstance(
+        raw_from, list
+    ) else []
+    to_phase = event.get("to_phase")
+    target = to_phase if isinstance(to_phase, str) and to_phase else "?"
+    return f"{' + '.join(from_phases) if from_phases else 'input'} -> {target}"
 
 
 def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
@@ -151,9 +174,9 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
         account = account_for(node_id)
         timestamp = event.get("timestamp")
         event_type = event.get("event_type")
-        if event_type == "phase_start" and isinstance(timestamp, str):
+        if event_type in ("phase_start", "edge_start") and isinstance(timestamp, str):
             account.started_at = timestamp
-        elif event_type == "phase_end" and isinstance(timestamp, str):
+        elif event_type in ("phase_end", "edge_end") and isinstance(timestamp, str):
             account.ended_at = timestamp
         elif event_type == "llm_call":
             account.llm_calls += 1

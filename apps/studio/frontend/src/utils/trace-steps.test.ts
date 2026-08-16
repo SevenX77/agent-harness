@@ -225,3 +225,84 @@ describe('buildTraceSteps × run verdict (decision 2026-08-13 D7 铁律)', () =>
     expect(buildTraceSteps(indexed(open), 'paused')[0].status).toBe('running')
   })
 })
+
+describe('run segments: an edge is peer to a node (decision 2026-08-15)', () => {
+  it('pairs edge_start with edge_end into ONE segment row', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'edge_start', edge_transition_id: 't1', from_phases: ['outline'], to_phase: 'draft' },
+      { event_type: 'edge_end', edge_transition_id: 't1', from_phases: ['outline'], to_phase: 'draft' },
+    ]))
+
+    expect(steps).toHaveLength(1)
+    expect(steps[0].status).toBe('done')
+    expect(steps[0].segment).toEqual({ kind: 'edge', id: 't1' })
+    expect(steps[0].end?.event.event_type).toBe('edge_end')
+  })
+
+  it('does not let one transition close another', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'edge_start', edge_transition_id: 't1', to_phase: 'draft' },
+      { event_type: 'edge_start', edge_transition_id: 't2', to_phase: 'review' },
+      { event_type: 'edge_end', edge_transition_id: 't2', to_phase: 'review' },
+    ]))
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0].status).toBe('running')
+    expect(steps[1].status).toBe('done')
+  })
+
+  it('puts an edge operation in the edge segment, not in the node that follows it', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'edge_start', edge_transition_id: 't1', from_phases: ['outline'], to_phase: 'draft' },
+      { event_type: 'input_dispatch', edge_transition_id: 't1', from_phases: ['outline'], to_phase: 'draft' },
+      { event_type: 'edge_end', edge_transition_id: 't1', from_phases: ['outline'], to_phase: 'draft' },
+      { event_type: 'phase_start', phase_name: 'draft', phase_execution_id: 'e1' },
+    ]))
+
+    const dispatch = steps.find((step) => step.start.event.event_type === 'input_dispatch')
+    expect(dispatch?.segment).toEqual({ kind: 'edge', id: 't1' })
+    const phaseStart = steps.find((step) => step.start.event.event_type === 'phase_start')
+    expect(phaseStart?.segment).toEqual({ kind: 'phase', id: 'e1' })
+  })
+
+  it('groups a phase\'s events by the execution they ran in, not by the phase name', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'phase_start', phase_name: 'draft', phase_execution_id: 'e1' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'llm_call', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'phase_end', phase_name: 'draft', phase_execution_id: 'e1' },
+      { event_type: 'phase_start', phase_name: 'draft', phase_execution_id: 'e2' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's2' },
+    ]))
+
+    const first = steps.find((step) => step.stepId === 's1')
+    const second = steps.find((step) => step.stepId === 's2')
+    expect(first?.segment).toEqual({ kind: 'phase', id: 'e1' })
+    expect(second?.segment).toEqual({ kind: 'phase', id: 'e2' })
+  })
+
+  it('starts each execution\'s turn counter fresh instead of inheriting the last one', () => {
+    // A phase run twice by an outer loop is two executions. Carrying the first
+    // execution's iteration into the second stamped its steps "Iteration 3"
+    // before its own marker arrived.
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'phase_start', phase_name: 'draft', phase_execution_id: 'e1' },
+      { event_type: 'agent_loop_iteration', phase_name: 'draft', iteration: 3 },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's1' },
+      { event_type: 'phase_end', phase_name: 'draft', phase_execution_id: 'e1' },
+      { event_type: 'phase_start', phase_name: 'draft', phase_execution_id: 'e2' },
+      { event_type: 'prompt_captured', phase_name: 'draft', step_id: 's2' },
+    ]))
+
+    expect(steps.find((step) => step.stepId === 's1')?.iteration).toBe(3)
+    expect(steps.find((step) => step.stepId === 's2')?.iteration).toBeNull()
+  })
+
+  it('severs an unclosed transition when the run reaches a verdict', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'edge_start', edge_transition_id: 't1', to_phase: 'draft' },
+    ]), 'failed')
+
+    expect(steps[0].status).toBe('severed')
+  })
+})

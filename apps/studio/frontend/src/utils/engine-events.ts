@@ -25,6 +25,8 @@ export const ENGINE_EVENT_TYPES: ReadonlySet<string> = new Set([
   'builtin_subagent_fallback',
   'compaction',
   'dead_end_pruned',
+  'edge_end',
+  'edge_start',
   'finish_task_verdict',
   'input_dispatch',
   'input_file_injected',

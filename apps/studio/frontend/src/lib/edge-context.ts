@@ -15,12 +15,18 @@ function isInputDispatch(event: CallbackEvent): boolean {
   return event.event_type === 'input_dispatch'
 }
 
-function isEdgeTransition(event: CallbackEvent): boolean {
-  return event.event_type === 'edge_transition'
-}
-
 function phaseMatches(eventPhase: unknown, edgePhase: string): boolean {
   return eventPhase === edgePhase
+}
+
+/**
+ * An edge operation names the phases its transition joins as a LIST: a fan-in
+ * transition genuinely has several upstreams, so asking "did this come from
+ * that phase" is a membership question, not an equality one.
+ */
+function upstreamIncludes(event: CallbackEvent, fromPhase: string): boolean {
+  const from = event.from_phases
+  return Array.isArray(from) && from.includes(fromPhase)
 }
 
 /**
@@ -40,10 +46,10 @@ export function edgeContextFromEvents(
   let match: CallbackEvent | null = null
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
-    if (!isInputDispatch(event) && !isEdgeTransition(event)) {
+    if (!isInputDispatch(event)) {
       continue
     }
-    if (phaseMatches(event.from_phase, fromPhase) && phaseMatches(event.to_phase, toPhase)) {
+    if (upstreamIncludes(event, fromPhase) && phaseMatches(event.to_phase, toPhase)) {
       match = event
     }
   }
@@ -68,7 +74,7 @@ export function edgeContextFromEvents(
   return {
     inputs: snapshot,
     phase_outputs: {},
-    from_phase: match.from_phase ?? null,
+    from_phase: fromPhase,
     to_phase: match.to_phase ?? toPhase,
     changed_keys: changedKeys,
     branch_index: match.branch_index ?? null,

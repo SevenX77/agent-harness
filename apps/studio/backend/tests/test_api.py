@@ -1425,7 +1425,7 @@ def fake_run_worker(
     (run_dir / "artifacts").mkdir(exist_ok=True)
     events = [
         RunStartedEvent(run_id=run_dir.name, thread_id="thread", initial_context={}),
-        PhaseStartEvent(phase_name="setup", context={}),
+        PhaseStartEvent(phase_name="setup", phase_execution_id="exec-1", context={}),
         LLMCallEvent(
             phase_name="setup",
             step_id="step-1",
@@ -1433,7 +1433,7 @@ def fake_run_worker(
             output_tokens=2,
             response_data={"content": "ok"},
         ),
-        PhaseEndEvent(phase_name="setup", context={}, metrics={}),
+        PhaseEndEvent(phase_name="setup", phase_execution_id="exec-1", context={}, metrics={}),
         FinishTaskVerdictEvent(
             phase_name="setup",
             verdict="accepted",

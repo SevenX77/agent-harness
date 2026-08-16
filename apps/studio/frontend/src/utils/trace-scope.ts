@@ -18,15 +18,21 @@ const INPUT_NODE_IDS = new Set(['__global_input__', 'input'])
 const OUTPUT_NODE_IDS = new Set(['__global_output__', 'output'])
 
 /**
- * The edge-op family (decision D5 / B10): what the engine records BETWEEN one
- * phase's end and the next one's start. `artifact_saved` carries only
- * `phase_name`, so it is attributed to the edge whose UPSTREAM phase persisted
- * it — the same attribution `lib/edge-context.ts` established.
+ * The edge-op family: what the engine records BETWEEN one phase's end and the
+ * next one's start. Each such event now names its transition's upstream phases
+ * outright (decision 2026-08-15 edge-as-run-segment), so matching an edge is a
+ * lookup, not a reconstruction. `artifact_saved` still carries only
+ * `phase_name` and is attributed to the edge whose upstream phase persisted it.
  */
 const EDGE_OP_TYPES = new Set(['blackboard_reduce', 'input_dispatch', 'input_file_injected'])
 
-function fromPhaseOf(event: CallbackEvent): string | null {
-  return typeof event.from_phase === 'string' && event.from_phase !== '' ? event.from_phase : null
+/**
+ * Which phases the event's transition came from. The engine names them from the
+ * compiled topology, so this is the graph's answer, not an inference from
+ * whichever phase happened to be current when the operation ran.
+ */
+function fromPhasesOf(event: CallbackEvent): string[] {
+  return Array.isArray(event.from_phases) ? (event.from_phases as string[]) : []
 }
 
 function toPhaseOf(event: CallbackEvent): string | null {
@@ -35,10 +41,10 @@ function toPhaseOf(event: CallbackEvent): string | null {
 
 function crossesInputBoundary(event: CallbackEvent): boolean {
   if (!EDGE_OP_TYPES.has(event.event_type)) return false
-  // The engine stamps from_phase from flow.current_phase, which is None before
-  // anything ran — exactly the dispatches leaving the Input boundary.
-  const from = fromPhaseOf(event)
-  return from === null || INPUT_NODE_IDS.has(from)
+  // A transition with no upstream phases is one leaving the Input boundary:
+  // the first phase of a graph has no predecessor to join.
+  const from = fromPhasesOf(event)
+  return from.length === 0 || from.some((phase) => INPUT_NODE_IDS.has(phase))
 }
 
 function matchesEdge(event: CallbackEvent, source: string, target: string): boolean {
@@ -50,11 +56,11 @@ function matchesEdge(event: CallbackEvent, source: string, target: string): bool
   if (to !== target && !(OUTPUT_NODE_IDS.has(target) && to !== null && OUTPUT_NODE_IDS.has(to))) {
     return false
   }
-  const from = fromPhaseOf(event)
+  const from = fromPhasesOf(event)
   if (INPUT_NODE_IDS.has(source)) {
-    return from === null || INPUT_NODE_IDS.has(from)
+    return from.length === 0 || from.some((phase) => INPUT_NODE_IDS.has(phase))
   }
-  return from === source
+  return from.includes(source)
 }
 
 export function eventInScope(event: CallbackEvent, scope: TraceScope): boolean {

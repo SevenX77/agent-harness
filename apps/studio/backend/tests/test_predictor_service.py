@@ -349,7 +349,7 @@ def test_predict_events_reach_transient_run_record_ws_queue(
         captured_queue.append(run_manager_module.run_manager._runs[run_id].ws_queue)
         subscriber = kwargs["event_subscriber"]
         subscriber(RunStartedEvent(run_id=run_id, thread_id=run_id, initial_context={}))
-        subscriber(PhaseStartEvent(phase_name="draft", context={}))
+        subscriber(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
         subscriber(RunEndedEvent(run_id=run_id, thread_id=run_id, status="completed", wall_time_seconds=0.1))
         return RunResult(
             success=True,

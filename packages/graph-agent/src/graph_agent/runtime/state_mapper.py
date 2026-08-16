@@ -11,6 +11,7 @@ from typing import Any, cast
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from graph_agent.core.edge_transition import active_phase_execution_id
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 from graph_agent.core.state import (
     BusinessData,
@@ -324,6 +325,13 @@ class StateMapper:
         else:
             flow_delta = {}
         flow_delta["current_phase"] = self.phase_id
+        # This phase execution's own identity, for the transitions leaving it:
+        # a downstream fan-in reads its predecessors' entries instead of
+        # inferring one upstream from ``current_phase``. Per-key merged on the
+        # flow channel, so parallel siblings never overwrite each other.
+        execution_id = active_phase_execution_id()
+        if execution_id:
+            flow_delta["phase_execution_ids"] = {self.phase_id: execution_id}
 
         messages_updates = updates.get("messages", [])
         return {

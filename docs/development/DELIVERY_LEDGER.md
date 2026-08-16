@@ -598,8 +598,15 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 发送端统一到 `_safe_emit_event`,`callbacks/base.py` 的 8 个旧 `on_*` 钩子与
 `_dispatch_legacy_event` 翻译层同批删除。
 
-**切分**:PR 0 发送端归位 + 删翻译层 → PR A 引擎转移所有者与事件契约 → PR B 前端分段模型
-(含删除 `edge_transition` 幽灵分支)→ PR C 后端按段记账。每个独立过门禁、独立合并;
+**切分与进度**:
+
+| PR | 内容 | 状态 |
+|---|---|---|
+| 0 | 发送端统一到 `_safe_emit_event` + 删 8 个旧钩子与翻译层 | ✅ #836 已合并。实测到的两个真缺陷:`execution_control.py` 调 `cb.on_dead_end_pruned` 而引擎装配的 `_EventSinkCallbackAdapter` 只有 `on_event`,AttributeError 被自吞——死胡同剪枝**从未进过任何 trace**(磁盘上每份 trace 该事件计数为 0);同文件的循环上报用未声明的 `on_loop_detected`,同样谁也收不到,删除而非补类型(活所有者是 `LoopDetectionMiddleware`,补了会双报) |
+| A | 引擎转移所有者 + `edge_start`/`edge_end` + `edge_transition_id` + `phase_execution_id` | ✅ 随本行同 PR。新模块 `core/edge_transition.py` 拥有转移段;`from_phases` 取自编译期拓扑而非 `flow.current_phase` 推断,`from_phase_execution_ids` 复数取自新的 `flow.phase_execution_ids`(挂进 `_FLOW_DICT_MERGE_FIELDS`,扇出下按 key 合并不互相覆盖)。三个边操作事件的 `from_phase` 单数字段**删除**,前端 `edge-context.ts` / `trace-scope.ts` 同批改读 `from_phases`,`edge_transition` 幽灵分支及其夹具一并删除(原属 PR B 的 D6,因同处一行代码提前落地) |
+| B | 前端分段模型:节点段与边段平级呈现、按段标识分组(D5) | ⏳ 待办 |
+| C | 后端按段记账(`run_report.py`,D8) | ⏳ 待办 |
+
 合并后按 `.claude/skills/studio-verify` 真机点验交五列报告。
 
 ### 环境 blocker(在册)

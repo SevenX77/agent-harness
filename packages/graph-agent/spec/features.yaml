@@ -379,6 +379,8 @@ features:
   - '[F-v3-runtime-phase-failed]'
   error_codes_secondary: []
   events_primary:
+  - EdgeEndEvent
+  - EdgeStartEvent
   - HeartbeatEvent
   - InputDispatchEvent
   - InputFileInjectedEvent

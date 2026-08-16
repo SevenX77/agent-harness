@@ -15,6 +15,8 @@ from graph_agent.callbacks.events import (  # noqa: E402
     CallbackEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
+    EdgeEndEvent,
+    EdgeStartEvent,
     InterruptedEvent,
     LLMCallEvent,
     LLMDeltaEvent,
@@ -36,6 +38,8 @@ from graph_agent.callbacks.events import (  # noqa: E402
 _ALL_EVENT_CLASSES = [
     PhaseStartEvent,
     PhaseEndEvent,
+    EdgeStartEvent,
+    EdgeEndEvent,
     LLMCallEvent,
     LLMDeltaEvent,
     ToolCallEvent,
@@ -64,8 +68,22 @@ _ALL_EVENT_CLASSES = [
 
 
 _MIN_CTOR: dict[type, dict] = {
-    PhaseStartEvent: {"phase_name": "p"},
-    PhaseEndEvent: {"phase_name": "p"},
+    PhaseStartEvent: {"phase_name": "p", "phase_execution_id": "exec-1"},
+    PhaseEndEvent: {"phase_name": "p", "phase_execution_id": "exec-1"},
+    EdgeStartEvent: {
+        "edge_transition_id": "t-1",
+        "from_phases": ["a"],
+        "from_phase_execution_ids": ["exec-a"],
+        "to_phase": "b",
+        "to_phase_execution_id": "exec-b",
+    },
+    EdgeEndEvent: {
+        "edge_transition_id": "t-1",
+        "from_phases": ["a"],
+        "from_phase_execution_ids": ["exec-a"],
+        "to_phase": "b",
+        "to_phase_execution_id": "exec-b",
+    },
     LLMCallEvent: {
         "phase_name": "p",
         "step_id": "step-1",

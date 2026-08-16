@@ -20,7 +20,7 @@ class _CollectingCallback:
 
 def test_safe_emit_event_continues_after_callback_failure() -> None:
     collector = _CollectingCallback()
-    event = PhaseStartEvent(phase_name="main", context={"topic": "T"})
+    event = PhaseStartEvent(phase_name="main", phase_execution_id="exec-1", context={"topic": "T"})
 
     _safe_emit_event([_RaisingCallback(), collector], event)
 

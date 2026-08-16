@@ -198,6 +198,12 @@ class FrameworkState(BaseModel):
     sub_run_id: str | None = None
     # phase + metrics
     current_phase: str = ""
+    #: phase name -> the id of that phase's most recent execution. A downstream
+    #: transition reads its predecessors' entries to say WHICH upstream runs it
+    #: joins, instead of inferring one from ``current_phase``. Per-key merged
+    #: below: each phase only ever writes its own key, so a fan-out cannot lose
+    #: a sibling's entry.
+    phase_execution_ids: dict[str, str] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     critic_metrics: dict[str, Any] = Field(default_factory=dict)
     subagent_validation_retries: dict[str, int] = Field(default_factory=dict)
@@ -217,6 +223,7 @@ class FrameworkState(BaseModel):
 # fields are last-writer-wins — under fan-out they are display metadata with no
 # single-value semantics and superstep ordering is accepted as nondeterministic.
 _FLOW_DICT_MERGE_FIELDS = (
+    "phase_execution_ids",
     "metrics",
     "critic_metrics",
     "subagent_validation_retries",

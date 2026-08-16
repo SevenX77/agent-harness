@@ -1,4 +1,10 @@
 import type { CompileError, LintError } from "@/api/types"
+import {
+  fieldAxisCanNameARootNode,
+  isSameDiagnosticFile,
+  normalizeDiagnosticPath,
+  rootPhaseIdFromPath,
+} from "./diagnostic-paths"
 
 /**
  * Field-level near-projection of lint/compile diagnostics (authoring N3 atom #5/#6).
@@ -20,26 +26,17 @@ import type { CompileError, LintError } from "@/api/types"
  * stays the node-level (file → `phases/<id>/`) channel.
  */
 
-// Mirrors the node channel's phase-path char class (skills.py `_relative_compile_path`
-// emits `phases/<id>/...`, `<id>` = `[A-Za-z0-9_-]+`). Used only as the fallback node
-// scope when an error carries no `phase_name`.
-const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
-const RUNTIME_INPUT_FILE_RE = /(?:^|\/)\.workspace\/(?:import_files(?:\/|$)|runtime_config\.json$)/
-
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\/+/, "")
-}
+// Root-anchored: `.workspace/` is Studio's workspace dir at the skill root; a nested
+// occurrence would belong to a child skill, not to this graph's Input boundary.
+const RUNTIME_INPUT_FILE_RE = /^\.workspace\/(?:import_files(?:\/|$)|runtime_config\.json$)/
 
 function errorPhaseId(error: LintError): string | null {
   if (typeof error.phase_name === "string" && error.phase_name) {
     return error.phase_name
   }
-  const file = error.file
-  if (typeof file !== "string") {
-    return null
-  }
-  const match = PHASE_FILE_RE.exec(file)
-  return match ? match[1] : null
+  // Root-anchored: a diagnostic from inside a child skill names no root node
+  // (see {@link import("./diagnostic-paths")}).
+  return rootPhaseIdFromPath(error.file)
 }
 
 export function lintErrorsForPhase(
@@ -49,6 +46,9 @@ export function lintErrorsForPhase(
   return (errors ?? []).filter((error) => {
     if (errorPhaseId(error) === phaseId) {
       return true
+    }
+    if (!fieldAxisCanNameARootNode(error?.file)) {
+      return false
     }
     const field = error?.field_path
     return typeof field === "string" && field.startsWith(`${phaseId}.`)
@@ -146,38 +146,41 @@ export function fieldDiagnosticsForPanels(
  * context only"), the editor shows only THIS file's diagnostics; cross-file / structural /
  * file-less errors degrade to the manual Compile drawer, never as inline marks here.
  *
- * Matching is separator-insensitive and tolerates an absolute sandbox-path leak (the
- * realtime lint normally strips the throwaway sandbox prefix to a skill-relative path, but
- * a leak would end with the relative path). Errors with no `file` are skill-level and dropped.
+ * Matching is separator-insensitive equality: both sides are paths counted from the same
+ * compile root, so nothing but the whole path identifies the file (see
+ * {@link import("./diagnostic-paths")}). Errors with no `file` are skill-level and dropped.
  */
 export function lintErrorsForFile(
   errors: readonly LintError[] | null | undefined,
   filePath: string,
 ): LintError[] {
-  const target = filePath.replace(/\\/g, "/").replace(/^\/+/, "")
+  const target = normalizeDiagnosticPath(filePath)
   if (!target) {
     return []
   }
-  return (errors ?? []).filter((error) => {
-    if (typeof error?.file !== "string" || !error.file) {
-      return false
-    }
-    const candidate = error.file.replace(/\\/g, "/").replace(/^\/+/, "")
-    return candidate === target || candidate.endsWith(`/${target}`)
-  })
+  return (errors ?? []).filter((error) => (
+    typeof error?.file === "string" && !!error.file && isSameDiagnosticFile(error.file, target)
+  ))
 }
 
 export type IoBoundary = "input" | "output"
 
 function isInputBoundaryError(error: LintError): boolean {
-  const file = typeof error.file === "string" ? normalizePath(error.file) : ""
+  const file = typeof error.file === "string" ? normalizeDiagnosticPath(error.file) : ""
+  if (RUNTIME_INPUT_FILE_RE.test(file)) {
+    return true
+  }
+  if (!fieldAxisCanNameARootNode(error.file)) {
+    return false
+  }
   const field = error.field_path
-  return RUNTIME_INPUT_FILE_RE.test(file)
-    || field === "io.inputs"
-    || (typeof field === "string" && field.startsWith("io.inputs."))
+  return field === "io.inputs" || (typeof field === "string" && field.startsWith("io.inputs."))
 }
 
 function isOutputBoundaryError(error: LintError): boolean {
+  if (!fieldAxisCanNameARootNode(error.file)) {
+    return false
+  }
   const field = error.field_path
   return field === "io.outputs" || (typeof field === "string" && field.startsWith("io.outputs."))
 }

@@ -80,11 +80,46 @@ _PATCH_SKILL_MD: Path = (
 # ─── Diagnostic data structures ──────────────────────────────────────────────
 
 
+@dataclass(frozen=True)
+class UnreadLine:
+    """One line inside a ``## `` block that could not be read into any field.
+
+    The parser used to drop such a line with a ``logger.warning``. A log is not
+    a channel the producer can hear: the producer here is an LLM whose only
+    feedback loop is the finish_task verdict, so a warning-and-skip reported
+    success on half-read input and let the run die later against a diagnosis
+    that pointed at the wrong problem (real run 09f67b86, 2026-08-16).
+
+    Borrowed from ``configparser.ParsingError``, which accumulates every
+    ``(lineno, line)`` it could not parse and reports them together instead of
+    guessing what the author meant. Rejected from it: raising — ``parse_md`` is
+    contractually non-raising (see its docstring), so the refusal is delivered
+    through the verdict instead of an exception.
+    """
+
+    line_number: int  # 1-based, counted over the whole md_text
+    text: str  # the line verbatim, so the producer can find it
+    reason: str  # why no field could take it
+
+
+@dataclass(frozen=True)
+class _SourceLine:
+    """One body line of a ``## `` block with its position in the whole md_text."""
+
+    number: int
+    text: str
+
+
+# One indented child line: its source position plus the content after the bullet.
+_NestedChild = tuple[_SourceLine, str]
+
+
 @dataclass
 class BlockMeta:
     """Framework metadata for one parsed markdown block. Never seen by Pydantic."""
 
     id: str  # the ## header text, e.g. "段落 1"
+    unread: tuple[UnreadLine, ...] = ()  # lines this block's parse could not use
 
 
 @dataclass
@@ -231,22 +266,26 @@ def _get_field_annotations(schema: type[BaseModel]) -> dict[str, Any]:
 # ─── @key sub-object parser ───────────────────────────────────────────────────
 
 
-def _parse_at_key_lines(raw_lines: list[str]) -> list[dict[str, str]]:
+def _parse_at_key_lines(
+    children: list[_NestedChild],
+) -> tuple[list[dict[str, str]], list[UnreadLine]]:
     """Parse ``@key: val`` indented lines into a list of dicts.
 
-    A repeated key signals the start of a new sub-object.
-    Non-@key lines are skipped (they should not appear in an @key block; a warning is logged).
+    A repeated key signals the start of a new sub-object. A child that is not
+    an ``@key: val`` line has no place in a sub-object, so it is returned as an
+    ``UnreadLine`` rather than dropped.
 
-    Example input:
+    Example input (payloads):
         ["@speaker: 旁白", "@text: 她回头", "@speaker: 主角", "@text: 来了"]
 
     Example output:
         [{"speaker": "旁白", "text": "她回头"}, {"speaker": "主角", "text": "来了"}]
     """
     objects: list[dict[str, str]] = []
+    unread: list[UnreadLine] = []
     current: dict[str, str] = {}
-    for raw in raw_lines:
-        m = re.match(r"@(\w+):\s*(.*)", raw.strip())
+    for source, payload in children:
+        m = re.match(r"@(\w+):\s*(.*)", payload.strip())
         if m:
             key, val = m.group(1), m.group(2).strip()
             if key in current:
@@ -254,16 +293,11 @@ def _parse_at_key_lines(raw_lines: list[str]) -> list[dict[str, str]]:
                 objects.append(current)
                 current = {}
             current[key] = val
-        else:
-            stripped = raw.strip()
-            if stripped:
-                logger.warning(
-                    "parse_md: non-@key line in nested sub-object context, skipping: %r",
-                    stripped,
-                )
+        elif payload.strip():
+            unread.append(_unread(source, _UNREAD_NOT_AT_KEY))
     if current:
         objects.append(current)
-    return objects
+    return objects, unread
 
 
 # ─── Regex constants ──────────────────────────────────────────────────────────
@@ -278,6 +312,23 @@ _RE_NESTED_FIELD = re.compile(r"^[-*•]\s+(\w+):\s*$")
 
 # Indented child: " - some content" (2+ leading spaces + any bullet)
 _RE_INDENTED_CHILD = re.compile(r"^\s{2,}[-*•]\s+(.+)$")
+
+# A line that ANNOUNCES STRUCTURE: it carries a bullet marker with content, or
+# it opens with a ``name:`` head. Those are the two marks this format writes
+# data with, so an unconsumed line bearing one is data that got lost and the
+# parser must name it. Prose, table rows (``|``), HTML comments (``<``),
+# sub-headings (``#``) and rules (``---``) announce nothing — the parser never
+# promised to read them, so naming them would be noise, and rejecting a
+# submission over a stray sentence would cost a retry cycle for nothing.
+_RE_ANNOUNCES_STRUCTURE = re.compile(r"^\s*(?:[-*•]\s+\S|\w[\w.-]*\s*:)")
+
+_UNREAD_NO_OWNING_FIELD = "缩进子项上方没有 '- 字段名:' 开启的嵌套字段，没有字段能承载它"
+_UNREAD_NOT_A_FIELD_BULLET = "不是 '- 字段名: 值' 形态，没有字段能承载它"
+_UNREAD_NOT_AT_KEY = "嵌套子对象的每一行必须写成 '- @字段名: 值'"
+
+
+def _unread(source: _SourceLine, reason: str) -> UnreadLine:
+    return UnreadLine(line_number=source.number, text=source.text, reason=reason)
 
 
 # ─── parse_md ─────────────────────────────────────────────────────────────────
@@ -294,7 +345,9 @@ def parse_md(md_text: str, schema: type[BaseModel]) -> list[ParsedBlock]:
     ``ParsedBlock.meta`` and parsed user fields in ``ParsedBlock.data``. Pydantic
     validation only receives ``data``.
 
-    Unrecognised lines are logged at WARNING level and skipped — never raised.
+    A line the parser cannot read into a field is never silently dropped: it is
+    returned as an ``UnreadLine`` on ``ParsedBlock.meta.unread``, so the caller
+    can tell the producer which lines went unread. Nothing is raised.
     """
     annotations = _get_field_annotations(schema)
     blocks = _split_into_blocks(md_text)
@@ -302,24 +355,39 @@ def parse_md(md_text: str, schema: type[BaseModel]) -> list[ParsedBlock]:
 
     parsed: list[ParsedBlock] = []
     for item_id, block_lines in blocks:
-        json_data = _parse_json_block(block_lines)
+        json_data = _parse_json_block([line.text for line in block_lines])
+        unread: list[UnreadLine] = []
         if json_data is _JSON_BLOCK_MISSING:
-            data = _parse_block_data(block_lines, annotations)
+            data, unread = _parse_block_data(block_lines, annotations)
         else:
             data = _data_from_json_block(item_id, json_data, annotations)
-        parsed.append(ParsedBlock(meta=BlockMeta(id=item_id), data=data))
+        if unread:
+            logger.warning(
+                "parse_md: block %r left %d line(s) unread: %s",
+                item_id,
+                len(unread),
+                [entry.line_number for entry in unread],
+            )
+        parsed.append(
+            ParsedBlock(meta=BlockMeta(id=item_id, unread=tuple(unread)), data=data)
+        )
 
     logger.info("parse_md: schema=%s parsed=%d items", schema.__name__, len(parsed))
     return parsed
 
 
-def _split_into_blocks(md_text: str) -> list[tuple[str, list[str]]]:
-    """Split MD text on ``## `` markers → [(item_id, body_lines), ...]."""
-    blocks: list[tuple[str, list[str]]] = []
-    current_id: str | None = None
-    current_lines: list[str] = []
+def _split_into_blocks(md_text: str) -> list[tuple[str, list[_SourceLine]]]:
+    """Split MD text on ``## `` markers → [(item_id, body_lines), ...].
 
-    for raw_line in md_text.splitlines():
+    Body lines keep their 1-based position in ``md_text`` so an unread line can
+    be pointed at by number, not only quoted — the same input can repeat a line
+    verbatim, and a quote alone would then be ambiguous.
+    """
+    blocks: list[tuple[str, list[_SourceLine]]] = []
+    current_id: str | None = None
+    current_lines: list[_SourceLine] = []
+
+    for line_number, raw_line in enumerate(md_text.splitlines(), start=1):
         m = _RE_ITEM_HEADER.match(raw_line)
         if m:
             if current_id is not None:
@@ -327,7 +395,7 @@ def _split_into_blocks(md_text: str) -> list[tuple[str, list[str]]]:
             current_id = m.group(1).strip()
             current_lines = []
         elif current_id is not None:
-            current_lines.append(raw_line)
+            current_lines.append(_SourceLine(number=line_number, text=raw_line))
 
     if current_id is not None:
         blocks.append((current_id, current_lines))
@@ -380,31 +448,38 @@ def _data_from_json_block(
 
 
 def _parse_block_data(
-    lines: list[str],
+    lines: list[_SourceLine],
     annotations: dict[str, Any],
-) -> dict[str, Any]:
-    """Parse the body lines of one ## block into a flat field dict."""
+) -> tuple[dict[str, Any], list[UnreadLine]]:
+    """Parse the body lines of one ## block into a flat field dict.
+
+    Returns the fields it could read plus every line it could not, in source
+    order.
+    """
     item: dict[str, Any] = {}
+    unread: list[UnreadLine] = []
     current_nested_key: str | None = None
-    nested_children: list[str] = []
+    nested_children: list[_NestedChild] = []
 
     def _flush_nested() -> None:
         """Apply accumulated children to current_nested_key."""
         nonlocal current_nested_key, nested_children
-        _flush_nested_field(item, current_nested_key, nested_children, annotations)
+        unread.extend(
+            _flush_nested_field(item, current_nested_key, nested_children, annotations)
+        )
         current_nested_key = None
         nested_children = []
 
-    for line in lines:
-        line_result = _classify_block_line(line)
+    for source in lines:
+        line_result = _classify_block_line(source.text)
         if line_result is None:
             continue
         line_type, payload = line_result
         if line_type == "child":
             if current_nested_key is None:
-                logger.warning("parse_md: indented child outside nested field, skipping: %r", line)
+                unread.append(_unread(source, _UNREAD_NO_OWNING_FIELD))
             else:
-                nested_children.append(payload)
+                nested_children.append((source, payload))
             continue
         _flush_nested()
         if line_type == "flat":
@@ -415,35 +490,44 @@ def _parse_block_data(
             current_nested_key = payload
             nested_children = []
             continue
-        logger.warning("parse_md: unrecognised line, skipping: %r", line)
+        if _RE_ANNOUNCES_STRUCTURE.match(source.text):
+            unread.append(_unread(source, _UNREAD_NOT_A_FIELD_BULLET))
 
     # Flush the last pending nested field
     _flush_nested()
-    return item
+    unread.sort(key=lambda entry: entry.line_number)
+    return item, unread
 
 
 def _flush_nested_field(
     item: dict[str, Any],
     current_nested_key: str | None,
-    nested_children: list[str],
+    nested_children: list[_NestedChild],
     annotations: dict[str, Any],
-) -> None:
+) -> list[UnreadLine]:
     if current_nested_key is None:
-        return
+        return []
     ann = annotations.get(current_nested_key)
     if _is_list_annotation(ann):
-        item[current_nested_key] = _parse_list_nested_children(ann, nested_children)
-    else:
-        item[current_nested_key] = ", ".join(c.strip() for c in nested_children if c.strip())
+        values, unread = _parse_list_nested_children(ann, nested_children)
+        item[current_nested_key] = values
+        return unread
+    item[current_nested_key] = ", ".join(
+        payload.strip() for _source, payload in nested_children if payload.strip()
+    )
+    return []
 
 
-def _parse_list_nested_children(ann: Any, nested_children: list[str]) -> list[Any]:
+def _parse_list_nested_children(
+    ann: Any,
+    nested_children: list[_NestedChild],
+) -> tuple[list[Any], list[UnreadLine]]:
     inner_type = _get_list_inner_type(ann)
     if isinstance(inner_type, type) and issubclass(inner_type, BaseModel):
         return _parse_at_key_lines(nested_children)
-    if any(c.strip().startswith("@") for c in nested_children):
+    if any(payload.strip().startswith("@") for _source, payload in nested_children):
         return _parse_at_key_lines(nested_children)
-    return [c.strip() for c in nested_children if c.strip()]
+    return [payload.strip() for _source, payload in nested_children if payload.strip()], []
 
 
 def _classify_block_line(line: str) -> tuple[str, str] | None:

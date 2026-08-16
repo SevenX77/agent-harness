@@ -25,7 +25,7 @@ graph-exec = 运行时**按 DAG 执行 phase**,用 blackboard(`WorkflowState.dat
 - **AGENT**:委派 `05-run-inner` 跑内层 loop → finish_task。
 - **SUBGRAPH**:child compiled graph invoke,失败冒泡包 parent context。
 - **run_context / io_manager(节点间黑板/IO 操作,源 11-io;现状见 baseline §4/§5)**:
-  - **子图 io 放宽(E1)**:删 `loader.py:528` 对 **inputs** 的 1:1 强制——子图像普通节点用自己 `io.inputs` 经 StateMapper 从黑板切片(机制现成);**outputs 保留**相等校验(下游契约)。
+  - **子图 io 放宽(E1,已完成并在 2026-06-20 扩到 outputs)**:删对 **inputs** 的 1:1 强制——子图像普通节点用自己 `io.inputs` 经 StateMapper 从黑板切片(机制现成)。**outputs 的相等校验此后也一并移除**(commit `cad7dbc0`,PM 授权):本条原写"outputs 保留相等校验(下游契约)",与 `01-contract/02-skill-syntax/mvp1-alignment.md` §3.4「父图和子图 IO 不需要字段全集一一相等」及其 §4 把「父子图 IO 1:1 强绑定」列为 drift 相冲突,以后者为准。outputs 边界由运行期 `StateMapper` 按声明 schema 守,越界写回记 `[F-v3-runtime-state-mapping-failed]`;`[F-v3-subgraph-io-mismatch]` 仅保留 registry 条目、**无发出点**。
   - **文件导入→黑板(E2,新能力)**:节点声明"导入文件 → 注入字段",**跑到该节点才 lazy 注入**(非图启动);落点 `_wrap_phase_runtime_node`(`graph_assembler.py:287`)进节点前,复用 read_file 工具(`make_read_file_tool`,`tools/builtin/read_file.py:43`)读路径 + `StateManager.update_business`(`state.py:225`)写黑板,再 StateMapper 切片;发 `InputFileInjectedEvent`(归 `observability`)。
   - **io.outputs artifact 扩展(E3)**:路径标注更丰富(一/多文件、filename-only 默认 `.workspace/artifacts`);**md 输出取 `business_data_md`(`CognitiveFlowMiddleware` 保留的原始 md,`cognitive_flow.py:536`)原样写,不做 json→md 回转**——⚠️ 现状未接:主路径 finish_task 工具(`finish_task.py:51`)走 `markdown`→parsed `data`,`business_data_md` 在中间件侧;接线改取它(`save_artifact` 对 str 原样写,`storage.py:167`)而非 parsed json。
   - **黑板切片(FROZEN-4)引擎侧已成(StateMapper),不改**(前端 canvas 可视化另算)。

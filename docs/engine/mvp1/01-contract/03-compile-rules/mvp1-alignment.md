@@ -304,8 +304,16 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | `[F-v3-subgraph-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-subgraph-target-skill-invalid]` | 编译期 | subgraph target path 不可解析、越界、非目录或缺 `GRAPH.md` | 重连到 skill root 内含 `GRAPH.md` 的 child graph folder | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-schema-invalid]` | 编译期 | Subgraph IO schema 非法 | 修正 object schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
-| `[F-v3-subgraph-io-mismatch]` | 编译期 | 父子 IO 字段集合不一致 | 对齐父 phase 和子 GRAPH IO | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
-| `[F-v3-subgraph-io-schema-incompatible]` | 编译期 | 同名字段 schema 不兼容 | 对齐字段 schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
+| `[F-v3-subgraph-io-mismatch]` | 编译期(registry 保留,**不再发出**) | 父子 IO 字段集合不一致 | 无需处理:父子 IO 不要求 1:1,见下方注 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
+| `[F-v3-subgraph-io-schema-incompatible]` | 编译期(registry 保留,**从未发出**) | 同名字段 schema 不兼容 | 无需处理:父子 IO 不要求 1:1,见下方注 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
+
+> **注:subgraph 父子 IO 1:1 两码已停用。** 本节 §「IO 是黑板切片边界」的权威规定是
+> [`02-skill-syntax/mvp1-alignment.md` §3.4](../02-skill-syntax/mvp1-alignment.md#34-io-是黑板切片边界):
+> 「父图和子图 IO 不需要字段全集一一相等」,同文件 §4 Implementation Drift 明确把「父子图 IO 1:1 强绑定」
+> 列为 drift。据此:`[F-v3-subgraph-io-mismatch]` 的编译闸已于 2026-06-20 由 commit `cad7dbc0` 移除;
+> `[F-v3-subgraph-io-schema-incompatible]` 自 round-17 建表(`c32575fa`)起就只有 registry 条目、从未实现发出点。
+> 两码继续留在 `ERROR_REGISTRY` 中,仅为维持 round28 registry↔owner 双射与码表计数,**不代表存在对应的编译期校验**。
+> 父 `SUBGRAPH.md` 声明的 outputs 边界改由运行期 `StateMapper` 守:越界写回记 `[F-v3-runtime-state-mapping-failed]`。
 
 ### agent domain
 

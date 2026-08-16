@@ -108,7 +108,7 @@ def test_a_missing_url_is_refused_at_the_boundary() -> None:
 def test_the_tool_is_pre_allowed_and_never_counted_as_a_write() -> None:
     from app.services.copilot import _DECLARATIVE_ALLOWED_TOOLS, _MCP_APPROVAL_WRITE_TOOLS
 
-    assert "fetch_web_page" in {tool.name for tool in copilot_tools._copilot_mcp_tools()}
+    assert "fetch_web_page" in {tool.name for tool in copilot_tools.copilot_mcp_tools()}
     assert "mcp__studio__fetch_web_page" in _DECLARATIVE_ALLOWED_TOOLS
     assert "mcp__studio__fetch_web_page" not in _MCP_APPROVAL_WRITE_TOOLS
 

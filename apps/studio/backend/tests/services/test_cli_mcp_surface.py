@@ -10,7 +10,7 @@ from app.services import cli_mcp_surface, copilot_tools
 
 
 def test_cli_toolset_is_panel_minus_cascade_deletes() -> None:
-    panel = {t.name for t in copilot_tools._copilot_mcp_tools()}
+    panel = {t.name for t in copilot_tools.copilot_mcp_tools()}
     cli = set(cli_mcp_surface.cli_tool_names())
 
     assert cli == panel - set(cli_mcp_surface.CLI_EXCLUDED_TOOL_NAMES)

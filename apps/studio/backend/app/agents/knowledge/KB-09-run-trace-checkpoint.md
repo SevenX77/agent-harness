@@ -38,7 +38,7 @@ This document details the telemetry, state persistence, and debugging overrides 
 ## 5. Bounded Trace Diagnostics with `query_run_trace`
 
 A full `trace.jsonl` can reach ~250 KB per run — never pull it whole. Use
-`query_run_trace(skill_id, run_id, phase?, event_types?, since_seq?, limit?)`:
+`query_run_trace(run_id, phase?, event_types?, since_seq?, limit?)`:
 slices are bounded, and every response carries per-phase aggregates (iteration
 count, `llm_call` count, `tool_call` count, rejection count with top-N reasons).
 

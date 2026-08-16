@@ -122,7 +122,7 @@ class TestToolHistorySpeaks:
 
 
 class TestRuntimeInputSpeaks:
-    def test_seeding_the_first_turn_is_an_event_naming_the_keys(self) -> None:
+    def test_handing_a_turn_its_inputs_is_an_event_naming_the_keys(self) -> None:
         recorder = Recorder()
         middleware = RuntimeInputMiddleware("work", ("topic",), callbacks=(recorder,))
         data = BusinessData.model_validate({"topic": "venus"})
@@ -141,13 +141,25 @@ class TestRuntimeInputSpeaks:
         assert event.keys == ["topic"]
         assert "topic" in event.message
 
-    def test_a_turn_that_already_has_input_emits_nothing(self) -> None:
+    def test_a_turn_that_already_carries_the_block_emits_nothing(self) -> None:
+        """路过 stays silent — but only a real re-delivery counts as 路过.
+
+        An unrelated HumanMessage (a nudge, a dead-end warning) is not this
+        phase's input block, so it must NOT be read as "already delivered";
+        that conflation is the defect fixed in
+        `test_runtime_input_delivery_criterion.py`.
+        """
         recorder = Recorder()
         middleware = RuntimeInputMiddleware("work", ("topic",), callbacks=(recorder,))
+        data = BusinessData.model_validate({"topic": "venus"})
 
-        middleware.wrap_model_call(
-            _model_request([HumanMessage(content="already here")]),
-            lambda request: None,
-        )
+        captured: list[ModelRequest] = []
 
-        assert recorder.of_type("runtime_input_injected") == []
+        def handler(request: ModelRequest) -> Any:
+            captured.append(request)
+            return None
+
+        middleware.wrap_model_call(_model_request([], data=data), handler)
+        middleware.wrap_model_call(captured[0], handler)
+
+        assert len(recorder.of_type("runtime_input_injected")) == 1, recorder.events

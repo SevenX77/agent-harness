@@ -28,7 +28,7 @@ Upon phase completion, the engine validates the phase's output dictionary agains
 ### How the slice reaches an agent phase's model
 An agent phase does not have to ask for its inputs, and its prompt does not have to carry them. `RuntimeInputMiddleware` (engine `graph_agent/middleware/runtime_input.py`) does two separate things on every model call:
 
-1.  **Seeds the first user turn with the whole declared slice** — when the conversation carries no human message yet, it prepends `以下是本阶段的输入数据(JSON):` followed by every declared input key as JSON. This is the model's opening view of the task.
+1.  **Delivers the whole declared slice as a JSON block** — it prepends `以下是本阶段的输入数据(JSON):` followed by every declared input key as JSON. This happens on **every** model call of the phase, not just the first: the block is handed to the model but never written back into the conversation, so each turn has to be given it again. A call that already carries the identical block is left alone.
 2.  **Renders `{key}` placeholders in the system message** against the same blackboard view, because the v0.3.0 assembler bakes the system prompt at assembly time and would otherwise leave `{key}` literal.
 
 Both mechanisms read the same slice, so a `{key}` written in the SKILL.md body produces a **second full copy** of that value in the same prompt — see the re-injection anti-pattern in the `agent-prompt-design` skill. Declaring two inputs that carry the same content in different shapes (e.g. a line array plus the same lines as one numbered string) multiplies the copies again, and every copy is paid for on every turn.

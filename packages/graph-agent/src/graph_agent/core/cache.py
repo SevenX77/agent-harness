@@ -200,8 +200,7 @@ def _rehydrate_compiled_skill(snapshot: dict[str, Any], root: Path) -> CompiledS
         )
         for node in snapshot["nodes"]
     ]
-    discovered = [(node.phase_name, node.path, node.mode) for node in nodes]
-    actions, tools = _discover_actions_and_tools(root.resolve(), discovered)
+    actions, tools = _discover_actions_and_tools(root.resolve(), nodes)
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for phase_id, subagents in dict(snapshot["subagents_by_phase"]).items():
         hydrated_subagents: list[CompiledSubagent] = []

@@ -128,6 +128,37 @@ class CompileSuccess(BaseModel):
     detail: SkillDetail
 
 
+class CompileDiagnosticExport(BaseModel):
+    """The compile result as an agent receives it: the verdict and every issue.
+
+    ``CompileSuccess`` is the FRONTEND's payload — it carries `detail.files`
+    (every skill file's full body) so the editor and canvas can render without a
+    second round trip. Handing that to a model costs tens of thousands of tokens
+    to answer "did it compile?", and past a limit costs the answer itself: on
+    2026-08-15 a 216 KB / 61 K-token result spilled to a tool-result file the
+    agent could no longer read, on a compile that was clean.
+
+    So this projection keeps what the verdict is made of and drops what the
+    agent can fetch on demand — file bodies via ``read_skill_file`` (paginated),
+    graph shape via ``get_skill_overview``. ``issues`` is never truncated: the
+    diagnostics SSOT rule gives every surface the SAME complete defect set, and
+    an agent that fixes one error only to be shown the next one is exactly the
+    failure that rule exists to prevent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: str
+    status: Literal["ok"]
+    phase_count: int
+    manifest_name: str
+    execution_fingerprint: str
+    lint_status: Literal["passed", "failed"] | None = None
+    issue_count: int
+    issues: list[LintError] = Field(default_factory=list)
+    file_paths: dict[str, str] = Field(default_factory=dict)
+
+
 class CompileFailure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

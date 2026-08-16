@@ -1128,3 +1128,68 @@ def test_fork_skill_tool_reports_failure_as_tool_error(monkeypatch) -> None:  # 
 
     assert result["is_error"] is True
     assert "fork target exists" in result["content"][0]["text"]
+
+
+def test_compile_skill_tool_hands_the_agent_the_export_not_the_frontend_payload(
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """工具返回的是 agent 侧投影,不是前端负载。
+
+    坏掉的就是这一根线:handler 直接 `result.model_dump()` 回了整个
+    `CompileSuccess`。2026-08-15 真机现场里那次结果 216,838 字节,SDK 溢写成
+    tool-result 文件后模型 `Read` 不动(61,160 token > 25,000 上限),而那次编译
+    是干净的。投影本身的判据在 test_compile_diagnostic_export.py。
+    """
+
+    from app.models.errors import LintError
+    from app.models.lint import LintResult
+    from app.models.skills import CompileSuccess, SkillDetail
+
+    body = "y" * 4000
+    fat = CompileSuccess(
+        skill_id="lab",
+        status="ok",
+        phase_count=1,
+        manifest_name="lab",
+        artifact_ref={"artifact_id": "lab"},
+        source_map_ref="file:///store/map.json",
+        execution_fingerprint="fp-9",
+        detail=SkillDetail(
+            manifest={
+                "schema_version": "v0.3.0",
+                "name": "lab",
+                "io": {
+                    "inputs": {"text": {"type": "string"}},
+                    "outputs": {"result": {"type": "string"}},
+                },
+            },
+            file_paths={"GRAPH.md": "GRAPH.md"},
+            files={"GRAPH.md": body},
+            has_golden=False,
+            lint_result=LintResult(
+                status="failed",
+                errors=[
+                    LintError(error_code="[F-v3-a]", severity="error", message="a"),
+                    LintError(error_code="[F-v3-b]", severity="error", message="b"),
+                ],
+            ),
+        ),
+    )
+
+    async def _fake_compile(*_args: object, **_kwargs: object) -> CompileSuccess:
+        return fat
+
+    import app.services.skills as skills_module
+
+    monkeypatch.setattr(skills_module, "compile_skill_for_studio", _fake_compile)
+
+    result = asyncio.run(copilot_tools.compile_skill_tool.handler({"skill_id": "lab"}))
+
+    assert "is_error" not in result
+    text = result["content"][0]["text"]
+    assert body not in text, "文件正文不得进 agent 侧工具结果"
+    payload = json.loads(text)
+    # 诊断全量保留:两条都在,不许只给第一条。
+    assert [i["error_code"] for i in payload["issues"]] == ["[F-v3-a]", "[F-v3-b]"]
+    assert payload["issue_count"] == 2
+    assert "files" not in payload and "detail" not in payload

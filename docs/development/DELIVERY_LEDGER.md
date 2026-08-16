@@ -574,6 +574,30 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 | M-4 | 分配判据(`roles/moirai.md` 的 "perfectly aligns") | ⏳ 待办 | 维持不动。现象是纯 prompt 设计题连跑 5 次仅 1 次派工,但**没有证据**表明判据措辞是原因——§7 已经有过一次教训(技能挂载漂移看着像根因,实测 1/5 vs 1/5 无差别)。下一步是先测再改:用 `dispatch-rate.sh` 对「scope 契合改为可对照技能映射表机械核对」跑 n≥5 的 A/B。独立任务,不夹带 |
 | M-5 | SDK/CLI 对等审计的其余分叉 | 📌 记档 | 三路审计 + 三路对抗核验共 32 条:应有差异 7 / 已登记已知差距(R8.8)3 / 本批次修 3 / 其余留档。留待后续四项见决议 §12:CLI 侧三 worker 拿不到 MCP 却读着声称 studio 工具可用的 `cli.md`;`web-research` 在映射表里无归属;atropos 面板侧派工拿不到 `<judge_context>` 契约;**codex 的沙箱兜底前提不成立**(R8.8 接受该差距的前提是「靠沙盒物理隔离兜底」,而 codex 带 `--dangerously-bypass-approvals-and-sandbox` 关掉了自身沙箱)。对抗核验推翻了审计的四条判定,同样记在 §12 以免下轮重复踩 |
 
+### 用户功能批次 2026-08-15:边升为与节点平级的运行分段(决议已落)
+
+**用户裁决(原话)**:「edge指的是一个node到下一个中间的过程，是需要的，把engine该补的补齐」
+「tracing要把edge和node作为平级的运行分段，流中的一个节点」「DeadEndPrunedEvent该怎么处理，
+合到正规的线路里去」。第四句授权执行者按仓规自裁细节,不再逐条上问。
+
+**问题定性**:引擎里没有"边执行"这个对象——边的操作寄生在下游节点包装器头部
+(`core/graph_assembler.py:1178` 的 `_emit_input_dispatch`、`:922`/`:1077` 的黑板 reduce),
+所以 `BlackboardReduceEvent` 的 `from_phase` 恒为 `None`(`:769`,结构上无从填起)、
+`input_dispatch` 的来源靠 `state.flow.current_phase` 推断、前端只好按上游 phase 猜边归属
+(`utils/trace-scope.ts:23` 注释自陈)。缺失字段是缺失所有者的症状,先补字段是错的修法。
+
+**决议正本**:`docs/design/2026-08-15-edge-as-first-class-run-segment-decision.md`
+(目标、设计、八条关键设计决定、四个 PR 切分、九条验收判据)。要点:边段与节点段在事件模型里
+形状相同(`edge_start`/`edge_end` 对称于 `phase_start`/`phase_end`);空转移也占一段;
+`from_phase_execution_ids` 用复数(扇入本就多上游,单数只能靠"取最近一个"猜);
+`phase_execution_id` 与 `AgentLoopIterationEvent.iteration` 是两个概念不合并;
+发送端统一到 `_safe_emit_event`,`callbacks/base.py` 的 8 个旧 `on_*` 钩子与
+`_dispatch_legacy_event` 翻译层同批删除。
+
+**切分**:PR 0 发送端归位 + 删翻译层 → PR A 引擎转移所有者与事件契约 → PR B 前端分段模型
+(含删除 `edge_transition` 幽灵分支)→ PR C 后端按段记账。每个独立过门禁、独立合并;
+合并后按 `.claude/skills/studio-verify` 真机点验交五列报告。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

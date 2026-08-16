@@ -27,6 +27,25 @@ RELEASE_CONTENT_HASH_TRAILER = "Studio-Release-Content-Hash"
 RELEASE_MANIFEST_REF_TRAILER = "Studio-Release-Manifest-Ref"
 RELEASE_SNAPSHOT_PREFIX = "release-"
 
+# Studio is the sole writer of a skill repository's object store, so git must
+# not fork maintenance of its own into it. Since git 2.29 a plain `git commit`
+# forks `git maintenance run --auto`, and since 2.54 it forks it *detached*:
+# an unsupervised process that repacks and unlinks objects Studio's very next
+# command still expects to read, and that Studio neither waits for nor reaps.
+# `gc.auto` covers gits older than the maintenance builtin; unknown keys are
+# ignored by git, so no version branch is needed.
+#
+# Borrowed from actions/checkout, which disables automatic garbage collection
+# on every repository it manages (visible in this repo's own CI logs as
+# "Disabling automatic garbage collection" -> `git config --local gc.auto 0`).
+# Rejected: its mechanism. checkout owns a throwaway CI workspace, so writing
+# policy into that repository's config costs nothing; a skill repository is the
+# user's own long-lived repository that they may also drive from a terminal,
+# and it may have been created outside Studio. Per-invocation flags make the
+# guarantee a property of how Studio runs git rather than of repository state
+# Studio would have to remember to write.
+GIT_NO_BACKGROUND_MAINTENANCE_ARGS = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
+
 STUDIO_GITIGNORE = "\n".join(
     [
         "/.workspace/*",
@@ -594,7 +613,7 @@ def run_git(
     for attempt in range(len(lock_retry_delays) + 1):
         try:
             completed = subprocess.run(
-                ["git", *args],
+                ["git", *GIT_NO_BACKGROUND_MAINTENANCE_ARGS, *args],
                 cwd=skill_dir,
                 check=False,
                 capture_output=True,

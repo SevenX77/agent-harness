@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from app.services.git_local import (
+    GIT_NO_BACKGROUND_MAINTENANCE_ARGS,
     STUDIO_GITIGNORE,
     GitCommandError,
     GitCommandTimeoutError,
@@ -14,6 +15,13 @@ from app.services.git_local import (
     run_git,
     write_studio_gitignore,
 )
+
+
+def _git_subcommand(command: list[str]) -> list[str]:
+    """The argv a caller asked for, minus the flags every Studio git carries."""
+    prefix = ["git", *GIT_NO_BACKGROUND_MAINTENANCE_ARGS]
+    assert command[: len(prefix)] == prefix, command
+    return command[len(prefix) :]
 
 
 def test_run_git_success_captures_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -29,10 +37,65 @@ def test_run_git_success_captures_output(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     assert result.stdout == "ok\n"
     assert result.returncode == 0
-    assert calls[0]["command"] == ["git", "status"]
+    assert calls[0]["command"] == [
+        "git",
+        *GIT_NO_BACKGROUND_MAINTENANCE_ARGS,
+        "status",
+    ]
     assert calls[0]["cwd"] == tmp_path
     assert calls[0]["timeout"] == 3
     assert calls[0]["capture_output"] is True
+
+
+def test_run_git_commit_spawns_no_background_git_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Studio owns a skill repository's object store exclusively.
+
+    Since git 2.29 a plain `git commit` forks `git maintenance run --auto`, and
+    since 2.54 it forks it *detached*. That child rewrites and unlinks objects
+    in the same repository Studio is still reading, and Studio never waits for
+    it or reaps it. `GIT_TRACE=1` names every child git spawns, so an empty
+    trace is first-hand proof that no such writer exists.
+    """
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    run_git(skill_dir, "init")
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    monkeypatch.setenv("GIT_TRACE", "1")
+
+    trace = run_git(skill_dir, "commit", "--allow-empty", "-m", "initial-skill").stderr
+
+    assert "maintenance" not in trace, trace
+    assert "gc --auto" not in trace, trace
+
+
+def test_release_marker_lookup_scans_unbounded_history(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A release marker stays the same release however old it is.
+
+    Truncating this scan to a history window would make an aged marker
+    invisible and republish a release that already exists, so the lookup must
+    carry no `-n` / `--max-count`.
+    """
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    found = GitLocalService().find_empty_snapshot_commit_with_exact_subject(tmp_path, "release-1.0.0")
+
+    assert found is None
+    log_command = next(command for command in commands if "log" in command)
+    assert [arg for arg in log_command if arg.startswith(("-n", "--max-count"))] == []
 
 
 def test_run_git_nonzero_raises_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -139,9 +202,10 @@ def test_git_service_wrappers_build_expected_commands(
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         del kwargs
-        commands.append(command)
-        stdout = "M SKILL.md\n" if command[1:3] == ["status", "--short"] else ""
-        if command[1] == "log":
+        subcommand = _git_subcommand(command)
+        commands.append(subcommand)
+        stdout = "M SKILL.md\n" if subcommand[:2] == ["status", "--short"] else ""
+        if subcommand[0] == "log":
             stdout = "abc auto-run-1\n"
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
@@ -157,13 +221,13 @@ def test_git_service_wrappers_build_expected_commands(
     service.reset_hard(tmp_path, "abc")
     service.status(tmp_path, ignored=True)
 
-    assert ["git", "add", "-A"] in commands
-    assert ["git", "add", "-f", ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb"] in commands
-    assert ["git", "checkout", "-b", "team-save/tester-1"] in commands
-    assert ["git", "commit", "-m", "auto-run-1"] in commands
-    assert ["git", "log", "--oneline", "-n50"] in commands
-    assert ["git", "reset", "--hard", "abc"] in commands
-    assert ["git", "status", "--short", "--ignored"] in commands
+    assert ["add", "-A"] in commands
+    assert ["add", "-f", ".workspace/runs/2026-08-09T12-00-00_bbbbbbbb"] in commands
+    assert ["checkout", "-b", "team-save/tester-1"] in commands
+    assert ["commit", "-m", "auto-run-1"] in commands
+    assert ["log", "--oneline", "-n50"] in commands
+    assert ["reset", "--hard", "abc"] in commands
+    assert ["status", "--short", "--ignored"] in commands
 
 
 def test_auto_commit_respects_gitignore_runs_but_commits_golden(
@@ -261,7 +325,7 @@ def test_commit_empty_snapshot_retries_cas_when_head_advances(
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         nonlocal advanced_head
-        if command[0:3] == ["git", "update-ref", "HEAD"] and not advanced_head:
+        if _git_subcommand(command)[0:2] == ["update-ref", "HEAD"] and not advanced_head:
             advanced_head = True
             original_run(
                 ["git", "commit", "--allow-empty", "-m", "manual-concurrent"],
@@ -332,7 +396,7 @@ def test_commit_empty_snapshot_uses_concurrent_existing_marker_after_cas_failure
     concurrent_marker: dict[str, str] = {}
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        if command[0:3] == ["git", "update-ref", "HEAD"] and not concurrent_marker:
+        if _git_subcommand(command)[0:2] == ["update-ref", "HEAD"] and not concurrent_marker:
             result = original_run(
                 ["git", "commit", "--allow-empty", "-m", "release-1.0.0"],
                 cwd=kwargs["cwd"],

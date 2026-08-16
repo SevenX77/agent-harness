@@ -683,6 +683,11 @@ def test_publish_idempotency_retry_finds_release_marker_beyond_default_history_w
     first = client.post("/api/skills/text-segmentation/publish", json={}, headers=headers)
     assert first.status_code == 200
     assert _release_marker_commit_count(skill_dir, "1.0.0") == 1
+    # Padding goes through the production `run_git`, not a bare `git`, on
+    # purpose: 101 commits is the point where git's own auto-maintenance
+    # thresholds come into range, and only Studio's git invocations are
+    # guaranteed to fork no background process into the repository this test
+    # keeps reading (`GIT_NO_BACKGROUND_MAINTENANCE_ARGS`).
     for index in range(101):
         run_git(skill_dir, "commit", "--allow-empty", "-m", f"manual-padding-{index}")
 

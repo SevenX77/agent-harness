@@ -12,7 +12,12 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
 
-from graph_agent.callbacks.events import CallbackEvent, PredictChainStartEvent
+from graph_agent.callbacks.events import (
+    LLMCallEvent,
+    PhaseEndEvent,
+    PhaseStartEvent,
+    PredictChainStartEvent,
+)
 from graph_agent.callbacks.tracing import TracingCallback
 
 MockedSource = Literal["golden_case", "copilot", "heuristic_stub", "manual"]
@@ -137,12 +142,6 @@ class PredictTracingCallback(TracingCallback):
     def phases_in_progress(self) -> list[dict[str, Any]]:
         return self._phase_stack
 
-    def on_event(self, event: CallbackEvent) -> None:
-        """Log typed event and dispatch to legacy hooks to populate flat segments."""
-        super().on_event(event)
-        from graph_agent.callbacks.base import _dispatch_legacy_event
-        _dispatch_legacy_event(self, event)
-
     def on_chain_start(self, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None:
         """Mark the root run metadata as Predict before execution proceeds."""
 
@@ -153,31 +152,26 @@ class PredictTracingCallback(TracingCallback):
         self._write_event("predict_chain_start", "<root>", {"metadata": root_metadata})
         self._write_typed_event(PredictChainStartEvent(metadata=root_metadata))
 
-    def on_phase_start(self, phase_name: str, context: dict[str, Any]) -> None:
+    def _record_phase_start(self, event: PhaseStartEvent) -> None:
         """Start a Predict phase and retain business inputs for export."""
 
-        super().on_phase_start(phase_name, context)
+        super()._record_phase_start(event)
         if self._phase_stack:
-            self._phase_stack[-1]["inputs"] = context
+            self._phase_stack[-1]["inputs"] = event.context
 
-    def on_phase_end(
-        self,
-        phase_name: str,
-        context: dict[str, Any],
-        metrics: dict[str, Any] | None,
-    ) -> None:
+    def _record_phase_end(self, event: PhaseEndEvent) -> None:
         """Finalize a phase with zeroed metrics and cached mock source metadata."""
 
-        metrics = metrics or {}
-        zeroed_metrics = _zero_usage_values(metrics)
+        phase_name = event.phase_name
+        zeroed_metrics = _zero_usage_values(event.metrics or {})
         source = self._source_cache.pop(phase_name)
         if source is not None:
             zeroed_metrics["mocked_source"] = source
         phase_count = len(self._phases)
-        super().on_phase_end(phase_name, context, zeroed_metrics)
+        super()._record_phase_end(event.model_copy(update={"metrics": zeroed_metrics}))
         if len(self._phases) > phase_count:
             phase = self._phases[-1]
-            phase["outputs"] = context
+            phase["outputs"] = event.context
             phase["metrics"] = zeroed_metrics
             if source is not None:
                 phase["mocked_source"] = source
@@ -185,21 +179,17 @@ class PredictTracingCallback(TracingCallback):
             if downgrade is not None:
                 phase["validator_downgraded"] = downgrade
 
-    def on_llm_call(
-        self,
-        phase_name: str,
-        input_tokens: int,
-        output_tokens: int,
-        *,
-        response_data: dict[str, Any],
-    ) -> None:
+    def _record_llm_call(self, event: LLMCallEvent) -> None:
         """Record Predict LLM activity while forcing all usage counters to zero."""
 
-        super().on_llm_call(
-            phase_name,
-            0,
-            0,
-            response_data=_zero_usage_values(response_data),
+        super()._record_llm_call(
+            event.model_copy(
+                update={
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "response_data": _zero_usage_values(event.response_data),
+                }
+            )
         )
 
     def save(self, output_dir: str | Path) -> str:

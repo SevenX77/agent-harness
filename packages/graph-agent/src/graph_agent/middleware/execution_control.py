@@ -1,4 +1,4 @@
-"""ExecutionControlMiddleware — retry / loop detection / metrics owner.
+"""ExecutionControlMiddleware — iteration / dead-end / metrics owner.
 
 MVP-3 T9 (B3 middleware simplification): the framework's runtime
 operations layer. ProtocolValidationMiddleware (T7) owns state
@@ -19,23 +19,18 @@ Responsibilities consolidated from the legacy ``cognitive/middlewares.py``:
   ``dead_end_threshold`` times in a row, inject a structured warning
   back into the message stream so the LLM stops mechanically retrying
   the same failing path.
-* Lightweight loop detection — MVP-0 砍 ``LoopDetectionMiddleware``;
-  T9 brings back a minimal version that flags the same tool call (by
-  ``name + args hash``) repeating within a short window. Hits a
-  callback so operators can surface it without aborting the agent.
 * Metrics aggregation — ``collect_metrics`` snapshots token / latency
   totals from ``state['flow'].metrics`` for the LoggingMiddleware /
   TracingCallback consumers.
 
 The middleware deliberately does *not* drive any retry loop of its
-own: ExecutionControl observes and reports (dead-end warnings, loop
-detection, metrics), while recovery is the model's job — the injected
-warning message tells it to change course.
+own: ExecutionControl observes and reports (dead-end warnings,
+metrics), while recovery is the model's job — the injected warning
+message tells it to change course.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Sequence
 from typing import Any
@@ -46,6 +41,8 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 
 from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.events import AgentLoopIterationEvent, DeadEndPrunedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +72,10 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
        ToolMessage stream contains ``dead_end_threshold`` consecutive
        same-tool errors, inject a structured warning so the LLM
        breaks out of the failing path.
-    3. **Lightweight loop detection** (``after_model``): when the same
-       ``(tool_name, args_hash)`` pair fires ``loop_threshold`` times
-       within ``loop_window`` recent ToolMessages, emit a
-       ``LoopDetectedEvent`` callback for operators. The middleware
-       does not abort the loop — that is the agent loop's
-       ``max_iterations`` ceiling.
+    No-progress tool loops are NOT this middleware's concern:
+    ``LoopDetectionMiddleware`` owns them, with the same window and
+    threshold, and it both emits ``LoopDetectedEvent`` and injects the
+    corrective diagnostic.
     """
 
     def __init__(
@@ -89,8 +84,6 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         max_retries: int = 3,
         max_iterations: int = 20,
         dead_end_threshold: int = 3,
-        loop_window: int = 5,
-        loop_threshold: int = 3,
         callbacks: Sequence[Callback] | None = None,
         phase_name: str = "unknown",
     ) -> None:
@@ -98,13 +91,10 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         self._max_retries = max(0, max_retries)
         self._max_iterations = max(1, max_iterations)
         self._dead_end_threshold = max(1, dead_end_threshold)
-        self._loop_window = max(1, loop_window)
-        self._loop_threshold = max(2, loop_threshold)
         self._callbacks = list(callbacks or [])
         self._phase_name = phase_name
         self._iteration = 0
         self._last_dead_end_signature: str | None = None
-        self._last_loop_signature: str | None = None
 
     @property
     def iteration(self) -> int:
@@ -132,20 +122,15 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         state: AgentState[Any],
         runtime: Runtime[Any],
     ) -> dict[str, Any] | None:
-        """Detect dead-end retries and lightweight tool-call loops.
+        """Detect dead-end retries.
 
         Returns a state update with a ``dead_end_warning`` message when
-        the threshold trips; otherwise ``None``. Loop detection emits
-        a callback event but does not mutate state — surfacing the
-        signal to the operator is enough; aborting belongs to the
-        harness's ``max_iterations`` ceiling.
+        the threshold trips; otherwise ``None``.
         """
         del runtime
         messages = list(state.get("messages", [])) if isinstance(state, dict) else []
 
-        update: dict[str, Any] | None = self._maybe_inject_dead_end_warning(messages)
-        self._maybe_emit_loop_detected(messages)
-        return update
+        return self._maybe_inject_dead_end_warning(messages)
 
     def collect_metrics(self, state: Any) -> dict[str, Any]:
         """Snapshot token / latency totals from ``state['flow'].metrics``.
@@ -174,23 +159,13 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
     # ------------------------------------------------------------------
 
     def _emit_iteration_event(self) -> None:
-        try:
-            from graph_agent.callbacks.events import AgentLoopIterationEvent
-
-            event = AgentLoopIterationEvent(
+        _safe_emit_event(
+            self._callbacks,
+            AgentLoopIterationEvent(
                 phase_name=self._phase_name,
                 iteration=self._iteration,
-            )
-            for cb in self._callbacks:
-                try:
-                    cb.on_event(event)
-                except Exception:  # noqa: BLE001 — callback faults must not break loop
-                    logger.warning(
-                        "[ExecutionControl] callback %r raised on iteration event; continuing",
-                        type(cb).__name__,
-                    )
-        except Exception:  # noqa: BLE001
-            logger.exception("[ExecutionControl] iteration event emit failed; continuing")
+            ),
+        )
 
     def _summarize_recent_failures(
         self,
@@ -253,15 +228,10 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
             count=count,
             latest_error=latest_error,
         )
-        for cb in self._callbacks:
-            try:
-                cb.on_dead_end_pruned(self._phase_name, warning)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "[ExecutionControl] callback %s error on dead_end_pruned: %s",
-                    type(cb).__name__,
-                    exc,
-                )
+        _safe_emit_event(
+            self._callbacks,
+            DeadEndPrunedEvent(phase_name=self._phase_name, summary=warning),
+        )
         logger.warning(
             "[ExecutionControl] Injected dead-end warning phase=%s tool=%s count=%d",
             self._phase_name,
@@ -269,69 +239,6 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
             count,
         )
         return {"messages": [HumanMessage(name="dead_end_warning", content=warning)]}
-
-    def _maybe_emit_loop_detected(self, messages: list[Any]) -> None:
-        """Lightweight loop detection: same ``(tool, args_hash)`` repeating.
-
-        Walks the most recent ``loop_window`` ToolMessages (any status)
-        and counts how often each ``(name, content)`` signature
-        appears. When any signature meets ``loop_threshold`` the
-        callback fires once per signature (deduped via
-        ``_last_loop_signature``).
-        """
-        recent = _recent_tool_messages(messages, self._loop_window)
-        if not recent:
-            return
-
-        for signature, hits in _tool_message_signatures(recent).items():
-            if hits < self._loop_threshold:
-                continue
-            if signature == self._last_loop_signature:
-                continue
-            self._last_loop_signature = signature
-            for cb in self._callbacks:
-                handler = getattr(cb, "on_loop_detected", None)
-                if handler is None:
-                    continue
-                try:
-                    handler(self._phase_name, signature, hits)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "[ExecutionControl] callback %s error on loop_detected: %s",
-                        type(cb).__name__,
-                        exc,
-                    )
-            logger.info(
-                "[ExecutionControl] Loop detected phase=%s signature=%s hits=%d",
-                self._phase_name,
-                signature,
-                hits,
-            )
-            break  # one report per after_model call
-
-
-def _recent_tool_messages(messages: list[Any], limit: int) -> list[ToolMessage]:
-    recent: list[ToolMessage] = []
-    for msg in reversed(messages):
-        if isinstance(msg, ToolMessage):
-            recent.append(msg)
-            if len(recent) >= limit:
-                break
-    return recent
-
-
-def _tool_message_signatures(messages: list[ToolMessage]) -> dict[str, int]:
-    signatures: dict[str, int] = {}
-    for msg in messages:
-        name = str(getattr(msg, "name", None) or "unknown")
-        content = (
-            msg.content
-            if isinstance(msg.content, str)
-            else json.dumps(msg.content, sort_keys=True, default=str)
-        )
-        sig = f"{name}:{hash(content)}"
-        signatures[sig] = signatures.get(sig, 0) + 1
-    return signatures
 
 
 __all__ = ["ExecutionControlMiddleware"]

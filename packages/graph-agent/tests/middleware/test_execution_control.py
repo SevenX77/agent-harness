@@ -8,6 +8,7 @@ import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.events import DeadEndPrunedEvent
 from graph_agent.core.state import (
     BusinessData,
     FrameworkState,
@@ -19,17 +20,12 @@ from graph_agent.middleware.execution_control import ExecutionControlMiddleware
 class _RecordingCallback(Callback):
     def __init__(self) -> None:
         self.events: list[Any] = []
-        self.dead_ends: list[tuple[str, str]] = []
-        self.loops: list[tuple[str, str, int]] = []
 
     def on_event(self, event: Any) -> None:
         self.events.append(event)
 
-    def on_dead_end_pruned(self, phase_name: str, warning: str) -> None:
-        self.dead_ends.append((phase_name, warning))
-
-    def on_loop_detected(self, phase_name: str, signature: str, hits: int) -> None:
-        self.loops.append((phase_name, signature, hits))
+    def events_of(self, event_type: type) -> list[Any]:
+        return [e for e in self.events if isinstance(e, event_type)]
 
 
 def _state(messages: list[Any] | None = None) -> WorkflowState:
@@ -63,15 +59,11 @@ class TestInit:
             max_retries=-5,
             max_iterations=0,
             dead_end_threshold=0,
-            loop_window=0,
-            loop_threshold=1,
         )
 
         assert mw._max_retries == 0
         assert mw._max_iterations == 1
         assert mw._dead_end_threshold == 1
-        assert mw._loop_window == 1
-        assert mw._loop_threshold == 2  # floors at 2 (single hit isn't a loop)
 
 
 class TestIterationCounter:
@@ -146,8 +138,9 @@ class TestDeadEndDetection:
         warning = warnings[0]
         assert warning.name == "dead_end_warning"
         assert "read_file" in warning.content
-        # Callback fired once with the structured payload.
-        assert cb.dead_ends == [("probe", warning.content)]
+        # One typed event carries the same payload the message does.
+        pruned = cb.events_of(DeadEndPrunedEvent)
+        assert [(e.phase_name, e.summary) for e in pruned] == [("probe", warning.content)]
 
     def test_warning_deduped_by_signature(self) -> None:
         """Calling after_model twice with the same failure pattern must
@@ -177,44 +170,6 @@ class TestDeadEndDetection:
         result = mw.after_model(_state(messages=messages), runtime=None)  # type: ignore[arg-type]
 
         assert result is None
-
-
-class TestLoopDetection:
-    def test_no_callback_when_no_repetition(self) -> None:
-        cb = _RecordingCallback()
-        mw = ExecutionControlMiddleware(loop_window=5, loop_threshold=3, callbacks=[cb])
-        # Three different tool calls — no repetition.
-        messages = [
-            ToolMessage(name="t1", content="a", tool_call_id="1"),
-            ToolMessage(name="t2", content="b", tool_call_id="2"),
-            ToolMessage(name="t3", content="c", tool_call_id="3"),
-        ]
-        mw.after_model(_state(messages=messages), runtime=None)  # type: ignore[arg-type]
-
-        assert cb.loops == []
-
-    def test_loop_callback_fires_at_threshold(self) -> None:
-        cb = _RecordingCallback()
-        mw = ExecutionControlMiddleware(
-            loop_window=5,
-            loop_threshold=3,
-            dead_end_threshold=999,
-            phase_name="loopy",
-            callbacks=[cb],
-        )
-        # Same (name, content) triple — loop_threshold met.
-        messages = [
-            ToolMessage(name="search", content="q=foo", tool_call_id="1"),
-            ToolMessage(name="search", content="q=foo", tool_call_id="2"),
-            ToolMessage(name="search", content="q=foo", tool_call_id="3"),
-        ]
-        mw.after_model(_state(messages=messages), runtime=None)  # type: ignore[arg-type]
-
-        assert len(cb.loops) == 1
-        phase, signature, hits = cb.loops[0]
-        assert phase == "loopy"
-        assert signature.startswith("search:")
-        assert hits == 3
 
 
 class TestCollectMetrics:

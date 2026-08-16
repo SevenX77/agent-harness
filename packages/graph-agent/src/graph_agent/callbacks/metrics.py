@@ -7,6 +7,17 @@ import time
 from typing import Any
 
 from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.events import (
+    CallbackEvent,
+    CompactionEvent,
+    DeadEndPrunedEvent,
+    LLMCallEvent,
+    NudgeEvent,
+    PhaseEndEvent,
+    PhaseStartEvent,
+    ToolCallEvent,
+    WorkingMemoryUpdateEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,78 +37,29 @@ class MetricsCallback(Callback):
         self.phase_durations: dict[str, list[float]] = {}
         self._phase_start_times: dict[str, float] = {}
 
-    def on_phase_start(self, phase_name: str, context: dict[str, Any]) -> None:
-        """Record phase start time."""
-        self._phase_start_times[phase_name] = time.monotonic()
-
-    def on_phase_end(
-        self,
-        phase_name: str,
-        context: dict[str, Any],
-        metrics: dict[str, Any],
-    ) -> None:
-        """Record phase duration."""
-        start = self._phase_start_times.pop(phase_name, None)
-        if start is not None:
-            self.phase_durations.setdefault(phase_name, []).append(time.monotonic() - start)
-
-    def on_llm_call(
-        self,
-        phase_name: str,
-        input_tokens: int,
-        output_tokens: int,
-        *,
-        messages: list[dict[str, Any]] | None = None,
-        response_data: dict[str, Any] | None = None,
-    ) -> None:
-        """Accumulate token counts."""
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-
-    def on_tool_call(
-        self,
-        phase_name: str,
-        tool_name: str,
-        args: dict[str, Any],
-        result: str,
-        *,
-        duration_ms: float | None = None,
-    ) -> None:
-        """Count tool calls."""
-        self.total_tool_calls += 1
-
-    def on_nudge(
-        self,
-        phase_name: str,
-        nudge_count: int,
-        nudge_type: str = "standard",
-    ) -> None:
-        """Count nudges."""
-        self.total_nudges += 1
-
-    def on_working_memory_update(
-        self,
-        phase_name: str,
-        content_length: int,
-    ) -> None:
-        """Count working-memory updates."""
-        self.total_working_memory_updates += 1
-
-    def on_dead_end_pruned(
-        self,
-        phase_name: str,
-        summary: str,
-    ) -> None:
-        """Count dead-end pruning events."""
-        self.total_dead_end_prunes += 1
-
-    def on_compaction(
-        self,
-        phase_name: str,
-        removed_message_count: int,
-    ) -> None:
-        """Count history compactions."""
-        self.total_compactions += 1
+    def on_event(self, event: CallbackEvent) -> None:
+        """Accumulate the counters this callback owns; ignore other event kinds."""
+        if isinstance(event, PhaseStartEvent):
+            self._phase_start_times[event.phase_name] = time.monotonic()
+        elif isinstance(event, PhaseEndEvent):
+            start = self._phase_start_times.pop(event.phase_name, None)
+            if start is not None:
+                self.phase_durations.setdefault(event.phase_name, []).append(
+                    time.monotonic() - start
+                )
+        elif isinstance(event, LLMCallEvent):
+            self.total_input_tokens += event.input_tokens
+            self.total_output_tokens += event.output_tokens
+        elif isinstance(event, ToolCallEvent):
+            self.total_tool_calls += 1
+        elif isinstance(event, NudgeEvent):
+            self.total_nudges += 1
+        elif isinstance(event, WorkingMemoryUpdateEvent):
+            self.total_working_memory_updates += 1
+        elif isinstance(event, DeadEndPrunedEvent):
+            self.total_dead_end_prunes += 1
+        elif isinstance(event, CompactionEvent):
+            self.total_compactions += 1
 
     def summary(self) -> dict[str, Any]:
         """Return accumulated metrics as a dictionary."""

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from graph_agent.callbacks.events import LLMCallEvent, PhaseEndEvent, PhaseStartEvent
 from graph_agent.core._predict_internal.tracing import (
     PredictTracingCallback,
     clear_mock_source_cache,
@@ -35,12 +36,14 @@ def test_phase_end_backfills_mocked_source_from_interception_cache() -> None:
     clear_mock_source_cache()
     callback = PredictTracingCallback()
 
-    callback.on_phase_start("draft", {"topic": "mars"})
+    callback.on_event(PhaseStartEvent(phase_name="draft", context={"topic": "mars"}))
     record_mock_source("draft", "heuristic_stub")
-    callback.on_phase_end(
-        "draft",
-        {"story": "stub"},
-        {"input_tokens": 41, "output_tokens": 19, "total_cost": 3.14},
+    callback.on_event(
+        PhaseEndEvent(
+            phase_name="draft",
+            context={"story": "stub"},
+            metrics={"input_tokens": 41, "output_tokens": 19, "total_cost": 3.14},
+        )
     )
 
     phase = callback.phases[-1]
@@ -56,11 +59,11 @@ def test_phase_source_cache_is_consumed_after_backfill() -> None:
     clear_mock_source_cache()
     callback = PredictTracingCallback()
 
-    callback.on_phase_start("draft", {})
+    callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
     record_mock_source("draft", "manual")
-    callback.on_phase_end("draft", {}, {})
-    callback.on_phase_start("draft", {})
-    callback.on_phase_end("draft", {}, {})
+    callback.on_event(PhaseEndEvent(phase_name="draft", context={}, metrics={}))
+    callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", context={}, metrics={}))
 
     assert callback.phases[0]["mocked_source"] == "manual"
     assert "mocked_source" not in callback.phases[1]
@@ -69,8 +72,16 @@ def test_phase_source_cache_is_consumed_after_backfill() -> None:
 def test_predict_llm_call_forces_zero_usage() -> None:
     callback = PredictTracingCallback()
 
-    callback.on_phase_start("draft", {})
-    callback.on_llm_call("draft", 123, 456, response_data={"usage": {"total_cost": 9}})
+    callback.on_event(PhaseStartEvent(phase_name="draft", context={}))
+    callback.on_event(
+        LLMCallEvent(
+            step_id="step-1",
+            phase_name="draft",
+            input_tokens=123,
+            output_tokens=456,
+            response_data={"usage": {"total_cost": 9}},
+        )
+    )
 
     summary = callback.summary()
     assert summary["total_input_tokens"] == 0

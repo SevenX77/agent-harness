@@ -18,21 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from graph_agent.callbacks.base import (
-    EVENT_COMPACTION,
-    EVENT_DEAD_END_PRUNED,
-    EVENT_LLM_CALL,
-    EVENT_NUDGE,
-    EVENT_PHASE_END,
-    EVENT_PHASE_START,
-    EVENT_TOOL_CALL,
-    EVENT_WORKING_MEMORY_UPDATE,
-    Callback,
-)
+from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import (
     CallbackEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
+    LLMCallEvent,
     NudgeEvent,
     PhaseEndEvent,
     PhaseStartEvent,
@@ -102,16 +93,42 @@ class TracingCallback(Callback):
             f.write(event.model_dump_json() + "\n")
 
     def on_event(self, event: CallbackEvent) -> None:
-        """New-style sink: log the typed event to trace.jsonl.
+        """Record one typed event: the raw line, plus the phase segments it builds.
 
-        Emitters that call ``cb.on_event(event)`` directly (for example the
-        ``prompt_captured`` emitter in the chat model and the ``parallel_map``
-        builtin in Task 4.3) bypass the legacy on_* dispatch entirely and
-        land here. We deliberately do NOT call the base-class dispatcher,
-        which would double-count events that also flow through the legacy
-        hooks below.
+        Every event lands here — this is the only entrypoint. The flat phase
+        segments (``self._phases``, which Predict exports) are built by the
+        ``_record_*`` methods below; subclasses that need to enrich a segment
+        override those rather than intercepting the event stream.
         """
         self._write_typed_event(event)
+        if isinstance(event, PhaseStartEvent):
+            self._record_phase_start(event)
+        elif isinstance(event, PhaseEndEvent):
+            self._record_phase_end(event)
+        elif isinstance(event, LLMCallEvent):
+            self._record_llm_call(event)
+        elif isinstance(event, ToolCallEvent):
+            self._record_tool_call(event)
+        elif isinstance(event, NudgeEvent):
+            self._write_event(
+                event.event_type,
+                event.phase_name,
+                {"count": event.nudge_count, "type": event.nudge_type},
+            )
+        elif isinstance(event, WorkingMemoryUpdateEvent):
+            self._write_event(
+                event.event_type,
+                event.phase_name,
+                {"content_length": event.content_length},
+            )
+        elif isinstance(event, DeadEndPrunedEvent):
+            self._write_event(event.event_type, event.phase_name, {"summary": event.summary})
+        elif isinstance(event, CompactionEvent):
+            self._write_event(
+                event.event_type,
+                event.phase_name,
+                {"removed_message_count": event.removed_message_count},
+            )
 
     def _active_phase(self) -> dict[str, Any] | None:
         """Return the innermost active phase segment, if any."""
@@ -119,8 +136,9 @@ class TracingCallback(Callback):
             return None
         return self._phase_stack[-1]
 
-    def on_phase_start(self, phase_name: str, context: dict[str, Any]) -> None:
+    def _record_phase_start(self, event: PhaseStartEvent) -> None:
         """Start a new phase trace segment."""
+        phase_name = event.phase_name
         self._phase_stack.append(
             {
                 "name": phase_name,
@@ -133,19 +151,14 @@ class TracingCallback(Callback):
             }
         )
         self._write_event(
-            EVENT_PHASE_START,
+            event.event_type,
             phase_name,
-            {"context_keys": list(context.keys())},
+            {"context_keys": list(event.context.keys())},
         )
-        self._write_typed_event(PhaseStartEvent(phase_name=phase_name, context=context))
 
-    def on_phase_end(
-        self,
-        phase_name: str,
-        context: dict[str, Any],
-        metrics: dict[str, Any],
-    ) -> None:
+    def _record_phase_end(self, event: PhaseEndEvent) -> None:
         """Finalize the active phase trace segment."""
+        phase_name = event.phase_name
         phase_index = next(
             (
                 idx
@@ -162,23 +175,16 @@ class TracingCallback(Callback):
         phase_data["duration_sec"] = round(time.monotonic() - start_mono, 2)
         self._phases.append(phase_data)
         self._write_event(
-            EVENT_PHASE_END,
+            event.event_type,
             phase_name,
-            {"context_keys": list(context.keys()), "metrics": metrics},
-        )
-        self._write_typed_event(
-            PhaseEndEvent(phase_name=phase_name, context=context, metrics=metrics)
+            {"context_keys": list(event.context.keys()), "metrics": event.metrics},
         )
 
-    def on_llm_call(
-        self,
-        phase_name: str,
-        input_tokens: int,
-        output_tokens: int,
-        *,
-        response_data: dict[str, Any],
-    ) -> None:
+    def _record_llm_call(self, event: LLMCallEvent) -> None:
         """Append one LLM event to the trace."""
+        phase_name = event.phase_name
+        input_tokens = event.input_tokens
+        output_tokens = event.output_tokens
         self._total_llm_calls += 1
         self._total_input_tokens += input_tokens
         self._total_output_tokens += output_tokens
@@ -194,118 +200,39 @@ class TracingCallback(Callback):
                 }
             )
         self._write_event(
-            EVENT_LLM_CALL,
+            event.event_type,
             phase_name,
             {
-                "response": response_data,
+                "response": event.response_data,
                 "usage": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                 },
             },
         )
-    def on_tool_call(
-        self,
-        phase_name: str,
-        tool_name: str,
-        args: dict[str, Any],
-        result: str,
-        *,
-        duration_ms: float | None = None,
-    ) -> None:
+
+    def _record_tool_call(self, event: ToolCallEvent) -> None:
         """Append one tool event to the trace."""
         self._total_tool_calls += 1
         active_phase = self._active_phase()
         if active_phase:
             active_phase["tool_calls"].append(
                 {
-                    "name": tool_name,
+                    "name": event.tool_name,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
         self._write_event(
-            EVENT_TOOL_CALL,
-            phase_name,
+            event.event_type,
+            event.phase_name,
             {
-                "tool_name": tool_name,
-                "args": args,
-                "result": result,
-                "duration_ms": round(duration_ms, 2) if duration_ms is not None else None,
+                "tool_name": event.tool_name,
+                "args": event.args,
+                "result": event.result,
+                "duration_ms": (
+                    round(event.duration_ms, 2) if event.duration_ms is not None else None
+                ),
             },
-        )
-        # The legacy hook hands over a call that already finished and carries no
-        # identity, so this sink mints one. Nothing announced a start for it
-        # either — there is no such moment to report from here.
-        self._write_typed_event(
-            ToolCallEvent(
-                tool_call_id=uuid.uuid4().hex,
-                phase_name=phase_name,
-                tool_name=tool_name,
-                args=args,
-                result=result,
-                duration_ms=duration_ms,
-            )
-        )
-
-    def on_nudge(
-        self,
-        phase_name: str,
-        nudge_count: int,
-        nudge_type: str = "standard",
-    ) -> None:
-        """Record a cognitive nudge in the trace."""
-        self._write_event(
-            EVENT_NUDGE,
-            phase_name,
-            {"count": nudge_count, "type": nudge_type},
-        )
-        self._write_typed_event(
-            NudgeEvent(phase_name=phase_name, nudge_count=nudge_count, nudge_type=nudge_type)
-        )
-
-    def on_working_memory_update(
-        self,
-        phase_name: str,
-        content_length: int,
-    ) -> None:
-        """Record working-memory update in the trace."""
-        self._write_event(
-            EVENT_WORKING_MEMORY_UPDATE,
-            phase_name,
-            {"content_length": content_length},
-        )
-        self._write_typed_event(
-            WorkingMemoryUpdateEvent(phase_name=phase_name, content_length=content_length)
-        )
-
-    def on_dead_end_pruned(
-        self,
-        phase_name: str,
-        summary: str,
-    ) -> None:
-        """Record dead-end pruning in the trace."""
-        self._write_event(
-            EVENT_DEAD_END_PRUNED,
-            phase_name,
-            {"summary": summary},
-        )
-        self._write_typed_event(DeadEndPrunedEvent(phase_name=phase_name, summary=summary))
-
-    def on_compaction(
-        self,
-        phase_name: str,
-        removed_message_count: int,
-    ) -> None:
-        """Record history compaction in the trace."""
-        self._write_event(
-            EVENT_COMPACTION,
-            phase_name,
-            {"removed_message_count": removed_message_count},
-        )
-        self._write_typed_event(
-            CompactionEvent(
-                phase_name=phase_name, removed_message_count=removed_message_count
-            )
         )
 
     def summary(self) -> dict[str, Any]:

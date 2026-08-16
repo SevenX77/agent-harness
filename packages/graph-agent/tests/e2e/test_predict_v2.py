@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from graph_agent.callbacks.events import PhaseEndEvent, PhaseStartEvent
 from graph_agent.core._predict_internal.models import GoldenCase
 from graph_agent.core._predict_internal.strategy import (
     BacktestStrategy,
@@ -69,10 +70,16 @@ def test_predict_tracing_consumes_mock_source_cache() -> None:
     source_cache = PredictMockSourceCache()
     callback = PredictTracingCallback(source_cache=source_cache)
     callback.on_chain_start(metadata={})
-    callback.on_phase_start("draft", {"topic": "mars"})
+    callback.on_event(PhaseStartEvent(phase_name="draft", context={"topic": "mars"}))
     source_cache.record("draft", "heuristic_stub")
 
-    callback.on_phase_end("draft", {"draft": {"text": "stub"}}, {"total_input_tokens": 123})
+    callback.on_event(
+        PhaseEndEvent(
+            phase_name="draft",
+            context={"draft": {"text": "stub"}},
+            metrics={"total_input_tokens": 123},
+        )
+    )
 
     assert callback.root_metadata["is_predict"] is True
     assert callback.phases[0]["mocked_source"] == "heuristic_stub"

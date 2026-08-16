@@ -72,27 +72,13 @@ Round 32 PR-1 (T3) 之后，V0.3.0 目录型 `GRAPH.md` 主运行路径不再暴
 
 ## 4. Callback 怎么分发事件
 
-Callback 有两套接口：
+Callback 只有一个接口：`on_event(event)`，直接收 typed event（决议
+2026-08-15 边分段 D7：旧的 8 个 `on_*` 钩子与它们的翻译层已删除）。基类默认实现
+是 no-op —— 没要事件的消费方就不会被告知，事件也不会在半路被改写成另一种形状。
 
-1. 新接口：`on_event(event)`，直接收 typed event。
-2. 旧接口：`on_phase_start()`、`on_tool_call()`、`on_llm_call()` 等。
-
-默认 `Callback.on_event()` 分三类处理：
-
-| 类别 | 行为 |
-|---|---|
-| 有 legacy hook 的事件 | 转回旧接口，例如 `PhaseStartEvent -> on_phase_start()`、`ToolCallEvent -> on_tool_call()`。 |
-| 已知 typed-only 事件 | debug no-op。没有旧 hook，但这是合法事件，不 warning。 |
-| 未识别事件 | 打 warning：`Callback.on_event received unrecognised event type ...`。 |
-
-PR E 把这 4 个事件加入了 typed-only 合法列表：
-
-- `AmbiguityLoggedEvent`
-- `BuiltinSubagentEnterEvent`
-- `BuiltinSubagentExitEvent`
-- `BuiltinSubagentFallbackEvent`
-
-所以普通 `Callback()` 收到这些事件不会误报 unknown；真正消费它们的 callback 仍应覆盖 `on_event()`。
+消费方覆写 `on_event()` 并按事件类型自行分派；不关心的类型直接落到 else 分支被忽略，
+不产生 warning。引擎装配给中间件的 `_EventSinkCallbackAdapter` 就只有这一个方法，
+所以"发送端调了别的方法名"这件事在结构上不可能再发生。
 
 ## 5. Event sink 怎么写文件和分发
 
@@ -344,7 +330,7 @@ log_ambiguity tool
   -> tool wrapper 注入 ctx["_callbacks"]
   -> log_ambiguity 写业务记录
   -> AmbiguityLoggedEvent via on_event
-  -> tool_call via legacy on_tool_call
+  -> ToolCallEvent via on_event
 
 reference reader assembly
   -> assemble_graph(callbacks=...)

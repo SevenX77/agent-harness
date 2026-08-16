@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -57,14 +58,47 @@ def save_to_cache(key: str, compiled: CompiledSkill) -> None:
     )
 
 
+#: File types a compile reads: the markdown documents it parses and the Python
+#: modules it imports (validators, logic actions, tools).
+_COMPILE_INPUT_SUFFIXES = frozenset({".md", ".py"})
+
+
+def _is_skipped_dir(name: str) -> bool:
+    """Directories a compile never reads, pruned before descending into them.
+
+    Not tidiness — each one is actively harmful in the key. ``.workspace`` holds
+    run/predict output that every execution rewrites, so keying on it would
+    invalidate the cache after each run. ``.git`` is large enough to make the walk
+    itself the dominant cost. ``__pycache__`` mirrors sources the key already
+    covers, with mtimes that move on import rather than on edit.
+    """
+    return name.startswith(".") or name == "__pycache__"
+
+
 def _collect_skill_files(root: Path) -> list[Path]:
+    """Every compile input under the skill root.
+
+    Deliberately over-approximate. An input the key MISSES makes ``compile_skill``
+    answer for a tree that is not the one on disk — a wrong answer. An extra file
+    in the key only costs a recompile. Build caches that get this right (ccache's
+    depfiles, Bazel's declared inputs) all treat an unsound dependency set as a
+    correctness bug rather than a tuning knob, and this follows that side.
+
+    Known remaining hole: a subgraph resolved OUTSIDE this root (a linked skill)
+    is still not covered, because the resolved set is only known after compiling.
+    Closing that needs the loader to report its read-set and the cache snapshot to
+    carry it — a separate change. This one shrinks the hole from "everything below
+    the root except GRAPH.md and phases/" to "only out-of-root links".
+    """
     files: list[Path] = []
-    graph = root / "GRAPH.md"
-    if graph.exists():
-        files.append(graph)
-    phases_dir = root / "phases"
-    if phases_dir.exists():
-        files.extend(path for path in phases_dir.rglob("*.md") if path.is_file())
+    for directory, subdirectories, filenames in os.walk(root):
+        subdirectories[:] = [name for name in subdirectories if not _is_skipped_dir(name)]
+        base = Path(directory)
+        files.extend(
+            base / filename
+            for filename in filenames
+            if Path(filename).suffix in _COMPILE_INPUT_SUFFIXES
+        )
     return sorted(files, key=lambda path: path.relative_to(root).as_posix())
 
 

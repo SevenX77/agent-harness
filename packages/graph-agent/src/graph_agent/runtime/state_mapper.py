@@ -166,7 +166,27 @@ class StateMapper:
 
         return WorkflowState(
             data=BusinessData.model_validate(filtered),
-            flow=flow_obj.model_copy(),
+            # A phase plans for itself. `working_memory` holds one phase's own
+            # notes — PLANNING_NUDGE asks the model to write down "本阶段的目标"
+            # — so handing it the previous phase's notes lets an upstream plan
+            # answer a downstream phase's planning gate: ExitControl's
+            # `_working_memory_has_plan` only asks whether the key `plan` is
+            # present, while its neighbour `_own_finish_payload` thirty lines up
+            # already qualifies the same cross-boundary shape by phase name.
+            # A phase that only talks then loses the planning nudge it had
+            # earned and gets the generic one instead.
+            #
+            # Excavating an earlier phase is `read_artifact`'s job ("an earlier
+            # phase's named output"); `query_working_memory` reads back "the
+            # plan text recorded by update_working_memory" — its own. Emptying
+            # the slot is what makes that docstring true.
+            #
+            # Input only, like `messages` below. The flow channel merges
+            # `working_memory` per key (`_FLOW_DICT_MERGE_FIELDS`), so an
+            # untouched empty slot unions to a no-op and a recorded plan
+            # overwrites just `plan` — the iterate bookkeeping written into the
+            # same dict by `_with_graph_iterate_signal` survives both.
+            flow=flow_obj.model_copy(update={"working_memory": {}}),
             # A phase opens its own conversation. Round 8 of the nine-round
             # finalization ruled it directly — "phase 间默认强隔离(`messages = []`
             # by-design)+ 按需挖掘机制(context_access opt-in)" — and the opt-in

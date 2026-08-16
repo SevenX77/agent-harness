@@ -162,7 +162,38 @@ class SkillLoader:
         _compilation_cache: dict[str, CompiledSkill] | None = None,
         allowed_roles: set[str] | None = None,
     ) -> CompiledSkill:
+        """Compile one skill root, with every diagnostic located against THAT root.
+
+        The boundary owns the rendering of ``source_path`` because the root is
+        what makes a relative path mean anything, and this call is the only
+        place that knows it. Diagnostics are carried as absolute paths inside,
+        and rebased once on the way out — the deeper helpers must not each guess
+        (guessing is what produced the defect this seam replaces).
+        """
         root = Path(skill_root)
+        try:
+            return self._compile_skill_from_root(
+                root,
+                skill_resolver=skill_resolver,
+                runtime_input_fields=runtime_input_fields,
+                _loading_stack=_loading_stack,
+                _compilation_cache=_compilation_cache,
+                allowed_roles=allowed_roles,
+            )
+        except SkillLoadError as exc:
+            _relocate_diagnostics_to_root(exc, root)
+            raise
+
+    def _compile_skill_from_root(
+        self,
+        root: Path,
+        *,
+        skill_resolver: SkillResolverProtocol | None,
+        runtime_input_fields: dict[str, set[str]] | None,
+        _loading_stack: tuple[str, ...],
+        _compilation_cache: dict[str, CompiledSkill] | None,
+        allowed_roles: set[str] | None,
+    ) -> CompiledSkill:
         resolver = skill_resolver or default_local_resolver_for_skill(root)
         root_key = str(root.resolve())
         if root_key in _loading_stack:
@@ -749,14 +780,48 @@ def _purity_fatal(path: Path, line: int, message: str) -> None:
 
 
 def _payload_source_path(path: Path) -> str:
-    parts = path.parts
-    if path.name == "GRAPH.md":
-        return "GRAPH.md"
-    for anchor in ("phases", "io"):
-        if anchor in parts:
-            index = len(parts) - 1 - parts[::-1].index(anchor)
-            return Path(*parts[index:]).as_posix()
+    """Carry the diagnostic's file as an unambiguous absolute posix path.
+
+    A path only becomes skill-relative against a stated root, and the helpers
+    that raise diagnostics do not know which root the caller is compiling — a
+    subgraph phase file is reached during BOTH the child's own compile and its
+    parent's. So they keep the whole path, and
+    ``SkillLoader.compile_skill`` renders it relative to the root it owns.
+    """
     return path.as_posix()
+
+
+def _relocate_diagnostics_to_root(exc: SkillLoadError, root: Path) -> None:
+    """Render this error's file locations relative to ``root``, in place.
+
+    Studio projects ``source_path`` straight onto files and nodes, so the axis
+    has to name the file the defect is actually in. A path outside ``root``
+    (a subgraph linked from elsewhere) has no relative form and stays absolute
+    rather than being bent into a wrong one.
+    """
+    resolved_root = root.resolve()
+
+    def relocate(source_path: str | None) -> str | None:
+        if not source_path:
+            return source_path
+        candidate = Path(source_path)
+        if not candidate.is_absolute():
+            return candidate.as_posix()
+        try:
+            return candidate.resolve().relative_to(resolved_root).as_posix()
+        except ValueError:
+            return candidate.as_posix()
+
+    compile_result = getattr(exc, "compile_result", None)
+    for issue in getattr(compile_result, "issues", []) or []:
+        issue.source_path = relocate(issue.source_path)
+
+    payload = exc.payload
+    if payload is not None:
+        payload.source_path = relocate(payload.source_path)
+        exc.source_path = payload.source_path
+        exc.skill_path = Path(payload.source_path) if payload.source_path else None
+        exc.error_payload = payload.model_dump(mode="json")
 
 
 def _first_validation_loc(exc: ValidationError) -> tuple[Any, ...]:

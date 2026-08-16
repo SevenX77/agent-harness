@@ -17,6 +17,15 @@ messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外
 
 > **现状 vs 目标**:**live 今天已有** `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:237`)、AGENT namespace checkpoint、`interrupt()` 原语(`cognitive_flow.py:292`)、Engine `resume_skill` 的 HITL ToolMessage 注入,以及 **summarization/compaction**(PR D 2026-08-15:`middleware/compaction.py` 的 `CompactionMiddleware`,顺序契约第 4 槽,fraction 0.8 / keep 20 + sidecar 全文 + `CompactionEvent.content_ref`)。**仍未 live**:Studio HTTP `resume_run` 仍是 501 桩(`runs.py:70`)。
 
+**相位边界的 messages 语义(用户裁决,九轮定稿 Round 8 第 3 条)**:一个相位的 agent 以
+**空 messages** 起步——`messages = []` by-design,加"按需挖掘"(`context_access` opt-in)。
+相位之间的数据只走黑板:相位在 `io.inputs` 里声明它消费什么,就只拿到什么;上游相位的对话记录
+不是第二条入口。这条规则约束的是**递给相位什么**,不约束**运行留下什么**——相位产出的 messages
+仍然并回全局 `WorkflowState.messages` 通道,所以整次运行的对话记录、checkpoint 与 HITL resume
+都建立在完整历史之上。落点:`runtime/state_mapper.py` 的 `build_phase_input`;同形的
+SUBGRAPH(`graph_assembler.py:1638`)与 subagent(`:2916`)本来就是这个语义。
+理由与现场证据见 `.kiro/specs/decision-2026-08-16-a-phase-opens-its-own-conversation.md`。
+
 messages 两条存储纪律(与 `03-checkpoint` blackboard 同构、各管各;**下为目标模型**):
 - **delta(去体积,无损)**:`DeltaChannel`(`state.py:237`,`_messages_delta_reducer:28`,**`snapshot_frequency=50`**——每 50 步存全量 snapshot、中间存 diff;经 ns 入共享 base,每 model/tool 步存档)。snapshot 频率 = 平衡旋钮(小=体积大、大=回放/resume 慢,需实测)。
 - **compact(有界,有损/外移)**:summarization——超窗触发的摘要中间件(实现在 `02-middleware`,逻辑本域)+ sidecar 存全文(`CompactionEvent.content_ref`)。

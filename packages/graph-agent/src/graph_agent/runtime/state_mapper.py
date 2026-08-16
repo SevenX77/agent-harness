@@ -166,7 +166,25 @@ class StateMapper:
         return WorkflowState(
             data=BusinessData.model_validate(filtered),
             flow=flow_obj.model_copy(),
-            messages=list(state.get("messages", [])),
+            # A phase opens its own conversation. Round 8 of the nine-round
+            # finalization ruled it directly — "phase 间默认强隔离(`messages = []`
+            # by-design)+ 按需挖掘机制(context_access opt-in)" — and the opt-in
+            # half is already live in `_cognitive_framework_tools`; this is the
+            # default half, which had never been wired.
+            #
+            # The blackboard is what carries data between phases: a phase states
+            # what it consumes in `io.inputs` and gets exactly that, filtered
+            # right above. Handing it the previous phase's transcript as well
+            # adds a second, undeclared inlet — one that three middlewares then
+            # read as this phase's own traffic (LoopDetection's window,
+            # ExecutionControl's dead-end scan, Compaction's token count), and
+            # that delivers another phase's nudges and loop diagnostics as if
+            # they were instructions to this one.
+            #
+            # This is the phase's INPUT only. `wrap_phase_output` still merges
+            # whatever the phase produced back into the global channel, so the
+            # run-level transcript, the checkpoint and HITL resume are unchanged.
+            messages=[],
         )
 
     def wrap_phase_output(

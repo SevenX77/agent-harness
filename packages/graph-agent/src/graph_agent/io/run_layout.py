@@ -25,7 +25,20 @@ from pathlib import Path
 RUNS_DIRNAME = "runs"
 PREDICTS_DIRNAME = "predicts"
 
-__all__ = ["PREDICTS_DIRNAME", "RUNS_DIRNAME", "predicts_root", "runs_root"]
+# The event stream an execution writes inside its own directory. Named here
+# because "where does an execution keep its artifacts" is this module's whole
+# subject: the sink that opens the file and the runner that has to report the
+# file's path after the sink is gone must agree on it, and a second spelling of
+# the name is a second answer to the same question.
+TRACE_FILENAME = "trace.jsonl"
+
+__all__ = [
+    "PREDICTS_DIRNAME",
+    "RUNS_DIRNAME",
+    "TRACE_FILENAME",
+    "predicts_root",
+    "runs_root",
+]
 
 
 def runs_root(workspace_dir: Path) -> Path:

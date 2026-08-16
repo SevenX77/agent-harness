@@ -1,15 +1,20 @@
 """Node-level model-compare mechanics (PR2): isolated single-node side-runs.
 
-The engine cannot execute two in-graph nodes in the same superstep
-(``WorkflowState.data`` is a reducerless LastValue channel), so compare does NOT
-inject a parallel graph node. Instead, for each candidate we:
+Compare does NOT inject a parallel graph node; it runs the node again on the
+side. The design source records that as the PM-approved shape
+(``docs/studio/mvp1/03_regions/properties/mvp1-alignment.md:61``), because a
+side-run touches neither the engine's execution nor the main blackboard. (The
+original 2026-07-02 reason — that two in-graph nodes could not run in the same
+superstep — no longer holds: ``WorkflowState.data`` became a reducer channel in
+#804, see ``graph_agent.core.state.merge_business_channel``. The design stands
+on its own grounds.) For each candidate we:
 
 1. take the compare node's real input slice from the base run's
    ``input_dispatch`` event (:func:`extract_node_input`),
 2. materialize a single-phase skill variant that runs just that node
    (:func:`materialize_single_node_skill`),
-3. bind that node's effective role to the candidate model in a temp roles file
-   (:func:`write_candidate_roles_file`),
+3. write a temp roles file that is the active roles truth with every role's
+   model swapped to the candidate (:func:`write_candidate_roles_file`),
 
 then run each variant with the captured slice via the ordinary run machinery. The
 side-run is a physically separate run, so it never writes the main blackboard and
@@ -27,7 +32,7 @@ from typing import Any
 import yaml
 
 from app.core.adapters.engine import AgentNodeAST, compile_skill, effective_llm_role
-from app.models.llm_config import RolesData
+from app.models.llm_config import RoleEntry, RolesData
 from app.models.model_compare import CompareCandidate
 
 
@@ -127,37 +132,83 @@ def build_candidate_roles(
     node_id: str,
     candidate: CompareCandidate,
 ) -> RolesData:
-    """Roles data binding the node's effective role + graph_agent to ``candidate``.
+    """The active roles truth with EVERY role's model swapped to ``candidate``.
 
-    Reuses the same transient candidate-role builder the node compare-candidate
-    TEST endpoint uses, so a compared model routes identically to a tested one.
+    The side-run worker points ``STUDIO_LLM_ROLES_PATH`` at this data, which
+    REPLACES the roles truth wholesale for that process — so any role name the
+    execution asks for and this data does not define kills the run at resolution
+    (``resource.no_available_route``). Which role names a node's execution asks
+    for is not knowable from the node: a SUBGRAPH node's phases each declare
+    their own ``llm_role`` and are compiled only at assembly time, and an AGENT
+    node's subagents pick theirs at run time. Enumerating them is therefore not
+    an option; covering the whole truth is.
+
+    Swapping the model of every role — rather than substituting one candidate
+    role everywhere — is what ``CompareCandidate`` means by "same node, same
+    input, only the underlying model differs": each role keeps its own
+    ``intent`` params, ``system_prompt_prefix`` and lint requirements, and only
+    the model behind it changes. Materialization re-fits those params to the
+    candidate's routes (temperature is a share of the route ceiling, reasoning
+    effort a level the route sells), which is exactly the per-route fitting
+    Settings does on save.
+
+    Accepted trade-off: a phase that deliberately runs on a cheap role also runs
+    on the candidate model here. That is the direct consequence of "only the
+    model differs" — leaving such a phase on its own model would compare a run
+    that is only half swapped — and it costs candidate tokens on phases the
+    author picked a cheap model for.
+
+    Roles the truth does not define — the node's effective role, and the
+    conventional ``graph_agent`` fallback — are synthesized bare, since there is
+    no authored role to inherit params from.
     """
     # Deferred import: the builder lives with the llm router; importing at module
     # load would create a router<->service cycle.
     from app.core.adapters.transport_factory import build_gateway_adapter
     from app.routers.llm import CompareCandidateTestRequest, _compare_candidate_role
     from app.services.llm_credentials import load_credentials
+    from app.services.llm_paths import roles_path
+    from app.services.llm_roles import load_roles_file
 
     route = None if candidate.route in (None, "", "auto") else candidate.route
     request = CompareCandidateTestRequest(canonical_id=candidate.model_group_id, route_id=route)
     credentials = load_credentials()
-    # `model_groups` is authoring intent; the engine resolves a role through its
-    # `fallback_chain`. Settings materializes on save (PUT /llm/roles/{name}) and
-    # a candidate role owes the engine the same executable shape — without this
-    # the side-run resolves to nothing and dies with `resource.no_available_route`.
-    role_entry = build_gateway_adapter().materialize_role(
-        {
-            "role": _compare_candidate_role(request, credentials),
-            "credentials": credentials,
-        }
-    )
+    # Reuses the same transient candidate-role builder the node compare-candidate
+    # TEST endpoint uses, so a compared model routes identically to a tested one.
+    candidate_groups = _compare_candidate_role(request, credentials).model_groups
+    adapter = build_gateway_adapter()
 
-    effective = node_effective_role(skill_dir, node_id)
-    roles = {effective: role_entry.model_copy(deep=True)}
-    # Bind the conventional fallback too, so resolution lands on the candidate
-    # regardless of the node's layering outcome.
-    roles.setdefault("graph_agent", role_entry.model_copy(deep=True))
-    return RolesData(roles=roles)
+    def _with_candidate_model(role: RoleEntry) -> RoleEntry:
+        swapped = role.model_copy(
+            update={
+                "model_groups": [group.model_copy(deep=True) for group in candidate_groups],
+                # The candidate is now the role's only model source; a surviving
+                # bundle/profile reference would resolve the original model back
+                # into the chain.
+                "bundle_id": None,
+                "source_profile_id": None,
+                "source_profile_snapshot": None,
+                "fallback_chain": [],
+            }
+        )
+        # `model_groups` is authoring intent; the engine resolves a role through
+        # its `fallback_chain`. Settings materializes on save (PUT
+        # /llm/roles/{name}) and a candidate role owes the engine the same
+        # executable shape — without this the side-run resolves to nothing.
+        return adapter.materialize_role({"role": swapped, "credentials": credentials})
+
+    active_path = roles_path()
+    # A missing roles file is first-run empty (same reading as the resolver's own
+    # build); a malformed one stays fatal in `load_roles_file`.
+    active = load_roles_file(active_path) if active_path.exists() else RolesData()
+
+    roles = {name: _with_candidate_model(role) for name, role in active.roles.items()}
+    for name in (node_effective_role(skill_dir, node_id), "graph_agent"):
+        if name not in roles:
+            roles[name] = _with_candidate_model(RoleEntry())
+    # Bundles and profiles are unreachable once every role's bundle reference is
+    # cleared; carrying them would leave the original models named in the file.
+    return active.model_copy(update={"roles": roles, "model_bundles": {}, "model_profiles": {}})
 
 
 def write_candidate_roles_file(

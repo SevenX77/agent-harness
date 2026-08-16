@@ -91,7 +91,7 @@ def record_edge_operation(changed_keys: list[str], snapshot: dict[str, Any]) -> 
     if transition is not None:
         transition.record_operation(changed_keys, snapshot)
 
-def phase_execution_ids_of(state: Any) -> dict[str, str]:
+def phase_execution_ids_of(state: Any) -> dict[str, list[str]]:
     """Read ``flow.phase_execution_ids`` off a graph state, tolerating both shapes.
 
     The flow channel is a Pydantic model in a live run and a plain dict in a
@@ -106,7 +106,13 @@ def phase_execution_ids_of(state: Any) -> dict[str, str]:
         recorded = flow_obj.get("phase_execution_ids")
     else:
         recorded = None
-    return dict(recorded) if isinstance(recorded, dict) else {}
+    if not isinstance(recorded, dict):
+        return {}
+    return {
+        str(phase): [str(execution_id) for execution_id in ids]
+        for phase, ids in recorded.items()
+        if isinstance(ids, list)
+    }
 
 
 def wrap_edge_transition(
@@ -130,7 +136,9 @@ def wrap_edge_transition(
             transition_id=uuid.uuid4().hex[:12],
             from_phases=list(upstream_phases),
             from_phase_execution_ids=[
-                recorded[name] for name in upstream_phases if name in recorded
+                execution_id
+                for name in upstream_phases
+                for execution_id in recorded.get(name, ())
             ],
             to_phase=phase_id,
             to_phase_execution_id=uuid.uuid4().hex[:12],

@@ -351,7 +351,7 @@ class StateMapper:
         # flow channel, so parallel siblings never overwrite each other.
         execution_id = active_phase_execution_id()
         if execution_id:
-            flow_delta["phase_execution_ids"] = {self.phase_id: execution_id}
+            flow_delta["phase_execution_ids"] = {self.phase_id: [execution_id]}
 
         messages_updates = updates.get("messages", [])
         return {

@@ -52,6 +52,7 @@ from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.edge_transition import (
     active_phase_execution_id,
     close_edge_transition,
+    phase_execution_ids_of,
     record_edge_operation,
     transition_identity,
     wrap_edge_transition,
@@ -454,6 +455,8 @@ def _phase_result_payload(
 
 def _phase_outputs_delta(
     phase_outputs: dict[str, dict[str, Any]],
+    *,
+    phase_execution_ids: dict[str, list[str]],
 ) -> dict[str, Any]:
     """Channel delta carrying business payloads plus their phase_outputs entries.
 
@@ -461,6 +464,13 @@ def _phase_outputs_delta(
     reducer channels fold them (parallel-fanout decision, 2026-08-15). The
     graph-level iterate runtime keeps using `_with_phase_outputs` because its
     result is the invoke return value, not a channel write.
+
+    The rounds' execution identities have to be carried here explicitly. Each
+    round writes its own id into the flow channel of ITS state, and an iterate
+    phase discards those states in favour of this delta — so without this the
+    downstream transition found nothing recorded for the phase it had just
+    left, and reported an empty ``from_phase_execution_ids`` for the very
+    topology that field is plural for.
     """
     data_delta: dict[str, Any] = {}
     for payload in phase_outputs.values():
@@ -468,7 +478,7 @@ def _phase_outputs_delta(
     data_delta["phase_outputs"] = {
         phase_id: dict(payload) for phase_id, payload in phase_outputs.items()
     }
-    return {"data": data_delta}
+    return {"data": data_delta, "flow": {"phase_execution_ids": phase_execution_ids}}
 
 
 def _with_phase_outputs(
@@ -671,7 +681,19 @@ def _phase_batch_runner(
     item_var: str,
     node: Any,
     output_keys: set[str] | None,
+    *,
+    phase_id: str,
+    item_executions: list[str],
 ) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
+    """Run the phase once per item, recording which execution produced each.
+
+    ``item_executions`` belongs to the caller that builds this phase's delta:
+    the items' own states are dropped in favour of that delta, so the ids they
+    each recorded have to be gathered here or they are lost. Items run on their
+    own threads and only append, which needs no lock under the GIL; passing the
+    list in rather than reaching for module state keeps the owner visible.
+    """
+
     async def _invoke_child(index: int, child_state: WorkflowState) -> Any:
         # An item needs an iteration IDENTITY, not just a branch label. The branch
         # index only names events; `active_outer_ns` is what gives the item its own
@@ -680,11 +702,13 @@ def _phase_batch_runner(
         # agent the same (thread_id, checkpoint_ns), so item N resumes item N-1's
         # conversation and inherits its spent budget (field evidence: run
         # 2026-08-15T10-19-55_df555c19, where chapter 2 re-submitted chapter 1's work).
-        return await _run_with_iteration_context_async(
+        result = await _run_with_iteration_context_async(
             index,
             _iteration_namespace(index),
             lambda: asyncio.to_thread(node, child_state),
         )
+        item_executions.extend(phase_execution_ids_of(result).get(phase_id, ()))
+        return result
 
     return _batch_payload_runner(workflow_state, item_var, output_keys, _invoke_child)
 
@@ -723,7 +747,10 @@ def _phase_batch_payload(
     item_var: str,
     node: Any,
     include_batch_outputs: bool,
-) -> dict[str, Any]:
+    phase_id: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Aggregate the items' outputs and the ids of the executions that made them."""
+    item_executions: list[str] = []
     _items, aggregated = _collect_batch_iteration(
         workflow_state,
         over=over,
@@ -735,10 +762,12 @@ def _phase_batch_payload(
             item_var,
             node,
             output_keys,
+            phase_id=phase_id,
+            item_executions=item_executions,
         ),
         include_batch_outputs=include_batch_outputs,
     )
-    return aggregated
+    return aggregated, item_executions
 
 
 def _graph_batch_payload_and_namespaces(
@@ -872,7 +901,7 @@ def _build_batch_iterate_phase(
 ) -> Any:
     def _batch_phase(state: WorkflowState) -> dict[str, Any]:
         workflow_state = _coerce_workflow_state(state)
-        payload = _phase_batch_payload(
+        payload, item_executions = _phase_batch_payload(
             workflow_state,
             over=over,
             range_spec=range_spec,
@@ -881,8 +910,12 @@ def _build_batch_iterate_phase(
             item_var=item_var,
             node=node,
             include_batch_outputs=include_batch_outputs,
+            phase_id=phase_id,
         )
-        return _phase_outputs_delta({phase_id: payload})
+        return _phase_outputs_delta(
+            {phase_id: payload},
+            phase_execution_ids={phase_id: item_executions},
+        )
 
     return _batch_phase
 
@@ -905,6 +938,7 @@ def _build_loop_iterate_phase(
         items = _apply_iterate_range(_resolve_iterate_items(workflow_state, iterate.over), iterate.range)
         acc = copy.deepcopy(accumulate.init)
         loop_state = StateManager.update_business(workflow_state, **{accumulate.var: acc})
+        round_executions: list[str] = []
         for index, item in enumerate(items, start=1):
             child_state = StateManager.update_business(
                 loop_state,
@@ -919,6 +953,7 @@ def _build_loop_iterate_phase(
             # round N-1's checkpoint (its whole conversation) and inherits its spent
             # agent-loop budget — the graph-level loop below already gets this right.
             result = _run_with_iteration_context(index, _iteration_namespace(index), _invoke_node)
+            round_executions.extend(phase_execution_ids_of(result).get(phase_id, ()))
             payload = _phase_result_payload(child_state, result, output_keys)
             if accumulate.from_ not in payload:
                 _iterate_merge_fatal(
@@ -934,7 +969,10 @@ def _build_loop_iterate_phase(
                 reducer=accumulate.merge,
             )
         final_payload = {accumulate.var: acc}
-        return _phase_outputs_delta({phase_id: final_payload})
+        return _phase_outputs_delta(
+            {phase_id: final_payload},
+            phase_execution_ids={phase_id: round_executions},
+        )
 
     return _loop_phase
 

@@ -610,7 +610,20 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 | B | 前端分段模型:节点段与边段平级呈现、按段标识分组(D5) | ✅ 随本行同 PR。`TraceStep` 增加 `segment: {kind:'phase'\|'edge', id}`;`edge_start`/`edge_end` 像 `prompt_captured`/`llm_call` 一样配对成**一行**分段;边操作按 `edge_transition_id` 归入边段,不再被读成"下游节点的事";同一 phase 的事件按 `phase_execution_id` 分组而非按名字——顺带修掉一个真缺陷:外层循环第二次执行同一 phase 时会继承上一次的 `agent_loop_iteration` 计数,在自己的 marker 到达前就把步骤标成「Iteration 3」 |
 | C | 后端按段记账(`run_report.py`,D8) | ✅ 随本行同 PR。`_event_node` 见到 `edge_transition_id` 就归到转移段(标签 `上游 -> 下游`,扇入用 `+` 连,无上游写 `input`),不再走 `to_phase` 兜底把边上的活与失败算到下游节点头上;`edge_start`/`edge_end` 给转移段自己的 wall time |
 
+| D | 真机点验抓到的回归:iterate 相位不把自己的执行标识交出去 | 🚧 本行 PR。真机 `demo-loop`(loop iterate + 下游相位)跑通后读引擎自己写的 `trace.jsonl`:`double -> summarize` 那一段 `from_phases=["double"]` 而 `from_phase_execution_ids=[]` —— 复数字段在它专为之设计的拓扑上恰好是空的。根因在 A:iterate 相位返回 `_phase_outputs_delta`,那只带 `data` 一个通道,各轮写进自己 state 的执行标识随那些 state 一起被丢掉,下游转移在 flow 里查无此相位。修法:`flow.phase_execution_ids` 的值由单个 id 改为**列表**(一个相位可以为一次下游交接执行多次:loop 每项一轮、batch 每项一份,累积输出是它们的汇合;只报最后一轮等于报一个真执行同时悄悄丢掉同伴),loop 与 batch 两条 in-graph 路径各自把本相位各轮的标识显式收集后交给 delta。跨模块事件契约不动(`from_phase_execution_ids` 本来就是 `list[str]`),改的是引擎内部 flow 通道。先红后绿:loop / batch 两条用例在改 src 前实测双红 |
+
 合并后按 `.claude/skills/studio-verify` 真机点验交五列报告。
+
+**同批发现、明写未修**:`blackboard_reduce` 的 `edge_transition_id` 在**所有**代码
+路径上恒为空串、`from_phases` 恒为空列表。两个发出点(`graph_assembler.py`
+`_loop_phase` 与 graph-loop 变体)都在轮次节点返回**之后**才发,那时转移段已关闭并
+清空,`transition_identity()` 只能返回空——这正是决议 §1.1 点名的
+`from_phase=None`「不是没填,是结构上无从填起」换了个字段重演。它没有用户可见后果
+(前端 `segmentOf` 会回落到该轮的节点段,事件照常显示),但决议 §3.2 要求这三个边操作
+事件的该字段「取值为其所属转移段的标识」,恒空违反该条。**不在本 PR 顺手改**:正确
+归属取决于「loop 的每一轮到底是节点级执行(轮次之间有边),还是节点内部的微观拓扑」,
+而决议 §3.4 已把节点内部微观拓扑(`parent_node_id` / `node_type`)显式划出范围、单独
+排期;在没有裁决的情况下改事件字段形状是跨三模块的结构性变更。留作该排期项的一部分。
 
 ### 用户缺陷批次 2026-08-15:compile_skill 的结果 agent 读不动
 

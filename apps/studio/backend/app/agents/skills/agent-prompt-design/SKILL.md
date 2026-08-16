@@ -113,7 +113,7 @@ contradiction at worst.
     thresholds on real content) — they belong to review prompts and golden.
 *   ❌ **Putting input payload content in the body — pasted OR expanded.**
     The engine already hands the model the phase's entire declared input slice
-    as a JSON message on the first turn (`[[KB-02-io-dataflow]]` §2), so a
+    as a JSON message on every turn (`[[KB-02-io-dataflow]]` §2), so a
     `{some_input}` reference written in `<goal>` is not "how the data gets
     there" — it is a SECOND full copy of a value the model already has. Name
     the variable and say what it is for; never expand it. Expanding a large

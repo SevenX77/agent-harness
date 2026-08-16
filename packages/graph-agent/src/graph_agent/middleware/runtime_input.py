@@ -53,7 +53,7 @@ def _blackboard_view(state: Any) -> dict[str, Any]:
 
 
 class RuntimeInputMiddleware(AgentMiddleware):
-    """Per-model-call rendering + first-turn input seeding for AGENT phases."""
+    """Per-model-call placeholder rendering + input delivery for AGENT phases."""
 
     def __init__(
         self,

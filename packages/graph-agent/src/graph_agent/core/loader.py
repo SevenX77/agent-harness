@@ -426,7 +426,7 @@ class SkillLoader:
         subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
 
         try:
-            actions, tools = _discover_actions_and_tools(root, discovered)
+            actions, tools = _discover_actions_and_tools(root, phase_docs)
         except SkillLoadError as exc:
             _append_issues_as_diags(post_diags, exc)
             discovery_failed = True
@@ -932,18 +932,19 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
 
 def _discover_actions_and_tools(
     skill_root: Path,
-    discovered: list[tuple[str, Path, str]],
+    phase_docs: list[PhaseDocument],
 ) -> tuple[ActionRegistry, ToolRegistry]:
     actions_by_phase: dict[str, dict[str, ActionDef]] = {}
     tools_by_phase: dict[str, list[ToolDef]] = {}
     root_tools = _load_tool_dir(skill_root / "tools", phase_id=None) if (skill_root / "tools").exists() else []
 
-    for phase_id, phase_file, mode in discovered:
-        phase_dir = phase_file.parent
+    for doc in phase_docs:
+        phase_id, mode = doc.phase_name, doc.mode
+        phase_dir = doc.path.parent
         actions_dir = phase_dir / "actions"
         tools_dir = phase_dir / "tools"
 
-        if mode == "logic":
+        if isinstance(doc.ast, LogicNodeAST):
             if tools_dir.exists():
                 _actions_fatal(
                     tools_dir,
@@ -952,7 +953,9 @@ def _discover_actions_and_tools(
                     code="[F-v3-agent-tool-unknown]",
                 )
             if actions_dir.exists():
-                actions_by_phase[phase_id] = _load_action_dir(actions_dir, phase_id)
+                actions_by_phase[phase_id] = _load_action_dir(
+                    actions_dir, phase_id, doc.ast.actions
+                )
         elif mode == "agent":
             if actions_dir.exists():
                 _actions_fatal(
@@ -1409,7 +1412,26 @@ def _subagent_input_model_name(phase_id: str, subagent_name: str) -> str:
     return f"{safe_phase or 'Phase'}{safe_name or 'Subagent'}Input"
 
 
-def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
+def _load_action_dir(
+    actions_dir: Path,
+    phase_id: str,
+    declared_actions: list[str],
+) -> dict[str, ActionDef]:
+    """Bind each DECLARED action name to the same-named function in `actions/*.py`.
+
+    The `actions:` list is the action registry (format SSOT
+    `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` §3: "actions | list[string] |
+    action 名注册表", and the file "必须导出同名函数"), and it is also the only thing
+    `graph_assembler._build_logic_node` ever dispatches. So the declaration decides
+    which module-level functions are actions; every other function in the file is an
+    ordinary private helper the author is free to write, and the action signature rule
+    does not apply to it.
+
+    Purity deliberately keeps a wider, file-level scope
+    (`docs/engine/mvp1/01-contract/03-compile-rules/mvp1-alignment.md:79` scopes it to
+    the "action/tool Python 文件"): a helper can be impure just as easily as an action.
+    """
+    declared = dict.fromkeys(declared_actions)
     by_id: dict[str, ActionDef] = {}
     for path in sorted(actions_dir.glob("*.py")):
         if path.name == "__init__.py":
@@ -1417,8 +1439,10 @@ def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
         _raise_on_purity_violations(path)
         module = _load_python_module(path)
         for func in _module_functions(module):
-            _validate_action_signature(path, func)
             action_id = func.__name__
+            if action_id not in declared:
+                continue
+            _validate_action_signature(path, func)
             if action_id in by_id:
                 _actions_fatal(
                     path,
@@ -1427,6 +1451,18 @@ def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
                     code="[F-v3-logic-action-name-invalid]",
                 )
             by_id[action_id] = ActionDef(id=action_id, phase_id=phase_id, path=path, func=func)
+
+    for action_id in declared:
+        if action_id in by_id:
+            continue
+        expected_file = actions_dir / f"{action_id}.py"
+        _actions_fatal(
+            expected_file if expected_file.exists() else actions_dir,
+            1,
+            f"action {action_id!r} is declared by phase {phase_id!r} but no function "
+            f"named {action_id!r} is defined in {actions_dir.name}/",
+            code="[F-v3-logic-action-entrypoint-missing]",
+        )
     return by_id
 
 

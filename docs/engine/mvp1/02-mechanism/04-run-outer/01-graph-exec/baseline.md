@@ -48,10 +48,12 @@ Step4 没把循环塞回 action,而是在 graph execution 外层接声明式 run
 - `ToolDef`(`:49`)/ `ToolRegistry`(`:60`,`_structured_tool` `:76`)——AGENT 的 tool(LLM 调,`StructuredTool`)。
 - **两套独立、不互通、无桥**(mvp1 决定**不统一** capability,见 `04-tools` TL2)。
 
-### 5. SUBGRAPH:inputs 放宽 / outputs 严校(loader)
-SUBGRAPH 节点 `_build_subgraph_node`(`:363`,装配归 `03-assemble`)递归调 child graph,父 data 启动子图、回 delta。
-- **子图 inputs 已放宽**(编译期):`loader.py:_validate_subgraph_io_contracts`(:528,`:211` 调用)仍递归编译 child graph,但不再比较父 `SUBGRAPH.md io.inputs` 与子 `GRAPH.md io.inputs`。父子 input 字段集合、required 或同名 schema 不一致不会在 loader 层 fatal;运行期子图仍先经父 phase `StateMapper` 切片,再由 child graph 按自己的 `io.inputs` 切片。
-- **子图 outputs 仍严校**(编译期):同函数继续要求父 `SUBGRAPH.md io.outputs` 与子 `GRAPH.md io.outputs` 整个 schema 相等;不一致报 `[F-v3-subgraph-io-mismatch]`,错误信息标明 `outputs do not match`。
+### 5. SUBGRAPH:父子 io 编译期不再比较,边界改由运行期 StateMapper 守(loader)
+SUBGRAPH 节点 `_build_subgraph_node`(`graph_assembler.py:1589`,装配归 `03-assemble`)递归调 child graph,父 data 启动子图、回 delta。
+- **父子 io 编译期完全不比较**:`loader.py:_validate_subgraph_io_contracts`(`:996`,`:397` 调用)只做一件事——递归编译 child graph,使"子图指向一个编译不过的 child"仍在父图编译期失败(路径解析 + child 有效性)。它既不比较父 `SUBGRAPH.md io.inputs` 与子 `GRAPH.md io.inputs`,也不比较双方的 `io.outputs`;父子字段集合、`required` 或同名字段 schema 不一致都不会在 loader 层 fatal。
+- **outputs 1:1 编译闸已于 2026-06-20 移除**(commit `cad7dbc0`,PM 授权):理由是子图与普通节点同构——按自己声明的 `io.inputs` 从父黑板切片、把声明的 `io.outputs` 合并回父黑板,这条边界由运行期 `StateMapper` 守,不需要编译期再要求父子 schema 相等;旧闸与该设计矛盾,并且卡死了 Studio 里逐节点编辑子图 io。权威设计见 `01-contract/02-skill-syntax/mvp1-alignment.md` §3.4(“父图和子图 IO 不需要字段全集一一相等”)与 §4 把“父子图 IO 1:1 强绑定”列为 drift。
+- **运行期边界**:`runtime/state_mapper.py:_validate_phase_updates_against_schema`(`:318`)按该 phase 声明的 outputs schema 过滤写回;子图写了未声明字段时以受控的 `[F-v3-runtime-state-mapping-failed]` 失败(`:328` "phase wrote undeclared keys"),不是崩溃。
+- **`[F-v3-subgraph-io-mismatch]` 保留在 registry 但引擎源码已**无发出点:保留是为了维持 round28 registry↔owner 双射与码表计数(`core/error_registry.py:95`,该行上方注释记录了这条保留理由)。同域的 `[F-v3-subgraph-io-schema-incompatible]`(`:96`)自 round-17 建表起就只有 registry 条目、从未有过发出点。
 
 ### 6. io.outputs 落盘:file / artifact(io/manager + io/storage + runner)
 `IOManager.save_outputs`(`io/manager.py:108`,storage-agnostic)按 `output_spec.target`(默认 `"file"`)分发:
@@ -83,7 +85,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 - **iterate runtime 已接入 graph-exec**:节点级/图级声明式循环 live;WS-E4 runtime edge trace 已覆盖 input dispatch 与 loop reduce;checkpoint delta/compaction、LangGraph `Send` 专门接线仍不在本 baseline 当前实现内。
 - **action/tool 不统一**:两套注册表(spec 已固定 Action≠Tool)。
 - **代码里术语混叫**:历史处把 action 叫 "tool"(死簇,待清)。
-- **子图 io 现状**:inputs 已放宽(`loader.py:528` 不再比较 inputs);outputs 仍强制相等并用 `[F-v3-subgraph-io-mismatch]` fatal。
+- **子图 io 现状**:编译期不做任何父子 io 比较(`loader.py:996` 只递归编译 child graph);父 `SUBGRAPH.md` 声明的 outputs 由运行期 `StateMapper` 按声明 schema 守边界,越界写回记 `[F-v3-runtime-state-mapping-failed]`。`[F-v3-subgraph-io-mismatch]` 仅保留 registry 条目(维持 round28 双射与计数),引擎源码无发出点。
 - **声明式 file input 依赖 runner 注入 workspace_dir**:经 `run_skill` / v0.3 runner 路径会写入 `persistent_storage_config.workspace_dir`;若直接拼状态调用 graph 且缺该配置,文件注入会以 `[F-v3-runtime-state-mapping-failed]` 失败。
 
 ## 🚨 已知代码债(2026-06-05 审计;如实记录,不在文档审计里改代码)

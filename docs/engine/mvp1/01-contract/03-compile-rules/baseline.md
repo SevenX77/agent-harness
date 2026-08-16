@@ -39,7 +39,7 @@ N/A。Studio 前端只消费编译结果和错误 payload；错误 payload 形�
 | `schema_version` | `engine-mvp1.error-metadata.v1` |
 | `status` | 当前统一为 `active` |
 
-WS-E3 P0-2 不新增/删除错误码；当前 key set 继续是 96 个。`[F-v3-mention-unused-registry-entry]` 与 `[F-v3-reference-reader-failed]` 是 `WARN`，其余现有码为 `FATAL`。
+WS-E3 P0-2 自身不新增/删除错误码;`ERROR_REGISTRY` 的 key set 此后被后续改动扩到 **99** 个(`uv run python -c "from graph_agent.core.error_registry import ERROR_REGISTRY as R; print(len(R))"` → `99`)。`[F-v3-mention-unused-registry-entry]` 与 `[F-v3-reference-reader-failed]` 是 `WARN`,其余现有码为 `FATAL`。其中 `[F-v3-reference-reader-failed]` 有真实发出点(`core/builtin_subagents/reference_reader.py:47`、`core/graph_assembler.py:2633`);`[F-v3-mention-unused-registry-entry]` 则只有 registry 条目(`core/error_registry.py:118`)、引擎源码无发出点——这条 WARN 目前不会真的报出来,待后续任务裁决是补发出点还是从码表退役。
 
 iterate 新增码:
 - `[F-v3-iterate-accumulate-fields-missing]`:编译期 fatal；loop phase `io.inputs` 缺 `item_var` 或 `accumulate.var`。

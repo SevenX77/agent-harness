@@ -14,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from graph_agent.tools.md_value import parse_list_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -389,7 +391,11 @@ def _list_type_runtime(
     inner_coerce, inner_enum = _build_type_runtime(inner_hint, field_name)
 
     def coerce_list(value: Any) -> list[Any]:
-        raw_values = value if isinstance(value, list) else str(value).split(",")
+        raw_values = value if isinstance(value, list) else parse_list_value(str(value))
+        if not isinstance(raw_values, list):
+            raise ValueError(
+                f"{value!r} announces JSON structure but does not parse as a list"
+            )
         items = [inner_coerce(v.strip() if isinstance(v, str) else v) for v in raw_values]
         _validate_list_enum_items(items, inner_enum)
         return items

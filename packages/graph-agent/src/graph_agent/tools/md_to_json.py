@@ -30,6 +30,7 @@ from pydantic import ValidationError as PydanticValidationError
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+from graph_agent.tools.md_value import parse_list_value
 
 logger = logging.getLogger(__name__)
 
@@ -466,9 +467,9 @@ def _coerce_scalar(key: str, raw_val: str, annotations: dict[str, Any]) -> Any:
     if ann is None:
         return raw_val
 
-    # list[str] via inline comma notation (flat field format)
+    # Inline list notation (flat field format) — JSON array or comma list.
     if _is_list_annotation(ann):
-        return [v.strip() for v in raw_val.split(",") if v.strip()]
+        return parse_list_value(raw_val)
 
     # int / float — try conversion; keep str on failure (diagnose will report)
     cast = _get_numeric_cast(ann)

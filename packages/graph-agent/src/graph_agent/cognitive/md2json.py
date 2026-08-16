@@ -9,6 +9,12 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from graph_agent.tools.md_value import (
+    looks_like_json_literal,
+    parse_list_value,
+    strip_outer_fence,
+)
+
 
 @dataclass(frozen=True)
 class Md2JsonResult:
@@ -53,7 +59,7 @@ def _parse_markdown_to_dict(
         normalized_key = _normalize_key(key)
         if normalized_key in properties or not bullet_data:
             schema = properties.get(normalized_key)
-            data[normalized_key] = _coerce_value(_strip_outer_fence(body), schema)
+            data[normalized_key] = _coerce_value(strip_outer_fence(body), schema)
 
     return data
 
@@ -89,14 +95,18 @@ def _coerce_value(raw: str, schema: dict[str, Any] | None) -> Any:
     value = raw.strip()
     schema_type = schema.get("type") if isinstance(schema, dict) else None
 
-    if _looks_like_json(value):
+    # A declared array is read by the one authority on list-shaped Markdown
+    # values, so this parser and ``tools/md_to_json.parse_md`` — both of which
+    # run over the same ``business_data_md`` — cannot disagree about it.
+    if schema_type == "array":
+        return parse_list_value(value)
+
+    if looks_like_json_literal(value):
         return _coerce_json_like(value)
 
     scalar = _coerce_schema_scalar(value, schema_type)
     if scalar is not _UNCOERCED:
         return scalar
-    if schema_type == "array" and "," in value:
-        return [item.strip() for item in value.split(",") if item.strip()]
 
     return value
 
@@ -106,7 +116,7 @@ _UNCOERCED = object()
 
 def _coerce_json_like(value: str) -> Any:
     try:
-        return json.loads(_strip_outer_fence(value))
+        return json.loads(strip_outer_fence(value))
     except json.JSONDecodeError:
         return value
 
@@ -142,24 +152,6 @@ def _coerce_bool_or_uncoerced(value: str) -> bool | object:
     if lowered in {"false", "no", "0"}:
         return False
     return _UNCOERCED
-
-
-def _strip_outer_fence(value: str) -> str:
-    stripped = value.strip()
-    if not stripped.startswith("```"):
-        return stripped
-
-    lines = stripped.splitlines()
-    if len(lines) >= 2 and lines[-1].strip() == "```":
-        return "\n".join(lines[1:-1]).strip()
-    return stripped
-
-
-def _looks_like_json(value: str) -> bool:
-    stripped = _strip_outer_fence(value)
-    return (stripped.startswith("{") and stripped.endswith("}")) or (
-        stripped.startswith("[") and stripped.endswith("]")
-    )
 
 
 def _schema_properties(output_schema: dict[str, Any] | None) -> dict[str, Any]:

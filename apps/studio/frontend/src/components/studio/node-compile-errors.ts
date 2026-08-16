@@ -1,19 +1,17 @@
 import type { CompileError, LintError } from "@/api/types"
 import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
+import { fieldAxisCanNameARootNode, normalizeDiagnosticPath, rootPhaseIdFromPath } from "./diagnostic-paths"
 
-const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
 const FIELD_NODE_PREFIX_RE = /^([A-Za-z0-9_-]+)\./
-const RUNTIME_INPUT_FILE_RE = /(?:^|\/)\.workspace\/(?:import_files(?:\/|$)|runtime_config\.json$)/
-
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\/+/, "")
-}
+// Root-anchored like every other path read here: `.workspace/` is Studio's own workspace
+// dir at the skill root, so a nested occurrence would belong to a child skill.
+const RUNTIME_INPUT_FILE_RE = /^\.workspace\/(?:import_files(?:\/|$)|runtime_config\.json$)/
 
 function boundaryNodeIdFromFile(file: string | null | undefined): string | null {
   if (typeof file !== "string") {
     return null
   }
-  return RUNTIME_INPUT_FILE_RE.test(normalizePath(file)) ? INPUT_ID : null
+  return RUNTIME_INPUT_FILE_RE.test(normalizeDiagnosticPath(file)) ? INPUT_ID : null
 }
 
 function boundaryNodeIdFromField(field: string | null | undefined): string | null {
@@ -31,14 +29,19 @@ function boundaryNodeIdFromField(field: string | null | undefined): string | nul
 
 function compileErrorNodeId(error: CompileError | null | undefined): string | null {
   const file = error?.file
-  if (typeof file === "string") {
-    const fileMatch = PHASE_FILE_RE.exec(file)
-    if (fileMatch) {
-      return fileMatch[1]
-    }
+  const rootPhaseId = rootPhaseIdFromPath(file)
+  if (rootPhaseId) {
+    return rootPhaseId
+  }
+  const boundaryFromFile = boundaryNodeIdFromFile(file)
+  if (boundaryFromFile) {
+    return boundaryFromFile
+  }
+  if (!fieldAxisCanNameARootNode(file)) {
+    return null
   }
   const field = error?.field
-  const boundaryId = boundaryNodeIdFromFile(file) ?? boundaryNodeIdFromField(field)
+  const boundaryId = boundaryNodeIdFromField(field)
   if (boundaryId) {
     return boundaryId
   }
@@ -72,14 +75,19 @@ function lintErrorNodeId(error: LintError | null | undefined): string | null {
     return phaseName
   }
   const file = error?.file
-  if (typeof file === "string") {
-    const fileMatch = PHASE_FILE_RE.exec(file)
-    if (fileMatch) {
-      return fileMatch[1]
-    }
+  const rootPhaseId = rootPhaseIdFromPath(file)
+  if (rootPhaseId) {
+    return rootPhaseId
+  }
+  const boundaryFromFile = boundaryNodeIdFromFile(file)
+  if (boundaryFromFile) {
+    return boundaryFromFile
+  }
+  if (!fieldAxisCanNameARootNode(file)) {
+    return null
   }
   const field = error?.field_path
-  const boundaryId = boundaryNodeIdFromFile(file) ?? boundaryNodeIdFromField(field)
+  const boundaryId = boundaryNodeIdFromField(field)
   if (boundaryId) {
     return boundaryId
   }

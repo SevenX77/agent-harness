@@ -7,6 +7,7 @@ import {
   formatDiagnosticCode,
   lintErrorsForBoundary,
   lintErrorsForFile,
+  lintErrorsForPhase,
   lintErrorsToMarkers,
 } from "./field-compile-errors"
 
@@ -76,6 +77,75 @@ describe("fieldErrorsByKey", () => {
   })
 })
 
+/*
+ * A diagnostic's path is relative to the COMPILE ROOT, so only a path that starts
+ * at the root names a root-graph phase.
+ *
+ * Engine contract (PR #830, merged 2026-08-15):
+ * `packages/graph-agent/src/graph_agent/core/compiler.py:19` documents
+ * `CompileIssue.source_path` as skill-relative, and
+ * `packages/graph-agent/tests/core/test_compile_issue_source_path_is_root_relative.py:181`
+ * pins the nested shape:
+ *   assert ("[F-v3-graph-schema-unknown-field]", "subgraph/first/GRAPH.md") in located
+ * — i.e. a phase living inside a child skill arrives as
+ * `subgraph/<child>/phases/<id>/<file>.md`, never bare `phases/<id>/...`.
+ *
+ * Observable defect before this change: `PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//`
+ * matched at ANY position, so `subgraph/first/phases/review/SKILL.md` yielded phase id
+ * `review` and its diagnostics were badged onto the ROOT graph's `review` node — a
+ * different skill's phase. The same regex is duplicated in `node-compile-errors.ts`
+ * (canvas node badges) and `field-compile-errors.ts` (Properties field tooltips), so both
+ * surfaces mis-attributed. Recorded as unhandled in
+ * `.kiro/specs/decision-2026-08-15-compile-diagnostics-name-the-file-they-are-in.md:85`
+ * ("已知未处理(另立)").
+ */
+describe("lintErrorsForPhase — child-skill phases never reach a root node", () => {
+  it("does not badge a subgraph's 'review' phase onto the root graph's 'review' node", () => {
+    const scoped = lintErrorsForPhase(
+      [
+        lintErr({ phase_name: null, file: "subgraph/first/phases/review/SKILL.md", message: "child" }),
+        lintErr({ phase_name: null, file: "phases/review/SKILL.md", message: "root" }),
+      ],
+      "review",
+    )
+
+    expect(scoped.map((error) => error.message)).toEqual(["root"])
+  })
+
+  it("keeps a deeply nested child phase off the root node too", () => {
+    const scoped = lintErrorsForPhase(
+      [
+        lintErr({
+          phase_name: null,
+          file: "subgraph/event-timeline/subgraph/event-extraction/phases/review/SKILL.md",
+          message: "grandchild",
+        }),
+      ],
+      "review",
+    )
+
+    expect(scoped).toEqual([])
+  })
+})
+
+describe("fieldErrorsByKey — child-skill phases never reach a root node", () => {
+  it("drops a subgraph phase's field diagnostic instead of marking the root node's field", () => {
+    const byField = fieldErrorsByKey(
+      [
+        lintErr({
+          phase_name: null,
+          file: "subgraph/first/phases/review/SKILL.md",
+          field_path: "llm_role",
+          message: "child role missing",
+        }),
+      ],
+      "review",
+    )
+
+    expect(byField).toEqual({})
+  })
+})
+
 describe("lintErrorsForFile", () => {
   it("keeps only diagnostics that belong to the open file (realtime lint = this file's context)", () => {
     const scoped = lintErrorsForFile(
@@ -89,15 +159,34 @@ describe("lintErrorsForFile", () => {
     expect(scoped.map((error) => error.message)).toEqual(["mine"])
   })
 
-  it("matches separator-insensitively and tolerates an absolute sandbox-path leak", () => {
+  it("matches separator-insensitively", () => {
     const scoped = lintErrorsForFile(
-      [
-        lintErr({ file: "phases\\aggregate\\SKILL.md", message: "win-seps" }),
-        lintErr({ file: "C:/tmp/studio-lint-xxx/skill/phases/aggregate/SKILL.md", message: "abs-leak" }),
-      ],
+      [lintErr({ file: "phases\\aggregate\\SKILL.md", message: "win-seps" })],
       "phases/aggregate/SKILL.md",
     )
-    expect(scoped.map((error) => error.message).sort()).toEqual(["abs-leak", "win-seps"])
+    expect(scoped.map((error) => error.message)).toEqual(["win-seps"])
+  })
+
+  /*
+   * Both sides of this comparison are paths relative to the SAME compile root — the open
+   * file's path (`LazyMonacoPanel` hands the very string it passes to
+   * `writeSkillFile(saveTarget, filePath, ...)`, `LazyMonacoPanel.tsx:97`) and the engine's
+   * root-relative `source_path` (PR #830). Suffix matching therefore has nothing left to
+   * absorb, and it actively mis-attributes: a grandchild file ends with a child file's
+   * whole path.
+   */
+  it("does not let a nested child's file claim a root-level child's same-named file", () => {
+    const scoped = lintErrorsForFile(
+      [
+        lintErr({
+          file: "subgraph/event-timeline/subgraph/event-extraction/phases/review/SKILL.md",
+          message: "grandchild",
+        }),
+        lintErr({ file: "subgraph/event-extraction/phases/review/SKILL.md", message: "child" }),
+      ],
+      "subgraph/event-extraction/phases/review/SKILL.md",
+    )
+    expect(scoped.map((error) => error.message)).toEqual(["child"])
   })
 
   it("drops diagnostics with no file (skill-level → Compile drawer, never inline on this file)", () => {
@@ -156,6 +245,18 @@ describe("lintErrorsForBoundary", () => {
       "Graph input schema requires runtime input field 'chapter'",
       "Runtime input field 'chapters' has type 'string'",
     ])
+  })
+
+  it("does not put a child graph's io diagnostic on the root input boundary", () => {
+    // Measured engine output (2026-08-16): a child graph's io defect arrives as
+    // source_path='subgraph/first/GRAPH.md', field_path='io.outputs.required' — the field
+    // names the CHILD's io block, so it must not be read as the root's.
+    const scoped = lintErrorsForBoundary(
+      [lintErr({ file: "subgraph/first/GRAPH.md", field_path: "io.inputs.properties.topic", message: "child io" })],
+      "input",
+    )
+
+    expect(scoped).toEqual([])
   })
 
   it("keeps io.inputs field diagnostics on the input boundary", () => {

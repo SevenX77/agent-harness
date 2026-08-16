@@ -32,6 +32,74 @@ function lintErr(file: string | null | undefined, overrides: Partial<LintError> 
   }
 }
 
+/*
+ * A diagnostic path is relative to the COMPILE ROOT, so only a path starting at the root
+ * names a root-graph node. Measured engine output for a defect inside a child skill
+ * (fixture `packages/graph-agent/tests/core/test_compile_issue_source_path_is_root_relative.py`
+ * `_skill()`, unknown frontmatter field added to `subgraph/first/phases/review/SKILL.md`,
+ * run 2026-08-16):
+ *
+ *   [F-v3-agent-schema-unknown-field] | 'subgraph/first/phases/review/SKILL.md' | 'no_such_field'
+ *   [F-v3-agent-subgraph-invalid]     | 'phases/alpha/SUBGRAPH.md'              | 'path'
+ *
+ * The first line is the child's own defect: it has no root node, because the root phase
+ * that hosts the child is `alpha` while the child's directory is `first` — the path cannot
+ * name the hosting node. The second line is the engine's OWN root-node diagnostic for the
+ * same event, so dropping the first one does not leave the canvas silent.
+ *
+ * Observable defect before this change: `PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//`
+ * matched at any position, so the first line was badged onto a root node named `review`
+ * — another skill's phase. See
+ * `.kiro/specs/decision-2026-08-15-compile-diagnostics-name-the-file-they-are-in.md:85`.
+ */
+describe("child-skill diagnostics never reach a root node", () => {
+  it("compileErrorsByNode: a subgraph phase file yields no node bucket", () => {
+    const byNode = compileErrorsByNode([
+      err("subgraph/first/phases/review/SKILL.md"),
+      err("phases/review/SKILL.md"),
+    ])
+    expect(Object.keys(byNode)).toEqual(["review"])
+    expect(byNode.review).toHaveLength(1)
+  })
+
+  it("lintErrorsByNode: a subgraph phase file yields no node bucket", () => {
+    const byNode = lintErrorsByNode([
+      lintErr("subgraph/first/phases/review/SKILL.md"),
+      lintErr("subgraph/event-timeline/subgraph/event-extraction/phases/review/SKILL.md"),
+    ])
+    expect(byNode).toEqual({})
+  })
+
+  /*
+   * Same fixture, child graph declaring an output its phase does not produce (run
+   * 2026-08-16):
+   *
+   *   [F-v3-graph-io-schema-invalid] | 'subgraph/first/GRAPH.md' | 'io.outputs.required'
+   *
+   * The field locator `io.outputs.required` is the CHILD graph's output block, but
+   * `boundaryNodeIdFromField` reads it as the root graph's global Output node. A file
+   * that already says "I am inside a child skill" must not be re-attributed by its
+   * field locator.
+   */
+  it("does not badge a child graph's io diagnostic onto the root global Output node", () => {
+    const byNode = compileErrorsByNode([
+      {
+        file: "subgraph/first/GRAPH.md",
+        line: 5,
+        field: "io.outputs.required",
+        severity: "fatal",
+        message: "child output block is invalid",
+      },
+    ])
+    expect(byNode).toEqual({})
+  })
+
+  it("still badges the engine's own root-node diagnostic for the broken child", () => {
+    const byNode = compileErrorsByNode([err("phases/alpha/SUBGRAPH.md")])
+    expect(Object.keys(byNode)).toEqual(["alpha"])
+  })
+})
+
 describe("compileErrorsByNode", () => {
   it("groups errors by the phase id derived from the file path", () => {
     const byNode = compileErrorsByNode([

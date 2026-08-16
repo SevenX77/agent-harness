@@ -198,12 +198,20 @@ class FrameworkState(BaseModel):
     sub_run_id: str | None = None
     # phase + metrics
     current_phase: str = ""
-    #: phase name -> the id of that phase's most recent execution. A downstream
-    #: transition reads its predecessors' entries to say WHICH upstream runs it
-    #: joins, instead of inferring one from ``current_phase``. Per-key merged
-    #: below: each phase only ever writes its own key, so a fan-out cannot lose
-    #: a sibling's entry.
-    phase_execution_ids: dict[str, str] = Field(default_factory=dict)
+    #: phase name -> the ids of the executions that produced this phase's
+    #: current output. A downstream transition reads its predecessors' entries
+    #: to say WHICH upstream runs it joins, instead of inferring one from
+    #: ``current_phase``. Per-key merged below: each phase only ever writes its
+    #: own key, so a fan-out cannot lose a sibling's entry.
+    #:
+    #: A list rather than one id because a phase can execute more than once for
+    #: a single downstream hand-off: an iterate phase runs a round per item and
+    #: the accumulated output is the join of all of them. Naming only the last
+    #: round would report a real execution while silently dropping its peers —
+    #: the same inference-by-omission the plural ``from_phase_execution_ids``
+    #: on the edge events exists to remove (decision 2026-08-15, D3). A
+    #: single-execution phase writes a list of one, with no special case.
+    phase_execution_ids: dict[str, list[str]] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     critic_metrics: dict[str, Any] = Field(default_factory=dict)
     subagent_validation_retries: dict[str, int] = Field(default_factory=dict)

@@ -180,7 +180,15 @@ class TestUpstreamIdentity:
             branch_index_of=lambda: None,
         )
 
-        node(_state(phase_execution_ids={"left": "exec-l", "right": "exec-r", "other": "exec-o"}))
+        node(
+            _state(
+                phase_execution_ids={
+                    "left": ["exec-l"],
+                    "right": ["exec-r"],
+                    "other": ["exec-o"],
+                }
+            )
+        )
 
         start = rec.of(EdgeStartEvent)[0]
         assert start.from_phases == ["left", "right"]
@@ -196,17 +204,17 @@ class TestUpstreamIdentity:
             branch_index_of=lambda: None,
         )
 
-        node(_state(phase_execution_ids={"outline": "exec-1"}))
+        node(_state(phase_execution_ids={"outline": ["exec-1"]}))
 
         assert rec.of(EdgeStartEvent)[0].from_phase_execution_ids == ["exec-1"]
 
     def test_parallel_siblings_do_not_overwrite_each_others_execution_ids(self) -> None:
         """The flow channel merges this map per key, so a fan-out keeps both."""
-        base = FrameworkState(phase_execution_ids={"left": "exec-l"})
+        base = FrameworkState(phase_execution_ids={"left": ["exec-l"]})
 
-        merged = merge_flow_channel(base, {"phase_execution_ids": {"right": "exec-r"}})
+        merged = merge_flow_channel(base, {"phase_execution_ids": {"right": ["exec-r"]}})
 
-        assert merged.phase_execution_ids == {"left": "exec-l", "right": "exec-r"}
+        assert merged.phase_execution_ids == {"left": ["exec-l"], "right": ["exec-r"]}
 
 
 class TestOperationsBelongToTheSegment:

@@ -1,8 +1,8 @@
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.channels.delta import DeltaChannel
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+from graph_agent.core.checkpointer import checkpointer_context
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
 
@@ -36,8 +36,9 @@ def test_sqlite_deltachannel_checkpoint_size(tmp_path) -> None:
     builder.add_edge("first", "second")
     builder.add_edge("second", END)
 
-    with SqliteSaver.from_conn_string(str(db_file)) as checkpointer:
-        checkpointer.setup()
+    # Through the engine's own factory, not SqliteSaver directly: a saver that
+    # holds engine state has to be one that was told the engine's state types.
+    with checkpointer_context(str(db_file), backend="sqlite") as checkpointer:
         graph = builder.compile(checkpointer=checkpointer)
 
         config = {"configurable": {"thread_id": "test-thread"}}

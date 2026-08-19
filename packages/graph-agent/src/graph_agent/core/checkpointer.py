@@ -9,9 +9,30 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Checkpointer
+from pydantic import BaseModel
+
+from graph_agent.core.state import BusinessData, FrameworkState
 
 logger = logging.getLogger(__name__)
+
+#: The engine's own types that reach a checkpoint's channel values. Only the
+#: `data` and `flow` channels of `WorkflowState` carry engine types; the
+#: `messages` channel carries langchain message models, which langgraph's
+#: built-in safe list already covers.
+#:
+#: Declaring them is not optional bookkeeping. langgraph's msgpack serializer
+#: rebuilds a checkpointed object only for types it was told to expect: left
+#: at its default it rebuilds everything but logs one warning per type per
+#: process, and under `LANGGRAPH_STRICT_MSGPACK` it rebuilds nothing outside
+#: its safe list and returns the raw payload dict instead — so `flow` comes
+#: back as a plain dict and the first attribute access on it raises.
+#:
+#: `tests/core/test_checkpoint_state_type_registry.py` fails when a state
+#: model reachable from `WorkflowState` is missing from this tuple.
+CHECKPOINT_STATE_TYPES: tuple[type[BaseModel], ...] = (BusinessData, FrameworkState)
 
 SQLITE_INSTALL = (
     "langgraph-checkpoint-sqlite is required for the SQLite checkpointer. "
@@ -27,6 +48,53 @@ _checkpointer: Checkpointer | None = None
 _checkpointer_ctx: contextlib.AbstractContextManager[Checkpointer] | None = None
 _checkpointers_by_spec: dict[tuple[str, str], Checkpointer] = {}
 _checkpointer_contexts_by_spec: dict[tuple[str, str], contextlib.AbstractContextManager[Checkpointer]] = {}
+
+
+def checkpoint_serde() -> JsonPlusSerializer:
+    """Return a serializer that expects exactly `CHECKPOINT_STATE_TYPES`.
+
+    Passing an explicit allowlist takes the serializer off langgraph's
+    environment-driven default entirely: it neither warns-and-allows
+    everything nor blocks everything outside the built-in safe list, in either
+    setting of `LANGGRAPH_STRICT_MSGPACK`. That is the point — the engine is a
+    pure SDK and must not decide a process-wide environment variable for its
+    host, and its checkpoints must round-trip the same way whatever the host
+    decided.
+
+    Narrowing to a declared set is also the safer half of the trade langgraph
+    documents on `JsonPlusSerializer`: whoever can write the checkpoint store
+    can otherwise name any importable type for the loader to construct.
+
+    Public because it is the seam for a host that builds its own saver rather
+    than taking one from this module: `InMemorySaver(serde=checkpoint_serde())`
+    holds engine state correctly, a bare `InMemorySaver()` does not.
+    """
+    return JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_STATE_TYPES)
+
+
+def _adopt_checkpoint_serde(saver: BaseCheckpointSaver[Any]) -> None:
+    """Install `checkpoint_serde()` on a saver the engine just constructed.
+
+    Assignment rather than a constructor argument because the two persistent
+    backends are built through `from_conn_string`, which owns the connection
+    and forwards no serializer. `BaseCheckpointSaver.serde` is the documented
+    seat for it, and langgraph itself writes to that attribute when deriving a
+    saver with a different allowlist (`BaseCheckpointSaver.with_allowlist`).
+
+    Only ever called on savers born here, never on one handed in by a caller.
+    langgraph offers `with_allowlist` for exactly that second case, and the
+    engine deliberately does not use it: it returns a shallow CLONE, so the
+    graph would read the checkpoint through the derived serializer while the
+    caller kept reading the same rows through its original one. A checkpoint
+    that deserializes differently depending on which handle you ask is worse
+    than one that fails outright, and callers do perform that out-of-band read
+    (Studio walks `checkpointer.list(...)` to recover a run's latest state).
+    Mutating a caller's serializer instead is no better — it would drop
+    whatever the caller wrapped around it, encryption included. So the engine
+    declares its types on the checkpointers it creates, and exposes
+    `checkpoint_serde()` for a host that creates its own.
+    """
+    saver.serde = checkpoint_serde()
 
 
 def _resolve_sqlite_conn_str(db_path: Path | str) -> str:
@@ -49,7 +117,7 @@ def checkpointer_context(
         from langgraph.checkpoint.memory import InMemorySaver
 
         logger.info("Checkpointer: using InMemorySaver (in-process, not persistent)")
-        yield InMemorySaver()
+        yield InMemorySaver(serde=checkpoint_serde())
         return
 
     if backend == "sqlite":
@@ -62,6 +130,7 @@ def checkpointer_context(
         if not (conn_str == ":memory:" or conn_str.startswith("file:")):
             os.makedirs(os.path.dirname(conn_str), exist_ok=True)
         with SqliteSaver.from_conn_string(conn_str) as saver:
+            _adopt_checkpoint_serde(saver)
             saver.setup()
             logger.info("Checkpointer: using SqliteSaver (%s)", conn_str)
             yield saver
@@ -76,6 +145,7 @@ def checkpointer_context(
         if not connection_string:
             raise ValueError(POSTGRES_CONN_REQUIRED)
         with PostgresSaver.from_conn_string(connection_string) as saver:
+            _adopt_checkpoint_serde(saver)
             saver.setup()
             logger.info("Checkpointer: using PostgresSaver")
             yield saver

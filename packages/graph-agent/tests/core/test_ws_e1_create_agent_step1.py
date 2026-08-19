@@ -17,6 +17,7 @@ from pydantic import BaseModel
 import graph_agent.core.graph_assembler as graph_assembler
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
+from graph_agent.core.checkpointer import checkpoint_serde
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.io_manager import IOManager
@@ -429,7 +430,7 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
     model = _NoToolChatModel()
     resolver = _PredictAwareResolver(model)
     predict_context = object()
-    checkpointer = InMemorySaver()
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
     captured: dict[str, Any] = {}
 
     class _Agent:
@@ -912,7 +913,7 @@ def test_create_agent_subagent_tool_persists_retry_count(
     monkeypatch.setattr(graph_assembler, "create_agent", fake_create_agent)
 
     from langgraph.checkpoint.memory import InMemorySaver
-    saver = InMemorySaver()
+    saver = InMemorySaver(serde=checkpoint_serde())
     compiled = compile_skill(parent, cache=False, skill_resolver=mock_skill_resolver)
     graph = graph_assembler.assemble_graph(
         compiled,

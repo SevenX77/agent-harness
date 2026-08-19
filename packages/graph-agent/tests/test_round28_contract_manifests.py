@@ -236,10 +236,15 @@ def test_task7_hash_lock_detects_mutated_schema_fixture() -> None:
         + baseline_result.stderr
     )
 
-    original_content = _read(SCHEMA_PATH)
+    # Byte I/O, not text I/O: `read_text` collapses CRLF to LF and `write_text`
+    # expands LF back to `os.linesep`, so a text-mode round-trip rewrites this
+    # LF-committed file as CRLF on Windows and leaves the repo dirty after every
+    # run. This test mutates a tracked file; restoring it byte-for-byte is part
+    # of what it owes.
+    original_bytes = SCHEMA_PATH.read_bytes()
     original_hash = _sha256(SCHEMA_PATH)
     try:
-        SCHEMA_PATH.write_text(original_content.replace("feature", "feature_weakened", 1), encoding="utf-8")
+        SCHEMA_PATH.write_bytes(original_bytes.replace(b"feature", b"feature_weakened", 1))
         assert _sha256(SCHEMA_PATH) != original_hash
         mutated_result = subprocess.run(
             ["uv", "run", "pytest", "tests/test_contract_hash_lock.py", "-q"],
@@ -251,7 +256,8 @@ def test_task7_hash_lock_detects_mutated_schema_fixture() -> None:
         assert mutated_result.returncode != 0, "hash lock must catch schema mutation"
         assert "round28-manifest-schema.yaml" in mutated_result.stdout + mutated_result.stderr
     finally:
-        SCHEMA_PATH.write_text(original_content, encoding="utf-8")
+        SCHEMA_PATH.write_bytes(original_bytes)
+    assert _sha256(SCHEMA_PATH) == original_hash, "the mutation test must leave the schema byte-identical"
 
 
 def test_task8_exemption_schema_accepts_valid_and_rejects_invalid_fixtures() -> None:

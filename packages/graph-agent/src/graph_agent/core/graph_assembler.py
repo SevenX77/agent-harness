@@ -21,7 +21,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, Checkpoin
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import InjectedState
 
-from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.emit import _safe_emit_event, active_subgraph_path
 from graph_agent.callbacks.events import (
     BlackboardReduceEvent,
     BuiltinSubagentEnterEvent,
@@ -1700,13 +1700,23 @@ def _build_subgraph_node(
         child_input = phase_inputs_from_state(state)
         child_flow_dict = _child_flow(state["flow"])
         child_flow = FrameworkState.model_validate(child_flow_dict)
-        result = sub_assembled.graph.invoke(
-            WorkflowState(
-                data=BusinessData.model_validate(child_input),
-                flow=child_flow,
-                messages=[],
-            )
+        # Every event emitted inside the child graph names this subgraph chain
+        # (`_EventBase.subgraph_path`): the child's phase names are only unique
+        # within the child, and consumers keying on the bare name folded two
+        # different `review` nodes into one (see the field's docstring).
+        scope_token = active_subgraph_path.set(
+            active_subgraph_path.get() + (phase_doc.phase_name,)
         )
+        try:
+            result = sub_assembled.graph.invoke(
+                WorkflowState(
+                    data=BusinessData.model_validate(child_input),
+                    flow=child_flow,
+                    messages=[],
+                )
+            )
+        finally:
+            active_subgraph_path.reset(scope_token)
         child_final_data = result["data"].model_dump()
         data_updates = _dict_delta(child_input, child_final_data)
         return {

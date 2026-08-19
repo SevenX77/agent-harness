@@ -125,12 +125,24 @@ describe("projectGateEvent", () => {
   })
 
   it("leaves a finished run on predict-pass so it stays immediately runnable", () => {
+    // A run that failed is a finished run: nothing about the skill changed, so
+    // pressing Run again is the obvious next move and must not require a fresh
+    // Compile + Predict first.
     expect(projectGateEvent(event({ gate: "run", outcome: "pass", runId: "r1" })).stage).toBe(
       "predict-pass",
     )
     expect(projectGateEvent(event({ gate: "run", outcome: "fail", runId: "r1" })).stage).toBe(
-      "run-fail",
+      "predict-pass",
     )
+  })
+
+  it("still opens the failure drawer for the run that failed", () => {
+    // Runnable-again is about the toolbar, not about hiding the failure: the
+    // errors reach the user through the drawer effect, which is why the stage
+    // does not have to carry the outcome.
+    const projection = projectGateEvent(event({ gate: "run", outcome: "fail", runId: "r1" }))
+
+    expect(projection.effects).toContainEqual({ kind: "open-drawer", gate: "run", errors: [] })
   })
 })
 

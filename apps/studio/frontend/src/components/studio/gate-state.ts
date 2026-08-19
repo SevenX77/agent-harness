@@ -72,8 +72,14 @@ const STAGE_BY_OUTCOME: Record<SkillGate, Record<GateOutcome, SkillBuildStage>> 
   predict: { started: "predicting", pass: "predict-pass", fail: "predict-fail", paused: "predict-pass", stopped: "predict-pass" },
   // A finished run leaves the toolbar on predict-pass: the skill is still
   // predict-clean and immediately runnable again, which is the state a human sees
-  // after their own run completes.
-  run: { started: "running", pass: "predict-pass", fail: "run-fail", paused: "paused", stopped: "predict-pass" },
+  // after their own run completes. A run that FAILED is a finished run too —
+  // nothing about the skill changed, so pressing Run again is the obvious next
+  // move. It used to land on a stage of its own, which `CenterActionBar` drew as
+  // a live Run button while `Workspace.handleRun` (accepting only `predict-pass`)
+  // returned in silence: the one outcome where the toolbar lied. The failure
+  // still reaches the user — through the `open-drawer` effect below, which is
+  // keyed on the outcome and not on the stage.
+  run: { started: "running", pass: "predict-pass", fail: "predict-pass", paused: "paused", stopped: "predict-pass" },
 }
 
 export function projectGateEvent(event: SkillGateEvent): GateProjection {

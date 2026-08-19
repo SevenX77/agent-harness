@@ -37,7 +37,7 @@ describe('CenterActionBar lock-reason hint (#13)', () => {
   })
 
   it('does not show the Run lock reason once predict has passed and Run is unlocked', () => {
-    for (const stage of ['predict-pass', 'running', 'run-fail'] as const) {
+    for (const stage of ['predict-pass', 'running', 'paused'] as const) {
       const html = renderBar(stage)
       expect(html).not.toContain(`aria-label="${RUN_LOCK_REASON}"`)
     }
@@ -50,8 +50,8 @@ describe('CenterActionBar lock-reason hint (#13)', () => {
     }
   })
 
-  it('shows no lock reasons at all when every gate is open (run-fail unlocks all)', () => {
-    const html = renderBar('run-fail')
+  it('shows no lock reasons at all once both gates are open', () => {
+    const html = renderBar('predict-pass')
     expect(html).not.toContain(PREDICT_LOCK_REASON)
     expect(html).not.toContain(RUN_LOCK_REASON)
   })
@@ -105,5 +105,33 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(idle).toContain('Run')
     expect(idle).not.toContain('Pause')
     expect(idle).not.toContain('Stop')
+  })
+
+  it('offers a live Run in exactly the one stage that can start a run', () => {
+    // `Workspace.handleRun` starts a run only from `predict-pass` and returns in
+    // silence otherwise. Any other stage that renders an ENABLED Run is therefore
+    // a dead control — the button invites a click and nothing happens, with no
+    // toast and no log. Pinning both halves of that rule here keeps them from
+    // drifting apart again.
+    // Typed as a total record so adding a stage to the union makes this fail to
+    // compile until the new stage is classified here too.
+    const everyStage: Record<SkillBuildStage, true> = {
+      idle: true,
+      compiling: true,
+      'compile-fail': true,
+      'compile-pass': true,
+      predicting: true,
+      'predict-fail': true,
+      'predict-pass': true,
+      running: true,
+      paused: true,
+    }
+
+    const liveRun = (Object.keys(everyStage) as SkillBuildStage[]).filter((stage) => {
+      const html = renderBar(stage)
+      return html.includes('Run') && !html.includes('disabled=""')
+    })
+
+    expect(liveRun).toEqual(['predict-pass'])
   })
 })

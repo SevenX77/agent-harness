@@ -17,7 +17,6 @@ export type SkillBuildStage =
   | "predict-pass"
   | "running"
   | "paused"
-  | "run-fail"
 
 interface CenterActionBarProps {
   stage: SkillBuildStage

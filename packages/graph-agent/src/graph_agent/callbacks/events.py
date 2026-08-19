@@ -50,6 +50,14 @@ class _EventBase(BaseModel):
     # propagates child-skill events to a parent callback; otherwise ``None``.
     sub_run_id: str | None = None
     group_key: str | None = None
+    #: Dot-joined chain of enclosing SUBGRAPH phase ids, root first (e.g.
+    #: ``"event_timeline.extrac"``); ``None`` for events emitted at root level.
+    #: Two subgraphs may both own a phase named ``review``, so ``phase_name``
+    #: alone cannot tell their events apart — run 2026-08-19T01-56-15_d0733362
+    #: folded 13 llm_calls from two different ``review`` nodes into one report
+    #: row and lost a ``setup`` node entirely. Stamped centrally in
+    #: ``_safe_emit_event`` from the scope ``_build_subgraph_node`` maintains.
+    subgraph_path: str | None = None
 
 
 class PhaseStartEvent(_EventBase):

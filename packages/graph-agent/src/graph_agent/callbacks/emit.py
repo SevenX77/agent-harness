@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 from collections.abc import Callable, Iterable
@@ -73,10 +74,38 @@ class _CompositeEventSink:
                 )
 
 
+#: Chain of SUBGRAPH phase ids enclosing the code that is emitting right now.
+#: ``_build_subgraph_node`` pushes its phase id around the child graph invoke;
+#: asyncio tasks inherit a copy, so batch items inside a subgraph stay scoped.
+#: Lives here rather than in the assembler because this module is the one
+#: place every emitter already routes through, and the assembler imports it.
+active_subgraph_path: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "active_subgraph_path", default=()
+)
+
+
+def _stamp_subgraph_path(event: Any) -> None:
+    """Fill ``subgraph_path`` from ambient scope on events that carry the field.
+
+    Only a still-unset (``None``) field is stamped: ``parallel_map`` propagates
+    child events that were already stamped inside the child context.
+    """
+    if getattr(event, "subgraph_path", "") is not None:
+        return
+    path = active_subgraph_path.get()
+    if not path:
+        return
+    try:
+        event.subgraph_path = ".".join(path)
+    except (AttributeError, TypeError, ValueError):  # frozen or exotic event objects
+        pass
+
+
 def _safe_emit_event(callbacks: Any | None, event: Any) -> None:
     """Dispatch a typed callback event without letting callback failures abort a run."""
     if callbacks is None:
         return
+    _stamp_subgraph_path(event)
     emit = getattr(callbacks, "emit", None)
     if callable(emit):
         try:
@@ -115,4 +144,5 @@ __all__ = [
     "_SubscriberSink",
     "_TraceJsonlSink",
     "_safe_emit_event",
+    "active_subgraph_path",
 ]

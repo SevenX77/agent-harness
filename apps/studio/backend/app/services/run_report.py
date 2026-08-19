@@ -140,12 +140,30 @@ def _event_node(event: dict[str, Any]) -> str | None:
     """
     transition = event.get("edge_transition_id")
     if isinstance(transition, str) and transition:
-        return _transition_label(event)
+        return _scoped(event, _transition_label(event))
     for key in ("phase_name", "current_phase", "to_phase"):
         value = event.get(key)
         if isinstance(value, str) and value:
-            return value
+            return _scoped(event, value)
     return None
+
+
+def _scoped(event: dict[str, Any], label: str) -> str:
+    """Prefix the label with the subgraph chain the event ran inside.
+
+    A phase name is only unique within one skill: run
+    2026-08-19T01-56-15_d0733362 had a `review` in the text-segmentation
+    subgraph AND a `review` in the event-extraction subgraph, and keying rows
+    on the bare name folded them into one (13 llm_calls) while
+    event-extraction's `setup` row vanished into segmentation's. The engine
+    now stamps `subgraph_path` on every event; two same-named phases from
+    different subgraphs get different rows, and a subgraph's own iterate
+    executions still aggregate into one row as before.
+    """
+    scope = event.get("subgraph_path")
+    if isinstance(scope, str) and scope:
+        return f"{scope}/{label}"
+    return label
 
 
 def _transition_label(event: dict[str, Any]) -> str:

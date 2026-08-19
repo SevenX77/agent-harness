@@ -224,7 +224,10 @@ def test_truncated_data_that_satisfies_the_schema_is_refused_anyway() -> None:
     reply = _reply_to_model(command)
     assert reply.status == "error"
     assert str(reply.content) != "PHASE_COMPLETE", "残缺数据不许拿到相位完成的通行证"
-    assert "business_data_parsed" not in (command.update or {}), "更不许被 hoist 进下游"
+    # 写 `data` 通道就是 hoist 已经发生:接受路径的 update 是 data/flow/messages 三键,
+    # 驳回路径只有 messages。断言 `business_data_parsed` 不在 update 里是**没有区分力**的
+    # ——那是 finish_result 内部的键,两条路径的 update 里都不会出现它。
+    assert "data" not in (command.update or {}), "更不许把残缺数据 hoist 进下游的 data 通道"
 
 
 def test_a_fully_read_submission_still_reaches_the_model_as_phase_complete() -> None:

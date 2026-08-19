@@ -76,6 +76,13 @@ rootdir 是副本,`src` 指的是副本的 src。
 全程只有一个测试文件与三份文档(本决议、被订正的 #850 决议、台账),
 生产代码一行没动(§五判据 d)。
 
+**基线说明**:下文所有变异体的基线写的是 `b44c2b71`,那是本 PR 开工时的 `main`。
+过程中 `main` 前进过两次,本分支跟着 rebase 了两次,但被变异的三个文件
+——`middleware/cognitive_flow.py`、`tools/md_to_json.py`、`cognitive/prompt.py`
+—— 在 `b44c2b71` 与 rebase 后的 `main` 之间**逐字节相同**
+(`git diff b44c2b71 origin/main -- <三个文件>` 输出为空),所以基线标签仍然精确;
+矩阵在 rebase 之后也重跑过一次,逐格结果与下表完全一致。
+
 ### 2.1 #850 的中间件测试断言的是账本,不是回路
 
 `packages/graph-agent/tests/middleware/test_finish_task_names_unread_lines.py`
@@ -365,9 +372,10 @@ M3 是本次分析的**额外发现**:任务书只点名了 M1 与 M2,而 M3 说
 前端零改动,故不跑前端门禁;`git status` 佐证工作树只有一个测试文件与三份文档
 (本决议、被订正的 #850 决议、台账)。
 
-本地全门禁实测。跑了两轮:第一轮在 `b44c2b71` 上,第二轮在 rebase 到
-`34bff961`(#853 合入后的 main)之后 —— 两轮全绿,下表是**第二轮**(即实际推送的
-那个 head)的数字,括号里是第一轮:
+本地全门禁实测。`main` 在本 PR 开工后前进过两次,本分支跟着 rebase 了两次,
+所以全门禁也跑了三轮:第一轮在 `b44c2b71`,第二轮在 `34bff961`(#853 合入后),
+第三轮在 `5b1b924d`(#855 合入后,即最终推送的那个基)。**三轮全绿**,
+下表是第三轮的数字,括号里是第一轮:
 
 | 门禁 | 结果 |
 |---|---|
@@ -376,12 +384,13 @@ M3 是本次分析的**额外发现**:任务书只点名了 M1 与 M2,而 M3 说
 | `mypy --strict packages/graph-agent-gateway/src` | no issues in 59 source files |
 | `mypy apps/studio/backend/app` | no issues in 134 source files |
 | `pytest packages/graph-agent/tests`(全套) | 1579 passed, 2 skipped, 4 xfailed, 2 xpassed(第一轮 1574 passed) |
-| `pytest packages/graph-agent-gateway/tests` | 618 passed, 1 xfailed(两轮同) |
+| `pytest packages/graph-agent-gateway/tests` | 618 passed, 1 xfailed(三轮同) |
 | `pytest apps/studio/backend/tests`(全套) | 1733 passed, 5 skipped(第一轮 1731 passed) |
 | `pip-audit` | No known vulnerabilities found |
 
-两轮的 passed 数差额来自 rebase 带进来的 `main` 侧新测试,不是本 PR 的改动
-——本 PR 只往 `packages/graph-agent/tests` 加了 2 条(4 条改成 6 条)。
+第一轮与后两轮的 passed 数差额来自 rebase 带进来的 `main` 侧新测试,不是本 PR
+的改动 —— 本 PR 只往 `packages/graph-agent/tests` 加了 2 条(4 条改成 6 条);
+第二轮与第三轮数字相同。
 
 **studio backend 全套的第一次运行报过一次 ERROR,原样记在这里,不装作没看见**:
 
@@ -390,12 +399,12 @@ ERROR apps\studio\backend\tests\routers\test_llm_registry_api.py::test_role_test
 1730 passed, 5 skipped, 2 warnings, 1 error in 250.59s (0:04:10)
 ```
 
-判断依据两条,都是实测:①**第二次全套运行没有复现**(1731 passed, 5 skipped,
+判断依据两条,都是实测:①**其后三次全套运行都没有复现**(1731 / 1733 / 1733 passed,
 零 error);②**单独跑该文件全绿**(`131 passed`)。而本 PR 改的是
 `packages/graph-agent/tests` 下的一个文件与三份文档,studio backend 的测试树
 不导入它。所以这是一条与本 PR 无关的既存 full-suite-only flaky,与仓内已立账的
 W2-23(`test_publish` 的 git 历史用例)同族但**不是同一条**;本 PR 不夹带它的
-排查,也不替它下结论——只留下这两次实测供下一个撞到的人接。
+排查,也不替它下结论——只留下这几次实测供下一个撞到的人接。
 
 ---
 

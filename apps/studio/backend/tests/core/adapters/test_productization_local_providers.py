@@ -872,19 +872,25 @@ def test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner(
         assert [process.exitcode for process in processes] == [0] * worker_count
 
         acquired: list[tuple[str, int]] = []
-        errors: list[tuple[str, str | None, str]] = []
+        errors: list[tuple[str, str | None, str, str]] = []
         for _ in processes:
-            status, owner_id, value, exc_type = results.get(timeout=1)
+            status, owner_id, value, exc_type, exc_repr = results.get(timeout=1)
             if status == "ok":
                 acquired.append((owner_id, int(value)))
             else:
-                errors.append((owner_id, value, exc_type))
+                errors.append((owner_id, value, exc_type, exc_repr))
 
         lease_data = json.loads((tmp_path / "runs" / "run-multiprocess-race" / "lease.json").read_text(encoding="utf-8"))
         assert acquired == [(lease_data["owner_id"], 1)]
         assert len(errors) == worker_count - 1
-        assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
-        assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
+        # `errors` is in both messages on purpose: a loser that fails for some
+        # other reason reports `error_code=None`, which on its own says only
+        # "not a lease conflict". Seen on `cross-platform-smoke (windows-latest)`
+        # 2026-08-19 (run 32227500016) as `assert {None, 'state.lease_conflict'}
+        # == {'state.lease_conflict'}` -- a red required gate that could not say
+        # what it caught.
+        assert {error_code for _, error_code, _, _ in errors} == {"state.lease_conflict"}, errors
+        assert {exc_type for _, _, exc_type, _ in errors} == {"StudioAdapterError"}, errors
     finally:
         _reap_processes(processes)
         _close_ctx_queue(results)
@@ -943,19 +949,25 @@ def test_runtime_state_store_multiprocess_expired_takeover_allows_only_one_owner
         assert [process.exitcode for process in processes] == [0] * worker_count
 
         acquired: list[tuple[str, int]] = []
-        errors: list[tuple[str, str | None, str]] = []
+        errors: list[tuple[str, str | None, str, str]] = []
         for _ in processes:
-            status, owner_id, value, exc_type = results.get(timeout=1)
+            status, owner_id, value, exc_type, exc_repr = results.get(timeout=1)
             if status == "ok":
                 acquired.append((owner_id, int(value)))
             else:
-                errors.append((owner_id, value, exc_type))
+                errors.append((owner_id, value, exc_type, exc_repr))
 
         final_lease = json.loads(lease_path.read_text(encoding="utf-8"))
         assert acquired == [(final_lease["owner_id"], stale.fencing_token + 1)]
         assert len(errors) == worker_count - 1
-        assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
-        assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
+        # `errors` is in both messages on purpose: a loser that fails for some
+        # other reason reports `error_code=None`, which on its own says only
+        # "not a lease conflict". Seen on `cross-platform-smoke (windows-latest)`
+        # 2026-08-19 (run 32227500016) as `assert {None, 'state.lease_conflict'}
+        # == {'state.lease_conflict'}` -- a red required gate that could not say
+        # what it caught.
+        assert {error_code for _, error_code, _, _ in errors} == {"state.lease_conflict"}, errors
+        assert {exc_type for _, _, exc_type, _ in errors} == {"StudioAdapterError"}, errors
     finally:
         _reap_processes(processes)
         _close_ctx_queue(results)
@@ -1602,9 +1614,9 @@ def _runtime_state_acquire_worker(
     try:
         lease = store.acquire_lease(run_id=run_id, owner_id=owner_id, ttl_ms=30_000)
     except Exception as exc:  # noqa: BLE001 - the contract asserts this is the typed adapter error.
-        results.put(("error", owner_id, _error_code(exc), type(exc).__name__))
+        results.put(("error", owner_id, _error_code(exc), type(exc).__name__, repr(exc)))
         return
-    results.put(("ok", owner_id, lease.fencing_token, ""))
+    results.put(("ok", owner_id, lease.fencing_token, "", ""))
 
 
 def _runtime_state_slow_expired_takeover_worker(
@@ -1637,9 +1649,9 @@ def _runtime_state_slow_expired_takeover_worker(
     try:
         lease = store.acquire_lease(run_id=run_id, owner_id=owner_id, ttl_ms=30_000)
     except Exception as exc:  # noqa: BLE001 - the contract asserts this is the typed adapter error.
-        results.put(("error", owner_id, _error_code(exc), type(exc).__name__))
+        results.put(("error", owner_id, _error_code(exc), type(exc).__name__, repr(exc)))
         return
-    results.put(("ok", owner_id, lease.fencing_token, ""))
+    results.put(("ok", owner_id, lease.fencing_token, "", ""))
 
 
 def _runtime_state_file_lock_holder(run_dir: Path, ready: Any, release: Any) -> None:
@@ -1672,9 +1684,9 @@ def _runtime_state_ready_acquire_worker(
     try:
         lease = store.acquire_lease(run_id=run_id, owner_id=owner_id, ttl_ms=30_000)
     except Exception as exc:  # noqa: BLE001 - the contract asserts this is the typed adapter error.
-        results.put(("error", owner_id, _error_code(exc), type(exc).__name__))
+        results.put(("error", owner_id, _error_code(exc), type(exc).__name__, repr(exc)))
         return
-    results.put(("ok", owner_id, lease.fencing_token, ""))
+    results.put(("ok", owner_id, lease.fencing_token, "", ""))
 
 
 def _release_payload(release_version: str = "v1") -> dict[str, Any]:

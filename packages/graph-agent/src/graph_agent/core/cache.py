@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -52,10 +53,28 @@ def save_to_cache(key: str, compiled: CompiledSkill) -> None:
     cache_dir = get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / f"{key}.json"
-    cache_file.write_text(
+    # Write-then-replace, borrowed from CPython's bytecode writer
+    # (importlib._bootstrap_external._write_atomic): a plain write_text
+    # truncates the destination first, so a concurrent reader sees half a
+    # snapshot and a concurrent Windows writer hits a sharing violation.
+    # os.replace is atomic within one directory on both POSIX and Windows.
+    # Divergence from CPython: a failed replace/cleanup is swallowed — the
+    # cache is an optimization, and losing one entry must not fail the
+    # compile that already succeeded (Windows can refuse the replace while
+    # a reader holds the destination open).
+    temp_file = cache_dir / f"{key}.{uuid.uuid4().hex}.tmp"
+    temp_file.write_text(
         json.dumps(_dehydrate_compiled_skill(compiled), ensure_ascii=False, sort_keys=True),
         encoding="utf-8",
     )
+    try:
+        os.replace(temp_file, cache_file)
+    except OSError as exc:
+        logger.warning("[Cache] Failed to publish cache entry %s: %s", key, exc)
+        try:
+            temp_file.unlink()
+        except OSError:
+            pass
 
 
 #: File types a compile reads: the markdown documents it parses and the Python

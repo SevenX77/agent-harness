@@ -73,7 +73,8 @@ LOADED: C:\Users\test\...\scratchpad\lab\graph-agent\src\graph_agent\middleware\
 rootdir 是副本,`src` 指的是副本的 src。
 
 工作树里**始终没有未提交的生产代码改动**:变异只发生在副本上,`git status`
-全程只有测试文件与本决议两项(§五判据 d)。
+全程只有一个测试文件与三份文档(本决议、被订正的 #850 决议、台账),
+生产代码一行没动(§五判据 d)。
 
 ### 2.1 #850 的中间件测试断言的是账本,不是回路
 
@@ -175,14 +176,17 @@ FFFFFFFFFF...                                                            [100%]
 - `test_the_verdict_details_narrate_the_parse_gap` —— 断言 `"5" in joined`。
   在 M2 下它**时红时绿**,原因见 §六第 1 条:`details` 里那句
   `Schema check against 'BusinessSchema_<8位十六进制>'` 的哈希后缀**逐进程随机**,
-  哈希里恰好出现数字 `5` 时这条断言就凭空成立。5 次矩阵重跑里 4 次
-  `10 failed, 3 passed`(注:此处 3 = 上面两条 + 对照组)与 1 次
-  `11 failed, 2 passed`,差别就是这一条。**这不只是弱断言,是一枚硬币。**
+  哈希里恰好出现数字 `5` 时这条断言就凭空成立。同一格跑了 6 次(1 次首轮矩阵
+  + 5 次重跑),`10 failed, 3 passed` 出现 **2** 次(首轮与第 5 次重跑,即这条断言
+  **通过**),`11 failed, 2 passed` 出现 **4** 次(即这条断言**失败**);上面那段
+  引文就是 `10 failed, 3 passed` 的那一次,其中 3 = 这一条 + 上一条空转的否定断言
+  + 对照组。**这不只是弱断言,是一枚硬币** —— 同一份代码、同一条测试,
+  结果取决于一个哈希后缀里有没有数字 5。
 
 第三条幸存者 `test_a_fully_read_submission_still_passes` 是对照组,幸存是对的
 (§四第 2 条)。
 
-改后 15 条,5 次重跑**每次都是同一结果**:
+改后 15 条,6 次运行**每次都是同一结果**:
 
 ```
 FFFFFFFFFFFFFF.                                                          [100%]
@@ -224,13 +228,13 @@ FAILED tests/middleware/test_finish_task_names_unread_lines.py::test_the_busines
 M3 是本次分析的**额外发现**:任务书只点名了 M1 与 M2,而 M3 说明"账本 vs 送达"
 这条裂缝不止一种走法 —— 只要断言留在账本上,送达可以任意缩水而不被察觉。
 
-### 2.5 全矩阵(5 次重跑,逐格结果)
+### 2.5 全矩阵(1 次首轮 + 5 次重跑,共 6 次;逐格结果)
 
 | 变异体 | 改前 13 条 | 改后 15 条 |
 |---|---|---|
 | 无(`b44c2b71`) | 13 passed | 15 passed |
 | M1 切断投递 | **1 failed**, 12 passed | **5 failed**, 10 passed |
-| M2 回退到 `49f7ad0d` | 10~11 failed, 2~3 passed(**不稳定**) | **14 failed**, 1 passed(5 次全同) |
+| M2 回退到 `49f7ad0d` | **不稳定**:6 次里 4 次 `11 failed, 2 passed`、2 次 `10 failed, 3 passed` | **14 failed**, 1 passed(6 次全同) |
 | M3 只送第一条错误 | **0 failed**(全绿,变异体存活) | **2 failed**, 13 passed |
 
 ---
@@ -457,7 +461,7 @@ W2-23(`test_publish` 的 git 历史用例)同族但**不是同一条**;本 PR �
    `any("5" in detail and "unread" in detail for detail in verdict.details)`,
    要求 `"5"` 与 `"unread"` **出现在同一条 detail 里**,而含 `unread` 的那句
    `parse_md left 5 line(s) ... unread` 是 `_parse_gap_validation` 自己写的、
-   与 schema 名无关。M2 下 5 次重跑结果完全一致(§2.3),就是这条断言不再掷硬币的
+   与 schema 名无关。M2 下 6 次运行结果完全一致(§2.3),就是这条断言不再掷硬币的
    直接证据。
 
 2. **本 PR 没有把变异分析变成可重复的仓内资产。** 那份矩阵脚本留在 scratchpad 的

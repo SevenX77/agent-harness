@@ -361,6 +361,39 @@ class StateMapper:
         }
 
 
+def _with_optional_fields_nullable(schema: Any) -> Any:
+    """The finish gate's truth condition, applied to the raw schema.
+
+    The gate's Pydantic projection deliberately makes every non-required field
+    nullable (`schema_engine._optional_annotation`), so a payload carrying
+    `optional_field: null` passes it. This validator judges the SAME payload;
+    judging it by the raw schema — where `{type: string}` rejects null — killed
+    submissions the gate had already accepted (run 2026-08-19T05-21-45_3aca03a5,
+    phase `foreshadow`: accepted, phase_end, then fatal on
+    `resolves_foreshadowing_id: None is not of type 'string'`). One schema, one
+    truth condition: optional properties get the same null-tolerance here.
+    Required fields keep the raw strictness — the gate has no
+    `_optional_annotation` for them either.
+    """
+    if not isinstance(schema, dict):
+        return schema
+    transformed = dict(schema)
+    properties = transformed.get("properties")
+    if isinstance(properties, dict):
+        required_names = set(transformed.get("required") or [])
+        new_properties: dict[str, Any] = {}
+        for name, prop_schema in properties.items():
+            prop = _with_optional_fields_nullable(prop_schema)
+            if name not in required_names and isinstance(prop, dict):
+                prop = {"anyOf": [prop, {"type": "null"}]}
+            new_properties[name] = prop
+        transformed["properties"] = new_properties
+    items = transformed.get("items")
+    if isinstance(items, dict):
+        transformed["items"] = _with_optional_fields_nullable(items)
+    return transformed
+
+
 def _validate_phase_updates_against_schema(
     updates: dict[str, Any],
     schema: dict[str, Any] | None,
@@ -388,7 +421,10 @@ def _validate_phase_updates_against_schema(
             code=code,
             phase_id=phase_id,
         )
-    errors = sorted(Draft202012Validator(schema).iter_errors(updates), key=str)
+    errors = sorted(
+        Draft202012Validator(_with_optional_fields_nullable(schema)).iter_errors(updates),
+        key=str,
+    )
     if errors:
         first = errors[0]
         path = ".".join(str(part) for part in first.path) or None

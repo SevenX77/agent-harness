@@ -125,6 +125,19 @@ _PRIMITIVE_TYPES: dict[str, Any] = {
 }
 
 
+@dataclass(frozen=True)
+class UnionType:
+    """JSON Schema type-array member union ('null' arrives as ``type(None)``).
+
+    A marker like ``ListType`` rather than an eager ``X | Y`` annotation:
+    members may be ``ListType``/``SchemaObject`` descriptors that only become
+    annotations inside ``_descriptor_to_annotation``, and building models
+    eagerly here would bypass the cached-model path.
+    """
+
+    members: tuple[Any, ...]
+
+
 class SchemaEngine:
     """Parse schema fragments, generate Pydantic models, and validate data."""
 
@@ -402,6 +415,8 @@ def _descriptor_from_json_mapping(value: dict[str, Any]) -> Any:
             raise SchemaParseError("JSON Schema 'enum' must be a list")
         return _literal_from_json_enum(enum_values)
     schema_type = value.get("type")
+    if isinstance(schema_type, list):
+        return _descriptor_from_json_type_array(value, schema_type)
     if schema_type == "array":
         items = value.get("items", {})
         item_descriptor = Any if items == {} else _descriptor_from_json_value(items)
@@ -416,6 +431,28 @@ def _descriptor_from_json_mapping(value: dict[str, Any]) -> Any:
     if isinstance(value.get("properties"), dict):
         return _schema_from_mapping(value)
     return _schema_from_mapping(value)
+
+
+def _descriptor_from_json_type_array(value: dict[str, Any], types: list[Any]) -> Any:
+    """JSON Schema 'type' as an ARRAY = a union of the named types.
+
+    The standard way to declare nullability (`type: [string, "null"]`).
+    Previously this fell through to the list-shorthand branch and died with a
+    message about item counts (field evidence: predict
+    2026-08-19T05-40-31_498a3bfe on story-deconstruction-v3-lab).
+    """
+    names = [t for t in types if isinstance(t, str)]
+    if not names or len(names) != len(types):
+        raise SchemaParseError("JSON Schema 'type' array must contain type names")
+    members: list[Any] = []
+    for name in names:
+        if name == "null":
+            members.append(type(None))
+            continue
+        members.append(_descriptor_from_json_mapping({**value, "type": name}))
+    if len(members) == 1:
+        return members[0]
+    return UnionType(tuple(members))
 
 
 def _descriptor_from_json_list(value: list[Any]) -> Any:
@@ -599,6 +636,11 @@ def _descriptor_to_annotation(descriptor: Any) -> Any:
         return _get_pydantic_model_cached(descriptor)
     if isinstance(descriptor, ListType):
         return GenericAlias(list, (_descriptor_to_annotation(descriptor.item_type),))
+    if isinstance(descriptor, UnionType):
+        annotation = _descriptor_to_annotation(descriptor.members[0])
+        for member in descriptor.members[1:]:
+            annotation = annotation | _descriptor_to_annotation(member)
+        return annotation
     return descriptor
 
 
@@ -678,6 +720,8 @@ def _canonical_key(value: Any) -> str:
         return _canonical_schema_key(value)
     if isinstance(value, ListType):
         return f"list[{_canonical_key(value.item_type)}]"
+    if isinstance(value, UnionType):
+        return "union[" + ",".join(_canonical_key(member) for member in value.members) + "]"
     if isinstance(value, type):
         return f"{value.__module__}.{value.__qualname__}"
     if isinstance(value, Mapping):

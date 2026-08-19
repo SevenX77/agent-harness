@@ -404,3 +404,22 @@ git 写 `index`/ref 时先写 `<name>.lock`,写完 rename 覆盖目标;rename �
    本 PR 复用它,于是 skill 源文件在 POSIX 上从默认权限变成 0600。桌面单用户 app、
    文件属主就是运行 app 的人,影响是"更严一点";Windows 上不适用。
    记在这里是因为它是一次**行为变化**,不是因为它是个问题。
+
+5. **这条路径现在删不掉任何东西,于是改名或删除一个相位无法再通过它表达。** 合并后复核时实测:
+   留下的旧 `phases/<老 id>/` 会让编译失败,原文
+   `F-v3-graph-phase-name-mismatch`「frontmatter phases, body `<phase>` names, and physical phase
+   dirs must match」,于是整次保存被 422 驳回并按 §五回滚。**修前它能成,靠的正是本 PR 修掉的那个
+   缺陷行为**(整目录替换顺手删光),所以这不是新增缺陷,是缺陷行为里唯一有用的那一半被一并去掉了。
+
+   **影响范围已核实为零生产客户**:`app/core/native_fs_write_boundary.py:53-54` 把该路由自陈为
+   「Legacy full skill map update surface retained for backend compatibility tests」,风险栏写的是
+   「Whole-skill Python rewrites can bypass Rust native-fs **if** production clients start using this
+   route」;`apps/studio/frontend/src` 全文搜索无调用点,真实写盘走 Rust native-fs。
+
+   **正确的分界线**按 §四借来的 dpkg 所有权规则本该是两条,本 PR 只落实了第二条:
+   owned 路径空间(`validate_skill_file_path` 放行的那一套,它就是这个 API 的所有权账本)之内,
+   一次 full-map PUT 可以删掉它没带来的;空间之外(`.git`/`.workspace`/`subgraph`)永远不许碰。
+   补齐第一条的前提是先裁定「这个路由是 full map 还是 partial map 语义」——本 PR 的
+   `test_partial_write_keeps_the_declared_files_it_did_not_carry` 钉的是 partial 语义,
+   而路由是 PUT、docstring 写的是 "a full V2.1 skill file map",两者对不上。
+   **那是一次独立的设计决策,单独立项,本 PR 不夹带,也不假装它不存在。**

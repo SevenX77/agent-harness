@@ -2532,3 +2532,46 @@ describe('API Keys v4 registry adapter', () => {
     expect(finished.result?.status).toBe('ok')
   })
 })
+
+// Regression (2026-08-19): the persisted `protocol` is an endpoint's single
+// protocol truth — endpoint ids are opaque (design §1.2 protocol matrix,
+// 2026-07-02). The retired id-slug sniffing survived here in the registry
+// adapter: a provider whose BASE URL contains a protocol word (e.g.
+// https://api.jiekou.ai/anthropic) gets that word into its URL-stable endpoint
+// id, so sniffing misfiled its google_genai sibling under the anthropic slot.
+// Downstream, the whole-page save no longer covered the sibling's real id and
+// deleted + recreated it WITHOUT its secret on every save.
+describe('endpoint protocol slot comes from the persisted protocol, never the id', () => {
+  afterEach(() => {
+    api.defaults.adapter = undefined
+    resetLlmApiCachesForTests()
+  })
+
+  it('keeps the stored protocol when the base URL path contains another protocol word', async () => {
+    const jiekou = (endpointId: string, protocol: ProviderEndpoint['protocol']): ProviderEndpoint => ({
+      ...endpoint,
+      endpoint_id: endpointId,
+      display_name: 'Jiekou',
+      protocol,
+      base_url: 'https://api.jiekou.ai/anthropic',
+      metadata: { studio_base_url: 'https://api.jiekou.ai/anthropic' },
+    })
+    const endpoints = {
+      'api-jiekou-ai-anthropic-openai-32f687cbee': jiekou('api-jiekou-ai-anthropic-openai-32f687cbee', 'openai_compatible'),
+      'api-jiekou-ai-anthropic-anthropic-5565f497d8': jiekou('api-jiekou-ai-anthropic-anthropic-5565f497d8', 'anthropic_compatible'),
+      'api-jiekou-ai-anthropic-google-5ae8a94fb4': jiekou('api-jiekou-ai-anthropic-google-5ae8a94fb4', 'google_genai'),
+    }
+    api.defaults.adapter = adapter(() => registry({ provider_endpoints: endpoints, provider_routes: {} }))
+
+    const credentials = await getCredentials()
+
+    const protocolById = Object.fromEntries(
+      credentials.providers.map((provider) => [provider.id, provider.provider_type]),
+    )
+    expect(protocolById).toEqual({
+      'api-jiekou-ai-anthropic-openai-32f687cbee': 'openai_compatible',
+      'api-jiekou-ai-anthropic-anthropic-5565f497d8': 'anthropic_compatible',
+      'api-jiekou-ai-anthropic-google-5ae8a94fb4': 'google_genai',
+    })
+  })
+})

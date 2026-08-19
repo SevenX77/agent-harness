@@ -52,9 +52,9 @@ def _registry_module() -> Any:
 
 def _spec_codes() -> set[str]:
     text = ERROR_SPEC.read_text(encoding="utf-8")
-    section_start = "## 4. 错误码全表(99)"
+    section_start = "## 4. 错误码全表(88)"
     section_end = "\n## 5."
-    assert section_start in text, "mvp1 compile-rules must keep a bounded 99-code table section"
+    assert section_start in text, "mvp1 compile-rules must keep a bounded 88-code table section"
     section = text.split(section_start, 1)[1].split(section_end, 1)[0]
     return set(re.findall(r"\[F-v3-[a-z0-9-]+\]", section))
 
@@ -70,7 +70,7 @@ def test_error_registry_metadata_exposes_p0_2_fields_for_every_existing_code() -
     registry = registry_module.ERROR_REGISTRY
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == 99
+    assert len(registry) == 88
 
     for code, metadata in registry.items():
         missing_fields = sorted(field for field in P0_2_METADATA_FIELDS if not hasattr(metadata, field))
@@ -118,7 +118,7 @@ def test_error_catalog_export_envelope_is_json_safe_versioned_and_stably_sorted(
 
     items = dumped["items"]
     assert [item["code"] for item in items] == sorted(_spec_codes())
-    assert len(items) == 99
+    assert len(items) == 88
 
     for item in items:
         assert CATALOG_ITEM_FIELDS <= set(item)

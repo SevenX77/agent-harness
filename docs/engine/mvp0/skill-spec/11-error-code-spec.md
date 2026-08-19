@@ -60,7 +60,6 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-graph-output-phase-invalid]` | 编译期 | body `output` 标记无效或无法确定输出 phase | 修正 `<phase ... output>` 标记 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `[F-v3-graph-phase-cycle]` | 编译期 | DAG 存在环 | 打断循环依赖 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `[F-v3-graph-phase-island]` | 编译期 | phase 与入口不可达 | 增加依赖连接或删除孤岛 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
-| `[F-v3-graph-phase-dir-missing]` | 编译期 | phase 目录不存在 | 创建 `phases/<id>/` | [Physical](./01-physical-layout.md#物理结构拓扑-directory-tree) |
 | `[F-v3-graph-phase-mode-ambiguous]` | 编译期 | 同一 phase 下多个节点文件 | 保留 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 之一 | [Physical](./01-physical-layout.md#物理结构拓扑-directory-tree) |
 | `[F-v3-graph-phase-node-missing]` | 编译期 | phase 目录下没有节点文件 | 添加 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 之一 | [Physical](./01-physical-layout.md#物理结构拓扑-directory-tree) |
 | `[F-v3-graph-io-not-object]` | 编译期 | 根 IO 顶层不是 object schema | 设置 `type: object` | [GRAPH](./02-graph-md-spec.md#根-io-契约-root-io-schema) |
@@ -81,7 +80,6 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-logic-schema-unknown-field]` | 编译期 | LOGIC frontmatter 未知字段 | 删除字段 | [LOGIC](./03-logic-md-spec.md#frontmatter-字段解析表-schema--validation) |
-| `[F-v3-logic-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [LOGIC](./03-logic-md-spec.md#frontmatter-字段解析表-schema--validation) |
 | `[F-v3-logic-io-schema-invalid]` | 编译期 | Logic IO schema 非法 | 修正 object schema | [LOGIC](./03-logic-md-spec.md#frontmatter-字段解析表-schema--validation) |
 | `[F-v3-logic-actions-empty]` | 编译期 | `actions` 为空 | 声明至少一个 action | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-name-invalid]` | 编译期 | action 名非法 | 使用一级合法函数名 | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
@@ -106,15 +104,12 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-subgraph-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [SUBGRAPH](./04-subgraph-md-spec.md#类型推导与节点契约) |
 | `[F-v3-subgraph-target-skill-invalid]` | 编译期 | `target_skill` 非法或像路径 | 使用 registry skill id | [SUBGRAPH](./04-subgraph-md-spec.md#target_skill-寻址规则) |
 | `[F-v3-subgraph-io-schema-invalid]` | 编译期 | Subgraph IO schema 非法 | 修正 object schema | [SUBGRAPH](./04-subgraph-md-spec.md#io-严格-11-映射校验-strict-mapping) |
-| `[F-v3-subgraph-io-mismatch]` | 编译期 | 父子 IO 字段集合不一致 | 对齐父 phase 和子 GRAPH IO | [SUBGRAPH](./04-subgraph-md-spec.md#io-严格-11-映射校验-strict-mapping) |
-| `[F-v3-subgraph-io-schema-incompatible]` | 编译期 | 同名字段 schema 不兼容 | 对齐字段 schema | [SUBGRAPH](./04-subgraph-md-spec.md#io-严格-11-映射校验-strict-mapping) |
 
 ~~### agent domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#agent-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-agent-schema-unknown-field]` | 编译期 | Agent frontmatter 未知字段 | 删除字段 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
-| `[F-v3-agent-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-llm-role-unknown]` | 编译期 | llm role 未注册 | 使用已注册角色 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-io-schema-invalid]` | 编译期 | Agent IO schema 非法 | 修正 schema | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-output-schema-invalid]` | 运行期 | CognitiveFlowMiddleware SchemaEngine strict 校验失败 (io.outputs 不匹配) | 触发 LLM 重试反馈 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
@@ -134,10 +129,8 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
-| `[F-v3-mention-type-unknown]` | 编译期 | mention 类型不在 7 类内 | 改用合法 type | [Mention](./07-mention-syntax-spec.md#--mention-语法规范) |
 | `[F-v3-mention-syntax-invalid]` | 编译期 | token 残缺或含空格 | 改成 `@type:NAME` | [Mention](./07-mention-syntax-spec.md#--mention-语法规范) |
 | `[F-v3-mention-target-not-found]` | 编译期 | 目标不在对应 registry | 注册目标或修正文案 | [Mention](./07-mention-syntax-spec.md#7-大分类静态可达性算法) |
-| `[F-v3-mention-unused-registry-entry]` | 编译期 | 注册项未被 body 引用 | 确认是否保留 | [Mention](./07-mention-syntax-spec.md#语法滥用与容错) |
 
 ~~### resource domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#resource-domain)
 
@@ -171,11 +164,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
-| `[F-v3-cognitive-slot-render-failed]` | 装配期 | template slot 序列化失败 | 检查 body AST | [Cognitive](./06-cognitive-template-spec.md#静态组装插槽解析) |
-| `[F-v3-cognitive-output-schema-render-failed]` | 装配期 | output schema 无法嵌入 exit_contract | 修正 `io.outputs` | [Cognitive](./06-cognitive-template-spec.md#动态装配插槽解析) |
 | `[F-v3-cognitive-output-schema-invalid]` | 装配期/装配前 | finish_task 的 output_schema 结构非法 (非 JSON Schema) | 检查 Agent 的 `io.outputs` 或装配传入 schema | [Cognitive](./06-cognitive-template-spec.md#动态装配插槽解析) |
-| `[F-v3-reference-reader-input-invalid]` | 装配期 | reader 输入 JSON 非法 | 检查 references registry | [Builtin](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
-| `[F-v3-reference-reader-output-invalid]` | 装配期 | reader 输出 JSON 非法 | 修 reader 模块 | [Builtin](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
 | `[F-v3-tool-argument-invalid]` | 运行期 | builtin tool 参数非法 | 修正 tool 调用参数 | [Builtin](./09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example) |
 | `[F-v3-runtime-state-mapping-failed]` | 运行期 | StateMapper 切片或回写失败 | 检查 phase IO 和上游输出 | [Flow](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) |
 | `[F-v3-runtime-phase-failed]` | 运行期 | phase 执行异常且无法归入更细错误 | 查看 trace 原始异常 | [Flow](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) |

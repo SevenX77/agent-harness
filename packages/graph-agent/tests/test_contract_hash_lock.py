@@ -20,7 +20,12 @@ EXPECTED_CONTRACT_HASHES = {
     "docs/engine/mvp0/skill-spec/08-resource-mechanisms-spec.md": "b52777065d6eb5a90a4e7be99d492b4e45f36317de80428dbb48499d59c6ad3b",
     "docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md": "dac431f0a28d11448ea72193814ad4cb1c4cdb36cc1e09cc6fb9dfb7c11413d1",
     "docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md": "9cc8f9a3df095623b67c74a353838c63825fae678e77a94593a18716cded660c",
-    "docs/engine/mvp0/skill-spec/11-error-code-spec.md": "e51c09b196950c20d83ab658a8a02a17256aa24cc2922c376f7554d90055981c",
+    # Re-pinned 2026-08-19 (an-error-code-either-fires-or-leaves): the eleven
+    # adjudicated-out zero-emitter codes left the table (decision doc
+    # .kiro/specs/decision-2026-08-19-an-error-code-either-fires-or-leaves.md;
+    # pre-release, no-backward-compat, registry + mvp1 table updated in the
+    # same PR — same pattern as the 2026-08-15 event-family re-pin below).
+    "docs/engine/mvp0/skill-spec/11-error-code-spec.md": "5bcb4f70d864ae7d392fe1d4c357d0269c0b88424cc726c7f5a7762d7c024509",
     "docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md": "0c632cbc7edbad3e741bf4a3676d08e68852ea2311f10624503d20f84d598223",
     "docs/engine/mvp0/skill-spec/README.md": "dc16c4c4caade48e027700f91ce666779b07f9a053ed3b8bda9f957fa6053b30",
     # Re-pinned 2026-08-15 (PR E, legacy execution family removal): the

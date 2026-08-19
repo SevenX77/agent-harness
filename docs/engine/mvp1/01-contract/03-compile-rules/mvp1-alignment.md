@@ -9,12 +9,12 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 
 # 03-compile-rules — 契约 A · 编译规则 + 错误码全表
 
-> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: 编译/装配/运行生命周期契约 + 全部校验规则(DAG/IO/mention/purity/golden/iterate)+ `[F-v3-*]` 错误码全表 | **现状**: mvp1 自承载,代码 registry 98 码 | **Related**: `skill-syntax`(被校验语法)· `01-compile`(扫描器实现)· `invalidation`/`06-golden-eval`(golden eval 期)· `02-iterate`(iterate 新码目标)· `03-api-contract`(CompileResult)
+> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: 编译/装配/运行生命周期契约 + 全部校验规则(DAG/IO/mention/purity/golden/iterate)+ `[F-v3-*]` 错误码全表 | **现状**: mvp1 自承载,代码 registry 88 码 | **Related**: `skill-syntax`(被校验语法)· `01-compile`(扫描器实现)· `invalidation`/`06-golden-eval`(golden eval 期)· `02-iterate`(iterate 新码目标)· `03-api-contract`(CompileResult)
 
 ## 1. 定义
 compile-rules = skill **要满足什么才合法可编译**,以及 Loader **怎么判、错误怎么报**(`[F-v3-*]`)。这是喂 copilot 的核心:copilot 生成的 skill 必须过这些规则。规则是声明式契约；扫描器实现归 `02-mechanism/01-compile`，运行外层行为归 `02-mechanism/04-run-outer/01-graph-exec`。
 
-本文件现在是 compile-rules 的 mvp1 SSOT，不再链接 mvp0 spec 当权威。98 个现有码以 `packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY` 为代码 baseline；本文件保留迁移源里的「具体原因 / 修复建议」，避免旧文删除后丢失解释语义。
+本文件现在是 compile-rules 的 mvp1 SSOT，不再链接 mvp0 spec 当权威。88 个现有码以 `packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY` 为代码 baseline；本文件保留迁移源里的「具体原因 / 修复建议」，避免旧文删除后丢失解释语义。
 
 Implementation binding: the public compile entry is
 `packages/graph-agent/src/graph_agent/core/compiler.py:compile_skill`; it is a
@@ -70,7 +70,7 @@ sequenceDiagram
 | 读取根 | `<root>/GRAPH.md` | raw markdown | 文件存在、root 是 V0.3.0 skill 目录 | `[F-v3-graph-root-missing]` |
 | 解析根 frontmatter | raw markdown | Graph metadata AST | name/version/phases registry/io | `[F-v3-graph-schema-unknown-field]`, `[F-v3-graph-name-invalid]`, `[F-v3-graph-schema-version-mismatch]`, `[F-v3-graph-io-schema-invalid]` |
 | 解析根 body 拓扑 | raw markdown body | DAG edges/output marks | `<phase depends_on>` 与 frontmatter phases/目录一致；name mismatch 与重复注册分码 | `[F-v3-graph-depends-unknown]`, `[F-v3-graph-phase-id-invalid]`, `[F-v3-graph-phase-name-mismatch]`, `[F-v3-graph-phase-id-duplicate]`, `[F-v3-graph-output-phase-invalid]` |
-| 扫描 phase 目录 | `phases[]` | phase file map | 每个 phase 恰好一个节点文件 | `[F-v3-graph-phase-dir-missing]`, `[F-v3-graph-phase-mode-ambiguous]`, `[F-v3-graph-phase-node-missing]` |
+| 扫描 phase 目录 | `phases[]` | phase file map | 每个 phase 恰好一个节点文件 | `[F-v3-graph-phase-mode-ambiguous]`, `[F-v3-graph-phase-node-missing]` |
 | 解析 phase 节点 | node md | Logic/Subgraph/Agent AST | 文件名类型推导、字段表、body XML、节点 IO schema | domain-specific F-v3 |
 | 递归解析子 skill | SUBGRAPH / subagent target | child skill root / child AST | resolver 注入、skill id、路径、递归链路 | `[F-v3-compile-recursion-cycle]`, `[F-v3-compile-depth-exceeded]`, `[F-v3-resolver-*]`, `[F-v3-skill-*]` |
 | DAG 校验 | frontmatter phases + body depends_on | topological order | 依赖存在、无环、无孤岛 | `[F-v3-graph-phase-cycle]`, `[F-v3-graph-phase-island]` |
@@ -105,9 +105,9 @@ Compiled GraphSkillAST
 | references registry | frontmatter `references` | 否 | `[]` | `[F-v3-resource-reference-invalid]` | reader input + registry listing |
 | inline examples | SKILL.md body `<example id>` | 否 | `[]` | `[F-v3-agent-example-invalid]` | `{skill_examples_inline}` |
 | examples registry | frontmatter document `examples` | 否 | `[]` | `[F-v3-resource-example-invalid]` | `{example_registry_listing}` |
-| output schema | `io.outputs` | 是 | 无 | `[F-v3-cognitive-output-schema-render-failed]`, `[F-v3-cognitive-output-schema-invalid]` | `{output_schema}` in hardcoded exit_contract |
+| output schema | `io.outputs` | 是 | 无 | `[F-v3-cognitive-output-schema-invalid]` | `{output_schema}` in hardcoded exit_contract |
 | tools list | frontmatter `tools` + builtin | 否 | builtin minimum tools | `[F-v3-agent-tool-unknown]`, `[F-v3-agent-tool-reserved]` | Agent tool bindings |
-| reference reader input/output | references registry | 否 | raw excerpt fallback | `[F-v3-reference-reader-input-invalid]`, `[F-v3-reference-reader-output-invalid]`, `[F-v3-reference-reader-failed]` | knowledge report |
+| reference reader input/output | references registry | 否 | raw excerpt fallback | `[F-v3-reference-reader-failed]` | knowledge report |
 
 装配顺序必须保证:
 
@@ -228,7 +228,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 **向后兼容(impl 注意,归 kiro)**:加字段本身 additive 安全(`diagnostics=[]` / `details={}` / `remediation=None`);风险点:(a) `ErrorCodeMetadata` 现为 `NamedTuple` + 位置参数(`error_registry.py:8`),加字段须改 dataclass/Pydantic 或关键字构造,否则全量改 93 行;(b) `doc_link` 改 scheme/HTTPS 是语义变化,保留弃用别名;(c) studio 多处 `extra="forbid"` 模型(`RunMetadata` / `RunDetail` / `ErrorResponse`),加 diagnostics 须同步 studio 模型 + TS 类型(engine 加字段 / studio 同步 = 跨边界协同)。
 
-## 4. 错误码全表(99)
+## 4. 错误码全表(88)
 本表与 `ERROR_REGISTRY` 逐码核对:98 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
 
 ### graph domain
@@ -249,7 +249,6 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | `[F-v3-graph-output-phase-invalid]` | 编译期 | body `output` 标记无效或无法确定输出 phase | 修正 `<phase ... output>` 标记 | [GRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-graph-phase-cycle]` | 编译期 | DAG 存在环 | 打断循环依赖 | [GRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-graph-phase-island]` | 编译期 | phase 与入口不可达 | 增加依赖连接或删除孤岛 | [GRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-graph-phase-dir-missing]` | 编译期 | phase 目录不存在 | 创建 `phases/<id>/` | [Physical](../01-physical-layout/mvp1-alignment.md#21-skill-源码树) |
 | `[F-v3-graph-phase-mode-ambiguous]` | 编译期 | 同一 phase 下多个节点文件 | 保留 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 之一 | [Physical](../01-physical-layout/mvp1-alignment.md#21-skill-源码树) |
 | `[F-v3-graph-phase-node-missing]` | 编译期 | phase 目录下没有节点文件 | 添加 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 之一 | [Physical](../01-physical-layout/mvp1-alignment.md#21-skill-源码树) |
 | `[F-v3-graph-io-not-object]` | 编译期 | 根 IO 顶层不是 object schema | 设置 `type: object` | [GRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
@@ -279,7 +278,6 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-logic-schema-unknown-field]` | 编译期 | LOGIC frontmatter 未知字段 | 删除字段 | [LOGIC](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-logic-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [LOGIC](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-logic-io-schema-invalid]` | 编译期 | Logic IO schema 非法 | 修正 object schema | [LOGIC](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-logic-actions-empty]` | 编译期 | `actions` 为空 | 声明至少一个 action | [LOGIC](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-logic-action-name-invalid]` | 编译期 | action 名非法 | 使用一级合法函数名 | [LOGIC](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
@@ -304,23 +302,21 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | `[F-v3-subgraph-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-subgraph-target-skill-invalid]` | 编译期 | subgraph target path 不可解析、越界、非目录或缺 `GRAPH.md` | 重连到 skill root 内含 `GRAPH.md` 的 child graph folder | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-schema-invalid]` | 编译期 | Subgraph IO schema 非法 | 修正 object schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
-| `[F-v3-subgraph-io-mismatch]` | 编译期(registry 保留,**不再发出**) | 父子 IO 字段集合不一致 | 无需处理:父子 IO 不要求 1:1,见下方注 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
-| `[F-v3-subgraph-io-schema-incompatible]` | 编译期(registry 保留,**从未发出**) | 同名字段 schema 不兼容 | 无需处理:父子 IO 不要求 1:1,见下方注 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
-
-> **注:subgraph 父子 IO 1:1 两码已停用。** 本节 §「IO 是黑板切片边界」的权威规定是
+> **注:subgraph 父子 IO 1:1 两码已删除。** 本节 §「IO 是黑板切片边界」的权威规定是
 > [`02-skill-syntax/mvp1-alignment.md` §3.4](../02-skill-syntax/mvp1-alignment.md#34-io-是黑板切片边界):
 > 「父图和子图 IO 不需要字段全集一一相等」,同文件 §4 Implementation Drift 明确把「父子图 IO 1:1 强绑定」
-> 列为 drift。据此:`[F-v3-subgraph-io-mismatch]` 的编译闸已于 2026-06-20 由 commit `cad7dbc0` 移除;
-> `[F-v3-subgraph-io-schema-incompatible]` 自 round-17 建表(`c32575fa`)起就只有 registry 条目、从未实现发出点。
-> 两码继续留在 `ERROR_REGISTRY` 中,仅为维持 round28 registry↔owner 双射与码表计数,**不代表存在对应的编译期校验**。
-> 父 `SUBGRAPH.md` 声明的 outputs 边界改由运行期 `StateMapper` 守:越界写回记 `[F-v3-runtime-state-mapping-failed]`。
+> 列为 drift。据此:`F-v3-subgraph-io-mismatch` 的编译闸已于 2026-06-20 由 commit `cad7dbc0` 移除;
+> `F-v3-subgraph-io-schema-incompatible` 自 round-17 建表(`c32575fa`)起就只有 registry 条目、从未实现发出点。
+> 两码曾留在 `ERROR_REGISTRY` 中,仅为维持 round28 registry↔owner 双射与旧的 99 码计数;2026-08-19 裁决
+> (`.kiro/specs/decision-2026-08-19-an-error-code-either-fires-or-leaves.md`)废除了该计数冻结,
+> 「码必发出、否则离表」——两码随之从 registry 删除。
+> 父 `SUBGRAPH.md` 声明的 outputs 边界由运行期 `StateMapper` 守:越界写回记 `[F-v3-runtime-state-mapping-failed]`。
 
 ### agent domain
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-agent-schema-unknown-field]` | 编译期 | Agent frontmatter 未知字段 | 删除字段 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-agent-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-llm-role-unknown]` | 编译期 | llm role 未注册 | 使用已注册角色 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-io-schema-invalid]` | 编译期 | Agent IO schema 非法 | 修正 schema | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-output-schema-invalid]` | 运行期 | CognitiveFlowMiddleware SchemaEngine strict 校验失败 (io.outputs 不匹配) | 触发 LLM 重试反馈 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
@@ -342,10 +338,8 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
-| `[F-v3-mention-type-unknown]` | 编译期 | mention 类型不在 7 类内 | 改用合法 type | [Mention](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-mention-syntax-invalid]` | 编译期 | token 残缺或含空格 | 改成 `@type:NAME` | [Mention](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-mention-target-not-found]` | 编译期 | 目标不在对应 registry | 注册目标或修正文案 | [Mention](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-mention-unused-registry-entry]` | 编译期 | 注册项未被 body 引用 | 确认是否保留 | [Mention](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 
 ### resource domain
 
@@ -379,11 +373,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
-| `[F-v3-cognitive-slot-render-failed]` | 装配期 | template slot 序列化失败 | 检查 body AST | [Cognitive](../../02-mechanism/03-assemble/mvp1-alignment.md#2-数据流--机制) |
-| `[F-v3-cognitive-output-schema-render-failed]` | 装配期 | output schema 无法嵌入 exit_contract | 修正 `io.outputs` | [Cognitive](../../02-mechanism/03-assemble/mvp1-alignment.md#2-数据流--机制) |
 | `[F-v3-cognitive-output-schema-invalid]` | 装配期/装配前 | finish_task 的 output_schema 结构非法 (非 JSON Schema) | 检查 Agent 的 `io.outputs` 或装配传入 schema | [Cognitive](../../02-mechanism/03-assemble/mvp1-alignment.md#2-数据流--机制) |
-| `[F-v3-reference-reader-input-invalid]` | 装配期 | reader 输入 JSON 非法 | 检查 references registry | [Builtin](../../02-mechanism/03-assemble/mvp1-alignment.md#2-数据流--机制) |
-| `[F-v3-reference-reader-output-invalid]` | 装配期 | reader 输出 JSON 非法 | 修 reader 模块 | [Builtin](../../02-mechanism/03-assemble/mvp1-alignment.md#2-数据流--机制) |
 | `[F-v3-tool-argument-invalid]` | 运行期 | builtin tool 参数非法 | 修正 tool 调用参数 | [Builtin](../../02-mechanism/05-run-inner/04-tools/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-runtime-state-mapping-failed]` | 运行期 | StateMapper 切片或回写失败 | 检查 phase IO 和上游输出 | [Flow](../../02-mechanism/04-run-outer/01-graph-exec/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-runtime-phase-failed]` | 运行期 | phase 执行异常且无法归入更细错误 | 查看 trace 原始异常 | [Flow](../../02-mechanism/04-run-outer/01-graph-exec/mvp1-alignment.md#3-接口契约) |

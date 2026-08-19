@@ -1011,6 +1011,7 @@ def _validate_subgraph_io_contracts(
         if not isinstance(doc.ast, SubgraphNodeAST):
             continue
         child_root: Path | None = None
+        _validate_subgraph_node_name(doc, diags)
         try:
             resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
             child_root = _resolve_subgraph_path_root(skill_root, doc.path, doc.ast.path)
@@ -1047,6 +1048,31 @@ def _validate_subgraph_io_contracts(
                     field_path="path",
                 )
             )
+
+
+_SUBGRAPH_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_subgraph_node_name(doc: PhaseDocument, diags: list[_Diag]) -> None:
+    """A SUBGRAPH.md `name` follows the identifier rule.
+
+    The same rule agent-embedded subgraph declarations already enforce
+    (`manifest.SubgraphAST`, pattern + `[F-v3-agent-subgraph-invalid]`); the
+    phase-node variant had the spec'd code registered but no emitter
+    (adjudication 2026-08-19 — `name: bad sub!` compiled clean).
+    """
+    name = doc.ast.name
+    if name is None or _SUBGRAPH_NAME_RE.match(name):
+        return
+    diags.append(
+        _Diag(
+            path=doc.path,
+            line=_frontmatter_key_line(doc.path, "name"),
+            code="[F-v3-subgraph-name-invalid]",
+            message=f"[F-v3-subgraph-name-invalid] subgraph name {name!r} is not a valid identifier",
+            field_path="name",
+        )
+    )
 
 
 def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str) -> Path:

@@ -104,7 +104,6 @@ features:
   - '[F-v3-graph-name-invalid]'
   - '[F-v3-graph-output-phase-invalid]'
   - '[F-v3-graph-phase-cycle]'
-  - '[F-v3-graph-phase-dir-missing]'
   - '[F-v3-graph-phase-id-duplicate]'
   - '[F-v3-graph-phase-id-invalid]'
   - '[F-v3-graph-phase-island]'
@@ -174,7 +173,6 @@ features:
   - '[F-v3-logic-action-return-invalid]'
   - '[F-v3-logic-actions-empty]'
   - '[F-v3-logic-io-schema-invalid]'
-  - '[F-v3-logic-name-invalid]'
   - '[F-v3-logic-output-field-undeclared]'
   - '[F-v3-logic-schema-unknown-field]'
   - '[F-v3-logic-validator-entrypoint-missing]'
@@ -203,8 +201,6 @@ features:
   - path: packages/graph-agent/src/graph_agent/core/subagents.py
   error_codes_primary:
   - '[F-v3-agent-subgraph-invalid]'
-  - '[F-v3-subgraph-io-mismatch]'
-  - '[F-v3-subgraph-io-schema-incompatible]'
   - '[F-v3-subgraph-io-schema-invalid]'
   - '[F-v3-subgraph-name-invalid]'
   - '[F-v3-subgraph-schema-unknown-field]'
@@ -239,7 +235,6 @@ features:
   - '[F-v3-agent-io-schema-invalid]'
   - '[F-v3-agent-llm-role-unknown]'
   - '[F-v3-agent-max-iterations-invalid]'
-  - '[F-v3-agent-name-invalid]'
   - '[F-v3-agent-output-schema-invalid]'
   - '[F-v3-agent-output-schema-missing]'
   - '[F-v3-agent-protocol-invalid]'
@@ -273,8 +268,6 @@ features:
   error_codes_primary:
   - '[F-v3-mention-syntax-invalid]'
   - '[F-v3-mention-target-not-found]'
-  - '[F-v3-mention-type-unknown]'
-  - '[F-v3-mention-unused-registry-entry]'
   error_codes_secondary: []
   events_primary: []
   events_secondary: []
@@ -295,8 +288,6 @@ features:
   - path: packages/graph-agent/src/graph_agent/tools/builtin/read_reference.py
   error_codes_primary:
   - '[F-v3-reference-reader-failed]'
-  - '[F-v3-reference-reader-input-invalid]'
-  - '[F-v3-reference-reader-output-invalid]'
   - '[F-v3-resource-example-id-invalid]'
   - '[F-v3-resource-example-invalid]'
   - '[F-v3-resource-example-not-found]'
@@ -540,8 +531,6 @@ features:
   - path: packages/graph-agent/src/graph_agent/cognitive/critic.py
   error_codes_primary:
   - '[F-v3-cognitive-output-schema-invalid]'
-  - '[F-v3-cognitive-output-schema-render-failed]'
-  - '[F-v3-cognitive-slot-render-failed]'
   error_codes_secondary: []
   events_primary:
   - CompactionEvent

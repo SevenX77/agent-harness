@@ -90,6 +90,16 @@ def require_skill_resolver(
             "skill_resolver is required",
             code="[F-v3-resolver-missing]",
         )
+    if not callable(getattr(resolver, "resolve_skill", None)):
+        # Fail at the boundary: without this, a non-conforming object only
+        # explodes as an AttributeError deep inside the first compile that
+        # actually needs the resolver (adjudication 2026-08-19; the spec'd
+        # code existed for years with no emitter).
+        raise SkillResolutionError(
+            caller,
+            f"skill_resolver {type(resolver).__name__!r} exposes no callable resolve_skill",
+            code="[F-v3-resolver-interface-invalid]",
+        )
     return resolver
 
 

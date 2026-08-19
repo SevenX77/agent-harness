@@ -658,12 +658,14 @@ def test_reference_has_no_path_missing_code_example_does() -> None:
     assert "[F-v3-resource-example-path-missing]" in ERROR_REGISTRY
 
 
-def test_error_registry_len_unchanged_97() -> None:
-    # LOCK (R4.3 / design §6.5): the 99-code freeze and the round28 catalog
-    # bijection must not move — this spec revives dead codes, never adds/removes.
-    assert len(ERROR_REGISTRY) == 99
+def test_error_registry_len_locked_88() -> None:
+    # LOCK: 88 codes after the 2026-08-19 adjudication
+    # (.kiro/specs/decision-2026-08-19-an-error-code-either-fires-or-leaves.md)
+    # removed the eleven emitterless codes from the previous 99-code freeze.
+    # The registry↔catalog bijection still must not move.
+    assert len(ERROR_REGISTRY) == 88
     catalog = export_error_catalog()
-    assert len(catalog["items"]) == 99
+    assert len(catalog["items"]) == 88
     assert all(item["remediation"] for item in catalog["items"])
 
 
@@ -689,7 +691,6 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-graph-output-phase-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-graph-phase-cycle]': ('FATAL', ('编译期',)),
     '[F-v3-graph-phase-island]': ('FATAL', ('编译期',)),
-    '[F-v3-graph-phase-dir-missing]': ('FATAL', ('编译期',)),
     '[F-v3-graph-phase-mode-ambiguous]': ('FATAL', ('编译期',)),
     '[F-v3-graph-phase-node-missing]': ('FATAL', ('编译期',)),
     '[F-v3-graph-io-not-object]': ('FATAL', ('编译期',)),
@@ -699,7 +700,6 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-compile-recursion-cycle]': ('FATAL', ('编译期',)),
     '[F-v3-compile-depth-exceeded]': ('FATAL', ('编译期',)),
     '[F-v3-logic-schema-unknown-field]': ('FATAL', ('编译期',)),
-    '[F-v3-logic-name-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-logic-io-schema-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-logic-actions-empty]': ('FATAL', ('编译期',)),
     '[F-v3-logic-action-name-invalid]': ('FATAL', ('编译期',)),
@@ -721,11 +721,8 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-subgraph-name-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-subgraph-target-skill-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-subgraph-io-schema-invalid]': ('FATAL', ('编译期',)),
-    '[F-v3-subgraph-io-mismatch]': ('FATAL', ('编译期',)),
-    '[F-v3-subgraph-io-schema-incompatible]': ('FATAL', ('编译期',)),
     '[F-v3-golden-stale-fields]': ('FATAL', ('eval 期',)),
     '[F-v3-agent-schema-unknown-field]': ('FATAL', ('编译期',)),
-    '[F-v3-agent-name-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-llm-role-unknown]': ('FATAL', ('编译期',)),
     '[F-v3-agent-io-schema-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-output-schema-invalid]': ('FATAL', ('运行期',)),
@@ -741,10 +738,8 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-agent-step-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-protocol-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-example-invalid]': ('FATAL', ('编译期',)),
-    '[F-v3-mention-type-unknown]': ('FATAL', ('编译期',)),
     '[F-v3-mention-syntax-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-mention-target-not-found]': ('FATAL', ('编译期',)),
-    '[F-v3-mention-unused-registry-entry]': ('WARN', ('编译期',)),
     '[F-v3-resource-reference-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-resource-reference-id-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-resource-reference-path-invalid]': ('FATAL', ('编译期', '运行期')),
@@ -763,11 +758,7 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-resolver-path-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-resolver-interface-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-resolver-missing]': ('FATAL', ('运行期',)),
-    '[F-v3-cognitive-slot-render-failed]': ('FATAL', ('装配期',)),
-    '[F-v3-cognitive-output-schema-render-failed]': ('FATAL', ('装配期',)),
     '[F-v3-cognitive-output-schema-invalid]': ('FATAL', ('装配期', '装配前')),
-    '[F-v3-reference-reader-input-invalid]': ('FATAL', ('装配期',)),
-    '[F-v3-reference-reader-output-invalid]': ('FATAL', ('装配期',)),
     '[F-v3-tool-argument-invalid]': ('FATAL', ('运行期',)),
     '[F-v3-runtime-state-mapping-failed]': ('FATAL', ('运行期',)),
     '[F-v3-runtime-phase-failed]': ('FATAL', ('运行期',)),

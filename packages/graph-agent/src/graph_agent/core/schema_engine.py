@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import textwrap
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from types import GenericAlias
@@ -645,9 +646,69 @@ def _descriptor_to_raw(descriptor: Any, description: str = "") -> dict[str, Any]
     return raw
 
 
+def _canonical_key(value: Any) -> str:
+    """A string that is equal for equal values, in every process.
+
+    `repr()` is not that string. Two things it pulls in break the property this
+    function exists to give `_model_name_for_schema`:
+
+    * **Unordered containers.** `SchemaObject.required_fields` is a `frozenset`,
+      and a frozenset's iteration order follows the hashes of its elements. Str
+      hashing is randomised per interpreter (`PYTHONHASHSEED`), so the same
+      schema reprs differently in different processes.
+    * **Fields excluded from equality.** `raw_schema_dict` is `compare=False`,
+      yet a dataclass repr still prints it -- so two `SchemaObject`s that are
+      `==` could repr differently.
+
+    So the key is built explicitly: unordered containers are sorted, mappings
+    are emitted by sorted key, and only the fields that define equality are
+    read. Types are named by module and qualname rather than repr, which is
+    stable but says `<class 'str'>`.
+
+    Borrowed from JSON Canonicalization Scheme (RFC 8785): fix an order for
+    members, then serialise through JSON so the encoding itself is injective --
+    a digest over an unordered or ambiguously delimited rendering addresses
+    nothing. Not borrowed: its number and Unicode rules, and its promise of
+    interoperability. This key is never parsed back, never stored, and never
+    compared across versions of this module; it only has to be injective and
+    stable within one build.
+    """
+
+    if isinstance(value, SchemaObject):
+        return _canonical_schema_key(value)
+    if isinstance(value, ListType):
+        return f"list[{_canonical_key(value.item_type)}]"
+    if isinstance(value, type):
+        return f"{value.__module__}.{value.__qualname__}"
+    if isinstance(value, Mapping):
+        items = sorted((str(key), _canonical_key(item)) for key, item in value.items())
+        return "{" + ",".join(f"{key}:{item}" for key, item in items) + "}"
+    if isinstance(value, (set, frozenset)):
+        return "{" + ",".join(sorted(_canonical_key(item) for item in value)) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_canonical_key(item) for item in value) + "]"
+    return repr(value)
+
+
+def _canonical_schema_key(schema: SchemaObject) -> str:
+    return json.dumps(
+        [
+            schema.schema_name,
+            [[name, _canonical_key(descriptor)] for name, descriptor in schema.fields],
+            sorted(schema.required_fields),
+            [[name, text] for name, text in schema.field_descriptions],
+            [[name, _canonical_key(value)] for name, value in schema.field_defaults],
+            schema.item_header,
+            schema.output_example_md,
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+
+
 def _model_name_for_schema(schema: SchemaObject) -> str:
     base = schema.schema_name if _SCHEMA_NAME_RE.match(schema.schema_name) else "BusinessSchema"
-    digest = hashlib.sha256(repr(schema).encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha256(_canonical_schema_key(schema).encode("utf-8")).hexdigest()[:8]
     return f"{base}_{digest}"
 
 

@@ -1396,10 +1396,26 @@ fn read_user_id_from_app_settings(config_dir: &Path) -> Option<String> {
     None
 }
 
+/// A git process that will not fork background maintenance into `skill_dir`.
+///
+/// Same contract, same reasoning and same reference as the Python
+/// `GIT_NO_BACKGROUND_MAINTENANCE_ARGS` in
+/// `apps/studio/backend/app/services/git_local.py`: since git 2.29 a plain
+/// `git commit` forks `git maintenance run --auto` (detached since 2.54),
+/// which rewrites and unlinks objects in a repository Studio believes it owns
+/// exclusively. The two layers are separate processes with no shared code, so
+/// each states the flags for the git processes it spawns.
+fn git_command(skill_dir: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    command
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
+        .current_dir(skill_dir);
+    command
+}
+
 fn run_git(skill_dir: &Path, args: &[&str]) -> Result<(), String> {
-    let output = std::process::Command::new("git")
+    let output = git_command(skill_dir)
         .args(args)
-        .current_dir(skill_dir)
         .output()
         .map_err(|error| format!("git {} failed to spawn: {error}", args.join(" ")))?;
     if !output.status.success() {
@@ -1438,9 +1454,8 @@ fn initialize_skill_repository(skill_dir: &Path, config_dir: &Path) -> Result<()
 /// True when `git status --porcelain` reports any entry — mirrors the Python
 /// `service.status(...).stdout.strip()` guard before committing `initial-skill`.
 fn git_has_staged_changes(skill_dir: &Path) -> Result<bool, String> {
-    let output = std::process::Command::new("git")
+    let output = git_command(skill_dir)
         .args(["status", "--porcelain"])
-        .current_dir(skill_dir)
         .output()
         .map_err(|error| format!("git status failed to spawn: {error}"))?;
     if !output.status.success() {
@@ -2960,6 +2975,39 @@ mod tests {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+    }
+
+    /// Mirrors the Python `test_run_git_commit_spawns_no_background_git_process`
+    /// guard: a commit issued by the native-fs layer must leave no background
+    /// git process rewriting the object store of the repository it just wrote.
+    /// `GIT_TRACE=1` is set on this child only, so the assertion cannot be
+    /// disturbed by tests running in parallel threads of the same process.
+    #[test]
+    fn studio_git_commit_spawns_no_background_git_process() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let root = temp_root("git-background-maintenance");
+        for args in [
+            &["init"][..],
+            &["config", "--local", "user.name", "alice"][..],
+            &["config", "--local", "user.email", "alice@studio.local"][..],
+        ] {
+            run_git(&root, args).expect("git setup");
+        }
+
+        let output = git_command(&root)
+            .args(["commit", "--allow-empty", "-m", "initial-skill"])
+            .env("GIT_TRACE", "1")
+            .output()
+            .expect("git commit");
+
+        let trace = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "git commit failed: {trace}");
+        assert!(!trace.contains("maintenance"), "background git spawned: {trace}");
+        assert!(!trace.contains("gc --auto"), "background git spawned: {trace}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -361,7 +361,9 @@ M3 是本次分析的**额外发现**:任务书只点名了 M1 与 M2,而 M3 说
 前端零改动,故不跑前端门禁;`git status` 佐证工作树只有一个测试文件与三份文档
 (本决议、被订正的 #850 决议、台账)。
 
-本地全门禁实测(推送前):
+本地全门禁实测。跑了两轮:第一轮在 `b44c2b71` 上,第二轮在 rebase 到
+`34bff961`(#853 合入后的 main)之后 —— 两轮全绿,下表是**第二轮**(即实际推送的
+那个 head)的数字,括号里是第一轮:
 
 | 门禁 | 结果 |
 |---|---|
@@ -369,10 +371,13 @@ M3 是本次分析的**额外发现**:任务书只点名了 M1 与 M2,而 M3 说
 | `mypy --strict packages/graph-agent/src` | no issues in 114 source files |
 | `mypy --strict packages/graph-agent-gateway/src` | no issues in 59 source files |
 | `mypy apps/studio/backend/app` | no issues in 134 source files |
-| `pytest packages/graph-agent/tests`(全套) | 1574 passed, 2 skipped, 4 xfailed, 2 xpassed |
-| `pytest packages/graph-agent-gateway/tests` | 618 passed, 1 xfailed |
-| `pytest apps/studio/backend/tests`(全套) | 1731 passed, 5 skipped |
+| `pytest packages/graph-agent/tests`(全套) | 1579 passed, 2 skipped, 4 xfailed, 2 xpassed(第一轮 1574 passed) |
+| `pytest packages/graph-agent-gateway/tests` | 618 passed, 1 xfailed(两轮同) |
+| `pytest apps/studio/backend/tests`(全套) | 1733 passed, 5 skipped(第一轮 1731 passed) |
 | `pip-audit` | No known vulnerabilities found |
+
+两轮的 passed 数差额来自 rebase 带进来的 `main` 侧新测试,不是本 PR 的改动
+——本 PR 只往 `packages/graph-agent/tests` 加了 2 条(4 条改成 6 条)。
 
 **studio backend 全套的第一次运行报过一次 ERROR,原样记在这里,不装作没看见**:
 

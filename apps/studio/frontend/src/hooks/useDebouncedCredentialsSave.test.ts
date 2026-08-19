@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ProviderCredentialUpdate } from "@/api/llm"
 import { buildPutPayload, useDebouncedCredentialsSave } from "./useDebouncedCredentialsSave"
+import { draftsFromCredentials } from "@/components/studio/settings/provider-utils"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -241,5 +242,50 @@ describe("useDebouncedCredentialsSave", () => {
     expect(onSaved).toHaveBeenCalledWith(sampleCredentialsState("latest-second"))
 
     act(() => root.unmount())
+  })
+})
+
+// Regression (2026-08-19): the whole-page save is a FULL declaration —
+// `putCredentials` deletes every cached endpoint whose id the payload does not
+// cover. So drafts rebuilt from a credentials snapshot MUST round-trip every
+// endpoint id they consumed, or an unrelated provider's endpoint gets silently
+// deleted (and recreated without its secret) on every save. The observed
+// failure: a provider whose base URL contains a protocol word
+// (api.jiekou.ai/anthropic) had its google_genai sibling misfiled by id-slug
+// sniffing, dropped from the payload, and its stored api_key wiped to null.
+describe("draftsFromCredentials → buildPutPayload round-trip", () => {
+  it("covers every endpoint id the credentials snapshot contained", () => {
+    const credentials = {
+      providers: [
+        {
+          id: "api-jiekou-ai-anthropic-openai-32f687cbee",
+          name: "Jiekou",
+          api_key: "**********",
+          base_url: "https://api.jiekou.ai/anthropic",
+          provider_type: "openai_compatible",
+        },
+        {
+          id: "api-jiekou-ai-anthropic-anthropic-5565f497d8",
+          name: "Jiekou",
+          api_key: "**********",
+          base_url: "https://api.jiekou.ai/anthropic",
+          provider_type: "anthropic_compatible",
+        },
+        {
+          id: "api-jiekou-ai-anthropic-google-5ae8a94fb4",
+          name: "Jiekou",
+          api_key: "",
+          base_url: "https://api.jiekou.ai/anthropic",
+          provider_type: "google_genai",
+        },
+      ],
+    } as CredentialsState
+
+    const updates = buildPutPayload(draftsFromCredentials(credentials))
+
+    const updateIds = updates.map((update) => update.id)
+    for (const provider of credentials.providers) {
+      expect(updateIds).toContain(provider.id)
+    }
   })
 })

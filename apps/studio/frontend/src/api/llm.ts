@@ -687,16 +687,13 @@ function comparableBaseUrl(value?: string | null): string {
 }
 
 function endpointProtocolSlot(endpoint: ProviderEndpoint): ProviderType {
-  return providerTypeFromEndpointId(endpoint.endpoint_id) ?? endpoint.protocol
-}
-
-function providerTypeFromEndpointId(endpointId: string): ProviderType | null {
-  const normalized = endpointId.toLowerCase()
-  if (normalized.includes('-openai-') || normalized.endsWith('-openai')) return 'openai_compatible'
-  if (normalized.includes('-anthropic-') || normalized.endsWith('-anthropic')) return 'anthropic_compatible'
-  if (normalized.includes('-google-') || normalized.endsWith('-google')) return 'google_genai'
-  if (normalized.includes('-ark-') || normalized.endsWith('-ark')) return 'ark_runtime'
-  return null
+  // Design §1.2 protocol matrix (2026-07-02): the persisted `protocol` is the
+  // single protocol truth; endpoint ids are opaque. The retired id-slug
+  // sniffing survived here until 2026-08-19 — a base URL containing a protocol
+  // word (api.jiekou.ai/anthropic) leaks that word into the URL-stable id, so
+  // sniffing misfiled the google_genai sibling under the anthropic slot and the
+  // whole-page save deleted + recreated it without its secret on every save.
+  return endpoint.protocol
 }
 
 function endpointIdForRequest(

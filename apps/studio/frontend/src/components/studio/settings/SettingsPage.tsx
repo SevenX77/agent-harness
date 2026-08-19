@@ -142,17 +142,22 @@ export function reconcileDraftsWithCredentials(
     return currentDraft
   })
   // A just-saved provider is rebuilt from credentials under a DIFFERENT id than
-  // its locally-minted draft (`custom-<uuid>` → `custom-<uuid>-<protocol>`), so
-  // an id-only "not yet persisted" check keeps the stale local copy alongside
-  // the reconciled one — the duplicate-card bug. Drop any dirty local draft
-  // whose stable provider IDENTITY (name + api_key) is already represented in
-  // the reconciled set; only genuinely-unsaved providers survive.
+  // its locally-minted draft (`custom-<uuid>` → the backend's URL-stable id),
+  // so an id-only "not yet persisted" check keeps the stale local copy
+  // alongside the reconciled one — the duplicate-card bug. Drop any dirty local
+  // draft whose stable provider IDENTITY (`providerDraftIdentityKey`) is
+  // already represented in the reconciled set — and clear its dirty marker,
+  // because that local id can never reappear in credentials. Only
+  // genuinely-unsaved providers survive.
   const nextIdentityKeys = new Set(nextDrafts.map(providerDraftIdentityKey))
-  const dirtyDraftsNotInCredentials = currentDrafts.filter((draft) => (
-    dirtyProviderIds.has(draft.id)
-    && !nextIds.has(draft.id)
-    && !nextIdentityKeys.has(providerDraftIdentityKey(draft))
-  ))
+  const dirtyDraftsNotInCredentials = currentDrafts.filter((draft) => {
+    if (!dirtyProviderIds.has(draft.id) || nextIds.has(draft.id)) return false
+    if (nextIdentityKeys.has(providerDraftIdentityKey(draft))) {
+      dirtyProviderIds.delete(draft.id)
+      return false
+    }
+    return true
+  })
   return [...reconciled, ...dirtyDraftsNotInCredentials]
 }
 

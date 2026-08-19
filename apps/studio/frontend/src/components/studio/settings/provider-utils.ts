@@ -92,8 +92,12 @@ export function draftsFromCredentials(credentials: CredentialsState): ProviderDr
     const [primary] = providers
     if (!primary) continue
     const baseUrls = baseUrlRowsFromCredentialProviders(providers)
+    // Sibling protocol records share one card key by design; a sibling missing
+    // its secret must not blank the card field just because it sorted first.
+    const apiKey = providers.map((provider) => provider.api_key).find(Boolean) ?? ""
     drafts.push({
       ...providerDraftFromCredential(primary),
+      api_key: apiKey,
       base_url: baseUrls[0]?.value ?? "",
       base_urls: baseUrls,
     })
@@ -419,22 +423,26 @@ function providerDraftFromCredential(provider: CredentialProviderState): Provide
  * Stable provider IDENTITY for a draft, independent of its (unstable) id.
  *
  * A freshly-added third-party provider draft carries a locally-minted id
- * (`custom-<uuid>`), but once saved the backend keys its per-protocol endpoints
- * by `<id>-<protocol>`, so `draftsFromCredentials` rebuilds the draft under the
- * primary endpoint's id — a DIFFERENT string. Matching drafts by id alone then
- * fails to recognise the just-saved provider, so reconcile keeps BOTH copies
- * (the duplicate-card bug). Identity mirrors `thirdPartyGroupKey` (name +
- * api_key) for third-party providers and the stable code for official ones, so
- * the two copies collapse to one.
+ * (`custom-<uuid>`), but the backend persists its per-protocol endpoints under
+ * URL-stable ids (`{url-slug}-{protocol}-{hash}`) and redacts every api_key in
+ * its responses — so NEITHER the id NOR the api_key of the local draft ever
+ * matches the reconciled server copy. The only stable identity is the NAME:
+ * per the settings UX spec (00_settings-ux-spec.md 确认②) the registry has no
+ * "card" concept — the card is a frontend authoring convenience — and
+ * AddProviderForm rejects duplicate names, making the name the third-party
+ * card's identity. api_key must never participate: its read-back has three
+ * unstable shapes (plaintext / redaction placeholder / empty) depending on
+ * which sibling stored a secret and on hydration state, and keying identity on
+ * it is exactly what split one provider into two cards (the duplicate-card
+ * bug, both times).
  */
 export function providerDraftIdentityKey(draft: ProviderDraft): string {
   if (inferProviderKind(draft) === "official") return `official ${draft.id}`
-  return `third ${draft.name.trim().toLowerCase()} ${draft.api_key}`
+  return `third ${draft.name.trim().toLowerCase()}`
 }
 
 function thirdPartyGroupKey(provider: CredentialProviderState): string {
-  return [
-    provider.name.trim().toLowerCase(),
-    provider.api_key,
-  ].join("\u0000")
+  // Same identity rule as providerDraftIdentityKey: the name alone — see its
+  // doc comment for why api_key can never be part of provider identity.
+  return provider.name.trim().toLowerCase()
 }

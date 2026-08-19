@@ -40,8 +40,8 @@ from pathlib import Path
 from typing import IO
 
 
-def write_text_atomically(path: Path, text: str) -> None:
-    """Replace ``path``'s contents with ``text`` in one observable step.
+def write_bytes_atomically(path: Path, data: bytes) -> None:
+    """Replace ``path``'s contents with ``data`` in one observable step.
 
     The temporary file is created in the destination's own directory because a
     rename is only atomic within a filesystem, and a system temp dir is often a
@@ -53,16 +53,17 @@ def write_text_atomically(path: Path, text: str) -> None:
     callers rather than something each one remembers to re-assert afterwards —
     a ``chmod`` after the rename would also leave a window where the mode was
     whatever the old file had.
+
+    Bytes rather than text is what lets a caller restore a document exactly as
+    it found it: a text round trip is only byte-exact for content that already
+    uses the newline convention the writer imposes.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temp_path = Path(temp_name)
     try:
-        # UTF-8 + LF on every platform (docs/development/CROSS_PLATFORM.md).
-        # Left to its default, a publish on Windows rewrites every line ending,
-        # so the same document differs byte for byte depending on who wrote it.
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as temp_file:
-            temp_file.write(text)
+        with os.fdopen(handle, "wb") as temp_file:
+            temp_file.write(data)
             temp_file.flush()
             os.fsync(temp_file.fileno())
         _rename_over(temp_path, path)
@@ -72,6 +73,17 @@ def write_text_atomically(path: Path, text: str) -> None:
         # contents, which is the point.
         if temp_path.exists():
             temp_path.unlink()
+
+
+def write_text_atomically(path: Path, text: str) -> None:
+    """Publish ``text`` as UTF-8, keeping the newlines the caller chose.
+
+    Encoding here rather than handing the string to a text-mode file is what
+    holds the UTF-8 + LF policy (docs/development/CROSS_PLATFORM.md): a
+    text-mode publish on Windows rewrites every line ending by default, so the
+    same document would differ byte for byte depending on who wrote it.
+    """
+    write_bytes_atomically(path, text.encode("utf-8"))
 
 
 def read_published_text(path: Path) -> str:
@@ -200,4 +212,9 @@ else:
             yield file
 
 
-__all__ = ["open_published", "read_published_text", "write_text_atomically"]
+__all__ = [
+    "open_published",
+    "read_published_text",
+    "write_bytes_atomically",
+    "write_text_atomically",
+]

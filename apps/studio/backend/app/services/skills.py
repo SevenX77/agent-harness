@@ -13,7 +13,6 @@ import stat
 import sys
 import tempfile
 import time
-import uuid
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
@@ -26,7 +25,11 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import ValidationError
 
 from app.core import config
-from app.core.adapters.atomic_file import read_published_text
+from app.core.adapters.atomic_file import (
+    read_published_text,
+    write_bytes_atomically,
+    write_text_atomically,
+)
 from app.core.adapters.engine import (
     AgentNodeAST,
     CompiledSkill,
@@ -153,32 +156,91 @@ def validate_skill_file_path(rel_path: str) -> None:
 
 
 def write_skill_files_atomic(skill_dir: Path, files: dict[str, str]) -> None:
+    """Publish ``files`` into ``skill_dir``, or leave the directory as it was.
+
+    The unit of replacement is the declared file, never the directory. Only the
+    paths ``validate_skill_file_path`` admits can appear in ``files``, so
+    ``.git/``, ``.workspace/`` and ``subgraph/`` are structurally unable to be
+    submitted — and swapping the directory for one built out of ``files`` would
+    delete exactly those. ``rsync`` draws the same line: it overwrites what the
+    source carries and removes the rest only when the caller asks for it with
+    ``--delete``. This API has no way to express "and remove the rest", so it
+    removes nothing.
+
+    Validation runs against ``skill_dir`` itself once the files are in place,
+    because the compiler has to judge the skill it will actually load. Judging a
+    directory built from ``files`` alone judges a skill root missing whatever
+    the payload could not carry — a graph with a subgraph phase can never pass
+    such a check, no matter how correct the skill on disk is.
+
+    A rejected batch is undone from the previous bytes captured below: the shape
+    ``dpkg`` uses when it moves the old file aside before unpacking the new one,
+    so a failed unpack can put the old one back. What is NOT borrowed is any
+    crash-time guarantee — ``dpkg`` has a journal and this does not. If the
+    process dies mid-batch, some files are new and some are old and a stray
+    ``.<name>.*.tmp`` may remain; nothing outside ``files`` is lost, and the
+    recovery is to save again, the same idempotent-rerun recovery ``rsync``
+    relies on.
+    """
     for rel_path in files:
         validate_skill_file_path(rel_path)
-    token = uuid.uuid4().hex
-    tmp_dir = skill_dir.parent / f".{skill_dir.name}.tmp-{token}"
-    backup_dir = skill_dir.parent / f".{skill_dir.name}.bak-{token}"
+    targets = {rel_path: skill_dir.joinpath(*PurePosixPath(rel_path).parts) for rel_path in files}
+    previous_bytes = {target: (target.read_bytes() if target.is_file() else None) for target in targets.values()}
+    created_directories = _directories_this_write_creates(skill_dir, targets.values())
+    published: list[Path] = []
     try:
-        tmp_dir.mkdir(parents=True, exist_ok=False)
-        for rel_path, content in files.items():
-            target = tmp_dir.joinpath(*PurePosixPath(rel_path).parts)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
-        lint = lint_skill_path(tmp_dir, include_studio_preflight=False)
+        for rel_path, target in targets.items():
+            write_text_atomically(target, files[rel_path])
+            published.append(target)
+        lint = lint_skill_path(skill_dir, include_studio_preflight=False)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
-        if skill_dir.exists():
-            os.rename(skill_dir, backup_dir)
-        os.rename(tmp_dir, skill_dir)
     except Exception:
-        if not skill_dir.exists() and backup_dir.exists():
-            os.rename(backup_dir, skill_dir)
+        _restore_previous_bytes(published, previous_bytes)
+        if skill_dir in created_directories:
+            # Nothing was here before this call, so removing everything the
+            # failed write and its lint left behind removes only our own work.
+            _rmtree_with_retry(skill_dir)
+        else:
+            _remove_empty_directories(created_directories)
         raise
-    finally:
-        if backup_dir.exists():
-            _rmtree_with_retry(backup_dir)
-        if tmp_dir.exists():
-            _rmtree_with_retry(tmp_dir)
+
+
+def _directories_this_write_creates(skill_dir: Path, targets: Iterable[Path]) -> set[Path]:
+    """The directories that do not exist yet, so a rollback can take them back.
+
+    A rejected write must not leave an empty ``phases/<new-id>/`` behind: an
+    empty phase directory is itself a compile defect, so "changed nothing" has
+    to cover directories as well as files.
+    """
+    missing: set[Path] = set()
+    for target in targets:
+        directory = target.parent
+        while not directory.exists() and directory not in missing:
+            missing.add(directory)
+            if directory == skill_dir:
+                break
+            directory = directory.parent
+    return missing
+
+
+def _restore_previous_bytes(published: Iterable[Path], previous_bytes: dict[Path, bytes | None]) -> None:
+    for target in published:
+        before = previous_bytes[target]
+        if before is None:
+            target.unlink(missing_ok=True)
+        else:
+            write_bytes_atomically(target, before)
+
+
+def _remove_empty_directories(directories: Iterable[Path]) -> None:
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            # Still holds something, which by construction is not ours: this
+            # write only ever created the directory, never its other contents.
+            pass
 
 
 def _rmtree_with_retry(path: Path, *, attempts: int = 20, delay_seconds: float = 0.05) -> None:
@@ -1020,12 +1082,13 @@ async def update_skill_files(
                 current_markdown_content=current_markdown,
             )
     skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage, metadata)
+    # No structure lint here: write_skill_files_atomic makes exactly that check
+    # on exactly this directory its commit criterion, so reaching this line
+    # already means the structure passed. What the detail still needs is the
+    # full lint, Studio preflight included.
     write_skill_files_atomic(skill_dir, files)
     for rel_path in files:
         record_api_write(skill_dir.joinpath(*PurePosixPath(rel_path).parts))
-    structure_lint = lint_skill_path(skill_dir, include_studio_preflight=False)
-    if structure_lint.status == "failed":
-        _raise_manifest_validation_failed(structure_lint)
     lint = lint_skill_path(skill_dir)
     compiled = _load_compiled(skill_dir)
     return await _detail_from_manifest_async(

@@ -43,6 +43,7 @@ from langgraph.runtime import Runtime
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.callbacks.events import AgentLoopIterationEvent, DeadEndPrunedEvent
+from graph_agent.middleware.invocation_scope import agent_invocation_key
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,12 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
 
     Three concerns, all observed at the LangGraph step boundary:
 
-    1. **Iteration counter** (``before_model``): increments
-       per-instance turn count and emits ``AgentLoopIterationEvent``.
-       Studio uses the event to group LLMCall / ToolCall events under
-       one iteration boundary.
+    1. **Iteration counter** (``before_model``): counts the model turns
+       spent by ONE invocation of the phase and emits
+       ``AgentLoopIterationEvent``. Studio uses the event to group LLMCall /
+       ToolCall events under one iteration boundary, so the count has to
+       restart for each batch item / loop round / resume — see
+       ``invocation_scope.agent_invocation_key``.
     2. **Dead-end detection** (``after_model``): when the most recent
        ToolMessage stream contains ``dead_end_threshold`` consecutive
        same-tool errors, inject a structured warning so the LLM
@@ -93,13 +96,16 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         self._dead_end_threshold = max(1, dead_end_threshold)
         self._callbacks = list(callbacks or [])
         self._phase_name = phase_name
-        self._iteration = 0
+        # One graph node = one middleware instance, invoked again for every
+        # batch item / loop round / resume, so the turn count is per
+        # invocation and not per instance.
+        self._iterations_by_invocation: dict[str, int] = {}
         self._last_dead_end_signature: str | None = None
 
     @property
     def iteration(self) -> int:
-        """Number of LLM turns observed by this middleware instance."""
-        return self._iteration
+        """Model turns spent by the invocation running right now."""
+        return self._iterations_by_invocation.get(agent_invocation_key(), 0)
 
     def before_model(
         self,
@@ -113,8 +119,10 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         still observable via ``self.iteration`` for testing.
         """
         del runtime
-        self._iteration += 1
-        self._emit_iteration_event()
+        invocation_key = agent_invocation_key()
+        iteration = self._iterations_by_invocation.get(invocation_key, 0) + 1
+        self._iterations_by_invocation[invocation_key] = iteration
+        self._emit_iteration_event(iteration)
         return None
 
     def after_model(
@@ -158,12 +166,12 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _emit_iteration_event(self) -> None:
+    def _emit_iteration_event(self, iteration: int) -> None:
         _safe_emit_event(
             self._callbacks,
             AgentLoopIterationEvent(
                 phase_name=self._phase_name,
-                iteration=self._iteration,
+                iteration=iteration,
             ),
         )
 

@@ -19,6 +19,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 import graph_agent.core.graph_assembler as graph_assembler
+from graph_agent.core.checkpointer import checkpoint_serde
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
@@ -137,7 +138,7 @@ def _mounted_tool_names(
         compiled,
         model_resolver=_Resolver(_ChatModel()),
         skill_resolver=mock_skill_resolver,
-        checkpointer=InMemorySaver(),
+        checkpointer=InMemorySaver(serde=checkpoint_serde()),
     ).graph
     graph.invoke(
         {"data": {"topic": "probe"}, "flow": {"thread_id": "mount-thread"}, "messages": []},

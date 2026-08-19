@@ -10,6 +10,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import Field
 
+from graph_agent.core.checkpointer import checkpoint_serde
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 
@@ -127,7 +128,7 @@ def test_agent_create_agent_loop_finishes_with_target_schema_and_inner_checkpoin
 ) -> None:
     _agent_skill(tmp_path)
     chat = _TargetFinishTaskChatModel()
-    checkpointer = InMemorySaver()
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
 
     compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     graph = assemble_graph(

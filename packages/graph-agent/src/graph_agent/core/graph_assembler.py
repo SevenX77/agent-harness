@@ -49,6 +49,7 @@ from graph_agent.cognitive.prompt import (
 )
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
+from graph_agent.core.checkpointer import checkpoint_serde
 from graph_agent.core.edge_transition import (
     active_phase_execution_id,
     close_edge_transition,
@@ -2189,7 +2190,10 @@ def _build_skill_node(
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.errors import GraphRecursionError
 
-    inner_checkpointer = checkpointer or InMemorySaver()
+    # Same rule as the checkpointer factory: a saver the engine creates is one
+    # the engine has to declare its state types to, because nothing downstream
+    # can tell what will be written through it later.
+    inner_checkpointer = checkpointer or InMemorySaver(serde=checkpoint_serde())
     wrapped_checkpointer = NamespaceCheckpointer(inner_checkpointer, f"agent:{phase_id}")
 
     agent_graph = create_agent(

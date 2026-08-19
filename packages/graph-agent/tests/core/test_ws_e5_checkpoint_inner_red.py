@@ -13,6 +13,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
 from graph_agent.core import graph_assembler
+from graph_agent.core.checkpointer import checkpoint_serde
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import (
     NamespaceCheckpointer,
@@ -180,7 +181,7 @@ def test_agent_inner_checkpoint_writes_to_shared_thread_and_namespace(
     mock_skill_resolver: object,
 ) -> None:
     _agent_skill(tmp_path)
-    saver = InMemorySaver()
+    saver = InMemorySaver(serde=checkpoint_serde())
 
     result = _invoke_agent_graph(
         tmp_path,
@@ -230,7 +231,7 @@ def test_agent_inside_graph_iterate_preserves_iteration_namespace(
             """
         ),
     )
-    saver = InMemorySaver()
+    saver = InMemorySaver(serde=checkpoint_serde())
 
     _invoke_agent_graph(
         tmp_path,
@@ -256,7 +257,7 @@ def test_history_queries_distinguish_outer_and_agent_checkpoints(
     mock_skill_resolver: object,
 ) -> None:
     _agent_skill(tmp_path)
-    saver = InMemorySaver()
+    saver = InMemorySaver(serde=checkpoint_serde())
 
     _invoke_agent_graph(
         tmp_path,
@@ -284,7 +285,7 @@ def test_agent_inner_invoke_uses_sync_durability_with_shared_checkpointer(
     mock_skill_resolver: object,
 ) -> None:
     _agent_skill(tmp_path)
-    saver = InMemorySaver()
+    saver = InMemorySaver(serde=checkpoint_serde())
     captured_invoke_kwargs: dict[str, Any] = {}
 
     class _FakeCompiledAgent:

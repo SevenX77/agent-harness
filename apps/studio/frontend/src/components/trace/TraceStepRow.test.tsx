@@ -69,14 +69,31 @@ describe('TraceStepRow payload text well (decision 2026-08-14)', () => {
     expect(html).toContain('phase_start')
   })
 
-  it('renders an oversized payload WHOLE inside the ONE well primitive', () => {
+  it('says so when it has no reading for an event, instead of passing JSON off as one', () => {
+    // Printing the whole event LOOKS like a rendering, so a new engine event
+    // could ship and turn a step back into a black box unnoticed (ledger T4).
+    const html = renderRow(event({ event_type: 'some_future_event', detail: 'x' }), true)
+
+    expect(html).toContain('data-trace-unread-event="some_future_event"')
+    expect(html).toContain('no reading for')
+  })
+
+  it('renders an oversized unread payload WHOLE inside the ONE well primitive', () => {
     const big = 'z'.repeat(4000)
-    const html = renderRow(event({ event_type: 'phase_end', big_field: big }), true)
+    const html = renderRow(event({ event_type: 'some_future_event', big_field: big }), true)
 
     expect(html).toContain('data-slot="text-well"')
     // The full text is in the DOM — the fixed-height well scrolls it, nothing slices it.
     expect(html).toContain(big)
     expect(html).not.toContain('Expand (')
+  })
+
+  it('reads a known event as facts, with no raw payload at all', () => {
+    const html = renderRow(event({ event_type: 'phase_end', phase_name: 'draft', phase_execution_id: 'exec-7' }), true)
+
+    expect(html).toContain('data-trace-facts')
+    expect(html).toContain('exec-7')
+    expect(html).not.toContain('data-trace-unread-event')
   })
 })
 

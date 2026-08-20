@@ -598,12 +598,176 @@ export interface MachineryNarration {
  * caller falls back to the raw payload.
  */
 export function machineryNarration(event: CallbackEvent): MachineryNarration | null {
-  const details = stringList(event.details)
-  const problems = [...stringList(event.errors), ...stringList(event.violations)]
+  // Two channels, and BOTH are the engine speaking. The list ones carry
+  // enumerated findings (a pipeline's stages, a rejection's reasons) and only
+  // two of the engine's event classes have them; the single-sentence ones are
+  // what the D4 machinery contract actually asks every decision to carry.
+  // Reading only the lists sent every other decision — a broken loop, a
+  // swallowed tool error, a repaired history — to the raw payload fallback,
+  // which is the black box D4 exists to open.
+  const details = [
+    ...sentenceList(event.message, event.warning, event.reason),
+    ...stringList(event.details),
+  ]
+  const problems = [
+    ...stringList(event.errors),
+    ...stringList(event.violations),
+    ...sentenceList(event.error),
+  ]
   if (details.length === 0 && problems.length === 0) {
     return null
   }
   return { details, problems }
+}
+
+function sentenceList(...values: unknown[]): string[] {
+  return values.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+}
+
+/** One labelled fact about a step — the numbers and names its type turns on. */
+export interface EventFact {
+  label: string
+  value: string
+}
+
+function fact(label: string, value: unknown): EventFact | null {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) {
+    const items = value.filter((item) => typeof item === 'string' || typeof item === 'number')
+    return items.length === 0 ? null : { label, value: items.join(', ') }
+  }
+  if (typeof value === 'boolean') return { label, value: value ? 'yes' : 'no' }
+  if (typeof value === 'number') return { label, value: String(value) }
+  if (typeof value === 'string') return value === '' ? null : { label, value }
+  return null
+}
+
+/**
+ * What a step turned on, as labelled facts.
+ *
+ * The sentence says what happened; these say with what — the keys a transition
+ * dispatched, how many messages a compaction dropped, which tool looped.
+ * Before this, everything but an LLM or tool call fell through to
+ * `JSON.stringify` of the whole event: the data was always there, printed in a
+ * shape nobody reads.
+ *
+ * Long values (blackboard snapshots, contexts, payloads) are deliberately NOT
+ * here — they belong in a text well, not a fact row.
+ *
+ * Returns NULL when this build has no reading for the type at all, which is a
+ * different thing from an instance that happens to carry no values: the first
+ * is a gap the reader must be told about, the second is just a quiet step.
+ */
+export function eventFacts(event: CallbackEvent): EventFact[] | null {
+  const facts = (...candidates: (EventFact | null)[]): EventFact[] =>
+    candidates.filter((candidate): candidate is EventFact => candidate !== null)
+  const transition = (): EventFact | null => fact('transition', transitionLabel(event))
+
+  switch (event.event_type) {
+    case 'phase_start':
+    case 'phase_end':
+      return facts(fact('execution', event.phase_execution_id))
+    case 'edge_start':
+      return facts(transition(), fact('branch', event.branch_index))
+    case 'edge_end':
+      return facts(
+        transition(),
+        fact('changed', event.changed_keys),
+        fact('operations', event.operation_count),
+      )
+    case 'blackboard_reduce':
+      return facts(transition(), fact('reducer', event.reducer), fact('changed', event.changed_keys))
+    case 'input_dispatch':
+      return facts(
+        transition(),
+        fact('dispatched', event.dispatched_keys),
+        fact('changed', event.changed_keys),
+        fact('branch', event.branch_index),
+      )
+    case 'input_file_injected':
+      return facts(transition(), fact('file', event.file_ref), fact('into', event.target_field))
+    case 'run_started':
+      return facts(fact('run', event.run_id), fact('resumed', event.is_resume), fact('checkpoint', event.checkpoint_id))
+    case 'run_ended':
+      return facts(fact('status', event.status), fact('wall time', event.wall_time_seconds))
+    case 'predict_chain_start':
+      return facts(fact('run', event.run_id))
+    case 'agent_loop_iteration':
+      return facts(fact('turn', event.iteration))
+    case 'nudge':
+      return facts(fact('nudge', event.nudge_count), fact('kind', event.nudge_type))
+    case 'loop_detected':
+      return facts(fact('tool', event.tool_name), fact('repeats', event.count))
+    case 'protocol_violation':
+      return facts(fact('boundary', event.boundary))
+    case 'tool_error_handled':
+      return facts(fact('tool', event.tool_name))
+    case 'tool_history_repaired':
+      return facts(fact('synthesized', event.synthesized_count), fact('dropped', event.dropped_count))
+    case 'runtime_input_injected':
+      return facts(fact('keys', event.keys))
+    case 'working_memory_update':
+      return facts(fact('length', event.content_length))
+    case 'compaction':
+      return facts(fact('removed', event.removed_message_count), fact('sidecar', event.content_ref))
+    case 'dead_end_pruned':
+      return facts(fact('pruned', event.summary))
+    case 'ambiguity_logged':
+      return facts(
+        fact('kind', event.ambiguity_type),
+        fact('question', event.question),
+        fact('decision', event.decision),
+        fact('refs', event.related_refs),
+        fact('protocols', event.related_protocols),
+      )
+    case 'builtin_subagent_enter':
+    case 'builtin_subagent_exit':
+      return facts(fact('subagent', event.builtin_name))
+    case 'builtin_subagent_fallback':
+      return facts(
+        fact('subagent', event.builtin_name),
+        fact('because', event.fallback_reason),
+        fact('instead', event.fallback_strategy),
+      )
+    case 'artifact_saved':
+      return facts(fact('artifact', event.name), fact('path', event.path), fact('bytes', event.size_bytes))
+    case 'parallel_map_group_started':
+      return facts(
+        fact('skill', event.skill_path),
+        fact('items', event.item_count),
+        fact('concurrency', event.max_concurrent),
+        fact('as', event.item_as),
+      )
+    case 'parallel_map_group_ended':
+      return facts(
+        fact('succeeded', event.succeeded),
+        fact('failed', event.failed),
+        fact('wall time', event.wall_time_seconds),
+      )
+    case 'interrupted':
+      return facts(
+        fact('question', event.question),
+        fact('options', event.options),
+        fact('checkpoint', event.checkpoint_id),
+      )
+    case 'resumed':
+      return facts(fact('from', event.resumed_from_phase), fact('answer', event.human_input))
+    case 'finish_task_verdict':
+      return facts(fact('verdict', event.verdict), fact('items', event.item_count))
+    case 'llm_delta':
+      return facts(fact('channel', event.channel))
+    // These three ARE read, in full, by their own bodies (the LLM flow and the
+    // tool-call subtree) — naming them here keeps "no reading" honest.
+    case 'prompt_captured':
+    case 'llm_call':
+    case 'tool_call':
+    case 'tool_call_started':
+    case 'llm_route_decision':
+    case 'llm_call_settings':
+      return []
+    default:
+      return null
+  }
 }
 
 const SEVERITY_RANK: Record<TraceSeverity, number> = { normal: 0, warning: 1, error: 2 }

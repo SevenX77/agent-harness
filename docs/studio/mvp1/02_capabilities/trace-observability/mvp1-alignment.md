@@ -222,6 +222,39 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: live（2026-07-16 落地：utils/trace.ts `llmFallbackDetails`/`countLlmFallbacks`/`eventModelName` + TraceEventRow FallbackBlock + TracePanel fallback chip + PromptInspector 模型 chip；活跑与历史回看共用同一渲染链）。
 - 归属: capability `trace-observability`; region `timeline`.
 
+### F12. 每一步都说出自己做了什么(没有沉默的原始 JSON 兜底)
+
+- 机制: 展开一个步骤,看到的是三层,按这个顺序:
+  1. **它说的话**(`machineryNarration.details`):引擎的**整句自述**。数据源是**两类通道**——
+     单句通道 `message` / `warning` / `reason`,与清单通道 `details`;两类都是引擎在说话。
+  2. **它拨动的东西**(`eventFacts`):每种事件类型自己那几个有意义的字段,渲染成
+     「标签 + 值」的事实行(如 `transition: draft → review`、`dispatched: topic, draft`、
+     `synthesized: 2 / dropped: 1`)。长值(黑板快照、context、payload)不进事实行,归文本井。
+  3. **它踩到的问题**(`machineryNarration.problems`):`errors` / `violations` 清单,
+     外加 `tool_error_handled` 的单数 `error`。
+- **没有读法的事件必须自己说出来**:`eventFacts` 对**认识**的类型返回数组(可以是空数组),
+  对**不认识**的返回 `null`;渲染层据此给出一条明确告警行
+  (`data-trace-unread-event=<类型>`:「This build has no reading for X — showing the raw
+  event」)加原始 payload,而不是像从前那样直接 `JSON.stringify` 整个事件了事。
+- **读法覆盖由门禁保证**:`utils/engine-event-types.ts` 镜像引擎 `CallbackEvent` 联合体的全部
+  事件类型,后端测试 `test_engine_event_types_are_mirrored.py` 同时读 Python 联合体与这份 TS
+  清单并要求一致;前端测试再断言清单里每一项都有读法。
+- 决策:
+  - **兜底渲染是伪装成渲染的黑箱。** 整坨 JSON 看上去"渲染了",于是引擎新加一个事件、
+    某个步骤悄悄退回黑箱,没有任何人会发现——而去黑箱正是 2026-08-13 D4 要终结的状态。
+    所以这里立两道:运行期**明说**没有读法,构建期**红灯**提醒补读法。
+  - **句子归引擎,版式归前端。** 事件里那句整话是引擎产出的事实(D4 契约),前端不改写、
+    不再造一份自己的叙述表——否则同一件事会有两种说法,而"哪个是真的"不可判定。
+  - **事实行只放短值。** 事实行是给人扫一眼的;把黑板快照塞进去只会把它变成另一种 JSON 墙。
+- 原话/来源: PM 2026-08-14②「tracing 对用户的目的是去黑箱」;2026-08-19 Q9(重复≥2 次:
+  「只有结果没有过程」);决议 `docs/design/2026-08-13-trace-goes-glass-box-decision.md` §D4。
+- 测试: `utils/trace.test.ts`(单句通道并入自述 / 吞掉的异常进 problems / 事实行内容 /
+  转移读作转移 / **每个引擎事件类型都有读法**)、`TraceStepRow.test.tsx`(无读法时明确告警 /
+  超长 payload 仍整份进同一个文本井 / 已知事件只出事实行不出原始 payload)、
+  `apps/studio/backend/tests/test_engine_event_types_are_mirrored.py`(镜像不漂移)。
+- Status: target-design(2026-08-20 立)。
+- 归属: capability `trace-observability`; region `timeline`.
+
 ## 3. 接口契约
 - Runtime input: run_id websocket events plus persisted `trace.jsonl`.
 - UI output: timeline stream/list, node status map, prompt inspector, dot context。(独立的只读文档面已按 2026-08-09 D1 删除,见 F2。)

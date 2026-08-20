@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTr
 import type { CallbackEvent } from '../../api/types'
 import type {
   CallSettingsDetails,
+  EventFact,
   RouteDecisionDetails,
   SettingVerdict,
   TraceSeverity,
@@ -20,6 +21,7 @@ import {
   eventTimeLabel,
   jsonText,
   callSettingsDetails,
+  eventFacts,
   machineryNarration,
   maxSeverity,
   routeDecisionDetails,
@@ -217,11 +219,17 @@ function StepBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepOutp
   if (opener.event_type === 'tool_call_started') {
     return <ToolArguments event={opener} />
   }
-  const narration = machineryNarration(step.end?.event ?? opener)
-  if (narration) {
-    return <MachineryBody narration={narration} />
+  // Everything else is machinery, and machinery says what it decided (D4) and
+  // shows what it turned on. A type with NO reading is a gap in this build, not
+  // a quiet step — it says so out loud rather than printing itself as JSON and
+  // letting that pass for a rendering.
+  const settled = step.end?.event ?? opener
+  const narration = machineryNarration(settled)
+  const facts = eventFacts(settled)
+  if (facts === null) {
+    return <UnreadEventBody event={settled} />
   }
-  return <GenericPayload event={step.end?.event ?? opener} />
+  return <MachineryBody narration={narration} facts={facts} />
 }
 
 /**
@@ -494,10 +502,29 @@ function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof t
  * pipeline narration it carried in `details`, and the reasons in
  * `errors` / `violations` when the decision went against the submission.
  */
-function MachineryBody({ narration }: { narration: NonNullable<ReturnType<typeof machineryNarration>> }) {
+function MachineryBody({
+  narration,
+  facts,
+}: {
+  narration: ReturnType<typeof machineryNarration>
+  facts: EventFact[]
+}) {
+  if (narration === null && facts.length === 0) {
+    return null
+  }
   return (
     <div className="mt-2 space-y-1.5 rounded-md border border-border bg-muted/30 p-2 text-xs">
-      {narration.details.length > 0 ? (
+      {facts.length > 0 ? (
+        <dl data-trace-facts className="flex flex-wrap gap-x-4 gap-y-1">
+          {facts.map((item) => (
+            <div key={item.label} className="flex min-w-0 items-baseline gap-1.5">
+              <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{item.label}</dt>
+              <dd className="min-w-0 truncate font-mono text-foreground" title={item.value}>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {narration !== null && narration.details.length > 0 ? (
         <ol className="space-y-1">
           {narration.details.map((line, position) => (
             <li key={`detail-${position}`} className="flex gap-2 text-foreground/90">
@@ -507,7 +534,7 @@ function MachineryBody({ narration }: { narration: NonNullable<ReturnType<typeof
           ))}
         </ol>
       ) : null}
-      {narration.problems.length > 0 ? (
+      {narration !== null && narration.problems.length > 0 ? (
         <ol className="space-y-1">
           {narration.problems.map((reason, position) => (
             <li
@@ -524,9 +551,22 @@ function MachineryBody({ narration }: { narration: NonNullable<ReturnType<typeof
   )
 }
 
-function GenericPayload({ event }: { event: CallbackEvent }) {
+/**
+ * An event this build cannot read.
+ *
+ * The old behaviour was to print the whole event as JSON, which LOOKS like a
+ * rendering — so a new engine event could ship and silently turn a step back
+ * into a black box, which is the state the glass-box decision set out to end.
+ * Naming the gap is the point: the payload is still here so the reader is not
+ * stuck, but nobody mistakes it for a reading.
+ */
+function UnreadEventBody({ event }: { event: CallbackEvent }) {
   return (
-    <div className="mt-2">
+    <div data-trace-unread-event={event.event_type} className="mt-2 space-y-1.5">
+      <p className="flex items-center gap-1.5 rounded border border-warning-border bg-warning-background px-2 py-1 text-xs text-warning-foreground">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        This build has no reading for <code className="font-mono">{event.event_type}</code> — showing the raw event.
+      </p>
       <TraceText text={jsonText(event as never)} label="Event payload" language="json" />
     </div>
   )

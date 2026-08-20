@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CallbackEvent } from '../api/types'
+import { ENGINE_EVENT_TYPES } from './engine-event-types'
 import {
   countRouteDegradations,
   eventColor,
+  eventFacts,
+  machineryNarration,
   eventMessageIsRedundant,
   eventMessage,
   eventModelName,
@@ -320,5 +323,61 @@ describe('redundant row messages', () => {
 
   it('keeps a message that actually says something', () => {
     expect(eventMessageIsRedundant(ev({ event_type: 'phase_start', phase_name: 'segment' }))).toBe(false)
+  })
+})
+
+describe('every machinery step says what it did (glass-box D4)', () => {
+  function ev(payload: Partial<CallbackEvent>): CallbackEvent {
+    return { schema_version: '1.0', timestamp: '2026-08-20T00:00:00Z', ...payload } as CallbackEvent
+  }
+
+  it('folds the single-sentence channels into the narration, not just the list ones', () => {
+    // The engine says what a decision was in `message` (D4: "带完整句子的
+    // message"), and only two of its 37 event classes carry the list channels.
+    // Reading only the lists sent every other decision to the raw payload.
+    expect(machineryNarration(ev({
+      event_type: 'loop_detected', phase_name: 'work', tool_name: 'search', count: 3,
+      message: 'Broke a no-progress loop on search after 3 identical results.',
+    }))?.details).toContain('Broke a no-progress loop on search after 3 identical results.')
+  })
+
+  it('puts a swallowed exception among the problems, not the narration', () => {
+    const narration = machineryNarration(ev({
+      event_type: 'tool_error_handled', phase_name: 'work', tool_name: 'fetch',
+      error: 'TimeoutError: timed out', message: 'Turned a fetch failure into model feedback.',
+    }))
+
+    expect(narration?.problems).toContain('TimeoutError: timed out')
+    expect(narration?.details).toContain('Turned a fetch failure into model feedback.')
+  })
+
+  it('names the numbers a machinery step turned on', () => {
+    expect(eventFacts(ev({
+      event_type: 'tool_history_repaired', phase_name: 'work',
+      synthesized_count: 2, dropped_count: 1, message: 'Repaired the history.',
+    }))).toEqual([
+      { label: 'synthesized', value: '2' },
+      { label: 'dropped', value: '1' },
+    ])
+  })
+
+  it('reads a transition as the transition it was', () => {
+    expect(eventFacts(ev({
+      event_type: 'input_dispatch', from_phases: ['draft'], to_phase: 'review',
+      dispatched_keys: ['topic', 'draft'], changed_keys: ['draft'],
+    }))).toEqual([
+      { label: 'transition', value: 'draft → review' },
+      { label: 'dispatched', value: 'topic, draft' },
+      { label: 'changed', value: 'draft' },
+    ])
+  })
+
+  it('has a reading for every event the engine can emit', () => {
+    // The point of the whole unit: a type with neither a sentence nor facts is
+    // exactly the silent raw-JSON fallback this replaces. If the engine adds an
+    // event, this fails until someone gives it a reading.
+    const unread = ENGINE_EVENT_TYPES.filter((type) => eventFacts(ev({ event_type: type })) === null)
+
+    expect(unread).toEqual([])
   })
 })

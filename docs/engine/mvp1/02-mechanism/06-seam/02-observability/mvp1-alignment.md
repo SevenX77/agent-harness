@@ -31,6 +31,7 @@ observability = 引擎执行的**可观测事件流**——把"发生了什么"�
 | OB3 | 回调覆盖全事件类型 | 新增事件须同步所有回调(防遗漏) |
 | OB4 | 边操作事件成系列(3 新 + 2 已有),按 edge 聚合;并联节点输入分发**各发一条** | dot = 节点间全部操作可观测;机制在 `graph-exec`、事件在本域(源 11-io E5) |
 | OB6 | **一步的开始和结束,都由执行这一步的那个单元自己发**,不由包在某类调用方外面的装饰器发、也不由事后读消息列表的人补发。LLM 往返的两半都发自 chat model 内部(`LLMProviderChatModel._generate` / `PredictGatewayChatModel._generate`):请求 provider **之前**发 `prompt_captured`,拿到回答**当场**发 `llm_call`;工具调用的开始事件 `tool_call_started` 发自 Tracing 中间件(它就套在工具执行外面) | 两个失效模式,同一个病根。①**装饰器**只对"以它预期的方式调用模型"的调用方生效:旧实现 `TracingClientProxy` 拦 `.invoke()`,只有 LLM phase 节点那样调;AGENT phase 把模型交给 `create_agent`,LangChain 走 `_generate`,于是**耗时最长的那条路一个开始信号都没有**——一次 5 分钟的 phase 在 UI 上全程空白(实测 2026-08-09)。②**事后读消息列表**的人只能在 phase 跑完后一次性补发所有 `llm_call`,于是这个 phase 开出去的每一步都要等到 phase 结束才关得上:一次 162 秒的 run 报成功之后,trace 里仍有 5 步在转圈(实测 2026-08-09,修复前)。放到调用点后,新增节点类型不可能漏发、没有能被绕过的包装层、开始与结束也不可能来自两个不同的 owner。代价:模型多背 `sub_run_id`/`group_key`/`parent_node_id`/`node_type` 四个只用于上报的字段 |
+| OB8 | **做决定的报每一次决定,只做断言的只报断言失败**:一个组件的输出会改变后续控制流,它就是决定者,每一次决定都发事件(`ExitControlMiddleware` 的五个退出决策 → `AgentExitDecisionEvent`);不改变控制流的检查是断言,只在失败时发(`ProtocolValidationMiddleware` → `ProtocolViolationEvent`) | 引擎其实一直把这些句子写出来了,只是写成 `logger.info` —— 而循环最常见的结局(提交被接受、相位正常结束)因此对每一个运行的读者都不存在(实测:真实 8 相位 run 里,结束了 4 个相位的那个组件贡献 0 条事件)。反过来,给「每次都通过」的断言加事件只会把 trace 淹掉:一个相位每次模型调用要断言两次 |
 | OB7 | **调用方自带的 chat model(`run_skill(mock_llm=...)`)从 Port 进,不从 model 层进**——`ChatModelProvider` 把它适配成 `LLMProvider`,仍由 `LLMProviderChatModel` 驱动 | OB6 把上报责任放在"引擎自己写的 model"身上,那么引擎驱动的每个 model 都必须是这一种,否则外来 model 跑的 run 单纯因为"不是我们写的"而失去全部 `llm_call`(实测:改动后 5 个断言 llm_call 的用例直接失灵)。外来 chat model 本质就是"另一种回答方式"= provider 变体,按稳定依赖原则它归 Adapter 层。副产品:`_resolve_phase_chat_model` 里那条平行的 `chat_model` 分支删掉,phase 之上只剩一种 model、一个 reporter、一套事件 |
 | OB5 | reducer 前后态 diff(REQ-7)= **前端近似**(从 OB4 边操作事件带的黑板快照 + phase 边界比对),engine **不加** authoritative 逐 reducer diff 事件(PM 2026-06-06 选 A) | 边操作事件已带黑板快照、足够前端近似"哪个 key 变了";authoritative 逐 reducer emit = 引擎复杂度↑、调试边际价值↓,deferred(工程取舍,非业务判断) |
 
@@ -70,7 +71,28 @@ engine 全权;trace 被 studio trace-inspector 消费(前端挂载归 studio)。
        - **`InputDispatchEvent` 专有**:`dispatched_keys: list[str]`(按 `io.inputs` 切给该节点的 key)· `branch_index: int | None`(并联/iterate 扇出时的分支/item 序号,让前端把并联分发画成各自的边;非并联为 `None`)。
        - **`InputFileInjectedEvent` 专有**:`file_ref: str`(注入文件路径/ref)· `target_field: str`(文件内容注入到的黑板字段名)。
    - **Prompt 三视图 = 已满足**(2026-06-06 核实):`PromptCapturedEvent`(`events.py:217`)已同时带 `template_source`(模板)+ `variables`(喂入变量)+ `resolved_prompt`(渲染后)三视图——无需补(06 #7 待办关闭)。
-2. **观察者必须在决策者外面(2026-08-20 落地)**:`ToolCallStartedEvent` 从 2026-06 就
+2. **做决定的报每一次决定,只做断言的只报断言失败(OB8,2026-08-20 落地)**:
+   `ExitControlMiddleware` 是决定"这个 agent 相位继续还是停下"的那个闸,它有五个答案,
+   其中四个**只写成 `logger.info(...)`**——也就是写在运行的读者永远不会看的地方。后果是
+   循环**最常见的那个结局也最看不见**:一个相位因为提交被接受而正常结束,trace 里只看到
+   `finish_task`、verdict、`phase_end`,没有任何一行说"闸同意了"。实测 2026-08-20 的真实
+   8 相位 run(`.workspace/runs/2026-08-19T06-58-15_179d1440/trace.jsonl`):77 条事件、
+   4 个 agent 相位,来自结束了这四个相位的那个组件的事件数为 **0**。这正是 E4「只给结果
+   不给过程」最字面的形态——引擎其实**已经把这些句子写出来了**,只是写成了 print 级日志。
+   **裁决**:新增 `AgentExitDecisionEvent`(`agent_exit_decision`),闸的**每一个**答案都发,
+   取值是封闭集合 `exit_success` / `continue_tool_work` / `continue_nudged` / `continue_open`
+   ——封闭是为了让"读者遇到一个没有读法的决定"在类型层就不可表示。**五个决策点全覆盖**,
+   包括挂在 `after_model` 的 planning gate:它在 `after_agent` 还没轮到之前就把循环打回去,
+   同样是一次决定(写这条测试时实测发现的,原本以为只有四个)。
+   **与 `NudgeEvent` 并存不重复**:nudge 带的是**对模型说了什么**,决定事件带的是**闸对此做了什么**。
+   **边界(这条规则的另一半)**:`ProtocolValidationMiddleware` 只做断言——它通过时什么都不改变,
+   而且每次模型调用要跑两次,给它加"检查通过"事件是纯噪声。所以它维持只在失败时发
+   `ProtocolViolationEvent`。判据不是"重不重要",是**这个组件的输出会不会改变后续控制流**:
+   会,就是决定,每次都报;不会,就是断言,只报失败。
+   门禁:`tests/callbacks/test_a_turn_says_why_it_ended.py`(正常结束的相位必须自己说出来、
+   决定必须早于它结束的那个 `phase_end`、被 nudge 的一轮报"继续"而不是"结束")。
+
+3. **观察者必须在决策者外面(2026-08-20 落地)**:`ToolCallStartedEvent` 从 2026-06 就
    定义好、导出、镜像进前端事件表、被 `TraceStepRow` 消费,却**只对 skill 自带工具生效**;
    `finish_task` / `update_working_memory` / `ask_clarification` 这些框架工具一次都没被宣告过
    ——而它们才是一个 agent 相位大部分时间在调的东西。

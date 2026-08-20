@@ -769,6 +769,14 @@ export function eventFacts(event: CallbackEvent): EventFact[] | null {
       return facts(fact('removed', event.removed_message_count), fact('sidecar', event.content_ref))
     case 'dead_end_pruned':
       return facts(fact('pruned', event.summary))
+    case 'agent_exit_decision':
+      // The sentence already says WHY the gate answered as it did, so the chips
+      // carry what it does not: which turn it was standing on, and — scannable
+      // without reading the sentence — whether the loop stopped or went around.
+      return facts(
+        fact('outcome', event.decision === 'exit_success' ? 'phase ended' : 'loop continues'),
+        fact('iteration', event.iteration),
+      )
     case 'ambiguity_logged':
       return facts(
         fact('kind', event.ambiguity_type),

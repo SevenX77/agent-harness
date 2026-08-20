@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ENGINE_EVENT_TYPES } from '../../utils/engine-events'
+import { ENGINE_EVENT_TYPES } from '../../utils/engine-event-types'
 import { TRACE_CATEGORIES, traceEventCategory } from './trace-category'
 
 describe('traceEventCategory', () => {
@@ -8,7 +8,7 @@ describe('traceEventCategory', () => {
   // from ENGINE_EVENT_TYPES rather than copied here, so this test cannot pass
   // by testing a stale idea of what the engine emits.
   it('sorts every event type the engine emits into exactly one bucket', () => {
-    expect(ENGINE_EVENT_TYPES.size).toBeGreaterThan(0)
+    expect(ENGINE_EVENT_TYPES.length).toBeGreaterThan(0)
     for (const eventType of ENGINE_EVENT_TYPES) {
       const category = traceEventCategory(eventType)
       expect(TRACE_CATEGORIES).toContain(category)

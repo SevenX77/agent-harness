@@ -409,7 +409,8 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                 ('diagnostics_truncated', 'bool'),
                 ('diagnostic_counts', 'dict[str, Any]')))}
 
-EXPECTED_CALLBACK_EVENT_VARIANTS = frozenset({'AgentLoopIterationEvent',
+EXPECTED_CALLBACK_EVENT_VARIANTS = frozenset({'AgentExitDecisionEvent',
+           'AgentLoopIterationEvent',
            'AmbiguityLoggedEvent',
            'ArtifactSavedEvent',
            'BlackboardReduceEvent',

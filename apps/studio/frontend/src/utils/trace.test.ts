@@ -373,6 +373,21 @@ describe('every machinery step says what it did (glass-box D4)', () => {
     ])
   })
 
+  it('says whether the loop stopped without making the reader parse the decision name', () => {
+    expect(eventFacts(ev({
+      event_type: 'agent_exit_decision', decision: 'exit_success', iteration: 2,
+    }))).toEqual([
+      { label: 'outcome', value: 'phase ended' },
+      { label: 'iteration', value: '2' },
+    ])
+    expect(eventFacts(ev({
+      event_type: 'agent_exit_decision', decision: 'continue_nudged', iteration: 1,
+    }))).toEqual([
+      { label: 'outcome', value: 'loop continues' },
+      { label: 'iteration', value: '1' },
+    ])
+  })
+
   it('has a reading for every event the engine can emit', () => {
     // The point of the whole unit: a type with neither a sentence nor facts is
     // exactly the silent raw-JSON fallback this replaces. If the engine adds an

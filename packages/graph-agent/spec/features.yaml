@@ -614,6 +614,7 @@ features:
   - '[F-v3-agent-exit-control-failed]'
   error_codes_secondary: []
   events_primary:
+  - AgentExitDecisionEvent
   - FinishTaskVerdictEvent
   events_secondary: []
   non_functional_contracts: []
@@ -621,6 +622,7 @@ features:
   - tests/runtime/test_exit_contract.py::test_v030_exit_contract_is_hardcoded_at_prompt_tail
   - tests/core/test_ws_e8_exit_gate_red.py::test_agent_without_finish_task_returns_explicit_failure
   - tests/middleware/test_finish_task_says_its_verdict.py::test_an_accepted_finish_says_so_and_says_what_it_accepted
+  - tests/callbacks/test_a_turn_says_why_it_ended.py::test_a_phase_that_ends_well_says_so
   public_api_symbols:
   - FinishTaskEvent
 - id: F-md-patch

@@ -41,7 +41,7 @@ async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
 
 
 @router.post(
-    "/{base_run_id}/compare",
+    "/{base_run_id}/node-compare",
     response_model=CompareRunResponse,
     status_code=202,
     responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
@@ -53,12 +53,16 @@ async def create_node_compare_run(
 ) -> CompareRunResponse:
     # PR2: launch isolated single-node side-runs for node_id's persisted compare
     # candidates, off the completed base run. Each side-run feeds the node the base
-    # run's exact input and swaps only the model. Poll via GET /compare/{group_id}.
+    # run's exact input and swaps only the model. Poll via
+    # GET /node-compare/{group_id}. The address says "node-compare" rather than
+    # "compare" because /runs/{id}/compare already names a different operation —
+    # diffing a finished run against its golden — and one address that means two
+    # things is how the golden endpoint spent months unreachable.
     return await run_manager.start_node_compare_run(skill_id, base_run_id, request.node_id)
 
 
 @router.get(
-    "/compare/{compare_group_id}",
+    "/node-compare/{compare_group_id}",
     response_model=CompareRunGroupResponse,
     responses={404: {"model": ErrorResponse}},
 )

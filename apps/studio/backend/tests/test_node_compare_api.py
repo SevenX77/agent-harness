@@ -1,6 +1,6 @@
 """PR2 node-level Compare LLMs — orchestration endpoint (isolated side-runs).
 
-POST /runs/{base_run_id}/compare launches one single-node side-run per persisted
+POST /runs/{base_run_id}/node-compare launches one single-node side-run per persisted
 candidate of a node, feeding it the base run's exact input for that node. This
 test drives the endpoint end-to-end with an inline fake worker, letting the real
 variant materialization + compile run, and asserting each side-run is tagged and
@@ -136,7 +136,7 @@ def test_node_compare_spawns_isolated_side_runs(
     monkeypatch.setattr(run_manager, "worker", _fake_side_worker)
 
     resp = client.post(
-        f"/api/skills/text-segmentation/runs/{base_run_id}/compare",
+        f"/api/skills/text-segmentation/runs/{base_run_id}/node-compare",
         json={"node_id": "setup"},
     )
     assert resp.status_code == 202, resp.text
@@ -165,7 +165,7 @@ def test_node_compare_spawns_isolated_side_runs(
         assert handed["roles_path_override"] is not None
         assert handed["artifact_id"] is not None
 
-    got = client.get(f"/api/skills/text-segmentation/runs/compare/{group_id}")
+    got = client.get(f"/api/skills/text-segmentation/runs/node-compare/{group_id}")
     assert got.status_code == 200
     assert {r["candidate_id"] for r in got.json()["runs"]} == {"fast", "slow"}
 
@@ -179,7 +179,7 @@ def test_node_compare_requires_candidates(
 
     monkeypatch.setattr(rm, "_read_run_artifact_events", lambda run_dir: _dispatch_events("base", "setup", {"input_text": "x"}))
     resp = client.post(
-        "/api/skills/text-segmentation/runs/base/compare",
+        "/api/skills/text-segmentation/runs/base/node-compare",
         json={"node_id": "setup"},
     )
     assert resp.status_code == 422

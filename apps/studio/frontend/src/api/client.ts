@@ -839,8 +839,11 @@ export async function putNodeCompareCandidates(
 /**
  * PR2: launch isolated single-node side-runs for a node's persisted candidates,
  * off a completed base run. Each side-run feeds the node the base run's exact
- * input and swaps only the model. POST `/skills/{id}/runs/{base_run_id}/compare`
- * → CompareRunResponse (poll via getCompareGroup).
+ * input and swaps only the model. POST
+ * `/skills/{id}/runs/{base_run_id}/node-compare` → CompareRunResponse (poll via
+ * getCompareGroup). Not `/compare`: that address already means "diff this run
+ * against its golden", and while both were registered on it the golden one
+ * was unreachable.
  */
 export async function startNodeCompareRun(
   skillId: string,
@@ -848,7 +851,7 @@ export async function startNodeCompareRun(
   nodeId: string,
 ): Promise<CompareRunResponse> {
   const response = await api.post<CompareRunResponse>(
-    `/skills/${skillId}/runs/${encodeURIComponent(baseRunId)}/compare`,
+    `/skills/${skillId}/runs/${encodeURIComponent(baseRunId)}/node-compare`,
     { node_id: nodeId },
   )
   return response.data
@@ -857,14 +860,15 @@ export async function startNodeCompareRun(
 /**
  * PR2: fetch the per-candidate side-runs for one compare group so the Trace top
  * tabs can render one tab per candidate (per-candidate failure read from each
- * run's `metadata.status`). GET `/skills/{id}/runs/compare/{compare_group_id}`.
+ * run's `metadata.status`). GET
+ * `/skills/{id}/runs/node-compare/{compare_group_id}`.
  */
 export async function getCompareGroup(
   skillId: string,
   compareGroupId: string,
 ): Promise<CompareRunGroupResponse> {
   const response = await api.get<CompareRunGroupResponse>(
-    `/skills/${skillId}/runs/compare/${encodeURIComponent(compareGroupId)}`,
+    `/skills/${skillId}/runs/node-compare/${encodeURIComponent(compareGroupId)}`,
   )
   return response.data
 }

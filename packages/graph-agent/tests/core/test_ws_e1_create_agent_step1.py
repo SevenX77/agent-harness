@@ -15,6 +15,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
 
 import graph_agent.core.graph_assembler as graph_assembler
+from graph_agent.callbacks.emit import _GatewayEventSink
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent.core.checkpointer import checkpoint_serde
@@ -506,14 +507,15 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
     assert int(agent_config["recursion_limit"]) < 10000
     assert captured["agent_invoke_kwargs"]["durability"] == "sync"
 
-    assert resolver.calls == [
-        {
-            "llm_role": "graph_agent",
-            "callbacks": (),
-            "phase_name": "main",
-            "predict_context": predict_context,
-        }
-    ]
+    (resolved,) = resolver.calls
+    assert resolved["llm_role"] == "graph_agent"
+    assert resolved["phase_name"] == "main"
+    assert resolved["predict_context"] is predict_context
+    # Not the engine's callback tuple: the gateway builds its own events and
+    # knows nothing about subgraphs, so what it is handed is the engine's relay
+    # — the seam that puts those events back under the scope they happened in.
+    (relay,) = resolved["callbacks"]
+    assert isinstance(relay, _GatewayEventSink)
 
 
 def test_default_langchain_agent_state_drops_workflow_data_and_flow() -> None:

@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from graph_agent.callbacks.events import LLMCallSettingsEvent, LLMRouteDecisionEvent
 from graph_agent.io.run_layout import TRACE_FILENAME
 
 logger = logging.getLogger(__name__)
@@ -138,9 +139,70 @@ def _safe_emit_event(callbacks: Any | None, event: Any) -> None:
             )
 
 
+class _GatewayEventSink:
+    """Restates the gateway's events as the engine's own, then emits them here.
+
+    The gateway cannot depend on this package, so it builds its own frozen
+    dataclasses and the engine hands its callback list straight through — which
+    means those events are the only ones in a run that never pass
+    ``_safe_emit_event``, and so the only ones that never learn which subgraph
+    they happened in. Two subgraphs may each own a phase called ``review``, and
+    an event that cannot say which one it belongs to makes the two
+    indistinguishable to every reader downstream.
+
+    Restating rather than stamping, because the gateway's event is frozen and
+    has no ``subgraph_path`` field at all: there is nothing there to fill in.
+    The engine already declares its own copy of each of these shapes in
+    ``events`` (they are in the ``CallbackEvent`` union), which until now
+    nothing constructed — this is what makes that declaration true.
+
+    An event the engine has no class for is passed along untouched. It arrives
+    without a scope, which is worse than the events around it and better than
+    vanishing until someone notices a new gateway event type is missing from
+    every trace.
+    """
+
+    def __init__(self, callbacks: Iterable[Any]) -> None:
+        self._callbacks = tuple(callbacks)
+
+    def on_event(self, event: Any) -> None:
+        _safe_emit_event(self._callbacks, _as_engine_event(event))
+
+
+def _as_engine_event(event: Any) -> Any:
+    engine_class = _ENGINE_CLASS_BY_GATEWAY_EVENT_TYPE.get(getattr(event, "event_type", ""))
+    if engine_class is None:
+        return event
+    dump = getattr(event, "model_dump", None)
+    if not callable(dump):
+        return event
+    try:
+        return engine_class(**dump())
+    except (TypeError, ValueError):
+        # The two sides of this contract are kept in step by hand, so a field
+        # can drift. Delivering the gateway's own object keeps the run readable
+        # while the mismatch gets fixed; dropping it would hide the drift.
+        logger.exception(
+            "[Callbacks] gateway %s does not fit %s; forwarding it unrestated",
+            getattr(event, "event_type", type(event).__name__),
+            engine_class.__name__,
+        )
+        return event
+
+
+#: Gateway event types the engine states a contract for, and the class it
+#: states it as. A gateway event type absent here is one the engine has no
+#: opinion about, which is a different thing from one it rejects.
+_ENGINE_CLASS_BY_GATEWAY_EVENT_TYPE: dict[str, Any] = {
+    "llm_route_decision": LLMRouteDecisionEvent,
+    "llm_call_settings": LLMCallSettingsEvent,
+}
+
+
 __all__ = [
     "_CallbackSink",
     "_CompositeEventSink",
+    "_GatewayEventSink",
     "_SubscriberSink",
     "_TraceJsonlSink",
     "_safe_emit_event",

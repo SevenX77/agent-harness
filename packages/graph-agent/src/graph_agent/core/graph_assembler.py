@@ -21,7 +21,11 @@ from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, Checkpoin
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import InjectedState
 
-from graph_agent.callbacks.emit import _safe_emit_event, active_subgraph_path
+from graph_agent.callbacks.emit import (
+    _GatewayEventSink,
+    _safe_emit_event,
+    active_subgraph_path,
+)
 from graph_agent.callbacks.events import (
     BlackboardReduceEvent,
     BuiltinSubagentEnterEvent,
@@ -2511,7 +2515,10 @@ def _resolve_phase_chat_model(
     import inspect
     sig = inspect.signature(model_resolver.resolve)
     kwargs = {
-        "callbacks": callbacks,
+        # Wrapped, not raw: whatever the gateway emits has to re-enter through
+        # the engine's own seam, or it arrives unable to say which subgraph it
+        # ran in — the gateway has no idea graphs nest.
+        "callbacks": (_GatewayEventSink(callbacks),),
         "phase_name": phase_id,
     }
     if "predict_context" in sig.parameters:

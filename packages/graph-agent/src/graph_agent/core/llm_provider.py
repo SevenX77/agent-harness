@@ -11,6 +11,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
+from graph_agent.callbacks.emit import _GatewayEventSink
 from graph_agent.tracing.steps import LlmCallStep, StepReporter
 
 
@@ -171,7 +172,10 @@ class LLMProviderChatModel(BaseChatModel):
         metadata = {
             "phase_name": self.phase_name,
             "model_override": self.model_override,
-            "callbacks": self.event_callbacks,
+            # Not the raw list: what the gateway emits has to come back through
+            # the engine's own seam, or it arrives unable to say which subgraph
+            # it ran in — the gateway has no idea graphs nest.
+            "callbacks": (_GatewayEventSink(self.event_callbacks),),
             "stop": stop,
             "bound_tools": list(self.bound_tools),
             "tool_choice": self.tool_choice,

@@ -44,6 +44,7 @@ from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.cognitive.prompt import (
     V030_COGNITIVE_TEMPLATE_ID,
+    V030_COGNITIVE_TEMPLATE_TEXT,
     apply_v030_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
@@ -139,6 +140,10 @@ class _AgentSystemPrompt:
 
     text: str
     template_source: str
+    #: The template's own text, and where the phase author's document lives.
+    #: Both answer "why does the prompt say this", from the two different sides.
+    template_text: str
+    source_path: str | None
     variables: dict[str, Any]
 
 
@@ -2387,6 +2392,8 @@ def _resolve_phase_chat_model(
             callbacks=callbacks,
             phase_name=phase_id,
             prompt_template_source=system_prompt.template_source,
+            prompt_template_text=system_prompt.template_text,
+            prompt_source_path=system_prompt.source_path,
             prompt_variables=system_prompt.variables,
             # The stub can only shape output it has a schema for, and this is the
             # one place that holds THIS phase's schema: phases compiled inside
@@ -2408,6 +2415,8 @@ def _resolve_phase_chat_model(
             # Same reason, one layer up: the phase knows what its prompt was
             # made from, the model is what announces the prompt.
             prompt_template_source=system_prompt.template_source,
+            prompt_template_text=system_prompt.template_text,
+            prompt_source_path=system_prompt.source_path,
             prompt_variables=system_prompt.variables,
         )
     if model_resolver is None:
@@ -2637,8 +2646,38 @@ def _agent_system_prompt(
     return _AgentSystemPrompt(
         text=apply_v030_cognitive_template(**variables),
         template_source=V030_COGNITIVE_TEMPLATE_ID,
+        template_text=V030_COGNITIVE_TEMPLATE_TEXT,
+        source_path=_phase_source_path(phase_id, compiled),
         variables=variables,
     )
+
+
+def _phase_source_path(phase_id: str, compiled: CompiledSkill) -> str | None:
+    """Where this phase's authored document lives, relative to the skill root.
+
+    Relative and forward-slashed because the reader opens it in the workspace
+    editor, which resolves against that root — the same reason the run report is
+    named that way. Absolute paths are only useful for handing to an OS shell.
+    """
+    for document in compiled.nodes:
+        if document.phase_name != phase_id:
+            continue
+        try:
+            return document.path.relative_to(_skill_root(compiled)).as_posix()
+        except ValueError:
+            return document.path.name
+    return None
+
+
+def _skill_root(compiled: CompiledSkill) -> Path:
+    """The skill directory every phase document sits under."""
+    root = compiled.raw.get("__skill_root__")
+    if isinstance(root, (str, Path)):
+        return Path(root)
+    # phases/<id>/SKILL.md — three levels up from any phase document.
+    for document in compiled.nodes:
+        return document.path.parents[2]
+    return Path(".")
 
 
 def _reference_registry_listing(phase_ast: AgentNodeAST) -> str:

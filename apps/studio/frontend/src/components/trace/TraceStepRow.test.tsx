@@ -134,27 +134,53 @@ describe('TraceStepRow has one expander, not two (decision 2026-08-09 D4)', () =
 })
 
 describe('TraceStepRow shows the prompt in place (decision 2026-08-09 D5)', () => {
-  it('puts template, variables and rendered prompt inside the opened step', () => {
+  it('walks the opened step through loading, wrapping, filling in and sending', () => {
     const html = renderRow(
       event({
         event_type: 'prompt_captured',
         phase_name: 'draft',
-        template_source: 'draft.md',
+        phase_source_path: 'phases/draft.md',
+        template_source: 'cognitive/v0.3.0',
+        template_text: 'You are {role}. Goal: {goal}',
         variables: { topic: 'venus' },
-        resolved_prompt: [{ role: 'user', content: 'write about venus' }],
+        resolved_prompt: [
+          { role: 'system', content: 'You are a writer. Goal: describe venus' },
+          { role: 'human', content: 'write about venus' },
+        ],
       }),
       true,
     )
 
-    // Decision 2026-08-13 D1: the body reads in execution order — loading the
-    // prompt (naming its source) comes first, the rendered prompt after it.
-    // The TEMPLATE / VARIABLES containers are gone.
-    expect(html).toContain('Prompt loaded')
-    expect(html).toContain('draft.md')
+    // Decision 2026-08-13 D1: the body reads in execution order, and every
+    // entry is titled by the ACT the engine performed, never by the KIND of
+    // data it holds — the abolished TEMPLATE / VARIABLES containers were
+    // exactly the latter.
+    expect(html).toContain('Loaded — phases/draft.md')
+    expect(html).toContain('Wrapped — cognitive/v0.3.0')
+    expect(html).toContain('You are {role}. Goal: {goal}')
+    expect(html).toContain('Filled in')
     expect(html).toContain('venus')
-    expect(html).toContain('Rendered prompt')
+    expect(html).toContain('Sent — System')
+    expect(html).toContain('Sent — User')
     expect(html).not.toContain('>Template<')
     expect(html).not.toContain('>Variables<')
+  })
+
+  it('shows the sent messages as messages, not as a JSON blob of them', () => {
+    // The reader is trying to read what the model read. A JSON array with
+    // escaped newlines is the same bytes in a shape no one reads.
+    const html = renderRow(
+      event({
+        event_type: 'prompt_captured',
+        phase_name: 'draft',
+        resolved_prompt: [{ role: 'system', content: 'line one\nline two' }],
+      }),
+      true,
+    )
+
+    expect(html).toContain('line one')
+    expect(html).not.toContain('Rendered prompt')
+    expect(html).not.toContain('\\n')
   })
 
   it('offers no link out to a separate inspector', () => {

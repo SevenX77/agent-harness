@@ -624,6 +624,61 @@ function sentenceList(...values: unknown[]): string[] {
   return values.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
 }
 
+/** One message of a prompt, as the reader reads it: who spoke, and what they said. */
+export interface PromptMessage {
+  role: string
+  text: string
+}
+
+/**
+ * LangChain's message types, in the words the reader already uses. Anything
+ * else keeps its own name rather than being folded into "other" — an
+ * unrecognised role is still a message that was sent.
+ */
+const PROMPT_ROLE_LABELS: Readonly<Record<string, string>> = {
+  system: 'System',
+  human: 'User',
+  ai: 'Assistant',
+}
+
+/**
+ * The messages a call actually sent, split by who spoke.
+ *
+ * `resolved_prompt` is a list of `{role, content}` and the panel used to
+ * `JSON.stringify` the whole list into one blob — so "what was the system
+ * prompt" and "what did we actually ask" were a reading exercise over escaped
+ * JSON (ledger T2). `content` is passed through raw by the engine and can be a
+ * string OR a list of content blocks, so a block list is rendered as its text
+ * rather than stringifying to `[object Object]`.
+ */
+export function promptMessages(event: CallbackEvent): PromptMessage[] {
+  const entries = Array.isArray(event.resolved_prompt) ? event.resolved_prompt : []
+  return entries.flatMap((entry) => {
+    if (entry === null || typeof entry !== 'object') return []
+    const raw = entry as Record<string, unknown>
+    const role = typeof raw.role === 'string' && raw.role !== '' ? raw.role : 'unknown'
+    return [{ role: PROMPT_ROLE_LABELS[role] ?? role, text: promptContentText(raw.content) }]
+  })
+}
+
+function promptContentText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (typeof block === 'string') return block
+        if (block !== null && typeof block === 'object') {
+          const text = (block as Record<string, unknown>).text
+          if (typeof text === 'string') return text
+        }
+        return jsonText(block as never)
+      })
+      .join('\n')
+  }
+  if (content === null || content === undefined) return ''
+  return jsonText(content as never)
+}
+
 /** One labelled fact about a step — the numbers and names its type turns on. */
 export interface EventFact {
   label: string

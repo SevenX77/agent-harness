@@ -180,7 +180,9 @@ def test_resolver_receives_effective_role() -> None:
         model_resolver=resolver,
         llm_provider=None,
         callbacks=(),
-        system_prompt=_AgentSystemPrompt(text="", template_source="t", variables={}),
+        system_prompt=_AgentSystemPrompt(
+            text="", template_source="t", template_text="", source_path=None, variables={}
+        ),
     )
     assert model is not None
     assert resolver.calls == ["fast"]

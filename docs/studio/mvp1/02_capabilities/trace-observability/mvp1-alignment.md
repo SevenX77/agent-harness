@@ -159,21 +159,50 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
   静态推断 lib/edge-static-inference.ts 不变)。
 - 归属: rendering `graph-authoring`/`canvas`; data `trace-observability`.
 
-### F5. Prompt 就在它自己的步骤里(原 Prompt Inspector 已删除)
+### F5. Prompt 就在它自己的步骤里,并说清每一段字是谁写的
 
-- 机制: 展开一条 LLM 步骤,就地看到 **Template / Variables / Rendered** 三段(以及完成后的 Response);
-  数据分别来自 `prompt_captured` 的 `template_source` / `variables` / `resolved_prompt`
-  (无 `prompt_captured` 半边时退到 `llm_call.messages`)。**没有第二个入口**——
-  没有 "Inspect prompt" 链接,没有独立弹窗。
-- 决策: 2026-08-09 D5 **删除 `components/PromptInspector.tsx` 及 `promptIndex` / `findPromptEvent` 整条链**。
-  理由是 F9 落地后 prompt 本来就要在步骤开始时展示——PM 原话「这个prompt inspect是什么东西?
-  不要搞那么复杂,如果显示清楚每一步做了什么,就能直接从tracing里面看到具体的prompt,不用搞特殊化」。
-  一个信息只有一个家:两个入口意味着两处要同步、两处会不一致。
-- 原话/来源: 决议 `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D5;
-  上述 PM 原话(2026-08-09)。本条**取代** `01_workflows/04_run-and-verify.md:93` 的独立 inspector 动作。
-- 测试: 展开的 LLM 步骤同时含 Template / Variables / Rendered 三段与其内容;
-  任何步骤都不再渲染 "Inspect prompt"。
-- Status: live(2026-08-09)。
+- 机制: 展开一条 LLM 步骤,**没有第二个入口**(没有 "Inspect prompt" 链接、没有独立弹窗),
+  就地按**执行顺序**看到这几格——每格的标题是引擎**做的那个动作**,不是它**存的那类数据**:
+  1. **`Loaded — <相位文档路径>`**:作者写的那份相位文档。这一格给的是一个**能打开真文件的
+     链接**(「Open this phase」,走工作区既有的 `onFileOpen` 通路),不是文档正文的副本。
+     数据源 `prompt_captured.phase_source_path`(工作区相对路径);相位不来自文件时整格不出现。
+  2. **`Wrapped — <模板 id>`**:引擎把作者那份文档裹进去的**认知模板全文**。
+     数据源 `prompt_captured.template_source`(id,如 `cognitive/v0.3.0`)+ `template_text`(正文)。
+  3. **`Filled in`**:代入的变量(`variables`),为空则整格不出现。
+  4. **`Sent — System` / `Sent — User` / `Sent — Assistant`**:真正发出去的那几条消息,
+     **一条消息一格、正文原样呈现**。数据源 `resolved_prompt`
+     (无 `prompt_captured` 半边时退到 `llm_call.messages`)。
+- 决策:
+  - **两个入口 = 两处要同步、两处会不一致。** 2026-08-09 D5 因此删掉
+    `components/PromptInspector.tsx` 及 `promptIndex` / `findPromptEvent` 整条链——
+    F9 落地后 prompt 本来就在步骤开始时展示,不需要特殊化的第二个家。
+  - **标题写动作,不写数据类别。** 这是 2026-08-13 D1「废除 TEMPLATE / VARIABLES 特殊容器」
+    那条裁决的正读法:被废除的是**按种类归堆、与时间无关**的容器,不是"模板正文不许出现"。
+    所以本条把每一格都命名成引擎当时做的那一下(装载 / 套模板 / 代入 / 发出),顺序即执行顺序。
+  - **作者的文档走路径,引擎的模板走正文——因为二者的"真相在哪"不同。** 相位文档是工作区里
+    的一个**文件**,读者可以打开、可以改;把它的副本抄进 trace,读者改完文件后 trace 里那份
+    立刻变成一份没人维护的旧影子(违反「文档事实唯一所有权」)。引擎模板则**盘上没有文件**——
+    `V030_COGNITIVE_TEMPLATE_ID` 是常量 id,正文过去只以 f-string 形式存在于
+    `cognitive/prompt.py` 里,读者无路可达;所以它只能以正文随事件走。
+  - **发出去的消息按消息呈现,不塞进一坨 JSON。** 读者在这一格要做的事是"读模型读到的东西";
+    一个带转义换行的 JSON 数组是同样的字节、却是没人读得下去的形状。
+- 原话/来源: 决议 `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D5 +
+  `docs/design/2026-08-13-trace-goes-glass-box-decision.md` D1;PM 原话 2026-08-09
+  「这个prompt inspect是什么东西?不要搞那么复杂,如果显示清楚每一步做了什么,就能直接从
+  tracing里面看到具体的prompt,不用搞特殊化」;问题台账 T2「prompt 装载展示不全」。
+  本条**取代** `01_workflows/04_run-and-verify.md:93` 的独立 inspector 动作,并**改写**本条
+  2026-08-09 版「Template / Variables / Rendered 三段」的措辞(那是 D1 之前的旧形状)。
+- 引擎侧前提: `prompt_captured` 新增 `template_text` / `phase_source_path` 两字段
+  (`callbacks/events.py`);模板正文从 f-string 提成模块常量 `V030_COGNITIVE_TEMPLATE_TEXT`
+  并以 `.format(...)` 渲染(`cognitive/prompt.py`),使"发出去的那份"与"展示的那份"同源。
+- 测试: `TraceStepRow.test.tsx`(四格按 `Loaded → Wrapped → Filled in → Sent` 出现且带内容 /
+  消息按消息呈现而非 JSON / 任何步骤都不渲染 "Inspect prompt")、
+  `TraceStepRow.liveOutput.test.tsx`(流入的思考与回答排在 `Sent` 之后)、
+  `utils/trace.test.ts`(`promptMessages` 的角色映射与正文提取)、
+  引擎 `tests/cognitive/test_template_text_is_a_value.py`(渲染结果钉死在 golden 文件上——
+  该 golden 由**改动前的 f-string 实现**渲染产出、与新实现逐字节相同,所以往后任何一处
+  空格漂移都必须显式改 golden 才能过)。
+- Status: target-design(2026-08-20 改写)。
 - 归属: capability `trace-observability`; region `timeline`.
 
 ### F6. Run Status Projection(状态投影 SSOT,2026-08-13 决议 D7)

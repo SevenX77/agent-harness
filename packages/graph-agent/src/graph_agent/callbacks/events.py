@@ -274,6 +274,16 @@ class PromptCapturedEvent(_EventBase):
     llm_role: str | None = None
     resolved_model: str | None = None
     template_source: str | None = None
+    #: The template's own text, un-substituted, so a reader can tell "the model
+    #: was told this because the TEMPLATE says so" from "because the phase
+    #: author wrote it". Carried as text and not a path because no file on disk
+    #: holds it (see ``V030_COGNITIVE_TEMPLATE_ID``); the authored half travels
+    #: as a path instead, precisely because that one IS a file.
+    template_text: str | None = None
+    #: Where the phase author's own document lives, relative to the skill root
+    #: (``phases/<id>/SKILL.md``). A path, not a copy: it is a file the reader
+    #: can open and edit, and a copy on every call would drift from it.
+    phase_source_path: str | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
     resolved_prompt: list[dict[str, Any]] = Field(default_factory=list)
     loop_index: int = Field(default=1, ge=1)

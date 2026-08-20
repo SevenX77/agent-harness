@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, Hash, ListTree, Loader2, TerminalSquare, Wrench } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Cpu, FileText, Hash, ListTree, Loader2, TerminalSquare, Wrench } from 'lucide-react'
 import type { CallbackEvent } from '../../api/types'
 import type {
   CallSettingsDetails,
@@ -23,6 +23,7 @@ import {
   callSettingsDetails,
   eventFacts,
   machineryNarration,
+  promptMessages,
   maxSeverity,
   routeDecisionDetails,
   mockedSourceClass,
@@ -34,6 +35,7 @@ import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
 import { EventTypeBadge } from './EventTypeBadge'
 import { TraceText } from './TraceText'
+import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 
 interface TraceStepRowProps {
   step: TraceStep
@@ -234,7 +236,8 @@ function StepBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepOutp
 
 /**
  * The expanded LLM step, as the sequence it actually was (decision 2026-08-13
- * D1): loading the prompt → the rendered prompt → the model thinking → what it
+ * D1): loading the author's phase → wrapping it in the engine template →
+ * filling in the variables → what was sent → the model thinking → what it
  * answered or which tools it reached for → the gateway's verdicts about the
  * call. The TEMPLATE / VARIABLES / RENDERED / Response containers this replaces
  * arranged the same data by KIND, which is an order no execution ever ran in.
@@ -254,14 +257,17 @@ function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepO
   const bareResponse = answered && !reasoning && !answer && !toolCalls
   return (
     <div className="mt-2 space-y-2 text-xs">
-      <FlowEntry title={`Prompt loaded — ${typeof prompt.template_source === 'string' && prompt.template_source !== '' ? prompt.template_source : 'inline'}`}>
-        {hasVariables ? (
+      <PromptOrigin event={prompt} />
+      {hasVariables ? (
+        <FlowEntry title="Filled in">
           <TraceText text={variables} label="Prompt variables" language="json" />
-        ) : null}
-      </FlowEntry>
-      <FlowEntry title="Rendered prompt">
-        <TraceText text={jsonText(prompt.resolved_prompt)} label="Rendered prompt" language="json" />
-      </FlowEntry>
+        </FlowEntry>
+      ) : null}
+      {promptMessages(prompt).map((message, position) => (
+        <FlowEntry key={`sent-${position}`} title={`Sent — ${message.role}`}>
+          <TraceText text={message.text} label={`${message.role} message`} />
+        </FlowEntry>
+      ))}
       {reasoning ? (
         <FlowEntry title="Thinking">
           <TraceText text={reasoning} label="Thinking" className="italic text-muted-foreground" />
@@ -286,6 +292,55 @@ function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepO
       ) : null}
       <VerdictBlocks verdicts={step.verdicts} />
     </div>
+  )
+}
+
+/**
+ * The two acts that happen before anything is substituted: the author's phase
+ * document is loaded, then the engine wraps it in the cognitive template.
+ * Both are steps in the stream, in the order the engine performs them — not a
+ * TEMPLATE container, which decision 2026-08-13 D1 abolished for arranging
+ * data by kind instead of by time.
+ *
+ * The two halves travel differently on purpose. The author's document is a
+ * FILE in the workspace, so it is offered as a link that opens the real thing
+ * — a copy pasted into the trace would drift from what the editor shows. The
+ * engine's template is not a file anywhere (`V030_COGNITIVE_TEMPLATE_ID`
+ * names a constant, not a path), so it can only travel as text.
+ *
+ * Together they answer the question the template id alone could not: which
+ * words in this prompt are the engine's, and which are the author's.
+ */
+function PromptOrigin({ event }: { event: CallbackEvent }) {
+  const onFileOpen = useOptionalWorkspaceContext()?.onFileOpen
+  const sourcePath = typeof event.phase_source_path === 'string' ? event.phase_source_path : ''
+  const templateText = typeof event.template_text === 'string' ? event.template_text : ''
+  const templateSource = typeof event.template_source === 'string' && event.template_source !== ''
+    ? event.template_source
+    : 'inline'
+  return (
+    <>
+      {sourcePath ? (
+        <FlowEntry title={`Loaded — ${sourcePath}`}>
+          {onFileOpen ? (
+            <button
+              type="button"
+              data-trace-prompt-source={sourcePath}
+              onClick={() => { onFileOpen({ path: sourcePath, saveEnabled: true }) }}
+              className="inline-flex items-center gap-1 font-mono text-xs text-link hover:text-link/80"
+            >
+              <FileText className="h-3 w-3" />
+              Open this phase
+            </button>
+          ) : null}
+        </FlowEntry>
+      ) : null}
+      <FlowEntry title={`Wrapped — ${templateSource}`}>
+        {templateText ? (
+          <TraceText text={templateText} label="Prompt template" />
+        ) : null}
+      </FlowEntry>
+    </>
   )
 }
 

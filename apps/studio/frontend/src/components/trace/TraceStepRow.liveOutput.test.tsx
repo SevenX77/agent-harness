@@ -99,15 +99,24 @@ describe('a running step shows the answer arriving', () => {
 
 describe('the arriving answer sits in the flow, not above it (design D1)', () => {
   it('renders the live output AFTER the prompt entries when the step is expanded', () => {
+    const composed = makeEvent({
+      event_type: 'prompt_captured',
+      phase_name: 'draft',
+      step_id: 'step-1',
+      phase_source_path: 'phases/draft.md',
+      template_source: 'cognitive/v0.3.0',
+      template_text: 'You are {role}',
+      resolved_prompt: [{ role: 'human', content: 'write about venus' }],
+    })
     const html = renderToStaticMarkup(
       <TraceStepRow
         step={{
           key: 'evt-0',
-          phase: eventPhase(opener),
+          phase: eventPhase(composed),
           segment: null,
           stepId: 'step-1',
           status: 'running',
-          start: { event: opener, index: 0 },
+          start: { event: composed, index: 0 },
           iteration: null,
           verdicts: [],
           end: null,
@@ -119,16 +128,18 @@ describe('the arriving answer sits in the flow, not above it (design D1)', () =>
       />,
     )
 
-    // 装载 prompt → 渲染后 prompt → 思考 → 回答: the answer arriving cannot
+    // 装载 phase → 套模板 → 发出去 → 思考 → 回答: the answer arriving cannot
     // precede the prompt that asked for it.
-    const promptLoaded = html.indexOf('Prompt loaded')
-    const renderedPrompt = html.indexOf('Rendered prompt')
+    const loaded = html.indexOf('Loaded — phases/draft.md')
+    const wrapped = html.indexOf('Wrapped — cognitive/v0.3.0')
+    const sent = html.indexOf('write about venus')
     const thinking = html.indexOf('let me think')
     const answer = html.indexOf('Hello, wor')
 
-    expect(promptLoaded).toBeGreaterThanOrEqual(0)
-    expect(renderedPrompt).toBeGreaterThan(promptLoaded)
-    expect(thinking).toBeGreaterThan(renderedPrompt)
+    expect(loaded).toBeGreaterThanOrEqual(0)
+    expect(wrapped).toBeGreaterThan(loaded)
+    expect(sent).toBeGreaterThan(wrapped)
+    expect(thinking).toBeGreaterThan(sent)
     expect(answer).toBeGreaterThan(thinking)
   })
 

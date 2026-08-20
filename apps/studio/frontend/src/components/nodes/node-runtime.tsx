@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { NodeRuntime } from './types'
+import type { NodeActivity, NodeRuntime } from './types'
 
 /**
  * How long a node's run segment lasted, written for a glance at a card.
@@ -54,4 +54,38 @@ export function NodeRuntimeClock({ runtime, running }: { runtime: NodeRuntime; r
       {formatRunDuration(endedAtMs - runtime.startedAtMs)}
     </span>
   )
+}
+
+/**
+ * What a node's tally reads on the card, and what it reads on hover.
+ *
+ * The card line and the tooltip answer two different questions with the same
+ * numbers. While the node runs the reader is asking "what is it doing right
+ * now", and the useful answer is an ordinal — `Call 3` says a third call is in
+ * flight. Once it is over the question becomes "how much did it do", and the
+ * same 3 is a cardinal — `3 calls`. The tense is what tells the reader which
+ * question is being answered.
+ *
+ * The tool count stays in the tooltip. The card line has to survive a
+ * zoomed-out board where it is a few pixels tall, so it carries the one number
+ * that changes while the reader watches; the second number is there for whoever
+ * stops to ask.
+ *
+ * A count of zero is absent rather than shown: a node that has called nothing
+ * is not reporting a `0`, it simply has nothing to say on that count yet.
+ */
+export function nodeActivityText(
+  activity: NodeActivity,
+  running: boolean,
+): { short: string; full: string } | null {
+  if (activity.llmCalls === 0) return null
+  const short = running ? `Call ${activity.llmCalls}` : `${activity.llmCalls} calls`
+  const callsFull = running
+    ? `On LLM call ${activity.llmCalls}`
+    : `${activity.llmCalls} LLM ${activity.llmCalls === 1 ? 'call' : 'calls'}`
+  const full =
+    activity.toolCalls > 0
+      ? `${callsFull} · ${activity.toolCalls} tool ${activity.toolCalls === 1 ? 'call' : 'calls'}`
+      : callsFull
+  return { short, full }
 }

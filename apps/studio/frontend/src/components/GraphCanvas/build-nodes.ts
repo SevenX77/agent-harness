@@ -1,7 +1,7 @@
 import yaml from 'js-yaml'
 import type { CompileError, GraphManifestV030, GraphTopologyItem, IoDeclaration, IoInput, IoOutput, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
 import type { RunVerdict } from '@/utils/run-status-projection'
-import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
+import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type NodeActivity, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { normalizeSubgraphPath } from '@/components/studio/subgraph-path'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
@@ -237,6 +237,7 @@ export interface NodeRunProjection {
   statusByNodeId?: Record<string, SkillNodeStatus>
   errorMessageByNodeId?: Record<string, string>
   runtimeByNodeId?: Record<string, NodeRuntime>
+  activityByNodeId?: Record<string, NodeActivity>
   /**
    * Where the run as a whole stands. Carried with the per-node statuses because
    * it is the authority that CLOSES anything still open (D7 铁律), which the
@@ -297,6 +298,7 @@ export function buildNodes(
         status: run.statusByNodeId?.[phase.name] ?? 'idle',
         errorMessage: run.errorMessageByNodeId?.[phase.name],
         runtime: run.runtimeByNodeId?.[phase.name],
+        activity: run.activityByNodeId?.[phase.name],
         compileErrors: compileErrorsByNodeId[phase.name] ?? [],
         goldenState: goldenStateByNodeId[phase.name],
         // N5 atom #3: gray this node when it is in the resume's affected-downstream set.
@@ -403,6 +405,7 @@ export function buildNodesFromTopology(
         filePath,
         status: run.statusByNodeId?.[phaseName] ?? 'idle',
         runtime: run.runtimeByNodeId?.[phaseName],
+        activity: run.activityByNodeId?.[phaseName],
         dependsOn: topology?.depends_on ?? [],
         isOutput: topology?.output === true,
         subgraphPath,

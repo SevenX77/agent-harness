@@ -38,7 +38,7 @@ import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
-import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type EdgeRunProjection, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type EdgeRunProjection, type GraphCanvasNode, type NodeActivity, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
 import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
@@ -159,6 +159,7 @@ interface GraphCanvasProps {
   errorMessageByNodeId?: Record<string, string>
   /** Per-node run segments (start / end) for the elapsed time on each card. */
   runtimeByNodeId?: Record<string, NodeRuntime>
+  activityByNodeId?: Record<string, NodeActivity>
   /** Per-edge run-segment state, keyed by `source->target` (deriveEdgeStatuses). */
   edgeStatusByEdgeId?: Record<string, EdgeRunStatus>
   /** Where the run as a whole stands — the authority that closes anything left open. */
@@ -700,6 +701,7 @@ export function GraphCanvas({
   goldenStateByNodeId,
   errorMessageByNodeId,
   runtimeByNodeId,
+  activityByNodeId,
   edgeStatusByEdgeId,
   runVerdict,
   dirtyDownstreamNodeIds,
@@ -1298,9 +1300,10 @@ export function GraphCanvas({
       statusByNodeId: safeStatusByNodeId,
       errorMessageByNodeId: safeErrorMessageByNodeId,
       runtimeByNodeId: runtimeByNodeId ?? {},
+      activityByNodeId: activityByNodeId ?? {},
       verdict: runVerdict ?? 'running',
     }),
-    [safeStatusByNodeId, safeErrorMessageByNodeId, runtimeByNodeId, runVerdict],
+    [safeStatusByNodeId, safeErrorMessageByNodeId, runtimeByNodeId, activityByNodeId, runVerdict],
   )
   const safeDirtyDownstreamNodeIds = useMemo(
     () => dirtyDownstreamNodeIds ?? new Set<string>(),

@@ -48,7 +48,7 @@ import {
   type SkillGateEvent,
 } from "./gate-state"
 import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@/utils/edge-status-projection"
-import { deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runVerdict, runningPhaseOf } from "@/utils/run-status-projection"
+import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runVerdict, runningPhaseOf } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -906,6 +906,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   )
   const runtimeByNodeId = useMemo(
     () => deriveNodeRuntimes(viewedRun.events, viewedRun.runId),
+    [viewedRun],
+  )
+  const activityByNodeId = useMemo(
+    () => deriveNodeActivity(viewedRun.events, viewedRun.runId),
     [viewedRun],
   )
   const selectedNodeStatus = useMemo(
@@ -2964,6 +2968,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       goldenStateByNodeId={goldenStateByNodeId}
                       errorMessageByNodeId={errorMessageByNodeId}
                       runtimeByNodeId={runtimeByNodeId}
+                      activityByNodeId={activityByNodeId}
                       edgeStatusByEdgeId={edgeStatusByEdgeId}
                       runVerdict={viewedRunVerdict}
                       dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}

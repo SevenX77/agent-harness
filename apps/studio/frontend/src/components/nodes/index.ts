@@ -2,4 +2,4 @@ export { buildEdges, createContextEdge, outputEdgeStatus, INPUT_ID, OUTPUT_ID } 
 export type { EdgeRunProjection } from './buildEdges'
 export { GlobalInputNode, GlobalOutputNode } from './GlobalInputOutputNode'
 export { SkillNode } from './SkillNode'
-export type { GlobalNodeData, GraphCanvasNode, NodeRuntime, SkillGraphNode, SkillGraphNodeData, SkillNodeStatus, SubagentRef, SubgraphGroupNodeData } from './types'
+export type { GlobalNodeData, GraphCanvasNode, NodeActivity, NodeRuntime, SkillGraphNode, SkillGraphNodeData, SkillNodeStatus, SubagentRef, SubgraphGroupNodeData } from './types'

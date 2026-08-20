@@ -26,6 +26,7 @@ function subgraphNode(id: string, subgraphPath: string, workspaceRoot: string): 
     type: 'skill',
     position: { x: 0, y: 0 },
     data: {
+      phasePath: 'phase',
       skillId: 'story-deconstruction-v3',
       workspaceRoot,
       phaseId: id,

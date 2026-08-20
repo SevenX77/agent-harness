@@ -66,6 +66,7 @@ function topologyRow(id: string, depends_on: string[], mode: string): GraphTopol
 const LOADED_REQUEST: SubgraphExpansionRequest = {
   parentNodeId: 'expand',
   parentLabel: 'expand',
+  parentPhasePath: 'expand',
   path: '/abs/child-skill',
   childSkillId: 'child-skill-id',
   view: {
@@ -356,6 +357,7 @@ describe('buildSubgraphExpansion', () => {
       height: node.height,
       data: {
         skillId: 'demo',
+        phasePath: node.id,
         label: node.id,
         mode: 'logic',
         status: 'idle' as const,
@@ -392,7 +394,7 @@ describe('buildSubgraphExpansion', () => {
 
   it('renders a loading container beside the parent node', () => {
     const { nodes, edges } = buildSubgraphExpansion(PARENT_NODES, [
-      { parentNodeId: 'expand', parentLabel: 'expand', path: '/abs/child', view: { status: 'loading' } },
+      { parentNodeId: 'expand', parentLabel: 'expand', parentPhasePath: 'expand', path: '/abs/child', view: { status: 'loading' } },
     ])
 
     expect(nodes.filter((node) => node.type === 'skill')).toHaveLength(0)
@@ -407,6 +409,7 @@ describe('buildSubgraphExpansion', () => {
       {
         parentNodeId: 'expand',
         parentLabel: 'expand',
+        parentPhasePath: 'expand',
         path: '',
         view: { status: 'error', message: 'subgraph path unresolved' },
       },
@@ -425,5 +428,47 @@ describe('buildSubgraphExpansion', () => {
     const { nodes, edges } = buildSubgraphExpansion(PARENT_NODES, [])
     expect(nodes).toHaveLength(0)
     expect(edges).toHaveLength(0)
+  })
+})
+
+describe('expanded subgraph children carry the run (canvas F7)', () => {
+  const request: SubgraphExpansionRequest = { ...LOADED_REQUEST, parentPhasePath: 'expand' }
+
+  function childData(nodes: ReturnType<typeof buildSubgraphExpansion>['nodes'], phaseName: string) {
+    const node = nodes.find((candidate) => candidate.id === subgraphPreviewChildNodeId('expand', phaseName))
+    return node?.data as SkillGraphNode['data'] | undefined
+  }
+
+  it('gives every child node its phase path inside the container', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request])
+
+    expect(childData(nodes, 'plan')?.phasePath).toBe('expand.plan')
+    expect(childData(nodes, 'write')?.phasePath).toBe('expand.write')
+  })
+
+  it('lights a child from the run projection keyed by that phase path', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      run: {
+        statusByNodeId: { 'expand.plan': 'success', 'expand.write': 'running', plan: 'error' },
+        errorMessageByNodeId: { 'expand.write': 'schema mismatch' },
+        runtimeByNodeId: { 'expand.write': { startedAtMs: 1000, endedAtMs: null } },
+      },
+    })
+
+    expect(childData(nodes, 'plan')?.status).toBe('success')
+    expect(childData(nodes, 'write')?.status).toBe('running')
+    expect(childData(nodes, 'write')?.errorMessage).toBe('schema mismatch')
+    expect(childData(nodes, 'write')?.runtime).toEqual({ startedAtMs: 1000, endedAtMs: null })
+  })
+
+  it('leaves a child the run never reached idle, even when the ROOT graph has its name', () => {
+    // `plan` also exists at root level and failed there. Keying by bare name is
+    // exactly the confusion this projection exists to prevent.
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      run: { statusByNodeId: { plan: 'error' } },
+    })
+
+    expect(childData(nodes, 'plan')?.status).toBe('idle')
+    expect(childData(nodes, 'plan')?.errorMessage).toBeUndefined()
   })
 })

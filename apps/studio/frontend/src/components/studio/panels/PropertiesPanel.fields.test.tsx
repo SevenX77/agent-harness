@@ -36,6 +36,7 @@ const READ_ONLY_METADATA_LABELS = ['Phase ID', 'Node type', 'Depends On', 'Role'
 
 function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
   return {
+    phasePath: 'phase',
     skillId: 'demo',
     label: 'phase',
     mode: 'logic',

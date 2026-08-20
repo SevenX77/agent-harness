@@ -1,6 +1,7 @@
 import type { CallbackEvent, EventEnvelope, ResumeValidityResponse } from '@/api/types'
 import type { ResumeRunOptions } from '@/api/client'
 import type { SkillNodeStatus } from '@/components/nodes'
+import { isRootPhasePath } from '@/utils/phase-path'
 
 export interface NodeResumeCheckpoint {
   checkpointId: string
@@ -35,14 +36,21 @@ export function nodeResumeOptionsFromValidity(
  * The validity endpoint needs a `resume_from_node_id` to compute the affected-downstream
  * set. Pre-F-n5 that anchor was the node the user *selected* (so graying only happened on a
  * manual selection); F-n5 derives it automatically from the run: a failed run resumes from
- * its failed node, so that node is the natural anchor. Returns the first phase in `error`
- * state (deterministic over insertion order), or null when nothing failed.
+ * its failed node, so that node is the natural anchor. Returns the first ROOT-level phase
+ * in `error` state (deterministic over insertion order), or null when nothing failed.
+ *
+ * Root-level only (canvas F7): the status map is keyed by phase path, and a phase inside a
+ * subgraph is not a node of the root graph — sending `event_timeline.extract` as
+ * `resume_from_node_id` asks the backend to rewind to an id its graph does not contain.
+ * When an inner phase fails its container fails with it (the container's `phase_end` never
+ * arrives and the run's verdict closes it), so the anchor lands on the container: the root
+ * node the user would actually re-run.
  */
 export function resumeAnchorNodeId(
   statusByNodeId: Record<string, SkillNodeStatus>,
 ): string | null {
   for (const [nodeId, status] of Object.entries(statusByNodeId)) {
-    if (status === 'error') {
+    if (status === 'error' && isRootPhasePath(nodeId)) {
       return nodeId
     }
   }

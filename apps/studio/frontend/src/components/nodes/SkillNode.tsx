@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
 import { nodeCardClass, type NodeCardRing } from './node-card'
+import { subgraphProgressLabel } from '@/components/GraphCanvas/subgraph-run'
 import { NodeRuntimeClock } from './node-runtime'
 import { STATUS_STYLE, StatusCapsule } from './StatusCapsule'
 import {
@@ -53,6 +54,10 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   // body's `<step>` blocks right on the canvas (no Properties detour). Logic /
   // subgraph nodes never get it (build-nodes leaves the callbacks undefined).
   const canEditSteps = kind === 'AGENT' && typeof data.onToggleSteps === 'function' && typeof data.agentBody === 'string'
+  // canvas F7 (4): a SUBGRAPH container reports how far its own graph got, in both
+  // states — the chip stays on the board when the container is expanded, so one
+  // place carries the count whether the child board is showing or not.
+  const subgraphProgressText = data.subgraphProgress ? subgraphProgressLabel(data.subgraphProgress) : null
 
   const ring: NodeCardRing = data.isConflictCancelled
     ? 'destructive'
@@ -68,7 +73,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       className={nodeCardClass({
         minWidth: 'min-w-[240px]',
         ring,
-        extra: [isDirtyDownstream && 'opacity-50 grayscale', isRunning && 'node-running-dash-frame'],
+        extra: [isDirtyDownstream && 'opacity-50 grayscale', isRunning && 'studio-running-dash-frame'],
       })}
     >
       <Handle
@@ -137,6 +142,19 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             <TooltipContent side="top">{statusLabel}</TooltipContent>
           </Tooltip>
           {data.runtime ? <NodeRuntimeClock runtime={data.runtime} running={isRunning} /> : null}
+          {subgraphProgressText ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  aria-label="Subgraph progress"
+                  className="text-[10px] tabular-nums leading-none text-muted-foreground"
+                >
+                  {subgraphProgressText.short}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{subgraphProgressText.full}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
       </div>
       {inlineErrorMessage ? (

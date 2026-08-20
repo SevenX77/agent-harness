@@ -109,6 +109,7 @@ function phaseNode(id: string, dependsOn: string[] = [], isOutput = false): Skil
     type: 'skill',
     position: { x: 0, y: 0 },
     data: {
+      phasePath: 'phase',
       skillId: 'demo',
       label: id,
       mode: 'llm',
@@ -137,6 +138,7 @@ function skillNodeProps(overrides: Partial<SkillGraphNode['data']> = {}): Parame
     id: 'phase',
     type: 'skill',
     data: {
+      phasePath: 'Phase',
       skillId: 'demo',
       label: 'Phase',
       mode: 'llm',

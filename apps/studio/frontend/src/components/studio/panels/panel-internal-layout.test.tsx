@@ -53,6 +53,7 @@ const selectedNode = {
   id: "review",
   data: {
     skillId: "demo",
+    phasePath: "review",
     label: "review",
     mode: "agent",
     status: "idle",

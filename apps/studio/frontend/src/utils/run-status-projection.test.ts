@@ -200,3 +200,70 @@ describe("deriveNodeRuntimes", () => {
     expect(runtimes.draft).toEqual({ startedAtMs: Date.parse("2026-06-15T00:00:00Z"), endedAtMs: Date.parse("2026-06-15T00:00:30Z") })
   })
 })
+
+describe("run projections key by phase path, so a subgraph's insides are visible", () => {
+  it("keys a phase inside a subgraph under its container chain", () => {
+    const statuses = deriveNodeStatuses([
+      event({ event_type: "phase_start", phase_name: "event_timeline" }),
+      event({ event_type: "phase_start", phase_name: "extract", subgraph_path: "event_timeline" }),
+      event({ event_type: "phase_end", phase_name: "extract", subgraph_path: "event_timeline" }),
+      event({ event_type: "phase_start", phase_name: "score", subgraph_path: "event_timeline" }),
+    ])
+
+    expect(statuses).toEqual({
+      event_timeline: "running",
+      "event_timeline.extract": "success",
+      "event_timeline.score": "running",
+    })
+  })
+
+  it("keeps two same-named phases in different subgraphs apart", () => {
+    const statuses = deriveNodeStatuses([
+      event({ event_type: "phase_end", phase_name: "review", subgraph_path: "timeline" }),
+      event({ event_type: "protocol_violation", phase_name: "review", subgraph_path: "characters" }),
+    ])
+
+    expect(statuses).toEqual({ "timeline.review": "success", "characters.review": "error" })
+  })
+
+  it("gives an inner phase its own failure reason and its own clock", () => {
+    const events = [
+      event({
+        event_type: "phase_start",
+        phase_name: "extract",
+        timestamp: "2026-08-20T00:00:00Z",
+      }),
+      event({
+        event_type: "protocol_violation",
+        phase_name: "extract",
+        subgraph_path: "event_timeline",
+        violations: ["missing output"],
+        timestamp: "2026-08-20T00:00:04Z",
+      }),
+    ]
+
+    expect(deriveNodeErrorMessages(events)["event_timeline.extract"]).toBe("missing output")
+    expect(deriveNodeErrorMessages(events).extract).toBeUndefined()
+    expect(deriveNodeRuntimes(events).extract).toEqual({
+      startedAtMs: Date.parse("2026-08-20T00:00:00Z"),
+      endedAtMs: null,
+    })
+  })
+
+  it("closes an inner phase still running at the run's verdict, like any other", () => {
+    expect(deriveNodeStatuses([
+      event({ event_type: "phase_start", phase_name: "extract", subgraph_path: "event_timeline" }),
+      event({ event_type: "run_ended", status: "crashed" }),
+    ])).toEqual({ "event_timeline.extract": "error" })
+  })
+
+  it("answers 'which phase is running' at ROOT level", () => {
+    // A phase running inside a subgraph means its container is running too; the
+    // reader wants the position on the board they are looking at.
+    expect(runningPhaseOf({
+      event_timeline: "running",
+      "event_timeline.extract": "running",
+    })).toBe("event_timeline")
+    expect(runningPhaseOf({ "event_timeline.extract": "running" })).toBeNull()
+  })
+})

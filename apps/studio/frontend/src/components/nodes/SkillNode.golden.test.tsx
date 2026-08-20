@@ -22,6 +22,7 @@ vi.mock("@/components/ui/tooltip", () => ({
 
 function baseData(overrides: Partial<SkillGraphNodeData> = {}): SkillGraphNodeData {
   return {
+    phasePath: "Draft",
     skillId: "demo",
     label: "Draft",
     mode: "agent",

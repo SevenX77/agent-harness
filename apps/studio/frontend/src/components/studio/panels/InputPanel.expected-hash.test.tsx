@@ -78,6 +78,7 @@ function selectedPhaseNode(): { id: string; data: SkillGraphNodeData } {
   return {
     id: "analyze",
     data: {
+      phasePath: "analyze",
       skillId: "demo-skill",
       label: "analyze",
       mode: "agent",

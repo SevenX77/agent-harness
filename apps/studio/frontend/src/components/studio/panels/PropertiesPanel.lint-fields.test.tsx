@@ -11,6 +11,7 @@ import { PropertiesPanel } from "./PropertiesPanel"
 
 function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
   return {
+    phasePath: "phase",
     skillId: "demo",
     label: "phase",
     mode: "logic",

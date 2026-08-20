@@ -34,6 +34,7 @@ const AGENT_BODY = ['<role>writer</role>', '', '<step id="S1" name="read">Read t
 
 function baseData(overrides: Partial<SkillGraphNodeData> = {}): SkillGraphNodeData {
   return {
+    phasePath: "Draft",
     skillId: "demo",
     label: "Draft",
     mode: "agent",

@@ -15,7 +15,8 @@ import {
   type SubgraphGroupNodeData,
 } from '@/components/nodes'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
-import { buildNodes, buildNodesFromTopology } from './build-nodes'
+import { childPhasePath } from '@/utils/phase-path'
+import { buildNodes, buildNodesFromTopology, type NodeRunProjection } from './build-nodes'
 
 const SKILL_NODE_WIDTH = 260
 const SKILL_NODE_HEIGHT = 120
@@ -99,12 +100,25 @@ export interface SubgraphExpansionRequest {
   path: string
   childSkillId?: string
   topologyOwnerSkillId?: string
+  /**
+   * The container's own phase path, which every child inside it extends by one
+   * segment (canvas F7). Carried on the request rather than read off the parent
+   * node because `PositionedParentNode` is geometry only — and a nested
+   * container's path cannot be recovered from its namespaced canvas id.
+   */
+  parentPhasePath: string
   view: ExpandedSubgraphView
 }
 
 export interface SubgraphExpansionOptions {
   expandedSubgraphs?: ReadonlySet<string>
   onToggleSubgraph?: (nodeId: string) => void
+  /**
+   * What the active run says about individual phases, keyed by phase path. The
+   * same projection the root board renders from: an expanded subgraph shows
+   * real execution, not a permanently idle diagram of one.
+   */
+  run?: NodeRunProjection
   expandedSteps?: ReadonlySet<string>
   onToggleSteps?: (nodeId: string) => void
   onStepsSave?: (
@@ -278,15 +292,12 @@ function layoutChild(
 }
 
 function inlineChildNode(
-  parentNodeId: string,
+  request: SubgraphExpansionRequest,
   groupId: string,
-  childSkillId: string,
-  childWorkspaceRoot: string | null,
-  topologyOwnerSkillId: string | undefined,
-  childDetail: SkillDetail | undefined,
   node: GraphCanvasNode,
   options: SubgraphExpansionOptions,
 ): GraphCanvasNode {
+  const parentNodeId = request.parentNodeId
   const id = subgraphPreviewChildNodeId(parentNodeId, node.id)
   const nodeStyle = node.style ? { ...node.style } : undefined
   if (nodeStyle) {
@@ -312,15 +323,25 @@ function inlineChildNode(
   const isSubgraphNode = data.mode === 'subgraph' || Boolean(data.subgraphPath)
   const isAgentNode = data.mode === 'agent' || data.mode === 'skill' || data.mode === 'llm'
   const canEditSteps = isAgentNode && typeof data.agentBody === 'string'
+  // The child board is laid out from topology alone (and cached on it), so the
+  // run is applied HERE, where the container this copy hangs under is known.
+  // Two expansions of the same child skill under different containers are the
+  // same layout but different executions.
+  const phasePath = childPhasePath(request.parentPhasePath, node.id)
+  const run = options.run
   return {
     ...base,
     data: {
       ...data,
-      skillId: childSkillId,
-      workspaceRoot: childWorkspaceRoot,
-      topologyOwnerSkillId,
-      resolvedSkillDetail: childDetail,
+      skillId: request.childSkillId ?? parentNodeId,
+      workspaceRoot: request.path,
+      topologyOwnerSkillId: request.topologyOwnerSkillId,
+      resolvedSkillDetail: request.view.status === 'loaded' ? request.view.detail : undefined,
       phaseId: data.phaseId ?? node.id,
+      phasePath,
+      status: run?.statusByNodeId?.[phasePath] ?? 'idle',
+      errorMessage: run?.errorMessageByNodeId?.[phasePath],
+      runtime: run?.runtimeByNodeId?.[phasePath],
       isExpanded: isSubgraphNode ? options.expandedSubgraphs?.has(id) === true : false,
       onToggleSubgraph: isSubgraphNode && options.onToggleSubgraph
         ? () => options.onToggleSubgraph?.(id)
@@ -454,6 +475,7 @@ function groupNode(
   width: number,
   height: number,
   status: SubgraphGroupNodeData['status'],
+  options: SubgraphExpansionOptions,
   childName?: string,
   message?: string,
 ): GraphCanvasNode {
@@ -472,6 +494,7 @@ function groupNode(
       parentLabel: request.parentLabel,
       path: request.path,
       status,
+      runStatus: options.run?.statusByNodeId?.[request.parentPhasePath] ?? 'idle',
       childName,
       message,
     },
@@ -524,7 +547,7 @@ export function buildSubgraphExpansion(
         width,
         height,
       )
-      const group = groupNode(request, parent, left, top, width, height, status, childName, message)
+      const group = groupNode(request, parent, left, top, width, height, status, options, childName, message)
       nodes.push(group)
       edges.push(visualBridgeEdge(request.parentNodeId, group.id))
       continue
@@ -555,7 +578,7 @@ export function buildSubgraphExpansion(
         width,
         height,
       )
-      const group = groupNode(request, parent, left, top, width, height, status, childName, message)
+      const group = groupNode(request, parent, left, top, width, height, status, options, childName, message)
       nodes.push(group)
       edges.push(visualBridgeEdge(request.parentNodeId, group.id))
       continue
@@ -571,19 +594,10 @@ export function buildSubgraphExpansion(
       width,
       height,
     )
-    const group = groupNode(request, parent, groupLeft, groupTop, width, height, status, childName, message)
+    const group = groupNode(request, parent, groupLeft, groupTop, width, height, status, options, childName, message)
     nodes.push(group)
     edges.push(visualBridgeEdge(request.parentNodeId, group.id))
-    nodes.push(...child.nodes.map((node) => inlineChildNode(
-      request.parentNodeId,
-      group.id,
-      request.childSkillId ?? request.parentNodeId,
-      request.path,
-      request.topologyOwnerSkillId,
-      request.view.status === 'loaded' ? request.view.detail : undefined,
-      node,
-      options,
-    )))
+    nodes.push(...child.nodes.map((node) => inlineChildNode(request, group.id, node, options)))
     edges.push(...child.edges.map((edge) => inlineChildEdge(request.parentNodeId, edge)))
   }
 

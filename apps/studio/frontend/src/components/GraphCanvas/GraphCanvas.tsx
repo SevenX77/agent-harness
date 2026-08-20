@@ -54,6 +54,7 @@ import { staticEdgeInference } from '@/lib/edge-static-inference'
 import { errorMessage } from '@/utils/errors'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile, type NodeRunProjection } from './build-nodes'
+import { containerAutoAction, subgraphProgress } from './subgraph-run'
 import {
   type NewPhaseKind,
   addSequentialOverwriteField,
@@ -1098,7 +1099,13 @@ export function GraphCanvas({
     })
   }, [updateViewportReady])
 
+  // canvas F7: containers the reader has opened or closed by hand in this run.
+  // Automation never touches those again — a manual toggle says the reader wants
+  // something other than what the rule would do.
+  const manuallyToggledContainers = useRef<Set<string>>(new Set())
+  const containerStatusMemory = useRef<Map<string, SkillNodeStatus>>(new Map())
   const toggleSubgraph = useCallback((nodeId: string) => {
+    manuallyToggledContainers.current.add(nodeId)
     setExpandedSubgraphs((current) => nextExpandedSubgraphs(current, nodeId))
   }, [])
 
@@ -1560,6 +1567,7 @@ export function GraphCanvas({
           requests.push({
             parentNodeId: node.id,
             parentLabel: node.data.label,
+            parentPhasePath: node.data.phasePath,
             path: node.data.subgraphPath ?? '',
             view: { status: 'error', message: 'This subgraph phase does not declare a usable path in SUBGRAPH.md.' },
           })
@@ -1571,6 +1579,7 @@ export function GraphCanvas({
         requests.push({
           parentNodeId: node.id,
           parentLabel: node.data.label,
+          parentPhasePath: node.data.phasePath,
           path,
           topologyOwnerSkillId: topologyOwnerSkillIdForNode(node, topologyRootSkillId, workspaceRoot),
           childSkillId: entry?.childSkillId ?? childIdentity?.skillId ?? undefined,
@@ -1585,6 +1594,7 @@ export function GraphCanvas({
         expandedSteps,
         onToggleSteps: toggleSteps,
         onStepsSave: handleExpandedPreviewStepsSave,
+        run: runProjection,
       })
       // The expanded subgraph board carries an "open child canvas" button
       // (drill-in). Double-clicking the subgraph node now opens its file instead.
@@ -1604,6 +1614,7 @@ export function GraphCanvas({
     expandedSubgraphs,
     expandedTopologies,
     handleExpandedPreviewStepsSave,
+    runProjection,
     topologyRootSkillId,
     toggleSteps,
     toggleSubgraph,
@@ -1614,8 +1625,24 @@ export function GraphCanvas({
       const composedNodes = subgraphExpansion.nodes.length > 0
         ? [...baseLayout.nodes, ...subgraphExpansion.nodes]
         : baseLayout.nodes
+      // canvas F7 ④: a container reports how far its own graph got. Computed
+      // here, after composition, because it needs BOTH halves at once — the run
+      // (statuses keyed by phase path) and the child topology the canvas holds
+      // per expanded container (its phase count = the denominator).
+      const withProgress = composedNodes.map((node) => {
+        if (node.type !== 'skill' || node.data.mode !== 'subgraph') return node
+        const loaded = expandedTopologies[node.id]?.view
+        const progress = subgraphProgress(
+          safeStatusByNodeId,
+          node.data.phasePath,
+          loaded?.status === 'loaded' ? loaded.phases : null,
+        )
+        return progress === node.data.subgraphProgress
+          ? node
+          : { ...node, data: { ...node.data, subgraphProgress: progress ?? undefined } }
+      })
       return {
-        nodes: composedNodes,
+        nodes: withProgress,
         edges: subgraphExpansion.edges.length > 0
           ? [...baseLayout.edges, ...subgraphExpansion.edges]
           : baseLayout.edges,
@@ -1624,10 +1651,45 @@ export function GraphCanvas({
     [
       baseLayout.edges,
       baseLayout.nodes,
+      expandedTopologies,
+      safeStatusByNodeId,
       subgraphExpansion.edges,
       subgraphExpansion.nodes,
     ],
   )
+  // canvas F7 ③: follow the run — open a container as its graph starts, close it
+  // when that graph finishes clean, leave a failed one open. Driven off the
+  // TRANSITION rather than the current status, so a container the reader closed
+  // mid-run stays closed.
+  useEffect(() => {
+    manuallyToggledContainers.current.clear()
+    containerStatusMemory.current.clear()
+  }, [runId])
+  useEffect(() => {
+    const memory = containerStatusMemory.current
+    const expand: string[] = []
+    const collapse: string[] = []
+    for (const node of composedLayout.nodes) {
+      if (node.type !== 'skill' || node.data.mode !== 'subgraph') continue
+      const status = safeStatusByNodeId[node.data.phasePath] ?? 'idle'
+      const action = containerAutoAction(memory.get(node.id), status)
+      memory.set(node.id, status)
+      if (!action || manuallyToggledContainers.current.has(node.id)) continue
+      if (action === 'expand') expand.push(node.id)
+      else collapse.push(node.id)
+    }
+    if (expand.length === 0 && collapse.length === 0) return
+    setExpandedSubgraphs((current) => {
+      const next = new Set(current)
+      for (const nodeId of expand) next.add(nodeId)
+      for (const nodeId of collapse) next.delete(nodeId)
+      if (next.size !== current.size) return next
+      for (const nodeId of next) {
+        if (!current.has(nodeId)) return next
+      }
+      return current
+    })
+  }, [composedLayout.nodes, safeStatusByNodeId])
   const routedSequentialOverwriteConflicts = useMemo(() => {
     const conflicts: OverwriteConflict[] = []
     for (const route of sequentialOverwriteRoutes) {

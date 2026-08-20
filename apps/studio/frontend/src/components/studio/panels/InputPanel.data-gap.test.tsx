@@ -67,6 +67,7 @@ function selectedNode(): { id: string; data: SkillGraphNodeData } {
   return {
     id: "enrich",
     data: {
+      phasePath: "enrich",
       skillId: "demo",
       label: "enrich",
       mode: "logic",

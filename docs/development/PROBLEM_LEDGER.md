@@ -123,7 +123,7 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
 | C1 | 暂停表达:有 checkpoint 却无法暂停;暂停态显式 resume+stop 双按钮;节点级暂停缺 | 后端→前端(节点级要引擎) | 🧩 **run 级全有**:`services/run_manager.py:1088` `pause_run` 保 checkpoint,`center-action-bar.tsx:168` paused 态同时给 Resume+Stop(测试钉死),落地 PR #584(08-04 当天)。**节点级暂停 = 全仓零实现**(右键菜单只有缩放/锁定/删除;节点 toolbar 只有 HITL 应答与 Resume;`nodes/types.ts:5` 有 `breakpoint` 状态但**没有任何动作产生它**)——落点 engine 断点能力 → backend `POST /runs/{id}/breakpoints` → frontend 入口。**另有可达性缺陷(会让用户复述"无法暂停")**:`stage` 只来自内存(`Workspace.tsx:561`),刷新/切 skill 后 run 还在后台跑但 Pause 按钮消失;`handlePause` 还要求 `runId` 非空而 `handleSelectRun` 只设 `viewedTrace`;后端 `pause_run` 只认内存 `self._runs`,sidecar 重启后 409 | 08-04×2 | 真机走查 |
-| C2 | run 运行中按钮至少变成可停止 | 前端 | 🧩 运行中**只有 Pause 没有 Stop**(`center-action-bar.tsx:154`),但 Pause 确实终止 worker(`run_manager.py:1103`)。**后端支持 running→stop 一步到位**(`test_run_pause_stop.py::test_stopping_a_run_in_flight_skips_the_pause`),前端没暴露入口,把"结束"强行变两步 → 纯前端一个分支的事 | 08-04③ | 真机走查 |
+| C2 | run 运行中按钮至少变成可停止 | 前端 | 🔎 **本 PR 已合**:`running` 现在同时给 **Pause + Stop**,与 `paused` 的 **Resume + Stop** 对称。后端本就一步到位(`test_run_pause_stop.py::test_stopping_a_run_in_flight_skips_the_pause` 断言在飞的 run 直接 `cancelled`),`handleStop` 也只要求有 `runId`——所以"先暂停再停止"那一步是 UI 自己发明的绕路。设计源 run-execution F7 | 08-04③ | 真机走查 |
 | C3 | compile 按钮状态机:compile 成功后再按一次卡死 | 前端 | 🔎 **已修**:PR #676(2026-08-09,正是复现当天)。病灶不在 `gate-state.ts` 而在 `Workspace.applyGateEvent`(:685)——状态落地已无条件且先于任何去重,去重键从 `runId ?? contentHash` 换成整份 projection 指纹(`gate-effect-fold.ts:51-63`),回归测试在案。**残留风险**:`compileSkillById` 无超时兜底,后端永不返回时 stage 永远停在 `compiling` | 08-09 复现 | 复现路径不再卡 |
 
 ## 3 LLM 配置

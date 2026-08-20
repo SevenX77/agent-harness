@@ -1776,11 +1776,23 @@ def _read_run_artifact_events(run_dir: Path) -> list[EventEnvelope]:
 
 
 def _run_report_path(run_dir: Path) -> str | None:
-    """Where this run's report lives, for a UI that can only open a path."""
+    """Where this run's report lives, named the way the workspace editor reads.
+
+    Workspace-relative and forward-slashed, because the report opens IN the app
+    (`onFileOpen` → the read-only editor document), and that opener resolves
+    paths against the skill's workspace root. An absolute path is what you hand
+    an OS shell — which is exactly the behaviour PM 08-19 Q6 overturned.
+
+    The layout is fixed by `run_dir_for`: `<skill>/.workspace/<runs|predicts>/
+    <run_id>`, so the skill directory is three levels up.
+    """
     from app.services.run_report import REPORT_FILENAME
 
     report = run_dir / REPORT_FILENAME
-    return str(report) if report.is_file() else None
+    if not report.is_file():
+        return None
+    skill_dir = run_dir.parents[2]
+    return report.relative_to(skill_dir).as_posix()
 
 
 def _read_run_artifact_paths(run_dir: Path) -> list[str]:

@@ -297,7 +297,13 @@ def _registered_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
 
 def test_run_detail_points_at_the_report_so_the_ui_can_open_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The report exists on disk; a reader with no shell needs its path (D5)."""
+    """The report opens in the workspace editor, so it is named the way that
+    editor reads: a workspace-relative, forward-slashed path.
+
+    An absolute path is what you hand an OS shell, and handing it to one is the
+    behaviour PM 08-19 Q6 overturned. Its only consumers are the two in-app
+    openers (trace outcome row, run list row).
+    """
     from app.services.run_manager import RunManager
     from app.services.run_report import write_run_report
 
@@ -306,7 +312,7 @@ def test_run_detail_points_at_the_report_so_the_ui_can_open_it(tmp_path: Path, m
 
     detail = RunManager().get_run_detail(skill_id="demo.skill", run_id=run_dir.name)
 
-    assert detail.metadata.report_path == str(run_dir / "report.md")
+    assert detail.metadata.report_path == f".workspace/runs/{run_dir.name}/report.md"
 
 
 def test_run_detail_reports_no_path_when_the_run_left_no_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -317,3 +323,4 @@ def test_run_detail_reports_no_path_when_the_run_left_no_report(tmp_path: Path, 
     detail = RunManager().get_run_detail(skill_id="demo.skill", run_id=run_dir.name)
 
     assert detail.metadata.report_path is None
+

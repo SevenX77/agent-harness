@@ -1,11 +1,11 @@
 import { FileText, FlaskConical, Play, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { openLocalPath } from "@/lib/tauri"
 import { formatRunDuration, formatRunTokens } from "@/utils/run-format"
 import { runStatusMark } from "@/utils/run-status-mark"
 import type { RunMetadata } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
 import { useWorkspaceContext } from "../WorkspaceContext"
+import { runReportOpenRequest } from "../../trace/TraceOutcomeRow"
 import { Button } from "../../ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip"
 import { PanelHeader } from "./_shared/PanelHeader"
@@ -114,17 +114,20 @@ function RunStatusBadge({ run }: { run: RunMetadata }) {
  * D8 entrance ②: the report is reachable from the run's own row.
  *
  * Absent rather than disabled when the run left none — a report either exists
- * on disk or does not, and a greyed control implies it could be enabled.
+ * on disk or does not, and a greyed control implies it could be enabled. It
+ * opens in the workspace editor, the same document surface the trace panel's
+ * outcome row uses (PM 08-19 Q6), so there is one way a report opens.
  */
 function RunReportLink({ run }: { run: RunMetadata }) {
   const reportPath = run.report_path
-  if (!reportPath) return null
+  const { onFileOpen } = useWorkspaceContext()
+  if (!reportPath || !onFileOpen) return null
   return (
     <button
       type="button"
       data-run-report
       aria-label={`Open report for run ${run.run_id}`}
-      onClick={() => { void openLocalPath(reportPath) }}
+      onClick={() => { onFileOpen(runReportOpenRequest(reportPath)) }}
       className="flex items-center gap-1 text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
     >
       <FileText className="size-3" />

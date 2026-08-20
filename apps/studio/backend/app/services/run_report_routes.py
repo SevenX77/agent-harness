@@ -20,6 +20,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.services.run_report_text import table_cell
+
 # The verdicts that mean the caller did not get what they asked for. Kept in
 # step with the gateway's closed set by hand, the same way the event itself is.
 UNMET_VERDICTS: frozenset[str] = frozenset({"adjusted", "unsupported", "rejected", "ignored"})
@@ -148,7 +150,7 @@ def _route_block(account: _RouteAccount) -> list[str]:
     if account.decisions:
         lines += ["| outcome | times | first reason |", "|---|---|---|"]
         lines += [
-            f"| {decision} | {count} | {account.reasons.get(decision, '')} |"
+            f"| {decision} | {count} | {table_cell(account.reasons.get(decision, ''))} |"
             for decision, count in sorted(account.decisions.items())
         ]
         lines.append("")
@@ -183,7 +185,8 @@ def _unmet_block(accounts: Sequence[_RouteAccount]) -> list[str]:
         "|---|---|---|---|---|",
     ]
     lines += [
-        f"| `{account.route_id}` | `{line.setting}` | {line.requested} | {line.verdict} | {line.reason} |"
+        f"| `{account.route_id}` | `{line.setting}` | {line.requested} "
+        f"| {line.verdict} | {table_cell(line.reason)} |"
         for account, line in unmet
     ]
     lines.append("")

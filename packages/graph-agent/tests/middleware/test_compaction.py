@@ -138,11 +138,11 @@ def test_order_contract_pins_compaction_slot() -> None:
     prefix" invariant intact.
     """
     assert MVP0_MIDDLEWARE_ORDER_CONTRACT == (
+        "Tracing",
         "ProtocolValidation",
         "CognitiveFlow",
         "ExecutionControl",
         "Compaction",
-        "Tracing",
         "ToolError",
         "LoopDetection",
         "ExitControl",

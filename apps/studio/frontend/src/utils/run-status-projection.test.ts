@@ -280,7 +280,7 @@ describe("deriveNodeActivity", () => {
     // Three would be a lie and two-minus-one a different one: the third call
     // has not started. `prompt_captured` marks a call BEGINNING, which is the
     // question a running card answers.
-    expect(activity.draft).toEqual({ llmCalls: 2, toolCalls: 0 })
+    expect(activity.draft).toEqual({ llmCalls: 2, toolCalls: 0, runningTool: null })
   })
 
   it("counts the tools a phase reached for", () => {
@@ -289,7 +289,7 @@ describe("deriveNodeActivity", () => {
       event({ event_type: "tool_call", phase_name: "draft", tool_name: "read_file" }),
       event({ event_type: "tool_call", phase_name: "draft", tool_name: "write_file" }),
     ])
-    expect(activity.draft).toEqual({ llmCalls: 1, toolCalls: 2 })
+    expect(activity.draft).toEqual({ llmCalls: 1, toolCalls: 2, runningTool: null })
   })
 
   it("adds up EVERY execution of an iterated phase, not just the last one", () => {
@@ -305,7 +305,7 @@ describe("deriveNodeActivity", () => {
       event({ event_type: "prompt_captured", phase_name: "work" }),
       event({ event_type: "phase_end", phase_name: "work" }),
     ])
-    expect(activity.work).toEqual({ llmCalls: 2, toolCalls: 0 })
+    expect(activity.work).toEqual({ llmCalls: 2, toolCalls: 0, runningTool: null })
   })
 
   it("keeps each subgraph child on its own path, like every other projection", () => {
@@ -313,8 +313,8 @@ describe("deriveNodeActivity", () => {
       event({ event_type: "prompt_captured", phase_name: "extract", subgraph_path: "timeline" }),
       event({ event_type: "prompt_captured", phase_name: "extract" }),
     ])
-    expect(activity["timeline.extract"]).toEqual({ llmCalls: 1, toolCalls: 0 })
-    expect(activity.extract).toEqual({ llmCalls: 1, toolCalls: 0 })
+    expect(activity["timeline.extract"]).toEqual({ llmCalls: 1, toolCalls: 0, runningTool: null })
+    expect(activity.extract).toEqual({ llmCalls: 1, toolCalls: 0, runningTool: null })
   })
 
   it("ignores frames belonging to another run", () => {
@@ -328,5 +328,48 @@ describe("deriveNodeActivity", () => {
   it("reports nothing for a phase that has not called anything yet", () => {
     const activity = deriveNodeActivity([event({ event_type: "phase_start", phase_name: "draft" })])
     expect(activity.draft).toBeUndefined()
+  })
+})
+
+describe("deriveNodeActivity names the tool that is still running", () => {
+  it("reports the tool whose start arrived and whose end has not", () => {
+    const activity = deriveNodeActivity([
+      event({ event_type: "prompt_captured", phase_name: "draft" }),
+      event({
+        event_type: "tool_call_started",
+        phase_name: "draft",
+        tool_call_id: "t1",
+        tool_name: "read_file",
+      }),
+    ])
+    expect(activity.draft?.runningTool).toBe("read_file")
+  })
+
+  it("forgets the tool once its own completion arrives", () => {
+    // Paired by tool_call_id, not by arrival order: an agent turn can have
+    // several calls open at once, so "the last event" identifies nothing.
+    const activity = deriveNodeActivity([
+      event({ event_type: "tool_call_started", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
+      event({ event_type: "tool_call", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
+    ])
+    expect(activity.draft?.runningTool).toBeNull()
+    expect(activity.draft?.toolCalls).toBe(1)
+  })
+
+  it("keeps naming the one still open when a sibling finishes first", () => {
+    const activity = deriveNodeActivity([
+      event({ event_type: "tool_call_started", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
+      event({ event_type: "tool_call_started", phase_name: "draft", tool_call_id: "t2", tool_name: "grep" }),
+      event({ event_type: "tool_call", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
+    ])
+    expect(activity.draft?.runningTool).toBe("grep")
+  })
+
+  it("counts a call once even though both halves arrive", () => {
+    const activity = deriveNodeActivity([
+      event({ event_type: "tool_call_started", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
+      event({ event_type: "tool_call", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
+    ])
+    expect(activity.draft?.toolCalls).toBe(1)
   })
 })

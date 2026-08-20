@@ -4,20 +4,25 @@ Every behaviour the agent loop layers on top of a plain ``create_agent``
 call lives here, as single-purpose middleware classes the assembler
 wires in a fixed topological order:
 
-1. :class:`ProtocolValidationMiddleware` — state contract guards
+1. :class:`TracingMiddleware` — reports every tool call as it starts and
+   as it ends. Runs first because it is the only observer on the
+   tool-call axis and the middlewares below it answer tool calls
+   themselves without calling through: an observer they can skip sees
+   only the subset their control flow leaves for it.
+2. :class:`ProtocolValidationMiddleware` — state contract guards
    (BusinessData / FrameworkState invariants + SchemaEngine validate
-   on the after-model boundary). Runs first because every later
-   middleware assumes the state shape is already valid.
-2. :class:`CognitiveFlowMiddleware` — cognitive tool interception:
+   on the after-model boundary). First of the middlewares that READ the
+   state, because every one of them assumes the shape is already valid.
+3. :class:`CognitiveFlowMiddleware` — cognitive tool interception:
    finish_task, ask_clarification, and the working-memory / ambiguity /
    context-access tools that read and write ``FrameworkState``.
-3. :class:`ExecutionControlMiddleware` — iteration counter, dead-end
+4. :class:`ExecutionControlMiddleware` — iteration counter, dead-end
    detection, lightweight loop detection, metrics aggregation.
-4. :class:`CompactionMiddleware` — summarizes messages out of context
+5. :class:`CompactionMiddleware` — summarizes messages out of context
    before the window overflows, writing the removed text to a sidecar.
-5. :class:`TracingMiddleware` · 6. :class:`ToolErrorHandlingMiddleware`
-   · 7. :class:`LoopDetectionMiddleware` — observation and tool-error
-   handling.
+6. :class:`ToolErrorHandlingMiddleware` · 7.
+   :class:`LoopDetectionMiddleware` — tool-error handling and repetition
+   detection.
 8. :class:`ExitControlMiddleware` — exit governance plus the nudge
    policy adapter; runs last because it decides whether the loop ends.
 
@@ -42,39 +47,30 @@ from graph_agent.middleware.protocol_validation import ProtocolValidationMiddlew
 from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
 from graph_agent.middleware.tracing import TracingMiddleware
 
-# Fixed topological order for the MVP-3 middleware chain.
+# Tracing is FIRST because it is the only observer on the tool-call axis, and an
+# observer a decider can skip is not observing the system — it is observing
+# whatever subset another component's control flow leaves for it. Measured
+# 2026-08-20: with Tracing at slot 5, `CognitiveFlowMiddleware` answered every
+# tool it intercepts without calling `handler(request)`, so `wrap_tool_call`
+# never reached Tracing and `ToolCallStartedEvent` — defined, exported, mirrored
+# into the frontend and consumed there — was emitted zero times in a real run.
+# Borrowed convention: Django's MIDDLEWARE list and Express's `app.use` order,
+# where the logging/tracing layer is registered first so it still sees the
+# requests an auth layer below it short-circuits.
 #
-# Slot 1: ProtocolValidation — runs first, guards state contracts.
-# Slot 2: CognitiveFlow — finish_task / clarification routing.
-# Slot 3: ExecutionControl — runtime ops (iteration / dead-end / loop).
-# Slot 4 reserved for the future LoggingMiddleware (see module docstring).
-#
-# Tests in ``conftest.py`` pin this order; do not re-order without
-# updating the regression test as well.
-DEFAULT_MIDDLEWARE_ORDER: tuple[type, ...] = (
-    ProtocolValidationMiddleware,
-    CognitiveFlowMiddleware,
-    ExecutionControlMiddleware,
-)
-
-# Compaction (decision 2026-08-15 §3.6) sits right after the MVP-3 core trio:
-# it acts through ``before_model`` (guaranteed to land before the model call
-# wherever it sits), and ToolHistoryIntegrity repairs the outgoing request
-# later inside ``wrap_model_call``, so the slot only needs to stay behind the
-# ProtocolValidation state guard and keep the core trio a contract prefix.
+# Moving it costs nothing on the other axes: Tracing implements only the tool
+# hooks, so ProtocolValidation still guards state before every middleware that
+# reads it, and Compaction still acts through `before_model`.
 MVP0_MIDDLEWARE_ORDER_CONTRACT: tuple[str, ...] = (
+    "Tracing",
     "ProtocolValidation",
     "CognitiveFlow",
     "ExecutionControl",
     "Compaction",
-    "Tracing",
     "ToolError",
     "LoopDetection",
     "ExitControl",
 )
-
-# Backward-compatible public name used by the γ0 TDD tests and future PR β.
-DEFAULT_MIDDLEWARE_ORDER_CONTRACT = MVP0_MIDDLEWARE_ORDER_CONTRACT
 
 from graph_agent.middleware.factory import (  # noqa: E402
     MIDDLEWARE_ORDER_CONTRACT,
@@ -83,8 +79,6 @@ from graph_agent.middleware.factory import (  # noqa: E402
 )
 
 __all__ = [
-    "DEFAULT_MIDDLEWARE_ORDER",
-    "DEFAULT_MIDDLEWARE_ORDER_CONTRACT",
     "MIDDLEWARE_ORDER_CONTRACT",
     "MVP0_MIDDLEWARE_ORDER_CONTRACT",
     "CognitiveFlowMiddleware",

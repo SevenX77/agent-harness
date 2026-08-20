@@ -271,28 +271,67 @@ export function deriveNodeRuntimes(
  * A phase with no calls yet has no entry at all, rather than an entry of zeros:
  * "it has not called anything" is what the card shows by staying silent, and an
  * explicit `0` would invite a "0 calls" readout that reads as a finding.
+ *
+ * `runningTool` is the tool whose `tool_call_started` has arrived and whose
+ * `tool_call` has not. The two halves are paired by `tool_call_id` rather than
+ * by arrival order, because one agent turn can hold several calls open at once
+ * — with concurrent calls, "the most recent event" identifies nothing.
  */
 export function deriveNodeActivity(
   events: readonly TraceEventInput[] | null | undefined,
   runId?: string | null,
 ): Record<string, NodeActivity> {
   const activity: Record<string, NodeActivity> = {}
+  const openTools: Record<string, Map<string, string>> = {}
   if (!events) return activity
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
     const eventRun = eventRunId(traceEvent, event)
     if (runId && eventRun && eventRun !== runId) continue
     const type = event.event_type || ""
-    if (type !== "prompt_captured" && type !== "tool_call") continue
+    if (type !== "prompt_captured" && type !== "tool_call" && type !== "tool_call_started") continue
     const phasePath = phasePathOf(event)
     if (!phasePath) continue
-    const tally = activity[phasePath] ?? { llmCalls: 0, toolCalls: 0 }
-    activity[phasePath] =
-      type === "prompt_captured"
-        ? { llmCalls: tally.llmCalls + 1, toolCalls: tally.toolCalls }
-        : { llmCalls: tally.llmCalls, toolCalls: tally.toolCalls + 1 }
+    const tally = activity[phasePath] ?? { llmCalls: 0, toolCalls: 0, runningTool: null }
+    const open = openTools[phasePath] ?? new Map<string, string>()
+    openTools[phasePath] = open
+    if (type === "prompt_captured") {
+      activity[phasePath] = { ...tally, llmCalls: tally.llmCalls + 1 }
+      continue
+    }
+    const callId = typeof event.tool_call_id === "string" ? event.tool_call_id : ""
+    const toolName = typeof event.tool_name === "string" ? event.tool_name : ""
+    if (type === "tool_call_started") {
+      if (callId) open.set(callId, toolName)
+      // The tally counts calls MADE, and a call is made when it starts — the
+      // same reason `prompt_captured` counts LLM calls. Its completion adds
+      // nothing to count, it only closes what is open.
+      activity[phasePath] = {
+        ...tally,
+        toolCalls: tally.toolCalls + 1,
+        runningTool: toolName || tally.runningTool,
+      }
+      continue
+    }
+    const wasAnnounced = callId !== "" && open.has(callId)
+    if (callId) open.delete(callId)
+    activity[phasePath] = {
+      ...tally,
+      // A completion with no announcement is a call the agent node
+      // reconstructed from the message list afterwards (it answered with a
+      // Command and never closed its own step), so it was never counted.
+      toolCalls: wasAnnounced ? tally.toolCalls : tally.toolCalls + 1,
+      runningTool: lastOf(open),
+    }
   }
   return activity
+}
+
+/** The most recently opened entry still in the map, or null when none is. */
+function lastOf(open: Map<string, string>): string | null {
+  let last: string | null = null
+  for (const toolName of open.values()) last = toolName
+  return last
 }
 
 function reasonList(value: unknown): string[] {

@@ -57,19 +57,22 @@ export function NodeRuntimeClock({ runtime, running }: { runtime: NodeRuntime; r
 }
 
 /**
- * What a node's tally reads on the card, and what it reads on hover.
+ * What a node's activity reads on the card, and what it reads on hover.
  *
- * The card line and the tooltip answer two different questions with the same
- * numbers. While the node runs the reader is asking "what is it doing right
- * now", and the useful answer is an ordinal — `Call 3` says a third call is in
- * flight. Once it is over the question becomes "how much did it do", and the
- * same 3 is a cardinal — `3 calls`. The tense is what tells the reader which
- * question is being answered.
+ * The card line answers ONE question, and which question depends on whether the
+ * node is still going:
  *
- * The tool count stays in the tooltip. The card line has to survive a
- * zoomed-out board where it is a few pixels tall, so it carries the one number
- * that changes while the reader watches; the second number is there for whoever
- * stops to ask.
+ * - A tool is open → the line is that tool's name. "What is it doing now" has a
+ *   literal answer, and no ordinal beats it.
+ * - Running with no tool open → `Call 3`, an ordinal: it is waiting on a third
+ *   model call.
+ * - Finished → `3 calls`, a cardinal. Same number, and the tense is what tells
+ *   the reader the question changed from "what is it doing" to "how much did it
+ *   do".
+ *
+ * Everything the line drops goes to the tooltip. The line has to survive a
+ * zoomed-out board where it is a few pixels tall, so it carries only the fact
+ * that changes while the reader watches.
  *
  * A count of zero is absent rather than shown: a node that has called nothing
  * is not reporting a `0`, it simply has nothing to say on that count yet.
@@ -78,14 +81,17 @@ export function nodeActivityText(
   activity: NodeActivity,
   running: boolean,
 ): { short: string; full: string } | null {
-  if (activity.llmCalls === 0) return null
-  const short = running ? `Call ${activity.llmCalls}` : `${activity.llmCalls} calls`
-  const callsFull = running
+  if (activity.llmCalls === 0 && activity.toolCalls === 0) return null
+  const calls = running
     ? `On LLM call ${activity.llmCalls}`
     : `${activity.llmCalls} LLM ${activity.llmCalls === 1 ? 'call' : 'calls'}`
-  const full =
+  const tools =
     activity.toolCalls > 0
-      ? `${callsFull} · ${activity.toolCalls} tool ${activity.toolCalls === 1 ? 'call' : 'calls'}`
-      : callsFull
-  return { short, full }
+      ? `${activity.toolCalls} tool ${activity.toolCalls === 1 ? 'call' : 'calls'}`
+      : ''
+  const openTool = running && activity.runningTool ? `running ${activity.runningTool}` : ''
+  const full = [openTool, calls, tools].filter(Boolean).join(' · ')
+  if (openTool) return { short: activity.runningTool ?? '', full }
+  if (activity.llmCalls === 0) return { short: tools, full }
+  return { short: running ? `Call ${activity.llmCalls}` : `${activity.llmCalls} calls`, full }
 }

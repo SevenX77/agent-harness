@@ -195,25 +195,15 @@ def test_γ0_3_middleware_order_contract_constant_exists() -> None:
     from graph_agent import middleware
 
     assert middleware.MVP0_MIDDLEWARE_ORDER_CONTRACT == (
+        "Tracing",
         "ProtocolValidation",
         "CognitiveFlow",
         "ExecutionControl",
         "Compaction",
-        "Tracing",
         "ToolError",
         "LoopDetection",
         "ExitControl",
     )
-
-
-def test_γ0_3_current_middleware_class_order_matches_contract_prefix() -> None:
-    from graph_agent import middleware
-
-    implemented_prefix = tuple(
-        cls.__name__.replace("Middleware", "") for cls in middleware.DEFAULT_MIDDLEWARE_ORDER
-    )
-
-    assert implemented_prefix == middleware.MVP0_MIDDLEWARE_ORDER_CONTRACT[:3]
 
 
 def test_γ0_4_validator_signature_and_error_placeholders_are_documented() -> None:

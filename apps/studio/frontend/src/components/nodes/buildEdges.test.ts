@@ -151,3 +151,34 @@ describe('edge run state on the canvas', () => {
     expect(edges.find((edge) => edge.id === 'setup->segment')?.data?.isSelected).toBe(false)
   })
 })
+
+describe("the edge into the Output boundary carries its producer's delivery", () => {
+  function outputNode(id: string, status: SkillGraphNode["data"]["status"]): SkillGraphNode {
+    const built = node(id, [], true)
+    return { ...built, data: { ...built.data, status } } as SkillGraphNode
+  }
+
+  function outputEdgeStatus(status: SkillGraphNode["data"]["status"]) {
+    const edges = buildEdges([outputNode("write", status)])
+    return edges.find((edge) => edge.target === OUTPUT_ID)?.data?.runStatus
+  }
+
+  it("has no bracket of its own — the engine emits no transition toward the endpoint", () => {
+    // Same evidence as `outputBoundaryStatus`: across the whole event stream of
+    // run predict-2026-08-20T04-09-33 every transition names a real downstream
+    // phase. Looking this segment up in `statusByEdgeId` finds nothing, so an
+    // edge-id lookup left it gray beneath a green Output endpoint.
+    expect(outputEdgeStatus("idle")).toBe("idle")
+    expect(outputEdgeStatus("running")).toBe("running")
+    expect(outputEdgeStatus("success")).toBe("done")
+    expect(outputEdgeStatus("error")).toBe("failed")
+    expect(outputEdgeStatus("paused")).toBe("paused")
+  })
+
+  it("leaves every other edge on its own bracket", () => {
+    const edges = buildEdges([node("a", []), node("b", ["a"])], {
+      statusByEdgeId: { "a->b": "running" },
+    })
+    expect(edges.find((edge) => edge.id === "a->b")?.data?.runStatus).toBe("running")
+  })
+})

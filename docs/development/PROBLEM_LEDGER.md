@@ -84,14 +84,14 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 **1.1.3 subgraph**
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| S1 | 运行状态不递归:展开容器内子节点恒 Idle(状态表按裸 phase 名记账,子图内没人喂) | 前端(E2 就绪) | 🔎 **本 PR 已合**:投影改按 phase path 记账(`utils/phase-path.ts`),`subgraph-expansion.ts` 不再给子节点硬塞空投影;根层键逐字不变 | 08-19 Q2×2 天 | 子图内正在跑的节点亮 |
+| S1 | 运行状态不递归:展开容器内子节点恒 Idle(状态表按裸 phase 名记账,子图内没人喂) | 前端(E2 就绪) | 🔎 **#882 + 本 PR 已合**:相位投影改按 phase path 记账(`utils/phase-path.ts`,#882);本 PR 把同一条规则贯彻到**边与端点**——边分段 key 带作用域前缀(`edge-status-projection.ts`),`from_phases: []` 在子图内指该子图自己的入口而不是 run 的输入,展开预览的内部边与自己那对端点都读本作用域证据(`inlineChildEdge`/`inlineChildNode`)。根层键逐字不变。设计源 canvas F9 | 08-19 Q2×2 天 | 子图内正在跑的节点亮 |
 | S2 | running 时自动展开,跑完收起,手动操作优先 | 前端 | 🔎 **本 PR 已合**:`containerAutoAction` 按状态**跃迁**驱动;失败的容器保持展开(参考 GitHub Actions 日志分组);本次 run 内手动开合过即接管 | 08-19"running的时候subgraph要打开" | — |
 | S3 | 折叠态容器显示进度(3/7 完成)+ 容器框呼吸/边框流动 | 前端 | 🔎 **本 PR 已合**:容器 chip 常驻 `3/7`(子拓扑未加载时只报 `3 done`,不编分母);容器框走与节点卡片、运行边同一套行进虚线(`.studio-running-dash-frame`),未选"呼吸"是为了三个尺度只有一套运行语汇 | 08-19 Q2/Q3-6 | — |
 
 **1.1.4 input/output 端点**
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| IO1 | INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一(重复:"我也说过,也不做") | 前端 | 🔎 **已合**:#878 把根边判定收敛成一处(`utils/edge-identity.ts`,两套逻辑删净),#879 让 IO 边界边与普通边走同一套 edge 运行态与命中区。端点自身的状态由**它那一端的边分段**派生(`boundaryNodeStatus`),与 phase 同住一张状态表、戴同一枚状态胶囊、running 时同一套行进虚线;多条边取最差;端点被显式排除在 resume 锚点之外。设计源 canvas F8 | 08-14⑦;08-19 Q7 | 同一状态系统驱动全部节点 |
+| IO1 | INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一(重复:"我也说过,也不做") | 前端 | 🔎 **已合**:#878 把根边判定收敛成一处(`utils/edge-identity.ts`,两套逻辑删净),#879 让 IO 边界边与普通边走同一套 edge 运行态与命中区。端点自身与 phase 同住一张状态表、戴同一枚状态胶囊、running 时同一套行进虚线;多来源取最差;端点被显式排除在 resume 锚点之外。**两端的证据来源不同**(2026-08-20 真机实证修正):Input 读从它出发的边分段(`inputBoundaryStatus`);Output 读**产出它的相位**(`outputBoundaryStatus`)——实测 run `predict-2026-08-20T04-09-33` 全量事件流里**没有任何事件指向 output 端点**(最后一条 `edge_end` 是 `[story_analysis] -> global_synthesis`),原先"看入边"让 Output 在完全成功的 run 上恒为 Idle;进入 Output 的那条边同样跟随产出相位(`outputEdgeStatus`),否则端点绿了喂它的线还是灰的。设计源 canvas F8 | 08-14⑦;08-19 Q7 | 同一状态系统驱动全部节点 |
 
 ## 1.2 trace 面板
 

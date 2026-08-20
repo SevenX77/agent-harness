@@ -10,7 +10,7 @@ import {
   SKILL_FLOW_SOURCE_HANDLE_ID,
   SKILL_FLOW_TARGET_HANDLE_ID,
 } from './subgraph-bridge-handles'
-import type { SkillGraphNode } from './types'
+import type { SkillGraphNode, SkillNodeStatus } from './types'
 
 export const INPUT_ID = '__global_input__'
 export const OUTPUT_ID = '__global_output__'
@@ -65,6 +65,32 @@ export function createContextEdge(
   }
 }
 
+/**
+ * What the segment INTO the Output boundary shows, given the phase that
+ * produces it.
+ *
+ * That segment is the one edge on the board with no bracket of its own: the
+ * engine emits a transition per real graph hop, and the endpoint is not a hop —
+ * verified across the whole event stream of run `predict-2026-08-20T04-09-33`,
+ * where every `edge_end` names a real downstream phase. So it reads the same
+ * truth its endpoint does (`outputBoundaryStatus`): a phase marked `output`
+ * finishing IS the graph delivering that output. Looking it up by edge id
+ * instead left it permanently gray under a green Output endpoint — one board
+ * telling the reader two different things about the same delivery.
+ */
+export function outputEdgeStatus(producerStatus: SkillNodeStatus | undefined): EdgeRunStatus {
+  return EDGE_STATUS_FROM_NODE[producerStatus ?? 'idle']
+}
+
+const EDGE_STATUS_FROM_NODE: Readonly<Record<SkillNodeStatus, EdgeRunStatus>> = {
+  idle: 'idle',
+  running: 'running',
+  success: 'done',
+  error: 'failed',
+  paused: 'paused',
+  breakpoint: 'paused',
+}
+
 export function buildEdges(
   phaseNodes: SkillGraphNode[],
   run: EdgeRunProjection = {},
@@ -75,7 +101,8 @@ export function buildEdges(
       edges.push(createContextEdge(source === 'input' ? INPUT_ID : source, node.id, run))
     }
     if (node.data.isOutput === true) {
-      edges.push(createContextEdge(node.id, OUTPUT_ID, run))
+      const edge = createContextEdge(node.id, OUTPUT_ID, run)
+      edges.push({ ...edge, data: { ...edge.data!, runStatus: outputEdgeStatus(node.data.status) } })
     }
   }
   return edges

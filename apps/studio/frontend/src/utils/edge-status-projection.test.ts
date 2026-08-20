@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
-import { EDGE_STATUS_AT_RUN_END, boundaryNodeStatus, deriveEdgeStatuses } from "./edge-status-projection"
+import { EDGE_STATUS_AT_RUN_END, deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "./edge-status-projection"
 
 function event(partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent {
   return {
@@ -131,44 +131,61 @@ describe("EDGE_STATUS_AT_RUN_END — the registered close table", () => {
   })
 })
 
-describe("boundaryNodeStatus — the IO endpoints join the same status system", () => {
-  it("is idle before the run touches the boundary", () => {
-    expect(boundaryNodeStatus({}, "input")).toBe("idle")
-    expect(boundaryNodeStatus({ "draft->review": "running" }, "output")).toBe("idle")
+describe("an edge segment inside a subgraph belongs to that subgraph", () => {
+  it("scopes the edge id by the container chain the engine stamped", () => {
+    expect(deriveEdgeStatuses([
+      event({ event_type: "edge_end", from_phases: ["setup"], to_phase: "segment", subgraph_path: "segmentation" }),
+    ])).toEqual({ "segmentation.setup->segmentation.segment": "done" })
   })
 
-  it("runs while the boundary's own edge segment is open, and succeeds when it closes", () => {
-    expect(boundaryNodeStatus({ "__global_input__->draft": "running" }, "input")).toBe("running")
-    expect(boundaryNodeStatus({ "__global_input__->draft": "done" }, "input")).toBe("success")
-    expect(boundaryNodeStatus({ "review->__global_output__": "running" }, "output")).toBe("running")
-    expect(boundaryNodeStatus({ "review->__global_output__": "done" }, "output")).toBe("success")
+  it("does NOT attribute a child graph's own first transition to the ROOT input", () => {
+    // `from_phases: []` means "nothing in THIS graph precedes it". Inside a
+    // subgraph that is the child's own entry, not the run's input — reading it
+    // as the root Input boundary made every child graph's first phase light up
+    // the parent's Input endpoint.
+    expect(deriveEdgeStatuses([
+      event({ event_type: "edge_start", from_phases: [], to_phase: "setup", subgraph_path: "segmentation" }),
+    ])).toEqual({ "segmentation.__global_input__->segmentation.setup": "running" })
   })
 
-  it("reads only the edges that touch ITS end of the graph", () => {
-    const statuses = {
-      "__global_input__->draft": "done" as const,
-      "review->__global_output__": "running" as const,
-    }
+  it("keeps two same-named edges in different subgraphs apart", () => {
+    const statuses = deriveEdgeStatuses([
+      event({ event_type: "edge_end", from_phases: ["a"], to_phase: "review", subgraph_path: "timeline" }),
+      event({ event_type: "edge_start", from_phases: ["a"], to_phase: "review", subgraph_path: "characters" }),
+    ])
 
-    expect(boundaryNodeStatus(statuses, "input")).toBe("success")
-    expect(boundaryNodeStatus(statuses, "output")).toBe("running")
+    expect(statuses["timeline.a->timeline.review"]).toBe("done")
+    expect(statuses["characters.a->characters.review"]).toBe("running")
+  })
+})
+
+describe("the IO endpoints read the run at their own end of the graph", () => {
+  it("takes Input from the ROOT input edges only", () => {
+    expect(inputBoundaryStatus({ "__global_input__->draft": "done" })).toBe("success")
+    // A child graph's entry edge is not this graph's input.
+    expect(inputBoundaryStatus({ "segmentation.__global_input__->segmentation.setup": "failed" })).toBe("idle")
   })
 
-  it("takes the worst answer when a boundary has several edges", () => {
-    // The run died on one of the branches feeding Output: the endpoint did not
-    // receive what it was owed, and saying "success" because a sibling arrived
-    // would be the endpoint reporting on someone else's branch.
-    expect(boundaryNodeStatus({
-      "a->__global_output__": "done",
-      "b->__global_output__": "failed",
-    }, "output")).toBe("error")
-    expect(boundaryNodeStatus({
-      "a->__global_output__": "done",
-      "b->__global_output__": "running",
-    }, "output")).toBe("running")
-    expect(boundaryNodeStatus({
-      "a->__global_output__": "done",
-      "b->__global_output__": "paused",
-    }, "output")).toBe("paused")
+  it("takes Output from the phases that produce it — no event ever reaches the endpoint", () => {
+    // Verified on run predict-2026-08-20T04-09-33: every edge_end names a real
+    // downstream phase, and the last one is `story_analysis -> global_synthesis`.
+    // Nothing is emitted toward the output boundary, so folding its edges left
+    // Output permanently Idle on a successful run.
+    expect(outputBoundaryStatus({ global_synthesis: "success" }, ["global_synthesis"], "success")).toBe("success")
+    expect(outputBoundaryStatus({ global_synthesis: "running" }, ["global_synthesis"], "running")).toBe("running")
+    expect(outputBoundaryStatus({}, ["global_synthesis"], "running")).toBe("idle")
+  })
+
+  it("closes an Output the run never reached, by the same table as every node", () => {
+    expect(outputBoundaryStatus({}, ["global_synthesis"], "failed")).toBe("error")
+    expect(outputBoundaryStatus({}, ["global_synthesis"], "cancelled")).toBe("paused")
+  })
+
+  it("takes the worst of several producing phases", () => {
+    expect(outputBoundaryStatus({ a: "success", b: "error" }, ["a", "b"], "failed")).toBe("error")
+  })
+
+  it("is idle when the graph declares no output phase at all", () => {
+    expect(outputBoundaryStatus({ a: "success" }, [], "success")).toBe("idle")
   })
 })

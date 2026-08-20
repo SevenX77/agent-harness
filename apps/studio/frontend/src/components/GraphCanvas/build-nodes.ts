@@ -1,5 +1,6 @@
 import yaml from 'js-yaml'
 import type { CompileError, GraphManifestV030, GraphTopologyItem, IoDeclaration, IoInput, IoOutput, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
+import type { RunVerdict } from '@/utils/run-status-projection'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { normalizeSubgraphPath } from '@/components/studio/subgraph-path'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
@@ -236,6 +237,13 @@ export interface NodeRunProjection {
   statusByNodeId?: Record<string, SkillNodeStatus>
   errorMessageByNodeId?: Record<string, string>
   runtimeByNodeId?: Record<string, NodeRuntime>
+  /**
+   * Where the run as a whole stands. Carried with the per-node statuses because
+   * it is the authority that CLOSES anything still open (D7 铁律), which the
+   * Output boundary needs: nothing executes in it, so it has no segment of its
+   * own to close and reads the verdict directly.
+   */
+  verdict?: RunVerdict
 }
 
 export function buildNodes(

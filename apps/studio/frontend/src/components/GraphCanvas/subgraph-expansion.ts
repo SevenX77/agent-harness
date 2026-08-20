@@ -9,12 +9,17 @@ import {
 } from '@/components/nodes/subgraph-bridge-handles'
 import {
   buildEdges,
+  OUTPUT_ID,
+  outputEdgeStatus,
+  type GlobalNodeData,
   type GraphCanvasNode,
   type SkillGraphNode,
   type SkillGraphNodeData,
   type SubgraphGroupNodeData,
 } from '@/components/nodes'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
+import type { EdgeRunProjection } from '@/components/nodes'
+import { inputBoundaryStatus, outputBoundaryStatus } from '@/utils/edge-status-projection'
 import { childPhasePath } from '@/utils/phase-path'
 import { buildNodes, buildNodesFromTopology, type NodeRunProjection } from './build-nodes'
 
@@ -119,6 +124,13 @@ export interface SubgraphExpansionOptions {
    * real execution, not a permanently idle diagram of one.
    */
   run?: NodeRunProjection
+  /**
+   * What the active run says about individual edge SEGMENTS, keyed by the
+   * scoped edge id. Separate from `run` for the same reason the root board
+   * keeps them apart: an edge is a run segment in its own right, not a
+   * shadow of the node it points at.
+   */
+  edgeRun?: EdgeRunProjection
   expandedSteps?: ReadonlySet<string>
   onToggleSteps?: (nodeId: string) => void
   onStepsSave?: (
@@ -318,6 +330,25 @@ function inlineChildNode(
     zIndex: CHILD_NODE_Z_INDEX,
   }
 
+  if (node.type === 'globalInput' || node.type === 'globalOutput') {
+    // The child board has endpoints of its own, and they are NOT the run's
+    // endpoints — a subgraph receives its container's dispatch and delivers
+    // back to it. Each reads the run at this container's scope, by the same two
+    // rules the root board uses (canvas F8).
+    return {
+      ...base,
+      data: {
+        ...(node.data as GlobalNodeData),
+        status: node.type === 'globalInput'
+          ? inputBoundaryStatus(options.edgeRun?.statusByEdgeId ?? {}, request.parentPhasePath)
+          : outputBoundaryStatus(
+              options.run?.statusByNodeId ?? {},
+              childOutputPhasePaths(request),
+              options.run?.verdict ?? 'running',
+            ),
+      } satisfies GlobalNodeData,
+    } as GraphCanvasNode
+  }
   if (node.type !== 'skill') return base as GraphCanvasNode
   const data = node.data as SkillGraphNodeData
   const isSubgraphNode = data.mode === 'subgraph' || Boolean(data.subgraphPath)
@@ -357,9 +388,31 @@ function inlineChildNode(
   } as GraphCanvasNode
 }
 
-function inlineChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edge<ContextEdgeData> {
+/** The child graph's own output-producing phases, as phase paths. */
+function childOutputPhasePaths(request: SubgraphExpansionRequest): string[] {
+  if (request.view.status !== 'loaded') return []
+  return request.view.graphTopology
+    .filter((row) => row.output === true)
+    .map((row) => childPhasePath(request.parentPhasePath, row.id))
+}
+
+function inlineChildEdge(
+  request: SubgraphExpansionRequest,
+  edge: Edge<ContextEdgeData>,
+  options: SubgraphExpansionOptions,
+): Edge<ContextEdgeData> {
+  const parentNodeId = request.parentNodeId
   const source = subgraphPreviewChildNodeId(parentNodeId, edge.source)
   const target = subgraphPreviewChildNodeId(parentNodeId, edge.target)
+  // The child board is laid out from topology alone and CACHED on it, so the
+  // run is applied here, where the container this copy hangs under is known —
+  // the same reason `inlineChildNode` re-keys statuses. The scoped edge id is
+  // what `deriveEdgeStatuses` writes for an event stamped with this container's
+  // `subgraph_path`, so this is a lookup, not a translation.
+  const scopedEdgeId = `${childPhasePath(request.parentPhasePath, edge.source)}->${childPhasePath(request.parentPhasePath, edge.target)}`
+  const runStatus = edge.target === OUTPUT_ID
+    ? outputEdgeStatus(options.run?.statusByNodeId?.[childPhasePath(request.parentPhasePath, edge.source)])
+    : options.edgeRun?.statusByEdgeId?.[scopedEdgeId] ?? 'idle'
   return {
     ...edge,
     id: childEdgeId(parentNodeId, edge.id),
@@ -369,6 +422,10 @@ function inlineChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edg
     zIndex: PREVIEW_EDGE_Z_INDEX,
     data: {
       ...edge.data,
+      runStatus,
+      // The dot opens the dispatched values, and resolving THOSE by scope is
+      // the edge-selection work (ledger G2) — until then an inner edge shows
+      // its state without offering data it cannot key correctly.
       hasTraceData: false,
       sourcePhaseId: source,
       targetPhaseId: target,
@@ -603,7 +660,7 @@ export function buildSubgraphExpansion(
     nodes.push(group)
     edges.push(visualBridgeEdge(request.parentNodeId, group.id, group.data.runStatus === 'running'))
     nodes.push(...child.nodes.map((node) => inlineChildNode(request, group.id, node, options)))
-    edges.push(...child.edges.map((edge) => inlineChildEdge(request.parentNodeId, edge)))
+    edges.push(...child.edges.map((edge) => inlineChildEdge(request, edge, options)))
   }
 
   return { nodes, edges }

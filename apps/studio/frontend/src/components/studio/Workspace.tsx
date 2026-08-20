@@ -47,8 +47,8 @@ import {
   projectGateEvent,
   type SkillGateEvent,
 } from "./gate-state"
-import { boundaryNodeStatus, deriveEdgeStatuses } from "@/utils/edge-status-projection"
-import { deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runningPhaseOf } from "@/utils/run-status-projection"
+import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@/utils/edge-status-projection"
+import { deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runVerdict, runningPhaseOf } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -878,18 +878,28 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     () => deriveEdgeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
     [viewedRun],
   )
+  /** The root phases the graph declares as its outputs — Output's producers. */
+  const outputPhasePaths = useMemo(
+    () => (skillDetail?.graph_topology ?? []).filter((row) => row.output === true).map((row) => row.id),
+    [skillDetail?.graph_topology],
+  )
   // canvas F8: the IO endpoints live in the SAME status map as every phase,
   // under their own canvas ids. They are not phases and execute nothing, so
-  // their state comes from the edge segments at their end of the graph — one
-  // status system driving the whole board, which is exactly what was asked for.
-  const statusByNodeId = useMemo<Record<string, SkillNodeStatus>>(
-    () => ({
-      ...deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
-      [INPUT_ID]: boundaryNodeStatus(edgeStatusByEdgeId, "input"),
-      [OUTPUT_ID]: boundaryNodeStatus(edgeStatusByEdgeId, "output"),
-    }),
-    [viewedRun, edgeStatusByEdgeId],
+  // each reads the run from its own end of the graph — Input from the edges
+  // leaving it, Output from the phases producing it (no event ever reaches the
+  // endpoint itself) — and both land in one status map driving the whole board.
+  const viewedRunVerdict = useMemo(
+    () => runVerdict(viewedRun.events, viewedRun.metadata, viewedRun.runId),
+    [viewedRun],
   )
+  const statusByNodeId = useMemo<Record<string, SkillNodeStatus>>(() => {
+    const phaseStatuses = deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata)
+    return {
+      ...phaseStatuses,
+      [INPUT_ID]: inputBoundaryStatus(edgeStatusByEdgeId),
+      [OUTPUT_ID]: outputBoundaryStatus(phaseStatuses, outputPhasePaths, viewedRunVerdict),
+    }
+  }, [viewedRun, edgeStatusByEdgeId, outputPhasePaths, viewedRunVerdict])
   const errorMessageByNodeId = useMemo(
     () => deriveNodeErrorMessages(viewedRun.events, viewedRun.runId),
     [viewedRun],
@@ -2955,6 +2965,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       errorMessageByNodeId={errorMessageByNodeId}
                       runtimeByNodeId={runtimeByNodeId}
                       edgeStatusByEdgeId={edgeStatusByEdgeId}
+                      runVerdict={viewedRunVerdict}
                       dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
                       hideMiniMap={editorOpen || !hasMiniMapSpace}
                       runId={runId}

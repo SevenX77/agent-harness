@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
-import type { SkillGraphNode } from '@/components/nodes'
+import { INPUT_ID, OUTPUT_ID, type SkillGraphNode } from '@/components/nodes'
 import {
   SUBGRAPH_BRIDGE_EDGE_TYPE,
   SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
@@ -470,5 +470,67 @@ describe('expanded subgraph children carry the run (canvas F7)', () => {
 
     expect(childData(nodes, 'plan')?.status).toBe('idle')
     expect(childData(nodes, 'plan')?.errorMessage).toBeUndefined()
+  })
+})
+
+describe('an expanded subgraph shows the run at ITS scope, not the root board', () => {
+  const request: SubgraphExpansionRequest = { ...LOADED_REQUEST, parentPhasePath: 'expand' }
+
+  function innerEdge(edges: ReturnType<typeof buildSubgraphExpansion>['edges'], source: string, target: string) {
+    return edges.find((edge) =>
+      edge.source === subgraphPreviewChildNodeId('expand', source)
+      && edge.target === subgraphPreviewChildNodeId('expand', target))
+  }
+
+  function boundaryData(nodes: ReturnType<typeof buildSubgraphExpansion>['nodes'], boundary: string) {
+    return nodes.find((node) => node.id === subgraphPreviewChildNodeId('expand', boundary))?.data as
+      { status?: string } | undefined
+  }
+
+  it('lights an inner edge from the segment keyed by the SCOPED edge id', () => {
+    const { edges } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      edgeRun: { statusByEdgeId: { 'expand.plan->expand.write': 'running', 'plan->write': 'failed' } },
+    })
+
+    expect(innerEdge(edges, 'plan', 'write')?.data?.runStatus).toBe('running')
+  })
+
+  it('lights the child graph\'s own entry edge, which is NOT the run input', () => {
+    const { edges } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      edgeRun: { statusByEdgeId: { 'expand.__global_input__->expand.plan': 'done' } },
+    })
+
+    expect(innerEdge(edges, INPUT_ID, 'plan')?.data?.runStatus).toBe('done')
+  })
+
+  it('gives the child preview its own Input endpoint state', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      edgeRun: { statusByEdgeId: { 'expand.__global_input__->expand.plan': 'done', '__global_input__->other': 'failed' } },
+    })
+
+    expect(boundaryData(nodes, INPUT_ID)?.status).toBe('success')
+  })
+
+  it('gives the child preview its own Output endpoint state, from the phases producing it', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      run: { statusByNodeId: { 'expand.write': 'success' } },
+    })
+
+    expect(boundaryData(nodes, OUTPUT_ID)?.status).toBe('success')
+  })
+
+  it('closes a child Output the run never reached, by the run verdict', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request], {
+      run: { statusByNodeId: {}, verdict: 'failed' },
+    })
+
+    expect(boundaryData(nodes, OUTPUT_ID)?.status).toBe('error')
+  })
+
+  it('leaves both child endpoints idle while nothing has entered the container', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [request], { run: {}, edgeRun: {} })
+
+    expect(boundaryData(nodes, INPUT_ID)?.status).toBe('idle')
+    expect(boundaryData(nodes, OUTPUT_ID)?.status).toBe('idle')
   })
 })

@@ -132,6 +132,28 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - Status: target-design。
 - 归属: capability `run-execution`(owner);数据来源 `engine:02-observability`(引)。
 
+### F7. 一次运行的两个未来,任何时候都摆在台面上
+
+- 机制: 中央动作条按 run 的阶段给按钮,**在飞和已暂停给的是同一对**:
+  - `running` → **Pause + Stop**(Pause 高亮为当前主动作)
+  - `paused` → **Resume + Stop**
+  - 其余阶段 → `Run`(按编译/预测门禁决定可用性)
+- 决策:
+  - **"我要它停"不该绕道经过一个用户没要的状态。** 从前 `running` 只给 Pause,
+    想结束就得先暂停再停止——两步,中间那一步是 UI 自己发明的。后端从来不需要它:
+    `POST /runs/{id}/stop` 对在飞的 run 一步到位
+    (`apps/studio/backend/tests/test_run_pause_stop.py::test_stopping_a_run_in_flight_skips_the_pause`
+    断言直接返回 `cancelled`)。
+  - **Pause 与 Stop 不互相蕴含,所以都写出来。** Pause 保留 checkpoint(引擎只在 run
+    自己跑完时才清),Stop 就地结束;这与 `paused` 那一对是同一条理由,只是方向相反。
+  - **禁用的 Run 按钮不是回答。** 它说"等着",却不说怎么才能不等——这正是本条要消除的
+    沉默。
+- 原话/来源: PM 2026-08-04③「run 运行中按钮至少变成可停止」。
+- 测试: `center-action-bar.test.tsx`(`running` 同时给出 Pause 与 Stop 且不出现 Resume;
+  `paused` 给出 Resume 与 Stop 且不出现 Pause)。
+- Status: target-design(2026-08-20 立)。
+- 归属: capability `run-execution`; region `canvas`.
+
 ## 3. 接口契约
 - Entry: Run is enabled only after compile-pass and predict-pass.
 - Input: i/o panel supplies single or batch input selection.

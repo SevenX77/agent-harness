@@ -152,19 +152,33 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun, onPause, o
         </Button>
       </LockableButton>
       {stage === "running" ? (
-        // A disabled Run button says "wait" without saying how to not wait.
-        // Pausing is what a run in flight can offer: the engine only clears a
-        // run's checkpoints when it finishes on its own, so a run halted
-        // part-way can be picked up again from where it stopped.
-        <Button
-          variant="ghost"
-          size="default"
-          onClick={onPause}
-          className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
-        >
-          <Pause fill="currentColor" className="size-3.5" />
-          Pause
-        </Button>
+        // A disabled Run button says "wait" without saying how to not wait, and
+        // a run in flight has the SAME two futures a paused one has: hold it,
+        // or end it. Both are offered outright. Pausing keeps the checkpoint —
+        // the engine only clears those when a run finishes on its own — while
+        // stopping ends it here, and the backend takes either in one step, so
+        // routing "stop" through a pause the reader never asked for was the UI
+        // inventing a detour the run itself does not require.
+        <>
+          <Button
+            variant="ghost"
+            size="default"
+            onClick={onPause}
+            className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
+          >
+            <Pause fill="currentColor" className="size-3.5" />
+            Pause
+          </Button>
+          <Button
+            variant="ghost"
+            size="default"
+            onClick={onStop}
+            className="studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs"
+          >
+            <Square fill="currentColor" className="size-3.5" />
+            Stop
+          </Button>
+        </>
       ) : stage === "paused" ? (
         // A paused run has two futures and both are offered outright: carry on
         // from the checkpoint, or end it here. Neither is implied by the other.

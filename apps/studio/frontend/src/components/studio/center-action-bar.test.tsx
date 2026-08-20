@@ -82,12 +82,16 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).not.toContain('left-1/2')
   })
 
-  it('offers Pause while a run is in flight, not a disabled Run', () => {
-    // A disabled Run button says "wait" without saying how to not wait. Pausing is
-    // possible because a halted run keeps the checkpoint it can be resumed from.
+  it('offers both futures of a run in flight: pause it or end it', () => {
+    // A disabled Run button says "wait" without saying how to not wait. A run in
+    // flight has the same two futures a paused one has, and the backend already
+    // takes either in one step (`test_stopping_a_run_in_flight_skips_the_pause`).
+    // Offering only Pause made "I want this to stop" a two-click detour through
+    // a state the reader did not ask for.
     const running = renderBar('running')
 
     expect(running).toContain('Pause')
+    expect(running).toContain('Stop')
     expect(running).not.toContain('Resume')
   })
 

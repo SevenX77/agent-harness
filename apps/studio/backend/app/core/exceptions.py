@@ -38,6 +38,10 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "RUN_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
     "RUN_REQUIRES_PREDICT": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
     "RUN_NOT_RUNNING": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
+    # The mirror of RUN_NOT_RUNNING: asked to project a run that has not reached
+    # a verdict yet. Not retryable for the same reason — the caller should wait
+    # for the run to end and be told, not poll a run it is already watching.
+    "RUN_NOT_CONCLUDED": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
     "TERMINAL_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
     "TERMINAL_LIMIT_REACHED": ErrorDefinition(http_status=503, retry_strategy="backoff"),
     "WEBSOCKET_DISCONNECTED": ErrorDefinition(http_status=499, retry_strategy="backoff"),

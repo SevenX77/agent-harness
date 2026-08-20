@@ -188,6 +188,26 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     基准 run 结束**之后**,而报告是在 run 终态写一次的纯投影。要么让报告可重生成(见下面的
     已知缺口),要么去 UI 的 compare 面板看——不能让报告去扫兄弟目录,那会让"这份报告说什么"
     取决于此后又跑了什么。
+- 决策 RUN_EXECUTION-11(报告在**被打开时**重新生成;2026-08-20 立,问题台账 R1 收尾):
+  RUN_EXECUTION-5 早就把报告定为"随时可以被重新生成"的纯投影,但产品里**没有任何一处能
+  重新生成它**——`report.md` 只在 run 封存那一刻写一次。于是每一份历史报告永远停在写它
+  那天的渲染逻辑上:渲染器每改进一次,只有此后的新 run 受益,旧 run 的报告变成一座过时
+  版本的博物馆。
+  - **重生成的时机 = 有人要读它**:`POST /api/skills/{skill}/runs/{run}/report` 重渲染
+    `report.md` 并返回这次 run 的规范快照。run 列表行的 Report 入口与 Trace 末尾的
+    "Open run report" 都先调它,再把返回的 `report_path` 交给编辑器打开——两个入口共用
+    同一个打开动作,不能一个新一个旧。投影是纯的,所以重复渲染幂等;按"打开"计费是
+    每次用户动作 O(1) 次写,而按"列出 run"计费会变成每次列表 O(runs) 次写。
+  - **明确拒绝渲染器版本号**:另一条路是在报告里盖一个渲染器版本、读时比对再决定要不要
+    重渲。本仓已经有一个"改了源码还要记得再做一步"的机制——桌面 app 的 vendor 快照——
+    而它留下的教训正是这类步骤会被忘掉(`AGENTS.md` Workflow Pipeline 第 7 条)。
+    所以不引入第二个需要人记得同步 bump 的数字。
+  - **没结束的 run 一律拒绝**(`RUN_NOT_CONCLUDED`,409):`report_path` 是从"报告文件
+    在不在"推出来的,给一个还在跑的 run 写报告,会让 run 列表**给一个正在跑的 run 挂上
+    报告入口**,而那份报告的内容几分钟后就自相矛盾。`paused` 同样算没结束——它在等着被继续。
+  - **重渲染失败仍然打开已有的那一份**:读者问的是"这次 run 发生了什么",上个月的渲染
+    回答得了这个问题,什么都不显示回答不了;但失败要明说(toast),不静默吞掉——渲染器
+    跑不起来是故障,不是偏好。
 - 决策 RUN_EXECUTION-7(格式 = 单份 markdown): 只写 `report.md`,不并写 `report.json`。
   **为什么**:结构化真相已经在 `trace.jsonl` / `metrics.json` 里;再存一份 JSON 投影
   等于第三份副本(违 KISS/YAGNI 与 SSOT),而 markdown 在文件管理器、编辑器和 Studio 里
@@ -240,6 +260,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 | RUN_EXECUTION-2 | 节点态 | 单元 `run-execution-node-status`；**为什么**：run events 经 state-engine 投到节点灯/边，非画布默认假态 |
 | RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
 | RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
+| RUN_EXECUTION-11 | 报告在被打开时重新生成 | F6；**为什么**：RUN_EXECUTION-5 说它可随时重生,却没有任何入口,历史报告永远停在写它那天的渲染逻辑上;按"打开"重生是每次用户动作 O(1) 次写,且不必再引入一个要人记得 bump 的渲染器版本号 |
 | RUN_EXECUTION-10 | 点了名的东西要能点开 | F6；**为什么**：输入文件与被对照的 run 从前只是文本；链接从实际目录推出,推不出就不给,点不开的链接比纯文本更坏 |
 | RUN_EXECUTION-8 | 重复逐次记账 + 节点状态入表 | F6；**为什么**：求和行回答不了「哪个 item 慢/挂了」，而「跑了几次」与「一次里想了几轮」是两件事 |
 | RUN_EXECUTION-9 | Failure 只收「拒绝或放弃」，纠正只计数 | F6；**为什么**：把每次 nudge 塞进 Failure 会淹没真失败，完全不记又丢掉「这个节点被推了六次」 |

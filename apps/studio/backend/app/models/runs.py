@@ -100,6 +100,11 @@ class BatchRunRequest(BaseModel):
 #: vocabulary that is only half-extended rejects its own data at validation.
 RunStatus = Literal["running", "success", "failed", "paused", "cancelled"]
 
+#: The statuses from which a run cannot continue, so its artifacts are final and
+#: anything projected from them stays true. ``paused`` is deliberately absent:
+#: it is an ending only in the sense that nothing is executing right now.
+CONCLUDED_RUN_STATUSES: frozenset[str] = frozenset({"success", "failed", "cancelled"})
+
 
 class RunMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")

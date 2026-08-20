@@ -43,6 +43,7 @@ from app.core.exceptions import error_response, raise_error_response, standard_h
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.runs import (
+    CONCLUDED_RUN_STATUSES,
     BatchRunItem,
     BatchRunResponse,
     BatchRunStatus,
@@ -1077,6 +1078,32 @@ class RunManager:
             final_context=final_context,
             artifacts=_read_run_artifact_paths(run_dir),
         )
+
+    def rebuild_run_report(self, skill_id: str, run_id: str) -> RunMetadata:
+        """Re-render this run's report from its sealed artifacts.
+
+        The report is a pure projection (RUN_EXECUTION-5), so re-rendering is
+        idempotent and this is the one entry point that makes "可随时重新生成"
+        true of a run that finished before today's renderer existed. It is done
+        on demand rather than on a stored renderer version: a version stamp is
+        one more thing that has to be remembered on every change to the
+        renderer, and the vendored-sidecar rebuild already showed what a
+        forgotten "bump this too" step costs.
+
+        A run that has not reached a verdict is refused. ``report_path`` is
+        derived from the file existing, so writing one mid-run would make every
+        run row advertise a report for a run that is still going.
+        """
+        metadata = self._metadata_for(skill_id, run_id)
+        if metadata.status not in CONCLUDED_RUN_STATUSES:
+            raise standard_http_exception(
+                "RUN_NOT_CONCLUDED",
+                f"Run {run_id} has not finished, so there is nothing to project yet",
+                {"skill_id": skill_id, "run_id": run_id, "status": metadata.status},
+            )
+        run_dir = run_dir_for(skill_id, run_id)
+        write_run_report(run_dir)
+        return metadata.model_copy(update={"report_path": _run_report_path(run_dir)})
 
     #: Every run status maps to exactly one thing the surfaces are told, so a new
     #: status cannot silently fall through to "fail".

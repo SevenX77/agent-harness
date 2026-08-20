@@ -6,7 +6,7 @@ import { runStatusMark } from "@/utils/run-status-mark"
 import type { RunMetadata } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
 import { useWorkspaceContext } from "../WorkspaceContext"
-import { runReportOpenRequest } from "../../trace/TraceOutcomeRow"
+import { openRunReport } from "../../../utils/run-report"
 import { Button } from "../../ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip"
 import { PanelHeader } from "./_shared/PanelHeader"
@@ -101,14 +101,21 @@ function RunStatusBadge({ run }: { run: RunMetadata }) {
  */
 function RunReportLink({ run }: { run: RunMetadata }) {
   const reportPath = run.report_path
-  const { onFileOpen } = useWorkspaceContext()
+  const { onFileOpen, currentSkillId } = useWorkspaceContext()
   if (!reportPath || !onFileOpen) return null
   return (
     <button
       type="button"
       data-run-report
       aria-label={`Open report for run ${run.run_id}`}
-      onClick={() => { onFileOpen(runReportOpenRequest(reportPath)) }}
+      onClick={() => {
+        void openRunReport({
+          skillId: currentSkillId,
+          runId: run.run_id,
+          reportPath,
+          onFileOpen,
+        })
+      }}
       className="flex items-center gap-1 text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
     >
       <FileText className="size-3" />

@@ -11,6 +11,8 @@ export interface TraceOutcomeEntry {
   wallTimeSec: number | null
   totalTokens: number | null
   reportPath: string | null
+  /** Which run this concluded, so the report can be re-rendered before it opens. */
+  runId: string | null
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -51,5 +53,6 @@ export function traceOutcomeEntry(
       ?? finiteNumber(endedEvent?.wall_time_seconds),
     totalTokens: finiteNumber(metadata?.metrics?.total_tokens),
     reportPath: metadata?.report_path ?? null,
+    runId: metadata?.run_id ?? null,
   }
 }

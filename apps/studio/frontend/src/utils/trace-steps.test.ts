@@ -326,3 +326,50 @@ describe('run segments: an edge is peer to a node (decision 2026-08-15)', () => 
     expect(steps[0].status).toBe('severed')
   })
 })
+
+describe('a degradation is explained once, not re-explained on every call', () => {
+  // Real shape, run 2026-08-19T06-58-15_179d1440: one endpoint timed out, and
+  // the gateway re-probed it on the next call, and the one after that. Three
+  // steps, three full "Probe failed — APITimeoutError…" blocks, one fact.
+  const degraded = indexed([
+    { event_type: 'prompt_captured', phase_name: 'segment', step_id: 's1', loop_index: 1 },
+    { event_type: 'llm_route_decision', phase_name: 'segment', decision: 'probe_failed', endpoint_id: 'ep-a', reason: 'APITimeoutError' },
+    { event_type: 'llm_call', phase_name: 'segment', step_id: 's1' },
+    { event_type: 'prompt_captured', phase_name: 'review', step_id: 's2', loop_index: 1 },
+    { event_type: 'llm_route_decision', phase_name: 'review', decision: 'probe_failed', endpoint_id: 'ep-a', reason: 'APITimeoutError' },
+    { event_type: 'llm_call', phase_name: 'review', step_id: 's2' },
+  ])
+
+  it('numbers each repeat of an identical degradation', () => {
+    const steps = buildTraceSteps(degraded)
+
+    expect(steps[0].verdicts.map((verdict) => verdict.occurrence)).toEqual([1])
+    expect(steps[1].verdicts.map((verdict) => verdict.occurrence)).toEqual([2])
+  })
+
+  it('treats a different outcome on the same endpoint as its own fact', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'a', step_id: 's1' },
+      { event_type: 'llm_route_decision', phase_name: 'a', decision: 'probe_failed', endpoint_id: 'ep-a', reason: 'timeout' },
+      { event_type: 'llm_call', phase_name: 'a', step_id: 's1' },
+      { event_type: 'prompt_captured', phase_name: 'b', step_id: 's2' },
+      { event_type: 'llm_route_decision', phase_name: 'b', decision: 'skipped_circuit_open', endpoint_id: 'ep-a' },
+      { event_type: 'llm_call', phase_name: 'b', step_id: 's2' },
+    ]))
+
+    expect(steps[1].verdicts[0].occurrence).toBe(1)
+  })
+
+  it('does not fold a healthy route decision — which endpoint served THIS call is per-call', () => {
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'prompt_captured', phase_name: 'a', step_id: 's1' },
+      { event_type: 'llm_route_decision', phase_name: 'a', decision: 'answered', endpoint_id: 'ep-b' },
+      { event_type: 'llm_call', phase_name: 'a', step_id: 's1' },
+      { event_type: 'prompt_captured', phase_name: 'b', step_id: 's2' },
+      { event_type: 'llm_route_decision', phase_name: 'b', decision: 'answered', endpoint_id: 'ep-b' },
+      { event_type: 'llm_call', phase_name: 'b', step_id: 's2' },
+    ]))
+
+    expect(steps[1].verdicts[0].occurrence).toBe(1)
+  })
+})

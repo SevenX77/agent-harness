@@ -284,6 +284,34 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: target-design(2026-08-20 立)。
 - 归属: capability `trace-observability`; region `timeline`.
 
+### F10. 降级只解释一次(重复的只报"又来了")
+
+- 机制: 一条**降级判定**(`llm_route_decision` 中 `decision != 'answered'`)在整条 trace 里
+  按「结果 + route + endpoint + 原因 + HTTP 码」认身份。**第一次出现**照旧渲染完整黄块
+  (标题 / endpoint / 协议 / 状态码 / 模型链 / 原因);**之后每一次相同的**渲染成一行紧凑的
+  重复行(`data-trace-route-repeat=<第几次>`):写清「又一次 + endpoint + 累计第几次 +
+  原因见上」,不再重复原因与路由表。计数由投影层给出(`trace-steps.ts` 的
+  `TraceVerdict.occurrence`),渲染层只按它选版式。
+- **健康判定不折叠**:`answered` 说的是「这一次调用由谁应答」,那是**每次调用各自的事实**,
+  不是重复的抱怨。所以它的 `occurrence` 恒为 1。
+- 决策:
+  - **重复事件保留在记录里,折叠的是解释。** trace 是按时间的记录,压掉真实事件就是撒谎;
+    但一个坏掉的 endpoint 会在**每一次**调用上被重新探测,于是同一个事实被完整解释 N 遍。
+    实测 run `2026-08-19T06-58-15_179d1440`:一个超时的 endpoint 在连续三个 LLM 步骤上
+    各画了一整块黄框(两次 `probe_failed` + 一次 `skipped_circuit_open`)。读者需要知道
+    「这一次调用也降级了」(与这次调用有关),不需要第三遍读同一个 `APITimeoutError`。
+  - **参考对象**:syslog 的 `last message repeated N times`——同一条消息连续重复时只记一次
+    加计数。本仓与它的差别是**不要求连续**:降级会被中间的正常步骤隔开,所以按身份在整条
+    trace 里累计,而不是只看相邻。
+  - **不同结果算新事实**:同一个 endpoint 从「探测失败」变成「熔断跳过」是状态变了,
+    重新完整解释一次。
+- 原话/来源: PM 2026-08-19 截图(每个 llm_call 上重复渲染 Probe failed 黄块)+ 判据
+  「降级信息一次一处」。
+- 测试: `utils/trace-steps.test.ts`(相同降级按出现次序编号 / 不同结果各自从 1 起 /
+  健康判定不参与折叠)。
+- Status: target-design(2026-08-20 立)。
+- 归属: capability `trace-observability`; region `timeline`.
+
 ## 3. 接口契约
 - Runtime input: run_id websocket events plus persisted `trace.jsonl`.
 - UI output: timeline stream/list, node status map, prompt inspector, dot context。(独立的只读文档面已按 2026-08-09 D1 删除,见 F2。)

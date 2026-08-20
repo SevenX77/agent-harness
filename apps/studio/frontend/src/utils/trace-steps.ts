@@ -2,7 +2,7 @@ import type { CallbackEvent } from '../api/types'
 import type { IndexedTraceEvent } from '../hooks/useTraceFilter'
 import { traceEventId } from '../hooks/useTraceSelection'
 import type { RunVerdict } from './run-status-projection'
-import { eventPhase } from './trace'
+import { eventPhase, eventSeverity, routeDecisionDetails } from './trace'
 
 /**
  * `severed` is a step whose closing half can never arrive: the run reached a
@@ -68,7 +68,44 @@ export interface TraceStep {
    * attribution would be a guess — two open steps, or none — the verdict stays
    * its own row instead, because a wrong nesting is worse than a flat list.
    */
-  verdicts: IndexedTraceEvent[]
+  verdicts: TraceVerdict[]
+}
+
+/** A gateway verdict, plus how many times this exact one has been seen. */
+export interface TraceVerdict extends IndexedTraceEvent {
+  /**
+   * 1 the first time a degradation appears in the run, N for the Nth repeat.
+   *
+   * The gateway re-probes a dead endpoint on every call, so one outage is
+   * reported once per LLM step — measured on run
+   * `2026-08-19T06-58-15_179d1440`, where a single timed-out endpoint produced
+   * a full "Probe failed" block on three consecutive steps. The repeats are
+   * real events and stay in the record; what folds is the EXPLANATION, so the
+   * reader reads the reason once and afterwards only learns that this call fell
+   * back too. Same idea as syslog's "last message repeated N times".
+   *
+   * Always 1 for a healthy decision: which endpoint served THIS call is a
+   * per-call fact, not a repeated complaint.
+   */
+  occurrence: number
+}
+
+/**
+ * What makes two degradations "the same complaint" — the outcome, where it
+ * happened, and why. A different outcome on the same endpoint (a probe failure
+ * becoming an open circuit) is a new fact and explains itself again.
+ */
+function degradationIdentity(event: CallbackEvent): string | null {
+  if (eventSeverity(event) === 'normal') return null
+  const details = routeDecisionDetails(event)
+  if (!details) return null
+  return [
+    details.decision,
+    details.routeId ?? '',
+    details.endpointId ?? '',
+    details.reason,
+    details.statusCode ?? '',
+  ].join('|')
 }
 
 /**
@@ -111,6 +148,8 @@ export function buildTraceSteps(
   // a later execution of the same phase overwrites it, which is correct — its
   // events come after.
   const phaseSegmentByPhase = new Map<string, TraceSegment>()
+  // How many times each distinct degradation has been reported so far.
+  const degradationCounts = new Map<string, number>()
 
   for (const entry of events) {
     const { event } = entry
@@ -150,7 +189,12 @@ export function buildTraceSteps(
     if (isGatewayVerdict(event)) {
       const host = onlyOpenLlmStepOfPhase(openLlmByStepId, phase)
       if (host) {
-        host.verdicts.push(entry)
+        const identity = degradationIdentity(event)
+        const occurrence = identity === null
+          ? 1
+          : (degradationCounts.get(identity) ?? 0) + 1
+        if (identity !== null) degradationCounts.set(identity, occurrence)
+        host.verdicts.push({ ...entry, occurrence })
         continue
       }
     }

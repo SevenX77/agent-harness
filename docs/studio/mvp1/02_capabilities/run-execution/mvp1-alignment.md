@@ -129,7 +129,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 
 - 机制: 每次 run 结束(成功或失败)后,在该 run 目录写出一份 `report.md`——把这次 run
   "花了多久 / 花了多少 token / 每个节点做了什么 / 用的哪个模型 / 读了哪些输入文件 /
-  产出了哪些 artifact / 哪里报错"汇成一页可读的账,并用相对链接指向同目录里的原始记录。
+  产出了哪些 artifact / **重复跑了多少次、每次各花了什么、哪一次没成** / 哪里报错"
+  汇成一页可读的账,并用相对链接指向同目录里的原始记录。
 - 决策 RUN_EXECUTION-5(报告 = 投影,不是第四份真相): report.md 由一个**纯函数**从该 run
   **已封存**的输入生成(`run_metadata.json` / `metrics.json` / `trace.jsonl` /
   `runtime_config.snapshot.json` / `artifacts/` 目录),不新增任何只存在于报告里的数据。
@@ -142,6 +143,33 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   **为什么**:一个 role 通过 fallback chain 解析,"这次用了哪个模型"只有逐次调用才为真;
   而 `metrics.json` 是引擎侧的汇总,两者必须能对上——对不上就是引擎缺陷(2026-08-08 修复:
   agent 节点此前不把 token 折进 run metrics,见 engine `02-observability` §8 #1)。
+- 决策 RUN_EXECUTION-8(重复要逐次记账,不许求和了事;2026-08-20 立,问题台账 R1②③): 一个节点
+  **跑了几次**与它**一次里想了几轮**是两件事,报告必须分开说,而且都要说。
+  - **逐次执行**:`iterate` 的每个 item、以及任何被重复执行的节点,各自是一次执行
+    (engine 用 `phase_execution_id` 区分)。Nodes 表里那一行是**求和**,它能回答"这个节点一共
+    花了多少",但**回答不了**"哪个 item 慢、哪个 item 挂了"——而对一次 40 章的 iterate,
+    后者才是唯一值得问的。所以逐次执行另起一节列出:每次的耗时 / token / 工具次数 / 成败。
+  - **`agent turns` 不叫 loop iterations**:`agent_loop_iteration` 数的是**一次执行内部**
+    ReAct 循环的轮数(模型想了几轮),从前它顶着 `loop iterations` 这个列名,读起来像"这个节点
+    跑了 3 次",实际是"跑了 1 次、想了 3 轮"。名字改成 `agent turns`,与上面的执行次数并列。
+  - **parallel_map 扇出按组记账**:引擎本来就发 `parallel_map_group_started/ended`
+    (item 数 / 并发度 / 成败数 / 墙钟),报告从前一个都不读。扇出的墙钟脱离并发度无法解读,
+    所以两者同排。
+  - **节点状态入表**:每行必须说这个节点**怎么结束的**——`ok` / `failed` / `interrupted` /
+    `unfinished`。`unfinished` 指"开了没关",即 run 结束时它还开着:它既不是成功也不是失败,
+    把它算进任何一边都是在编造事实。节点状态取其各次执行里**最差**的那个。
+- 决策 RUN_EXECUTION-9(区分"出错"与"纠正";2026-08-20 立,问题台账 R1④): 报告里
+  **Failure 只列"机器拒绝或放弃了被要求做的事"**——`protocol_violation`(违反框架契约、
+  循环即将被切断)、`finish_task_verdict` 被拒、`loop_detected`(转圈被切)、
+  `builtin_subagent_fallback`(**跑完了,但走的是比配置更次的路**——这条不报就没有任何地方
+  会报)。而 `nudge` / `tool_error_handled` / `tool_history_repaired` 是**纠正**:机器改变了
+  run 的走向而 run 继续往前,它们**只计数**(进 Nodes 表的 `corrections` 列),不进 Failure。
+  **为什么**:Failure 是"哪里出问题了"的清单,把每一次 nudge 塞进去会让真正的失败淹没在噪声里;
+  而完全不记又会丢掉"这个节点被推了六次"这条值得看一眼的事实。引擎对 `tool_error_handled`
+  早就是这个判断(它把异常变成了模型读得懂的反馈),这里只是把同一条判据说全。
+  **单条消息必须截断**(200 字符):实测一条 `protocol_violation` 消息几千字,原样打印会把
+  同一节里其他失败全部压到屏幕外;全文就在报告已经链接着的 `trace.jsonl` 里,报告欠读者的是
+  "认得出是哪个失败",不是一份逐字誊本。
 - 决策 RUN_EXECUTION-7(格式 = 单份 markdown): 只写 `report.md`,不并写 `report.json`。
   **为什么**:结构化真相已经在 `trace.jsonl` / `metrics.json` 里;再存一份 JSON 投影
   等于第三份副本(违 KISS/YAGNI 与 SSOT),而 markdown 在文件管理器、编辑器和 Studio 里
@@ -194,6 +222,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 | RUN_EXECUTION-2 | 节点态 | 单元 `run-execution-node-status`；**为什么**：run events 经 state-engine 投到节点灯/边，非画布默认假态 |
 | RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
 | RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
+| RUN_EXECUTION-8 | 重复逐次记账 + 节点状态入表 | F6；**为什么**：求和行回答不了「哪个 item 慢/挂了」，而「跑了几次」与「一次里想了几轮」是两件事 |
+| RUN_EXECUTION-9 | Failure 只收「拒绝或放弃」，纠正只计数 | F6；**为什么**：把每次 nudge 塞进 Failure 会淹没真失败，完全不记又丢掉「这个节点被推了六次」 |
 | RUN_EXECUTION-5 | run 报告 = 已封存产物的纯投影 | F6；**为什么**：用户要一页可读的 run 总账，但底座一不允许再立一份并行真相——投影可重生成、删了不丢信息 |
 | RUN_EXECUTION-6 | 报告的 token / 模型只认 `llm_call` 事件 | F6；**为什么**：role 走 fallback chain，"这次用了哪个模型"只有逐次调用才为真；与 `metrics.json` 对不上即引擎缺陷 |
 | RUN_EXECUTION-7 | 只写 `report.md`，不并写 `report.json` | F6；**为什么**：结构化真相已在 trace/metrics 里，再存一份 JSON 投影是第三份副本 |

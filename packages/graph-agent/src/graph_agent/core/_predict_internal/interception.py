@@ -41,7 +41,7 @@ class _PredictGatewayChatModelMixin:
     bound_tools: tuple[Any, ...]
     tool_choice: str | None
     tool_kwargs: dict[str, object]
-    call_counter: list[int]
+    call_counts: dict[str, int]
     prompt_template_source: str | None
     prompt_variables: dict[str, Any]
     probe_before_call: bool
@@ -69,14 +69,17 @@ class _PredictGatewayChatModelMixin:
         # run is concerned, and it reports itself for the same reason a real one
         # does: the unit that performs a step is the only one that knows when it
         # started and when it ended.
-        self.call_counter[0] += 1
+        # Imported here, not at module scope: `graph_agent.middleware.__init__`
+        # reaches back into `core.runner`, so a top-level import closes a cycle.
+        from graph_agent.middleware.invocation_scope import next_invocation_call_index
+
         with StepReporter(
             callbacks=self.event_callbacks,
             phase_name=self._predict_phase_name,
         ).llm_call(
             messages,
             llm_role=self.role_name,
-            loop_index=self.call_counter[0],
+            loop_index=next_invocation_call_index(self.call_counts),
             parent_node_id=self.phase_name,
             node_type="agent",
             template_source=self.prompt_template_source,
@@ -197,8 +200,10 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
     tool_choice: str | None = None
     tool_kwargs: dict[str, object] = Field(default_factory=dict)
     # Shared with the copy ``bind_tools`` makes, so the loop count a phase
-    # reports keeps rising instead of restarting at 1 on every turn.
-    call_counter: list[int] = Field(default_factory=lambda: [0])
+    # reports keeps rising instead of restarting at 1 on every turn — keyed by
+    # invocation so it DOES restart for each batch item (see
+    # ``next_invocation_call_index``).
+    call_counts: dict[str, int] = Field(default_factory=dict)
     # A mocked round-trip reports its prompt's provenance for the same reason a
     # real one does: the panel showing it makes no distinction, so a gap here
     # would read as "this prompt came from nowhere".
@@ -277,7 +282,7 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
             tool_choice=tool_choice,
             phase_output_schema=self.phase_output_schema,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
-            call_counter=self.call_counter,
+            call_counts=self.call_counts,
             name=self.name,
             cache=self.cache,
             verbose=self.verbose,

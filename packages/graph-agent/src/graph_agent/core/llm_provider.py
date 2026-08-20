@@ -120,10 +120,12 @@ class LLMProviderChatModel(BaseChatModel):
     # the prompt says what it says.
     prompt_template_source: str | None = None
     prompt_variables: dict[str, Any] = Field(default_factory=dict)
-    # Shared so a bound copy keeps counting where the original left off: the
+    # Shared so a bound copy keeps counting where the original left off (the
     # agent loop binds tools once and then invokes the bound copy every turn,
-    # and "call 1, call 1, call 1" is not a sequence anyone can read.
-    call_counter: list[int] = Field(default_factory=lambda: [0])
+    # and "call 1, call 1, call 1" is not a sequence anyone can read), but keyed
+    # by INVOCATION so the count restarts for each batch item / loop round /
+    # resume — the model instance outlives all of those.
+    call_counts: dict[str, int] = Field(default_factory=dict)
 
     @property
     def _llm_type(self) -> str:
@@ -194,12 +196,15 @@ class LLMProviderChatModel(BaseChatModel):
         # reconstructed its calls from the finished message list could only
         # close them all at once, when the phase was already over — which is
         # what left five steps spinning on a finished run (measured 2026-08-09).
-        self.call_counter[0] += 1
+        # Imported here, not at module scope: `graph_agent.middleware.__init__`
+        # reaches back into `core.runner`, so a top-level import closes a cycle.
+        from graph_agent.middleware.invocation_scope import next_invocation_call_index
+
         with self._steps().llm_call(
             messages,
             llm_role=self.role,
             resolved_model=self.model_name,
-            loop_index=self.call_counter[0],
+            loop_index=next_invocation_call_index(self.call_counts),
             parent_node_id=self.parent_node_id,
             node_type=self.node_type,
             sub_run_id=self.sub_run_id,

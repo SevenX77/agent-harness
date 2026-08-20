@@ -49,3 +49,24 @@ def agent_invocation_key() -> str:
     thread_id = str(configurable.get("thread_id") or "default")
     invocation_id = str(configurable.get("agent_invocation_id") or "")
     return f"{thread_id}|{invocation_id}"
+
+
+def next_invocation_call_index(counts: dict[str, int]) -> int:
+    """The 1-based index of the LLM call starting now, within THIS invocation.
+
+    Same disease, one layer up: the chat model is built once per phase node
+    (``_resolve_phase_chat_model``) and reused for every batch item, so a plain
+    counter on it keeps climbing across items — measured on the batch fixture in
+    ``tests/core/test_agent_loop_iteration_is_per_execution.py`` as loop_index
+    1..6 for two items that each spent three calls, where the truth is 1,2,3
+    then 1,2,3 again.
+
+    Counting per LLM CALL rather than per model turn is deliberate and stays:
+    one turn can spend several calls (the same fixture shows turn 1 spending
+    two), so this number and ``AgentLoopIterationEvent.iteration`` answer
+    different questions and neither can be derived from the other.
+    """
+    key = agent_invocation_key()
+    index = counts.get(key, 0) + 1
+    counts[key] = index
+    return index

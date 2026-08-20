@@ -186,7 +186,11 @@ export function buildTraceSteps(
       status: opensAStep ? 'running' : 'done',
       start: entry,
       end: null,
-      iteration: numericIteration(event.loop_index) ?? iterationByPhase.get(phase) ?? null,
+      // The ONLY source of the turn layer is `agent_loop_iteration`, carried
+      // forward to the events that followed it. `prompt_captured.loop_index`
+      // looks like the same number and is not: it counts LLM CALLS, and one
+      // turn can spend several (engine fixture: three calls over two turns).
+      iteration: iterationByPhase.get(phase) ?? null,
       verdicts: [],
     }
     steps.push(step)

@@ -38,11 +38,11 @@ import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
-import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type EdgeRunProjection, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
 import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
-import { runningPhaseOf } from '@/utils/run-status-projection'
+import type { EdgeRunStatus } from '@/utils/edge-status-projection'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
 import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
@@ -157,6 +157,8 @@ interface GraphCanvasProps {
   errorMessageByNodeId?: Record<string, string>
   /** Per-node run segments (start / end) for the elapsed time on each card. */
   runtimeByNodeId?: Record<string, NodeRuntime>
+  /** Per-edge run-segment state, keyed by `source->target` (deriveEdgeStatuses). */
+  edgeStatusByEdgeId?: Record<string, EdgeRunStatus>
   // N5 atom #3 (dirty-downstream-graying): the resume-validity `affected_downstream`
   // node ids. Workspace derives this from the real validity response for the node
   // being resumed from; the canvas grays exactly these nodes (unrelated branches
@@ -694,6 +696,7 @@ export function GraphCanvas({
   goldenStateByNodeId,
   errorMessageByNodeId,
   runtimeByNodeId,
+  edgeStatusByEdgeId,
   dirtyDownstreamNodeIds,
   compact = false,
   hideMiniMap = false,
@@ -1471,10 +1474,17 @@ export function GraphCanvas({
     () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes)),
     [phaseNodes, rawNodes.length],
   )
-  const runningPhase = useMemo(() => runningPhaseOf(statusByNodeId ?? {}), [statusByNodeId])
+  const edgeRunProjection = useMemo<EdgeRunProjection>(
+    () => ({
+      traceEvents,
+      statusByEdgeId: edgeStatusByEdgeId ?? {},
+      selectedEdgeId: workspace?.selectedEdge?.id ?? null,
+    }),
+    [traceEvents, edgeStatusByEdgeId, workspace?.selectedEdge?.id],
+  )
   const rawEdges = useMemo(
-    () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, traceEvents, runningPhase)),
-    [phaseNodes, rawNodes.length, runningPhase, traceEvents],
+    () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, edgeRunProjection)),
+    [phaseNodes, rawNodes.length, edgeRunProjection],
   )
   const layoutCanvasHeight = layoutCanvasHeightForMode(canvasHeight, compactRatio)
   const layoutSignature = useMemo(

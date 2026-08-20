@@ -642,6 +642,43 @@ class AgentLoopIterationEvent(_EventBase):
     iteration: int  # 1-based; incremented for every before_model hook
 
 
+#: What the exit gate answered. A closed set, so a reader never meets a
+#: decision the trace has no reading for, and an unhandled branch is a type
+#: error rather than an unfamiliar string in the UI.
+AgentExitDecision = Literal[
+    "exit_success",
+    "continue_tool_work",
+    "continue_nudged",
+    "continue_open",
+]
+
+
+class AgentExitDecisionEvent(_EventBase):
+    """Why the agent loop ended a turn the way it did.
+
+    ``ExitControlMiddleware.after_agent`` is the gate that decides whether an
+    agent phase keeps going or stops, and it has exactly four answers. Three of
+    them used to exist only as ``logger.info`` lines, so the loop's most common
+    outcome — a phase ending because its submission was accepted — reached no
+    reader of the run at all.
+
+    A component that DECIDES reports every decision; a guard that only ASSERTS
+    reports only when the assertion fails. This is the first kind, which is why
+    ``exit_success`` is an event and a passing protocol check is not.
+
+    Paired with, not replacing, :class:`NudgeEvent`: the nudge carries WHAT was
+    said to the model, this carries what the gate DID about it.
+    """
+
+    event_type: Literal["agent_exit_decision"] = "agent_exit_decision"
+    phase_name: str
+    decision: AgentExitDecision
+    #: 1-based iteration the gate was standing on when it answered.
+    iteration: int
+    #: Full sentence saying what was decided and why (machinery-speaks D4).
+    message: str = ""
+
+
 class InterruptedEvent(_EventBase):
     """Fired when an agent middleware suspends execution awaiting HITL input.
 
@@ -694,6 +731,7 @@ CallbackEvent = Annotated[
     | ToolCallStartedEvent
     | ToolCallEvent
     | NudgeEvent
+    | AgentExitDecisionEvent
     | WorkingMemoryUpdateEvent
     | DeadEndPrunedEvent
     | CompactionEvent
@@ -739,6 +777,8 @@ __all__ = [
     "LLMDeltaEvent",
     "ToolCallStartedEvent",
     "ToolCallEvent",
+    "AgentExitDecision",
+    "AgentExitDecisionEvent",
     "NudgeEvent",
     "WorkingMemoryUpdateEvent",
     "DeadEndPrunedEvent",

@@ -1,6 +1,6 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
 import type { NodeActivity, NodeRuntime, SkillNodeStatus } from "@/components/GraphCanvas"
-import { ENGINE_EVENT_TYPES } from "./engine-events"
+import { isEngineEventType } from "./engine-event-types"
 import { isRootPhasePath, phasePathOf } from "./phase-path"
 
 // ————————————————————————————————————————————————————————————————————————————
@@ -138,7 +138,7 @@ function isFailureEvent(event: CallbackEvent): boolean {
   const type = event.event_type || ""
   const status = event.status
   if (status === "failed" || status === "error") return true
-  if (ENGINE_EVENT_TYPES.has(type)) return isKnownFailureEvent(event, type)
+  if (isEngineEventType(type)) return isKnownFailureEvent(event, type)
   return type.includes("error") || type.includes("fail")
 }
 

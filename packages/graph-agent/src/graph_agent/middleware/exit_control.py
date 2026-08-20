@@ -30,7 +30,11 @@ from langgraph.runtime import Runtime
 
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.emit import _safe_emit_event
-from graph_agent.callbacks.events import NudgeEvent
+from graph_agent.callbacks.events import (
+    AgentExitDecision,
+    AgentExitDecisionEvent,
+    NudgeEvent,
+)
 from graph_agent.middleware.cognitive_flow import WORKING_MEMORY_PLAN_KEY
 from graph_agent.middleware.invocation_scope import agent_invocation_key
 from graph_agent.middleware.nudge_policy import (
@@ -185,6 +189,12 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
                 "update_working_memory first"
             ),
         )
+        self._report(
+            "continue_nudged",
+            self._iterations_by_invocation.get(agent_invocation_key(), 0),
+            "The model produced text with no plan recorded, so the planning gate sent it "
+            "back with a nudge before the turn could end.",
+        )
         return {"jump_to": "model", "messages": [HumanMessage(content=decision.text)]}
 
     @hook_config(can_jump_to=["model"])
@@ -216,9 +226,13 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> dict[str, Any] | None:
         del runtime
         # 1. 检查是否有合格的 finish_task_result
+        current_iteration = self._iterations_by_invocation.get(agent_invocation_key(), 0)
+
         if self._has_valid_finish(state):
-            logger.info(
-                "[ExitControlMiddleware] Qualified finish_task marker observed. Exiting success."
+            self._report(
+                "exit_success",
+                current_iteration,
+                "The exit gate accepted a qualified finish_task submission, so the phase ends here.",
             )
             # after_agent only runs when the loop is already terminating, so
             # success needs no jump — and `{"jump_to": "end"}` here re-enters
@@ -230,8 +244,6 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         from langgraph.config import get_config
         config = get_config()
         max_iterations = config.get("configurable", {}).get("max_iterations", 20)
-
-        current_iteration = self._iterations_by_invocation.get(agent_invocation_key(), 0)
 
         if current_iteration >= max_iterations:
             self._raise_fatal_error(
@@ -256,9 +268,11 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
             # Tool activity is progress, not a nudge condition: the loop is
             # ending with unfinished tool work (e.g. a rejected validation),
             # so send it back and let the iteration budget govern.
-            logger.info(
-                "[ExitControlMiddleware] Tool calls present but no valid finish marker. "
-                "Jumping back to model."
+            self._report(
+                "continue_tool_work",
+                current_iteration,
+                "The turn ended with tool calls outstanding and no finish_task submission, "
+                "so the loop continues and the iteration budget governs.",
             )
             return {"jump_to": "model"}
 
@@ -280,6 +294,12 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
                         "business_data_md via finish_task"
                     ),
                 )
+                self._report(
+                    "continue_nudged",
+                    current_iteration,
+                    "The finish_task submission lacked a substantive self-check, so the loop "
+                    "continues with a nudge instead of ending.",
+                )
                 return {
                     "jump_to": "model",
                     "messages": [HumanMessage(content=decision.text)],
@@ -289,17 +309,18 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
 
         decision = policy.try_standard(_latest_ai_text(messages), has_tool_calls=False)
         if decision.text is not None:
-            logger.info(
-                "[ExitControlMiddleware] No tool calls and no finish_task. "
-                "Nudging model back to model node. Iteration: %d",
-                current_iteration,
-            )
             self._emit_nudge(
                 decision,
                 reason=(
                     "the model made no tool calls and did not finish; asked it "
                     "to advance via tools or submit through finish_task"
                 ),
+            )
+            self._report(
+                "continue_nudged",
+                current_iteration,
+                "The turn made no tool calls and did not submit, so the loop continues "
+                "with a nudge instead of ending.",
             )
             return {
                 "jump_to": "model",
@@ -316,10 +337,11 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         # The policy has no opinion on this end shape (no trailing AI text —
         # e.g. the loop is ending on a ToolMessage such as a finish_task
         # rejection). Keep the loop alive; the iteration budget governs.
-        logger.info(
-            "[ExitControlMiddleware] No finish marker and no nudge condition. "
-            "Jumping back to model. Iteration: %d",
+        self._report(
+            "continue_open",
             current_iteration,
+            "The turn ended on a tool reply with nothing for the nudge policy to correct, "
+            "so the loop continues and the iteration budget governs.",
         )
         return {"jump_to": "model"}
 
@@ -329,6 +351,24 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
             f"nudge budget exhausted (counts={counts}, max_nudges={self._max_nudges}) "
             f"after {current_iteration} iteration(s) without a valid finish_task "
             "marker."
+        )
+
+    def _report(self, decision: AgentExitDecision, iteration: int, message: str) -> None:
+        """Say what the gate answered, in the stream a reader of the run watches.
+
+        These four sentences existed before this method did — as ``logger.info``
+        lines, which is to say in a place no reader of a run ever looks. A
+        decision the product cannot show is not observable, however carefully it
+        is worded.
+        """
+        _safe_emit_event(
+            self._callbacks,
+            AgentExitDecisionEvent(
+                phase_name=self._phase_name,
+                decision=decision,
+                iteration=iteration,
+                message=message,
+            ),
         )
 
     def _emit_nudge(self, decision: NudgeDecision, *, reason: str) -> None:

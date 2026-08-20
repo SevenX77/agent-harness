@@ -69,11 +69,19 @@ export interface CopilotPatchProposedEvent extends CopilotEventBase {
 /** A copilot tool call held for human approval (Bash / out-of-fence read).
  * Approving lets the CLI execute the tool itself; `detail` is the Bash
  * command text or the out-of-fence path being read. */
+export type ToolApprovalDecision = 'pending' | 'approved' | 'denied'
+
 export interface CopilotToolApprovalRequiredEvent extends CopilotEventBase {
   type: 'tool_approval_required'
   toolUseId: string
   toolName: string
   detail: string
+  /**
+   * What the user decided, on the event itself — the session is written to disk
+   * as JSON, so a decision kept anywhere else does not survive the panel being
+   * collapsed, a session tab switch, or Restore chat (problem ledger CP6).
+   */
+  decision: ToolApprovalDecision
 }
 
 export interface CopilotUnknownEvent extends CopilotEventBase {
@@ -191,6 +199,10 @@ export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {
       toolUseId: typeof record.tool_use_id === 'string' ? record.tool_use_id : '',
       toolName: record.tool_name,
       detail: record.detail,
+      // This function reads the LIVE stream only; a just-arrived approval is
+      // pending by definition. Restoring a session does not come through here —
+      // the persisted CopilotEvent objects are read back as they were written.
+      decision: 'pending',
     }
   }
   if (record.type === 'done') {

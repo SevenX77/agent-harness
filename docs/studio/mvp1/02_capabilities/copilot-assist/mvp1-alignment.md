@@ -54,6 +54,26 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **决策+动机**：PM 2026-06-14 对 Copilot Write/Edit 作 MVP1 例外：这条“放过”，允许 copilot 自己读写。D12 仍约束 Studio 自有本地写入（编辑器保存、脚手架、graph serialize、test_inputs/golden/runs/artifacts、publish 打包等）走 [[native-fs]]；Copilot SDK 工具 runner 视为外部 agent runtime 的受控 workspace 操作，不再作为 D12 阻断项。**Bash 抄 Cursor**(保留 Bash 但 human-in-the-loop:Bash 命令逐条审批,只读类可配自动允许,`cat>file`/`sed -i` 这类 shell 写入也走审批,闭环不绕过)。
 - **原话**：「抄cursor」(Bash 处置) / 「Copilot Write/Edit 这条放过,在 MVP1 设计文档里也注明一下,允许 copilot 自己读写」。
 - **status**：SDK `acceptEdits` 直写 = MVP1 允许；diff 审阅 / Open Compare / 工具事件回显强化 = target，不再把 Write/Edit 直写标为 D12 违规。
+- **决策 COPILOT_ASSIST-6(用户的决议归消息记录所有,不归卡片;2026-08-20 立,问题台账 CP6)**：
+  用户在卡片上做出的决议——批准这条 Bash、接受这个补丁——是**关于那条消息的事实**,
+  所以它写在**事件对象本身**上(审批卡 `decision: pending|approved|denied`,补丁气泡
+  `review: pending|accepted|rejected`),随会话一起落盘。
+  卡片**只渲染记录里写着的东西**,自己不记任何记录里没有的状态;组件本地 state 只留
+  「这一刻正在提交」这种真·瞬态。
+  **为什么**:此前决议只活在卡片的 `useState` 里,而会话是要序列化成 JSON 写盘的——
+  于是存下去的永远是卡片刚到时的样子:仍然 pending、按钮仍然可点。面板收起再展开、
+  切会话标签、冷启后 Restore chat,**每一张已决议的卡片都复活成未决议**,再点一下就得到
+  一条红 toast。这不是渲染 bug,是**状态放错了 owner**(呼应通用工程原则「显式状态与唯一
+  owner」)。落盘时机也随之收紧:决议要**立刻**持久化,不能等消息 settle——模型正**阻塞在
+  这条审批上**,消息恰恰要等这个决议才settle得了。
+- **决策 COPILOT_ASSIST-7(挂起没了要说清是哪一种没了;2026-08-20 立,问题台账 CP6)**：
+  后端对一条不再挂起的审批,必须区分**三种**结局并各自回一句人话:①**已决议过**
+  (重复点击 / 陈旧卡片);②**超时,任务已停**;③**这个会话已经不在了**(app 或会话重启)。
+  从前三种一律回 `approval_not_found`,前端还在外面套一层「Approval expired:」——
+  把其中一种当成事实断言,而它三次里有两次是错的。
+  实现上后端**按会话记住每条已结束审批的结束原因**(参照 supervisor 记录子进程退出原因:
+  「没了」和「因为超时没了」不是同一个答案),生命周期与会话同长,`_cleanup_pending_tool_approvals`
+  清挂起时一并清掉——所以它不会无限增长,而一个已被清掉的会话里的审批号,本来就正是第③种。
 - **测试点**：Write/Edit 可在 workspace 内直接修改文件且不触发 D12 违规报警；改后 predict/run 读取最新文件；工具事件展示文件名与 diff/summary（可取到前后内容时）；Bash 审批拒绝后不执行。
 - **归属**：Write/Edit 自写归 region [[copilot]] / `copilot-assist`；Studio 自有写入仍归 platform [[native-fs]]。
 
@@ -101,6 +121,8 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 | COPILOT_ASSIST-2 | Copilot Write/Edit 自写例外 | 单元 `copilot-session-persistence`；**为什么**：MVP1 允许 SDK Write/Edit 直接读写 workspace，保留 diff/summary 审阅体验；D12 继续约束 Studio 自有写入，Bash 仍逐条审批 |
 | COPILOT_ASSIST-3 | session | 单元 `copilot-session-persistence`；**为什么**：退出再进对话一模一样、session 必须落盘不丢(D8 MUST) |
 | COPILOT_ASSIST-4 | SDK 测试 | 单元 `copilot-sdk-test-parity`；**为什么**：copilot test 必须走真实 `ClaudeSDKClient`，不能用 AsyncAnthropic 假路径 |
+| COPILOT_ASSIST-6 | 决议归消息记录所有 | 单元 `copilot-session-persistence`；**为什么**：决议存在卡片 `useState` 里,会话落盘存的却是「刚到时的样子」,重挂载即复活成未决议 |
+| COPILOT_ASSIST-7 | 挂起消失要分三种结局 | 单元 `copilot-session-persistence`；**为什么**：一个 `approval_not_found` 同时指「已决议」「超时」「会话没了」,前端还断言成 expired |
 | COPILOT_ASSIST-5 | 会话身份契约（2026-08-15 用户裁决） | 单元 `copilot-session-persistence`；**为什么**：每个前端会话标签对应一条**独立的后端 SDK 对话**，会话身份必须显式进契约——此前 New chat 只换前端视图，报文无 session 标识，后端按 skill 只存一条 SDK 对话，生成中新建标签发的消息被注入正在跑的对话（2026-08-15 实测缺陷）。目标契约：① ws 报文必带 `session_id`（前端标签的 session id，缺失即边界拒绝）；② 后端 SDK client 缓存键 = (skill, **session**, model, provider, credential, workspace)，不同标签绝不共享对话；③ 流式事件按**发起查询的会话**归属渲染，与"当前激活标签"无关，切标签不串流；④ 关闭标签经 `POST /api/skills/{skill_id}/copilot/session-close` 结束对应后端 client（每 client 一个 CLI 子进程，不关则漏资源）；⑤ ws 断连仍重置该 skill 全部会话、一条连接内查询仍串行（单活跃查询不变式不变，审批/中断继续按 skill 键） |
 
 ## 6. 测试关键点

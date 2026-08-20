@@ -1694,11 +1694,20 @@ def test_registry_model_groups_keep_third_party_anthropic_method_candidates_test
     response = client.get("/api/llm/registry")
 
     assert response.status_code == 200
-    groups = {group["canonical_id"]: group for group in response.json()["model_groups"]}
-    provider_models = {
-        option["route_id"]: option
-        for option in groups["deepseek.deepseek-v4-pro"]["provider_models"]
-    }
+    # Found by the routes it holds rather than by its id: this test is about
+    # which call methods a route offers, and hard-coding the group's id would
+    # make it fail whenever the naming rule changes — as it did when group ids
+    # stopped being elected (ledger L1).
+    groups = [
+        group
+        for group in response.json()["model_groups"]
+        if any(
+            option["route_id"] == "qiniu-anthropic:deepseek.deepseek-v4-pro"
+            for option in group["provider_models"]
+        )
+    ]
+    assert len(groups) == 1, f"the three routes are one model; got {len(groups)} groups"
+    provider_models = {option["route_id"]: option for option in groups[0]["provider_models"]}
     assert provider_models["qiniu-anthropic:deepseek.deepseek-v4-pro"][
         "candidate_call_method_ids"
     ] == ["anthropic_messages"]
@@ -1794,10 +1803,11 @@ def test_registry_merges_model_groups_by_projected_display_name(
     ]
     assert len(matching_groups) == 1
     model_group = matching_groups[0]
-    # canonical_id is derived live from provider_model_id: both "claude-opus-4-7"
-    # (official) and "anthropic/claude-opus-4-7" (proxy) normalize to the dotted
-    # "claude-opus-4.7", so the two routes share one canonical group.
-    assert model_group["canonical_id"] == "claude-opus-4.7"
+    # The group's id is the key its routes were MERGED by — the normalized
+    # projected display name — not the canonical id of whichever route would win
+    # an election. That is why it survives an endpoint appearing or disappearing
+    # (ledger L1); `test_a_model_group_id_is_not_elected.py` pins the rule.
+    assert model_group["canonical_id"] == "claude-opus-4-7"
     assert model_group["section_label"] == "anthropic"
     assert {
         option["route_id"]

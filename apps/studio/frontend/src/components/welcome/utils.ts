@@ -1,20 +1,12 @@
 import type { SkillSummary } from '../../api/types'
+import { dateAndTime } from '../../utils/wall-clock'
 
 export function formatLastRun(value: string | null) {
   if (!value) {
     return 'No runs yet'
   }
 
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(value))
-  } catch {
-    return value
-  }
+  return dateAndTime(value)
 }
 
 export function sortRecent(skills: SkillSummary[], recentSkillIds: string[]) {

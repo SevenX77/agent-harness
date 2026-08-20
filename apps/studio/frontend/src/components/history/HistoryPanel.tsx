@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { GitHistoryItem } from '../../api/types'
 import { useLocalHistory } from '../../hooks/useRunHistory'
 import { errorMessage } from '../../utils/errors'
+import { dateAndTime } from '../../utils/wall-clock'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { PanelHeader } from '../studio/panels/_shared/PanelHeader'
@@ -25,19 +26,6 @@ export interface LocalHistoryPanelViewProps {
 
 function shortSha(sha: string): string {
   return sha.slice(0, 7)
-}
-
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) {
-    return timestamp
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
 }
 
 function kindLabel(kind: GitHistoryItem['kind']): string {
@@ -127,7 +115,7 @@ export function LocalHistoryPanelView({
                       <span>{shortSha(item.sha)}</span>
                       <span>{kindLabel(item.kind)}</span>
                       <span>{item.author}</span>
-                      <span>{formatTimestamp(item.timestamp)}</span>
+                      <span>{dateAndTime(item.timestamp)}</span>
                     </span>
                   </span>
                 </Button>

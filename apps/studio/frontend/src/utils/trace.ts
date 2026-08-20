@@ -1,4 +1,5 @@
 import type { CallbackEvent, JsonObject, JsonValue, MockedSource } from '../api/types'
+import { timeOfDay } from './wall-clock'
 
 export function jsonText(value: JsonValue | undefined): string {
   if (value === undefined) {
@@ -11,14 +12,15 @@ export function jsonText(value: JsonValue | undefined): string {
  * Wall-clock time of one trace event, local HH:MM:SS. A timeline without time
  * is only an ordering (design analogy: LangSmith 式竖向时间轴), so every row
  * carries its moment; null when the event has no parseable timestamp.
+ *
+ * The reading itself belongs to `wall-clock.ts`, which owns how this product
+ * turns a stored instant into something a person reads; what is trace-specific
+ * is only knowing where an event keeps its timestamp.
  */
 export function eventTimeLabel(event: CallbackEvent): string | null {
   const raw = (event as { timestamp?: unknown }).timestamp
   if (typeof raw !== 'string') return null
-  const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) return null
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  return timeOfDay(raw)
 }
 
 /**

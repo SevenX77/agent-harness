@@ -56,7 +56,7 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 | # | 模块问题 | 层 | 状态 | 出处(用户原话日期) | 验收判据 |
 |---|---|---|---|---|---|
 | E1 | edge 是"上一 phase end→下一 phase start 之间的过程",引擎必须发 edge 分段事件,trace 中 edge 与 node 平级作为运行分段 | 引擎✅→前端⏳ | 🧩 **引擎侧已完成**:`callbacks/events.py:380-419` 定义 `EdgeStartEvent`/`EdgeEndEvent`(带 `edge_transition_id`/`from_phases`/`to_phase`/`changed_keys`/`blackboard_snapshot`/`operation_count`),`core/edge_transition.py:118-155` 真发。**缺口 100% 在前端**,见 T6 三条 | 08-16"edge指的是一个node到下一个中间的过程…把engine该补的补齐";08-14④;08-19 Q1/Q4 | 跑一次 run,trace 里能看到 edge 分段 |
-| E2 | subgraph_path 已随事件上线(#867)但前端零消费 | 前端 | ⏳ | 08-19 Q2 | 见 1.1.3 |
+| E2 | subgraph_path 已随事件上线(#867)但前端零消费 | 前端 | 🔎 **本 PR 已合**:`phasePathOf` 把 `subgraph_path` + `phase_name` 接成一个键,三条投影全部改用它 | 08-19 Q2 | 见 1.1.3 |
 | E3 | prompt_captured 不携带模板原文,只有来源名——"SKILL.md 里写的是什么"无法展示 | 引擎→前端(+vendor 重建) | ⏳ 已坐实:`callbacks/events.py:268-279` 字段面只有 `template_source`(来源"名"),且 `model_config = ConfigDict(extra="forbid")`(:35)——**不改 SDK 前端做不出这三段** | 08-19"SKILL.md里写的是什么,模板写的是什么" | trace 步骤里能看到模板原文 |
 | E4 | agent 节点内部步骤(中间件/md2json/validator 查了什么/protocol 检查)无 print 级语义事件——"只给结果不给过程" | 引擎→前端 | 🧩 已坐实:`utils/trace.ts:600-607` 的 `machineryNarration` 只读 `details`/`errors`/`violations`,而**整个 events.py 里带这三者的只有 2 个类**(`FinishTaskVerdictEvent`、`ProtocolViolationEvent`)。其余 20+ 类事件(`loop_detected`/`tool_error_handled`/`runtime_input_injected`/`nudge`/`working_memory_update`/`compaction`/`blackboard_reduce`/`input_dispatch`/`edge_*`/`phase_*`/`run_*`/`parallel_map_group_*`…)一律落 raw JSON | 08-14②"tracing对用户的目的是去黑箱";08-19 Q9(说过不止两次) | 展开任一步骤能读到它每一步做了什么,无原始 JSON 兜底 |
 | E5 | DeadEndPrunedEvent 等旁路事件要合入正规回调链 | 引擎 | 🔎 | 08-16 | 事件在 trace 正常出现 |
@@ -69,7 +69,7 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 **1.1.1 node**
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| N1 | 状态只有小胶囊换字,整卡无状态表达;裁决呈现方式:状态灯闪烁+状态标签(idle/running/success/failed)+边框虚线流动+有空间加运行时间,找成熟参考 | 前端 | 🔧 **PR #875 已发**:状态灯(复用 Settings 路由灯)+ 标签(Idle/Running/Success/Failed)+ running 卡片虚线流动边框(图案与 edge 流动线同源)+ 运行时间(`deriveNodeRuntimes` 投影,running 逐秒推进、终态冻结);设计源 canvas F3 ② 同 PR 改写 | 08-19 Q3 | 扫一眼画布即知进度 |
+| N1 | 状态只有小胶囊换字,整卡无状态表达;裁决呈现方式:状态灯闪烁+状态标签(idle/running/success/failed)+边框虚线流动+有空间加运行时间,找成熟参考 | 前端 | 🔎 **#875 已合**:状态灯(复用 Settings 路由灯)+ 标签(Idle/Running/Success/Failed)+ running 卡片虚线流动边框(图案与 edge 流动线同源)+ 运行时间(`deriveNodeRuntimes` 投影,running 逐秒推进、终态冻结);设计源 canvas F3 ② 同 PR 改写 | 08-19 Q3 | 扫一眼画布即知进度 |
 | N2 | running 节点不显示"正在干什么"(第几次调用/工具/已耗时) | 前端(事实源已有) | 🧩 #875 已给"已耗时";"第几次调用/当前工具"仍缺 | 08-19 视觉裁决 | running 卡上有活动说明 |
 | N3 | run 结束动画/running 态残留不清("老生常谈"×3);要求组件建立"状态↔显示效果对照表" | 前端 | 🔎 对照表已存在且有测试:`utils/run-status-projection.ts:38-45` `NODE_STATUS_AT_RUN_END`,`:188-193` 用 run verdict 无条件关掉所有 running。残留风险见 P1(两条终态通道都没送达时仍永久 running) | 08-04②;08-09⑤;08-14⑥ | run 结束 10s 后画布无任何运动元素 |
 | N4 | 完成节点留痕(耗时/调用次数),run 后画布=结果地图 | 前端 | 🗳 耗时已由 #875 落地;"调用次数"待裁 | 08-19 讨论中方案 D | — |
@@ -77,21 +77,21 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 **1.1.2 edge**
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| G1 | edge 无任何运行状态;"哪一部分运行哪一部分呈现 running"必须覆盖 edge | 前端(E1 引擎侧已就绪) | ⏳ | 08-19 Q1 | 数据流过哪条边哪条边动 |
-| G2 | edge 选中要点得中、有高亮 | 前端 | ⏳ | 08-19 Q4-1 | 点边即高亮 |
-| G3 | 运行中连线虚线流动动画(含 subgraph 连接线) | 前端 | ⏳ 素材已在(`index.css` `.animated-flow-line` + `@keyframes context-edge-flow`),缺的是"由 edge 运行事件驱动它" | 08-19 Q3-2/5 | — |
+| G1 | edge 无任何运行状态;"哪一部分运行哪一部分呈现 running"必须覆盖 edge | 前端(E1 引擎侧已就绪) | 🔎 **#879 已合**:`utils/edge-status-projection.ts` 从 `edge_start`/`edge_end` 派生 idle/running/done/failed/paused,取代 `flowing = (target === runningPhase)` 的倒推;run 终态按与节点同一张对照表关闭 | 08-19 Q1 | 数据流过哪条边哪条边动 |
+| G2 | edge 选中要点得中、有高亮 | 前端 | 🔎 **#879 已合**:整条线加 20px 透明命中路径(`EDGE_INTERACTION_WIDTH`),选中出加粗环 | 08-19 Q4-1 | 点边即高亮 |
+| G3 | 运行中连线虚线流动动画(含 subgraph 连接线) | 前端 | 🔎 **#879 + 本 PR 已合**:数据边由 edge 运行态驱动 `.animated-flow-line`;subgraph 连接线由容器 running 驱动(`isContainerRunning`) | 08-19 Q3-2/5 | — |
 
 **1.1.3 subgraph**
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| S1 | 运行状态不递归:展开容器内子节点恒 Idle(状态表按裸 phase 名记账,子图内没人喂) | 前端(E2 就绪) | ⏳ | 08-19 Q2×2 天 | 子图内正在跑的节点亮 |
-| S2 | running 时自动展开,跑完收起,手动操作优先 | 前端 | ⏳ | 08-19"running的时候subgraph要打开" | — |
-| S3 | 折叠态容器显示进度(3/7 完成)+ 容器框呼吸/边框流动 | 前端 | ⏳ | 08-19 Q2/Q3-6 | — |
+| S1 | 运行状态不递归:展开容器内子节点恒 Idle(状态表按裸 phase 名记账,子图内没人喂) | 前端(E2 就绪) | 🔎 **本 PR 已合**:投影改按 phase path 记账(`utils/phase-path.ts`),`subgraph-expansion.ts` 不再给子节点硬塞空投影;根层键逐字不变 | 08-19 Q2×2 天 | 子图内正在跑的节点亮 |
+| S2 | running 时自动展开,跑完收起,手动操作优先 | 前端 | 🔎 **本 PR 已合**:`containerAutoAction` 按状态**跃迁**驱动;失败的容器保持展开(参考 GitHub Actions 日志分组);本次 run 内手动开合过即接管 | 08-19"running的时候subgraph要打开" | — |
+| S3 | 折叠态容器显示进度(3/7 完成)+ 容器框呼吸/边框流动 | 前端 | 🔎 **本 PR 已合**:容器 chip 常驻 `3/7`(子拓扑未加载时只报 `3 done`,不编分母);容器框走与节点卡片、运行边同一套行进虚线(`.studio-running-dash-frame`),未选"呼吸"是为了三个尺度只有一套运行语汇 | 08-19 Q2/Q3-6 | — |
 
 **1.1.4 input/output 端点**
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| IO1 | INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一(重复:"我也说过,也不做") | 前端 | ⏳ 根 edge 的判定分裂已坐实:`utils/trace-scope.ts:59-63` **已**特判根边(`INPUT_NODE_IDS.has(source) → from.length === 0`),而 `lib/edge-context.ts:27-30` 的 `upstreamIncludes` **没有**——同一件事两套逻辑、一套对一套错,这正是 T6 缺陷① | 08-14⑦;08-19 Q7 | 同一状态系统驱动全部节点 |
+| IO1 | INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一(重复:"我也说过,也不做") | 前端 | 🧩 **状态一半已合**:#878 把根边判定收敛成一处(`utils/edge-identity.ts`,两套逻辑删净),#879 让 IO 边界边与普通边走同一套 edge 运行态与命中区。**仍缺**:INPUT/OUTPUT 两个端点节点自身没有状态灯/标签/运行态(它们不是 phase,不进 phase 投影)——这才是 IO1 的剩余部分 | 08-14⑦;08-19 Q7 | 同一状态系统驱动全部节点 |
 
 ## 1.2 trace 面板
 
@@ -102,7 +102,7 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 | T3 | iteration 区分:机制在(Iteration N 分隔条),部分 phase 事件无轮次标记导致不显示 | 引擎→前端 | 🧩 **只有 `PromptCapturedEvent` 带 `loop_index`**;`ToolCallStarted`/`ToolCall`/`nudge`/`loop_detected`/`protocol_violation`/`tool_error_handled`/`runtime_input_injected`/`working_memory_update`/`compaction` 全无。它们靠 `trace-steps.ts:189` 的 `iterationByPhase` 兜底,而 `:122-130` 在 `phase_start` 时 `iterationByPhase.delete(phase)` 清零 → **排在首条 `agent_loop_iteration` 之前的事件 iteration 恒 null**,渲染成不缩进的平铺行夹在分隔条之间。另:`opensIteration`(`TraceEventList.tsx:216-218`)只开层不闭层 | 08-19 Q11 | 全部循环 phase 有分隔 |
 | T4 | 非 LLM 步骤展开=原始 JSON 兜底,"只有结果没有过程"(重复≥2 次) | 依赖 E4→前端 | 🧩 兜底链坐标 `TraceStepRow.tsx:202-219`,`GenericPayload`(:517-523)= 整个事件 `JSON.stringify`。缺口清单见 E4。附带要求:`GenericPayload` 应改成**显式的 unknown-event 告警**,否则新事件会继续悄悄退化 | 08-14②;08-19 Q9 | 无 GenericPayload 兜底可见 |
 | T5 | 长文本:"View full text"按裁决应打开常规编辑器而非自造 modal | 前端 | 🔎 **已实现**:`components/trace/TraceText.tsx:12-21,44-58` → `Workspace.handleFileOpen`(:1083-1096)→ 工作区编辑器,打开的是只读虚拟文档 `trace/<slug>.json`;测试 `TraceText.test.tsx:84-91` 同时断言 payload 与"无 `[role=dialog]`"。**两个会让用户以为没做的触发条件**:①按钮只在文本溢出时出现(`ui/text-well.tsx:27-34` 用 `scrollHeight>clientHeight` 量,被折叠父容器隐藏时两值都是 0);②无 workspace context 时按钮不渲染 | 08-14③→08-15 修订三条 | 点开=编辑器 |
-| T6 | edge dot 面板:run 成功后仍显示静态推断+"Run the skill to see real dispatched values" | 前端(E1 引擎侧已就绪) | ⏳ **三处缺陷已定位,全在前端**:①`lib/edge-context.ts:27-30,52` 的 `upstreamIncludes` 要求 `from_phases.includes(fromPhase)`,而首个 phase 的 `from_phases` 是 `[]` → 根边恒不匹配 → 回落静态推断(与 `trace-scope.ts:59-63` 的正确写法分裂,见 IO1);②`Workspace.tsx:2255` 给画布喂的是 `runStream.events`,而 trace 面板读 `viewedTraceEvents`(:738)——**回看历史 run 时画布 dot 永远拿不到真实值**;③`utils/trace-scope.ts:27` 的 `EDGE_OP_TYPES` 不含 `edge_start`/`edge_end`,选中一条 edge 后**它自己的分段步骤被范围过滤掉了** | 08-14④;08-19 Q4-2+截图 | 跑完点 dot 见真实值与操作 |
+| T6 | edge dot 面板:run 成功后仍显示静态推断+"Run the skill to see real dispatched values" | 前端(E1 引擎侧已就绪) | 🔎 **#878 已合,三处全修**:①`lib/edge-context.ts:27-30,52` 的 `upstreamIncludes` 要求 `from_phases.includes(fromPhase)`,而首个 phase 的 `from_phases` 是 `[]` → 根边恒不匹配 → 回落静态推断(与 `trace-scope.ts:59-63` 的正确写法分裂,见 IO1);②`Workspace.tsx:2255` 给画布喂的是 `runStream.events`,而 trace 面板读 `viewedTraceEvents`(:738)——**回看历史 run 时画布 dot 永远拿不到真实值**;③`utils/trace-scope.ts:27` 的 `EDGE_OP_TYPES` 不含 `edge_start`/`edge_end`,选中一条 edge 后**它自己的分段步骤被范围过滤掉了**。①→`edge-identity.ts` 一处判定(空 `from_phases` = 根迁移);②→`Workspace.tsx` 的 `viewedRun` 三元组,画布与 trace 面板同源;③→`EDGE_SEGMENT_EVENT_TYPES` 收编两个分段事件 | 08-14④;08-19 Q4-2+截图 | 跑完点 dot 见真实值与操作 |
 | T7a | 结局卡(Run succeeded)在任何 node/edge 范围收窄下都渲染,与时间线脱节 | 设计源→前端 | ⏳ **必须先改设计源**:`docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md:54-55` 现在明文写着相反的裁决(「run 级派生…**不受范围影响**」),与用户 08-19 Q5 冲突。按 SOP Phase 2 先改设计源再改代码,同一 PR。代码坐标:`TracePanel.tsx:337` 传的是全量 `traceEvents` 而非 `scopedEvents`,`TraceEventList.tsx:259` 无条件渲染。连带决定 `degradedRouteCount` chip(`TracePanel.tsx:327`)是否同样收窄 | 08-19 Q5 | 收窄范围时不出现 |
 | T7b | Open run report 用系统默认程序打开,裁决=app 内编辑器/阅读器(重复≥2 次) | 前端 | ⏳ 坐标 `components/trace/TraceOutcomeRow.tsx:52` `openLocalPath` → `lib/tauri.ts:85` `invoke('open_path')` → OS 默认程序。正解就在同一面板里(T5 的 `onFileOpen`)。**同病漏网**:`panels/TimelinePanel.tsx:127` 也是 `openLocalPath`,一并修 | 08-19 Q6 | 点开=app 内打开 |
 | T8 | search:多轮返工仍不符("直接用 shadcn 模板组件不要改";"说了不知道多少次") | 前端 | 🧩 **组件壳子没跑偏**:`TraceSearchBar.tsx:26-31` 100% 用本地 shadcn `ui/input-group`,零样式覆写。用户不满的是**行为**。已列出 11 条行为限制(零事件时搜索框整个不挂载 / 筛选行只在聚焦时可见 / "n filters on" 计数在聚焦时被隐藏 / 匹配面是整个事件 `JSON.stringify` / 纯子串无正则无字段限定 / 无高亮无命中计数无跳转 / 过滤事件而非步骤导致步骤被拆成孤立完成态 / 无防抖 / route-issues chip 与搜索框共用 searchTerm 会覆盖用户输入 / 搜到 0 条时结局卡仍在 / 图标尺寸被测试禁止覆写)——**需与用户逐条对账后一次修对,不再猜** | 08-08④;08-09⑩;08-19 Q8 | 用户点头 |

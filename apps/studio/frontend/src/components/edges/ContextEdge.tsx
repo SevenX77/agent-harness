@@ -22,6 +22,13 @@ export interface ContextEdgeData extends Record<string, unknown> {
   runStatus?: EdgeRunStatus
   /** This edge is the one whose scope the trace panel is showing. */
   isSelected?: boolean
+  /**
+   * SUBGRAPH BRIDGE edges only: the container this bridge hangs off is running
+   * (canvas F7 ⑤). Not an `EdgeRunStatus` — the bridge carries no data and is
+   * not a transition, it is the umbilical drawn between a container chip and
+   * its child board, so it marches while the CONTAINER does.
+   */
+  isContainerRunning?: boolean
   contextJson?: unknown
   sourcePhaseId: string
   targetPhaseId: string

@@ -377,7 +377,11 @@ function inlineChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edg
   }
 }
 
-function visualBridgeEdge(parentNodeId: string, groupId: string): Edge<ContextEdgeData> {
+function visualBridgeEdge(
+  parentNodeId: string,
+  groupId: string,
+  containerRunning: boolean,
+): Edge<ContextEdgeData> {
   return {
     id: bridgeEdgeId(parentNodeId),
     source: parentNodeId,
@@ -392,6 +396,7 @@ function visualBridgeEdge(parentNodeId: string, groupId: string): Edge<ContextEd
     zIndex: PREVIEW_EDGE_Z_INDEX,
     data: {
       hasTraceData: false,
+      isContainerRunning: containerRunning,
       sourcePhaseId: parentNodeId,
       targetPhaseId: groupId,
       showContextControl: false,
@@ -549,7 +554,7 @@ export function buildSubgraphExpansion(
       )
       const group = groupNode(request, parent, left, top, width, height, status, options, childName, message)
       nodes.push(group)
-      edges.push(visualBridgeEdge(request.parentNodeId, group.id))
+      edges.push(visualBridgeEdge(request.parentNodeId, group.id, group.data.runStatus === 'running'))
       continue
     }
 
@@ -580,7 +585,7 @@ export function buildSubgraphExpansion(
       )
       const group = groupNode(request, parent, left, top, width, height, status, options, childName, message)
       nodes.push(group)
-      edges.push(visualBridgeEdge(request.parentNodeId, group.id))
+      edges.push(visualBridgeEdge(request.parentNodeId, group.id, group.data.runStatus === 'running'))
       continue
     }
 
@@ -596,7 +601,7 @@ export function buildSubgraphExpansion(
     )
     const group = groupNode(request, parent, groupLeft, groupTop, width, height, status, options, childName, message)
     nodes.push(group)
-    edges.push(visualBridgeEdge(request.parentNodeId, group.id))
+    edges.push(visualBridgeEdge(request.parentNodeId, group.id, group.data.runStatus === 'running'))
     nodes.push(...child.nodes.map((node) => inlineChildNode(request, group.id, node, options)))
     edges.push(...child.edges.map((edge) => inlineChildEdge(request.parentNodeId, edge)))
   }

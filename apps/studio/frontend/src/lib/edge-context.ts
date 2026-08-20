@@ -1,6 +1,6 @@
 import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { EdgeContextJson } from '@/components/studio/WorkspaceContext'
-import { eventCrossesEdge } from '@/utils/edge-identity'
+import { eventCrossesEdge, GLOBAL_OUTPUT_NODE_ID } from '@/utils/edge-identity'
 
 type TraceEventInput = CallbackEvent | EventEnvelope
 
@@ -10,6 +10,65 @@ function callbackPayload(event: TraceEventInput): CallbackEvent {
     return maybeEnvelope.payload as CallbackEvent
   }
   return event as CallbackEvent
+}
+
+function plainObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+/**
+ * What the run handed out at the canvas Output boundary.
+ *
+ * That boundary is a canvas pseudo-node — no engine transition runs into it and
+ * no event names it — so the only producer of "what did this run give back" is
+ * the run itself, reporting once at `run_ended`. Reading that report is why the
+ * dot can show real values here; making the engine emit a second event carrying
+ * the same values would be one fact with two publishers, the defect this
+ * module's own header describes (ledger E14).
+ *
+ * The slice shown is the OUTPUT PHASE's outputs, not the whole final blackboard:
+ * every other dot shows what was dispatched INTO its downstream node, and what
+ * goes into the output boundary is exactly the phase outputs the root
+ * `io.outputs` declares.
+ */
+function runOutputContext(
+  events: TraceEventInput[],
+  fromPhase: string,
+  toPhase: string,
+): EdgeContextJson | null {
+  let produced: Record<string, unknown> | null = null
+  let runId: unknown
+  for (const traceEvent of events) {
+    const event = callbackPayload(traceEvent)
+    if (event.event_type !== 'run_ended') {
+      continue
+    }
+    const phaseOutputs = plainObject(plainObject(event.final_context)?.phase_outputs)
+    const slice = plainObject(phaseOutputs?.[fromPhase])
+    if (slice) {
+      produced = slice
+      runId = event.run_id
+    }
+  }
+
+  // Nothing produced by this phase — mid-run, or a run that ended before
+  // reaching it. The caller falls back to the static inference, which is honest
+  // about being a pre-run expectation.
+  if (!produced) {
+    return null
+  }
+
+  return {
+    inputs: produced,
+    from_phase: fromPhase,
+    to_phase: toPhase,
+    changed_keys: Object.keys(produced),
+    branch_index: null,
+    blackboard_snapshot: produced,
+    run_id: runId,
+  }
 }
 
 /**
@@ -30,6 +89,14 @@ export function edgeContextFromEvents(
   fromPhase: string,
   toPhase: string,
 ): EdgeContextJson | null {
+  // Branch on the topology, not on "did the scan find anything": a skill may
+  // declare a literal phase named `output`, and the edge INTO that phase is an
+  // ordinary transition with ordinary dispatch events. Only the canvas
+  // pseudo-node has no events of its own.
+  if (toPhase === GLOBAL_OUTPUT_NODE_ID) {
+    return runOutputContext(events, fromPhase, toPhase)
+  }
+
   let match: CallbackEvent | null = null
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)

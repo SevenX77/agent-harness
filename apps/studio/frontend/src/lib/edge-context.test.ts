@@ -23,6 +23,18 @@ function dispatchEvent(
   } as CallbackEvent
 }
 
+function runEndedEvent(phaseOutputs: Record<string, Record<string, unknown>>): CallbackEvent {
+  return {
+    schema_version: '1.0',
+    event_type: 'run_ended',
+    timestamp: '2026-06-14T00:00:10Z',
+    run_id: 'run-1',
+    status: 'completed',
+    final_context: { inputs: {}, phase_outputs: phaseOutputs, scratch: {} },
+    wall_time_seconds: 10,
+  } as CallbackEvent
+}
+
 describe('edgeContextFromEvents', () => {
   it('maps a matching dispatch event into the panel render shape', () => {
     const snapshot = { query: 'build a router', max_iterations: 5 }
@@ -133,6 +145,72 @@ describe('edgeContextFromEvents', () => {
 
     expect(edgeContextFromEvents(events, 'planner', 'reviewer')).toBeNull()
     expect(edgeContextFromEvents([], 'planner', 'executor')).toBeNull()
+  })
+
+  it('shows what the run handed out on the edge into the Output boundary', () => {
+    // `__global_output__` is a canvas node, not a graph node: it appears zero
+    // times in the engine, the gateway and the studio backend (buildEdges.ts
+    // mints it). So no transition ever runs into it and no `input_dispatch`
+    // ever names it — the run's own report of what it produced is
+    // `run_ended.final_context.phase_outputs[<the output phase>]`, and reading
+    // that is what makes this dot show the run instead of a static guess
+    // (ledger E14). Emitting a second event carrying the same values would be
+    // the same "two answers to one question" defect as OB11/OB12.
+    const framework = { acts: 3, title: 'a story' }
+    const result = edgeContextFromEvents(
+      [
+        dispatchEvent('story_analysis', 'global_synthesis', { batch_outputs: [] }),
+        runEndedEvent({
+          story_analysis: { batch_outputs: [] },
+          global_synthesis: { story_framework: framework },
+        }),
+      ],
+      'global_synthesis',
+      '__global_output__',
+    )
+
+    expect(result?.inputs).toEqual({ story_framework: framework })
+    expect(result?.blackboard_snapshot).toEqual({ story_framework: framework })
+    expect(result?.from_phase).toBe('global_synthesis')
+    expect(result?.to_phase).toBe('__global_output__')
+    expect(result?.changed_keys).toEqual(['story_framework'])
+  })
+
+  it('leaves the Output edge to the static inference until the run reports an end', () => {
+    // Mid-run there is nothing produced yet, and a premature "this is what the
+    // run handed out" is worse than the honest pre-run inference.
+    expect(edgeContextFromEvents(
+      [dispatchEvent('story_analysis', 'global_synthesis', { batch_outputs: [] })],
+      'global_synthesis',
+      '__global_output__',
+    )).toBeNull()
+  })
+
+  it('does not hand one phase’s outputs to another phase’s Output edge', () => {
+    // A run can end without the output phase having produced anything; showing
+    // the previous phase's outputs there would name the wrong producer.
+    expect(edgeContextFromEvents(
+      [runEndedEvent({ story_analysis: { batch_outputs: [] } })],
+      'global_synthesis',
+      '__global_output__',
+    )).toBeNull()
+  })
+
+  it('leaves an edge into a literal `output` phase on the dispatch path', () => {
+    // `output` is also an id the boundary helpers accept, because a skill may
+    // declare a phase by that name — but such a phase is a real graph node with
+    // real transitions, so its dot must keep reading its own dispatch.
+    const dispatched = { draft: 'text to publish' }
+    const result = edgeContextFromEvents(
+      [
+        dispatchEvent('writer', 'output', dispatched),
+        runEndedEvent({ writer: { draft: 'text to publish' }, output: { published: true } }),
+      ],
+      'writer',
+      'output',
+    )
+
+    expect(result?.inputs).toEqual(dispatched)
   })
 
   it('ignores non-dispatch events with matching phases', () => {

@@ -15,12 +15,22 @@ import type { CallbackEvent } from '../api/types'
 // ————————————————————————————————————————————————————————————————————————————
 
 /**
- * The canvas ids of the boundary pseudo-nodes. Both aliases are live:
- * `buildEdges.ts` mints the `__global_*__` ids, and a skill may name a literal
- * `input` / `output` phase that the engine reports by that name.
+ * The two pseudo-nodes the CANVAS mints to show where a run's data enters and
+ * leaves the graph. Neither exists in the engine, the gateway or the studio
+ * backend — grep either id there and you get nothing — so no runtime event can
+ * ever name them. Anything a reader wants to know about them has to come from
+ * the run's own report, not from an event addressed to them.
  */
-const INPUT_NODE_IDS: ReadonlySet<string> = new Set(['__global_input__', 'input'])
-const OUTPUT_NODE_IDS: ReadonlySet<string> = new Set(['__global_output__', 'output'])
+export const GLOBAL_INPUT_NODE_ID = '__global_input__'
+export const GLOBAL_OUTPUT_NODE_ID = '__global_output__'
+
+/**
+ * The canvas ids of the boundary pseudo-nodes. Both aliases are live: the
+ * pseudo-node ids above, and a literal `input` / `output` phase that a skill
+ * may declare and the engine then reports by that name.
+ */
+const INPUT_NODE_IDS: ReadonlySet<string> = new Set([GLOBAL_INPUT_NODE_ID, 'input'])
+const OUTPUT_NODE_IDS: ReadonlySet<string> = new Set([GLOBAL_OUTPUT_NODE_ID, 'output'])
 
 export function isInputBoundaryId(id: string): boolean {
   return INPUT_NODE_IDS.has(id)

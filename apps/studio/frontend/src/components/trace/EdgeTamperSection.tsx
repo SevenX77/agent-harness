@@ -2,9 +2,11 @@ import { useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import type { ResumeRunOptions } from "@/api/client"
 import { isStaticEdgeInference, type StaticEdgeField } from "@/lib/edge-static-inference"
+import { GLOBAL_OUTPUT_NODE_ID } from "@/utils/edge-identity"
 import type { SelectedEdge } from "../studio/WorkspaceContext"
 import { edgeTamperResumeOptionsFromJson } from "../studio/panels/edge-tamper"
 import { EdgeTamperEditor } from "../studio/panels/EdgeTamperEditor"
+import { TraceText } from "./TraceText"
 
 /**
  * The edge-scope OPERATOR section (decision 2026-08-13 D5): what remains of
@@ -80,6 +82,9 @@ export function EdgeTamperSection({
   if (staticInference) {
     return <StaticInferenceBody fields={staticInference.fields} target={selectedEdge.target} />
   }
+  if (selectedEdge.target === GLOBAL_OUTPUT_NODE_ID && blackboard) {
+    return <RunOutputBody produced={blackboard} producedBy={selectedEdge.source} />
+  }
   if (selectedEdge.contextJson == null) {
     return (
       <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
@@ -118,6 +123,36 @@ export function EdgeTamperSection({
           {tamperError}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * The Output boundary's body: what this run handed back, and no operator.
+ *
+ * The boundary is a canvas pseudo-node — nothing runs after it — so "tamper the
+ * context and resume downstream" has no downstream to aim at; the request would
+ * carry a `resumeFromNodeId` the engine has never heard of. The reader is owed
+ * the produced values instead, which the run states once at `run_ended` and
+ * `edge-context` reads from there (ledger E14).
+ */
+function RunOutputBody({
+  produced,
+  producedBy,
+}: {
+  produced: Record<string, unknown>
+  producedBy: string
+}) {
+  return (
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Run output
+      </div>
+      <div className="mb-3 text-xs text-muted-foreground">
+        What <span className="font-mono text-foreground">{producedBy}</span> produced, as this run
+        reported it at the end. Nothing runs past this boundary, so there is nothing to resume.
+      </div>
+      <TraceText text={JSON.stringify(produced, null, 2)} label="Run output" language="json" />
     </div>
   )
 }

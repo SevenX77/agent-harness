@@ -144,12 +144,32 @@ describe('iteration layering (decision 2026-08-13 D1)', () => {
     expect(steps[1].iteration).toBe(2)
   })
 
-  it('prompt_captured.loop_index is an equally valid source of the layer', () => {
+  it('does NOT read loop_index as the layer — it counts calls, not turns', () => {
+    // One ReAct turn can spend several LLM calls: a rejected finish_task is
+    // retried without a new `before_model`, so the engine's own batch fixture
+    // spends three calls over two turns (engine
+    // tests/core/test_agent_loop_iteration_is_per_execution.py). Reading the
+    // call number as the turn number put a prompt under a divider that had not
+    // opened yet.
+    const steps = buildTraceSteps(indexed([
+      { event_type: 'agent_loop_iteration', phase_name: 'work', iteration: 1 },
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1', loop_index: 1 },
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's2', loop_index: 2 },
+      { event_type: 'agent_loop_iteration', phase_name: 'work', iteration: 2 },
+      { event_type: 'prompt_captured', phase_name: 'work', step_id: 's3', loop_index: 3 },
+    ]))
+
+    // Three calls become three steps (the turn markers are dividers, not
+    // steps): the first two both belong to turn 1, only the third to turn 2.
+    expect(steps.map((step) => step.iteration)).toEqual([1, 1, 2])
+  })
+
+  it('leaves an LLM call before any turn marker flat rather than guessing', () => {
     const steps = buildTraceSteps(indexed([
       { event_type: 'prompt_captured', phase_name: 'work', step_id: 's1', loop_index: 3 },
     ]))
 
-    expect(steps[0].iteration).toBe(3)
+    expect(steps[0].iteration).toBeNull()
   })
 
   it('a phase without loop markers stays flat (iteration null)', () => {

@@ -34,7 +34,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from graph_agent.callbacks.events import AgentLoopIterationEvent, CallbackEvent
+from graph_agent.callbacks.events import AgentLoopIterationEvent, CallbackEvent, PromptCapturedEvent
 from graph_agent.core.llm_provider import LLMProviderChunk, LLMProviderRequest
 from graph_agent.core.runner import run_skill
 
@@ -187,3 +187,46 @@ def test_each_batch_item_counts_its_own_model_turns(tmp_path: Path) -> None:
         "first model turn is reported as a continuation of the first execution "
         f"instead of as turn 1 of its own. iteration numbers seen: {numbers}"
     )
+
+
+def _loop_index_numbers(tmp_path: Path) -> list[int]:
+    seen: list[int] = []
+
+    def collect(event: CallbackEvent) -> None:
+        if isinstance(event, PromptCapturedEvent) and event.phase_name == "work":
+            seen.append(event.loop_index)
+
+    run_skill(
+        _fixture_skill(tmp_path),
+        workspace_dir=tmp_path / "ws",
+        unattended=True,
+        llm_provider=_TwoTurnProvider(),
+        event_subscriber=collect,
+        items=[ITEM_1, ITEM_2],
+    )
+    return seen
+
+
+def test_each_batch_item_counts_its_own_llm_calls(tmp_path: Path) -> None:
+    """`loop_index` is the disease `iteration` was cured of, one layer up.
+
+    `LLMProviderChatModel` kept a plain per-instance counter, and the chat
+    model — like the middleware chain — is built ONCE per phase node at assembly
+    time (`_resolve_phase_chat_model`). So it climbed across batch items exactly
+    the way `ExecutionControlMiddleware._iteration` used to (measured on this
+    fixture: 1..6 for two items that spend three calls each), while
+    `AgentLoopIterationEvent.iteration` had already been fixed to restart.
+
+    Note what this does NOT claim: that the two numbers should be equal. This
+    fixture spends THREE calls over TWO turns per item — a rejected submission
+    is retried without a new `before_model` — so "which call" and "which turn"
+    are different questions. Only the SCOPE was wrong.
+    """
+    numbers = _loop_index_numbers(tmp_path)
+
+    half = len(numbers) // 2
+    assert numbers[:half] == numbers[half:], (
+        "each batch item counts its own LLM calls, so the two items report the "
+        "same sequence starting at 1. Seen: " + str(numbers)
+    )
+    assert numbers[0] == 1, f"an item's first call is call 1; got {numbers}"

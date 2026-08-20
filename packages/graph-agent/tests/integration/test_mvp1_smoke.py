@@ -192,7 +192,6 @@ def _build_metrics_text(
         lines.append(f"data_keys={sorted(data_dump.keys())}")
         lines.append(f"current_phase={flow.current_phase}")
         lines.append(f"io_errors={list(flow.io_errors)}")
-        lines.append(f"metrics={dict(flow.metrics)}")
     if error_text:
         lines.append("error=<see error.txt>")
     return "\n".join(lines) + "\n"
@@ -291,10 +290,11 @@ def synthetic_post_run_state() -> WorkflowState:
     BusinessData carries a populated ``segments`` business field plus the
     bookkeeping fields the v3 SKILL preserves (``chapter_number``,
     ``chapter_content``). FrameworkState carries a typical
-    ``finish_task_result`` payload, a non-empty ``messages`` list, and
-    the metrics dict the harness fills in. Touching every populated
-    flow field is deliberate so a regression in any single field's
-    serialization shows up here.
+    ``finish_task_result`` payload and a non-empty ``messages`` list.
+    Touching every populated flow field is deliberate so a regression in
+    any single field's serialization shows up here. Token counters are not
+    among them: they left graph state in OB10 and are counted on the run's
+    event sink instead.
     """
     business = BusinessData.model_validate(
         {
@@ -321,7 +321,6 @@ def synthetic_post_run_state() -> WorkflowState:
         run_id="r-mvp1-smoke",
         unattended=True,
         current_phase="review",
-        metrics={"total_input_tokens": 1234, "total_output_tokens": 567},
         io_errors=[],
     )
     messages: list[StateMessage] = [HumanMessage(content="kickoff for MVP-1 smoke")]

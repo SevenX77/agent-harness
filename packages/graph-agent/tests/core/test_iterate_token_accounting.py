@@ -15,13 +15,16 @@ is then discarded in favour of a channel delta built by
 carry is gone — the same loss ``phase_execution_ids`` was already threaded out
 by hand to avoid. Token spend was never threaded out.
 
-The fix these tests pin: a child is given a ZEROED metrics base, so what it
-reports back is *what it itself spent*, and the parent adds those increments to
-its own delta. That is the G-Counter discipline (each worker reports only its
-own increment, merges are additions — as in LangGraph's own
-``Annotated[int, operator.add]`` channels and Prometheus counters), chosen here
-because the alternative — a child reporting the accumulated total it inherited —
-cannot be summed across siblings without double-counting the base.
+The first fix (2026-08-19) kept the count in graph state and gave each child a
+ZEROED base, so siblings reported increments that could be added. It made these
+two fixtures pass and left the same premise standing, which a fan-out then broke
+again (see ``test_parallel_token_accounting``). Token counting has since left
+graph state altogether (OB10): a run's total is accumulated as each call reports
+itself, so there is no child state for an iterate to discard the count with.
+
+What these two fixtures pin is therefore unchanged and still worth running —
+batch and loop really do run their phase against a child state, and the
+invariant below says the run's total covers those calls anyway.
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ from typing import Any
 
 from graph_agent.core.llm_provider import LLMProviderChunk, LLMProviderRequest
 from graph_agent.core.runner import run_skill
+
+from ._token_spend_invariant import CallRecorder, assert_totals_match_the_calls
 
 INPUT_TOKENS_PER_CALL = 11
 OUTPUT_TOKENS_PER_CALL = 7
@@ -201,22 +206,6 @@ class _CountingProvider:
         )
 
 
-class _CallRecorder:
-    """The run's own account of every call it made, as the trace reports them."""
-
-    def __init__(self) -> None:
-        self.input_tokens = 0
-        self.output_tokens = 0
-        self.calls = 0
-
-    def __call__(self, event: Any) -> None:
-        if getattr(event, "event_type", None) != "llm_call":
-            return
-        self.calls += 1
-        self.input_tokens += int(getattr(event, "input_tokens", 0) or 0)
-        self.output_tokens += int(getattr(event, "output_tokens", 0) or 0)
-
-
 def _skill(tmp_path: Path, name: str, graph_md: str, skill_md: str) -> Path:
     skill = tmp_path / name
     (skill / "phases" / "work").mkdir(parents=True)
@@ -231,7 +220,7 @@ def _metrics(result: Any) -> dict[str, Any]:
 
 def test_a_batch_item_spend_reaches_the_run_total(tmp_path: Path) -> None:
     provider = _CountingProvider(payload_builder=lambda n: {"summary": f"call#{n}"})
-    recorder = _CallRecorder()
+    recorder = CallRecorder()
 
     result = run_skill(
         _skill(tmp_path, "batch-fixture", _BATCH_GRAPH_MD, _BATCH_SKILL_MD),
@@ -247,14 +236,14 @@ def test_a_batch_item_spend_reaches_the_run_total(tmp_path: Path) -> None:
     metrics = _metrics(result)
     assert metrics["total_input_tokens"] == INPUT_TOKENS_PER_CALL * len(ITEMS), metrics
     assert metrics["total_output_tokens"] == OUTPUT_TOKENS_PER_CALL * len(ITEMS), metrics
-    _assert_totals_match_the_calls(metrics, recorder)
+    assert_totals_match_the_calls(metrics, recorder)
 
 
 def test_a_loop_round_spend_reaches_the_run_total(tmp_path: Path) -> None:
     provider = _CountingProvider(
         payload_builder=lambda n: {"round_result": {f"call{n}": n}},
     )
-    recorder = _CallRecorder()
+    recorder = CallRecorder()
 
     result = run_skill(
         _skill(tmp_path, "loop-fixture", _LOOP_GRAPH_MD, _LOOP_SKILL_MD),
@@ -270,27 +259,6 @@ def test_a_loop_round_spend_reaches_the_run_total(tmp_path: Path) -> None:
     metrics = _metrics(result)
     assert metrics["total_input_tokens"] == INPUT_TOKENS_PER_CALL * len(ITEMS), metrics
     assert metrics["total_output_tokens"] == OUTPUT_TOKENS_PER_CALL * len(ITEMS), metrics
-    _assert_totals_match_the_calls(metrics, recorder)
+    assert_totals_match_the_calls(metrics, recorder)
 
 
-def _assert_totals_match_the_calls(metrics: dict[str, Any], recorder: _CallRecorder) -> None:
-    """The invariant behind both fixtures, and the one the ledger asks for.
-
-    A run's reported spend must equal the sum over the calls the run itself
-    reported making. Stating it this way rather than against a hardcoded number
-    is what makes it hold for topologies nobody has written a fixture for: any
-    future path that discards a child state fails here without anyone having to
-    predict it. It is also exactly the equality that was violated on disk —
-    ``report.md`` sums the ``llm_call`` events while ``metrics.json`` quotes
-    these totals, and run ``2026-08-19T06-58-15_179d1440`` had them at 27009 and
-    0 in the same directory.
-    """
-    assert recorder.calls > 0, "no llm_call reached the trace; the fixture proved nothing"
-    assert metrics["total_input_tokens"] == recorder.input_tokens, (
-        f"run total {metrics['total_input_tokens']} != sum over "
-        f"{recorder.calls} reported calls {recorder.input_tokens}"
-    )
-    assert metrics["total_output_tokens"] == recorder.output_tokens, (
-        f"run total {metrics['total_output_tokens']} != sum over "
-        f"{recorder.calls} reported calls {recorder.output_tokens}"
-    )

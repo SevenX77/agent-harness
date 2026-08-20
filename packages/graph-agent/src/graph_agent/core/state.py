@@ -212,7 +212,6 @@ class FrameworkState(BaseModel):
     #: on the edge events exists to remove (decision 2026-08-15, D3). A
     #: single-execution phase writes a list of one, with no special case.
     phase_execution_ids: dict[str, list[str]] = Field(default_factory=dict)
-    metrics: dict[str, Any] = Field(default_factory=dict)
     critic_metrics: dict[str, Any] = Field(default_factory=dict)
     subagent_validation_retries: dict[str, int] = Field(default_factory=dict)
     # 工作记忆
@@ -226,13 +225,18 @@ class FrameworkState(BaseModel):
     timeout_s: int | None = None
 
 
-# flow fields that are per-key counters/maps: parallel branches touch disjoint
-# keys (their own phase name), so a per-key merge loses nothing. Scalar flow
-# fields are last-writer-wins — under fan-out they are display metadata with no
+# flow fields that are per-key maps: parallel branches touch disjoint keys
+# (their own phase name), so a per-key merge loses nothing. Scalar flow fields
+# are last-writer-wins — under fan-out they are display metadata with no
 # single-value semantics and superstep ordering is accepted as nondeterministic.
+#
+# Token counters were listed here once and did not belong: every branch writes
+# the SAME two keys, so "per-key merge" degraded to last-writer-wins and a
+# three-way fan-out reported one branch's spend as the whole run's (OB10). A
+# quantity every branch contributes to needs addition, not a merge — and it is
+# now counted on the run's event sink instead of in this channel.
 _FLOW_DICT_MERGE_FIELDS = (
     "phase_execution_ids",
-    "metrics",
     "critic_metrics",
     "subagent_validation_retries",
     "working_memory",

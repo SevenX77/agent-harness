@@ -1,12 +1,13 @@
-"""ExecutionControlMiddleware — iteration / dead-end / metrics owner.
+"""ExecutionControlMiddleware — iteration / dead-end owner.
 
 MVP-3 T9 (B3 middleware simplification): the framework's runtime
 operations layer. ProtocolValidationMiddleware (T7) owns state
 contracts; CognitiveFlowMiddleware (T8) owns finish_task and
 clarification interception; ExecutionControlMiddleware (T9) owns
 everything *operational* — when to abort the agent loop, when to
-inject a dead-end warning, when to count an iteration, and where to
-park metrics.
+inject a dead-end warning, and when to count an iteration. Token
+metrics used to be parked here too; they are counted on the run's
+event sink now (OB10) and this middleware no longer touches them.
 
 Responsibilities consolidated from the legacy ``cognitive/middlewares.py``:
 
@@ -19,13 +20,9 @@ Responsibilities consolidated from the legacy ``cognitive/middlewares.py``:
   ``dead_end_threshold`` times in a row, inject a structured warning
   back into the message stream so the LLM stops mechanically retrying
   the same failing path.
-* Metrics aggregation — ``collect_metrics`` snapshots token / latency
-  totals from ``state['flow'].metrics`` for the LoggingMiddleware /
-  TracingCallback consumers.
-
 The middleware deliberately does *not* drive any retry loop of its
-own: ExecutionControl observes and reports (dead-end warnings,
-metrics), while recovery is the model's job — the injected warning
+own: ExecutionControl observes and reports (dead-end warnings),
+while recovery is the model's job — the injected warning
 message tells it to change course.
 """
 
@@ -139,28 +136,6 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         messages = list(state.get("messages", [])) if isinstance(state, dict) else []
 
         return self._maybe_inject_dead_end_warning(messages)
-
-    def collect_metrics(self, state: Any) -> dict[str, Any]:
-        """Snapshot token / latency totals from ``state['flow'].metrics``.
-
-        Helper for LoggingMiddleware / TracingCallback consumers that
-        need a stable view of accumulated metrics. Returns an empty
-        dict when the state shape doesn't carry a Pydantic flow (e.g.,
-        a default LangGraph ``AgentState``), so callers can use the
-        return value unconditionally.
-        """
-        if not isinstance(state, dict):
-            return {}
-        flow = state.get("flow")
-        if flow is None:
-            return {}
-        try:
-            metrics = getattr(flow, "metrics", None)
-        except AttributeError:
-            return {}
-        if not isinstance(metrics, dict):
-            return {}
-        return dict(metrics)
 
     # ------------------------------------------------------------------
     # Internal helpers

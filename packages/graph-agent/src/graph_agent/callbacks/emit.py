@@ -36,6 +36,45 @@ class _TraceJsonlSink:
             f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
 
 
+class _RunSpendLedger:
+    """What this run spent, counted as each call reports itself (OB10).
+
+    A call is known to have happened at the moment it happens. Reconstructing
+    the total afterwards — by re-reading whichever messages or graph state
+    survived — can only ever describe what remained, which is why the previous
+    accounting missed every parallel branch but one, and every call that never
+    appends to a message list at all (``finish_task``'s md-patch repair invokes
+    the model directly).
+
+    Counting here instead makes the run total equal to the sum over the run's
+    own ``llm_call`` events by construction: ``report.md`` re-aggregates those
+    events and ``metrics.json`` quotes this ledger, so the two cannot disagree.
+
+    Batch items run on their own threads and only ever add, but ``+=`` on an
+    int attribute is a read and a write, so the lock is what keeps two items
+    finishing at once from losing one of them.
+    """
+
+    def __init__(self) -> None:
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self._lock = RLock()
+
+    def emit(self, event: Any) -> None:
+        if getattr(event, "event_type", None) != "llm_call":
+            return
+        with self._lock:
+            self.total_input_tokens += int(getattr(event, "input_tokens", 0) or 0)
+            self.total_output_tokens += int(getattr(event, "output_tokens", 0) or 0)
+
+    def totals(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "total_input_tokens": self.total_input_tokens,
+                "total_output_tokens": self.total_output_tokens,
+            }
+
+
 class _SubscriberSink:
     def __init__(self, subscriber: Callable[[Any], None]) -> None:
         self._subscriber = subscriber
@@ -60,6 +99,10 @@ class _CompositeEventSink:
         self._sinks = tuple(sinks)
         self.trace_path = next(
             (sink.path for sink in self._sinks if isinstance(sink, _TraceJsonlSink)),
+            None,
+        )
+        self.spend = next(
+            (sink for sink in self._sinks if isinstance(sink, _RunSpendLedger)),
             None,
         )
 
@@ -203,6 +246,7 @@ __all__ = [
     "_CallbackSink",
     "_CompositeEventSink",
     "_GatewayEventSink",
+    "_RunSpendLedger",
     "_SubscriberSink",
     "_TraceJsonlSink",
     "_safe_emit_event",

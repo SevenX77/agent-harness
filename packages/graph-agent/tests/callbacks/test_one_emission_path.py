@@ -48,7 +48,7 @@ class _TypedOnlyConsumer:
 def _state(messages: list[Any]) -> WorkflowState:
     return {
         "data": BusinessData(),
-        "flow": FrameworkState(metrics={}),
+        "flow": FrameworkState(),
         "messages": messages,
     }
 

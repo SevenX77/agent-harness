@@ -53,10 +53,18 @@ describe('timeOfDay', () => {
 })
 
 describe('dateAndTime', () => {
-  it('carries the local hour of the instant', () => {
+  it('reads a clock rather than the digits of the string', () => {
+    // Deliberately not asserting the hour's text: `Intl` follows the reader's
+    // locale, so on a 12-hour system 13:58 renders as "01:58 PM" and matching
+    // "13" fails for a reason that has nothing to do with what this renders.
+    // Locale-free proof that it read the instant: an hour later reads
+    // differently, and the same hour on another day does too. `timeOfDay` is
+    // where localness itself is pinned, because it formats its own digits.
     const instant = '2026-08-19T13:58:15Z'
-    const local = new Date(instant)
-    expect(dateAndTime(instant)).toContain(pad(local.getHours()))
+    const anHourLater = '2026-08-19T14:58:15Z'
+    const nextDay = '2026-08-20T13:58:15Z'
+    expect(dateAndTime(instant)).not.toBe(dateAndTime(anHourLater))
+    expect(dateAndTime(instant)).not.toBe(dateAndTime(nextDay))
   })
 
   it('hands back what it was given when it cannot read it', () => {

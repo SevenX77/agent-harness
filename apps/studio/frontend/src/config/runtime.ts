@@ -91,6 +91,37 @@ export async function initializeRuntimeConfig(options: RuntimeOptions = {}): Pro
 }
 
 /**
+ * shell-layout F5 (problem ledger P2) — ask the Rust shell to GET this run a
+ * sidecar: restart the one that died, or start the one that never came up. The
+ * shell owns the launch recipe either way, so both starting points are the same
+ * call here.
+ *
+ * This is what the runtime banner's Retry runs. The distinction that matters:
+ * `initializeRuntimeConfig` asks the shell *about* the sidecar — with none
+ * running, the answer is the failure it recorded, and re-asking returns that
+ * same answer forever. Retry has to ask for the missing thing itself.
+ *
+ * Outside Tauri there is no shell to ask, so retrying can only mean re-reading
+ * the dev backend URL.
+ */
+export async function restartSidecar(options: RuntimeOptions = {}): Promise<SidecarConfig> {
+  if (!isTauriRuntime(options.windowRef)) {
+    return initializeRuntimeConfig(options)
+  }
+  const invoke = options.invoke ?? (await loadTauriInvoke())
+  try {
+    const config = normalizeSidecarConfig(await invoke<SidecarConfig>('restart_sidecar'))
+    applySidecarConfig(config)
+    return config
+  } catch (error) {
+    runtimeConfig = null
+    runtimeSidecarStatus = 'degraded'
+    runtimeStatusMessage = error instanceof Error ? error.message : String(error)
+    throw error
+  }
+}
+
+/**
  * R-F13 — apply a freshly rotated sidecar config (port/token) to the api/client
  * module state. Always overrides the cached token (unlike `initializeRuntimeConfig`
  * which preserves an existing bootstrap-tunnel token): after a sidecar restart

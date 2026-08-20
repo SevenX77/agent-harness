@@ -278,6 +278,111 @@ impl SidecarManager {
     }
 }
 
+/// Owns the *recipe* for a Python sidecar, and at most one sidecar made from it.
+///
+/// The separation is the entire point. An Erlang/OTP supervisor holds the child
+/// spec, and systemd holds the unit file — in both cases outside the process
+/// being supervised, which is exactly why `restart_child` and `systemctl
+/// restart` work on a child that is not currently running. Before this type,
+/// the launch recipe lived inside `SidecarManager`, and a `SidecarManager` can
+/// only be constructed by a start that SUCCEEDED; a failed first boot therefore
+/// destroyed the only means of trying again, and the app's Retry button had
+/// nothing to call (problem ledger P2).
+///
+/// Deliberately NOT borrowed from those systems: automatic restart policies
+/// (`Restart=always`, restart intensity limits). The trigger here is a person
+/// pressing Retry. Auto-retrying a permanent failure — a missing vendor
+/// snapshot, a broken interpreter — would only bury the error it needs to show.
+pub struct SidecarSupervisor {
+    launch: SidecarLaunchConfig,
+    state: Mutex<SupervisedSidecar>,
+}
+
+/// Either there is a sidecar, or there isn't and this is what the last attempt
+/// to have one said. Never both, never neither.
+enum SupervisedSidecar {
+    Running(SidecarManager),
+    Absent(String),
+}
+
+/// What `restart` produced, before it is committed to the state.
+enum Attempt {
+    /// The live sidecar rebuilt its own process group; the manager stays put.
+    InPlace(SidecarRuntimeConfig),
+    /// A sidecar was started from scratch and still has to be installed.
+    Fresh(SidecarManager),
+}
+
+impl SidecarSupervisor {
+    /// Attempt a first sidecar. Never fails: a failure to start is a state the
+    /// supervisor can be in and recover from, not a reason to have no supervisor.
+    pub fn start(launch: SidecarLaunchConfig) -> Self {
+        let state = match SidecarManager::start(launch.clone()) {
+            Ok(manager) => SupervisedSidecar::Running(manager),
+            Err(error) => {
+                SupervisedSidecar::Absent(format!("failed to start Python sidecar: {error}"))
+            }
+        };
+        Self {
+            launch,
+            state: Mutex::new(state),
+        }
+    }
+
+    pub fn runtime_config(&self) -> Result<SidecarRuntimeConfig, String> {
+        match &*self.state.lock().expect("sidecar state poisoned") {
+            SupervisedSidecar::Running(manager) => Ok(manager.runtime_config()),
+            SupervisedSidecar::Absent(error) => Err(error.clone()),
+        }
+    }
+
+    /// Get a sidecar, whether or not one is running — restart the live one, or
+    /// start the first one. Either way the outcome REPLACES what is recorded,
+    /// so whatever a caller reads afterwards is this attempt's own result and
+    /// not a verdict frozen at boot.
+    pub fn restart(&self) -> Result<SidecarRuntimeConfig, String> {
+        let mut state = self.state.lock().expect("sidecar state poisoned");
+        let attempt = match &*state {
+            SupervisedSidecar::Running(manager) => manager
+                .restart()
+                .map(Attempt::InPlace)
+                .map_err(|error| format!("failed to restart Python sidecar: {error}")),
+            SupervisedSidecar::Absent(_) => SidecarManager::start(self.launch.clone())
+                .map(Attempt::Fresh)
+                .map_err(|error| format!("failed to start Python sidecar: {error}")),
+        };
+        match attempt {
+            Ok(Attempt::InPlace(runtime_config)) => Ok(runtime_config),
+            Ok(Attempt::Fresh(manager)) => {
+                let runtime_config = manager.runtime_config();
+                *state = SupervisedSidecar::Running(manager);
+                Ok(runtime_config)
+            }
+            Err(error) => {
+                *state = SupervisedSidecar::Absent(error.clone());
+                Err(error)
+            }
+        }
+    }
+
+    /// Recent sidecar stderr, or — with no sidecar to have written any — the
+    /// reason there isn't one. Both answer the same operator question.
+    pub fn recent_stderr(&self) -> Vec<String> {
+        match &*self.state.lock().expect("sidecar state poisoned") {
+            SupervisedSidecar::Running(manager) => manager.recent_stderr(),
+            SupervisedSidecar::Absent(error) => error.lines().map(str::to_string).collect(),
+        }
+    }
+
+    pub fn shutdown_blocking(&self) {
+        let mut state = self.state.lock().expect("sidecar state poisoned");
+        if let SupervisedSidecar::Running(manager) = &*state {
+            manager.shutdown_blocking();
+        }
+        *state = SupervisedSidecar::Absent("Python sidecar was shut down".to_string());
+    }
+}
+
 pub fn default_tauri_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -710,6 +815,64 @@ mod tests {
                 .config_dir,
             Path::new("/tmp/studio-config")
         );
+    }
+
+    /// A launch recipe that provably cannot produce a sidecar: the interpreter
+    /// path does not exist, so `spawn` fails immediately instead of waiting out
+    /// a health timeout. One attempt, so a failure costs nothing.
+    fn unstartable_launch_config() -> SidecarLaunchConfig {
+        let mut config = SidecarLaunchConfig::from_resource_root(Path::new("/nowhere/studio"));
+        config.python = PathBuf::from("/nowhere/studio/definitely-not-an-interpreter");
+        config.backend_dir = std::env::temp_dir();
+        config.startup_attempts = 1;
+        config.health_timeout = Duration::from_millis(10);
+        config
+    }
+
+    #[test]
+    fn retrying_a_sidecar_that_never_started_attempts_a_start() {
+        // P2: the whole defect in one assertion. The supervisor owns the launch
+        // recipe, so "start one" is reachable even when there is no process to
+        // restart. Before this, the recipe lived inside a SidecarManager that
+        // only a SUCCESSFUL start could produce — so a first start that failed
+        // took the recipe with it, and retry could only refuse.
+        let supervisor = SidecarSupervisor::start(unstartable_launch_config());
+        assert!(supervisor.runtime_config().is_err());
+
+        let error = supervisor
+            .restart()
+            .expect_err("this recipe cannot produce a sidecar");
+
+        assert!(
+            error.contains("failed to spawn"),
+            "retry should report what THIS attempt hit; got: {error}"
+        );
+        assert!(
+            !error.contains("is not running"),
+            "retry refused to try instead of trying: {error}"
+        );
+    }
+
+    #[test]
+    fn the_reported_error_is_the_latest_attempts_own() {
+        // What the banner shows must be what just happened. The original bug was
+        // a startup error frozen at first-boot: every retry re-read the same
+        // string, which is what "点了没反应" actually looked like.
+        let supervisor = SidecarSupervisor::start(unstartable_launch_config());
+        let retry_error = supervisor.restart().expect_err("cannot start");
+
+        assert_eq!(
+            supervisor.runtime_config().expect_err("still no sidecar"),
+            retry_error,
+        );
+    }
+
+    #[test]
+    fn a_supervisor_with_no_sidecar_still_answers_for_stderr() {
+        // The stderr surface reads through the same supervisor; with nothing
+        // spawned there is no captured output, only the failure to report.
+        let supervisor = SidecarSupervisor::start(unstartable_launch_config());
+        assert!(!supervisor.recent_stderr().is_empty());
     }
 
     #[test]

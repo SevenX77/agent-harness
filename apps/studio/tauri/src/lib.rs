@@ -1099,8 +1099,24 @@ fn deploy_vendored_ah() -> Result<CliDependencyStatus, String> {
 }
 
 struct SidecarAppState {
-    manager: Mutex<Option<sidecar::SidecarManager>>,
-    startup_error: Mutex<Option<String>>,
+    /// `None` means this run has no sidecar recipe at all
+    /// (`STUDIO_TAURI_DISABLE_SIDECAR=1`) — a different situation from a recipe
+    /// that failed to produce a sidecar, which the supervisor holds internally
+    /// and can retry from.
+    supervisor: Option<sidecar::SidecarSupervisor>,
+}
+
+/// Said to the frontend when this run was launched with the sidecar switched
+/// off. Retrying cannot help, so the message must not read like a failure.
+const SIDECAR_DISABLED: &str = "Python sidecar disabled";
+
+fn supervisor<'a>(
+    state: &'a tauri::State<'_, SidecarAppState>,
+) -> Result<&'a sidecar::SidecarSupervisor, String> {
+    state
+        .supervisor
+        .as_ref()
+        .ok_or_else(|| SIDECAR_DISABLED.to_string())
 }
 
 /// Set to true by the `confirm_quit_ready` tauri command after the FE has
@@ -1181,20 +1197,7 @@ const CODE_ASSISTANT_STATUS_EVENT: &str = "code-assistant-status-changed";
 fn get_sidecar_config(
     state: tauri::State<'_, SidecarAppState>,
 ) -> Result<sidecar::SidecarRuntimeConfig, String> {
-    if let Some(manager) = state
-        .manager
-        .lock()
-        .expect("sidecar state poisoned")
-        .as_ref()
-    {
-        return Ok(manager.runtime_config());
-    }
-    Err(state
-        .startup_error
-        .lock()
-        .expect("sidecar error state poisoned")
-        .clone()
-        .unwrap_or_else(|| "Python sidecar is not running".to_string()))
+    supervisor(&state)?.runtime_config()
 }
 
 /// R-F19.2 — the frontend calls this after `flushRolesSave()` resolves in its
@@ -1207,29 +1210,21 @@ fn confirm_quit_ready(state: tauri::State<'_, QuitFlushState>) {
     log::info!("phase=quit action=flush-ready source=frontend");
 }
 
-/// R-F13 — tear down the current Python sidecar process and spawn a fresh one,
-/// then emit `SIDECAR_RESTARTED_EVENT` so the frontend's `sidecar-restarted`
-/// listener rotates `currentApiToken` / `currentApiBaseURL`. The next
+/// R-F13 / shell-layout F5 — get this run a working Python sidecar and emit
+/// `SIDECAR_RESTARTED_EVENT` so the frontend's `sidecar-restarted` listener
+/// rotates `currentApiToken` / `currentApiBaseURL`. The next
 /// `useStudioEventStream` reconnect picks up the new token via `wsUrl()` instead
 /// of looping on 4401 closes (the auth gate's "Unauthorized" close code).
 ///
-/// Intended trigger: a future watchdog / FE recovery flow. Wiring it up now means
-/// the moment a trigger exists, token rotation is end-to-end without a second
-/// landing.
+/// Trigger: the Retry affordance on the runtime banner. It works from either
+/// starting point — a sidecar that died, or one that never came up at all —
+/// because the supervisor, not the running process, owns the launch recipe.
 #[tauri::command]
 fn restart_sidecar(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, SidecarAppState>,
 ) -> Result<sidecar::SidecarRuntimeConfig, String> {
-    let runtime_config = {
-        let guard = state.manager.lock().expect("sidecar state poisoned");
-        let manager = guard
-            .as_ref()
-            .ok_or_else(|| "Python sidecar is not running".to_string())?;
-        manager
-            .restart()
-            .map_err(|err| format!("failed to restart Python sidecar: {err}"))?
-    };
+    let runtime_config = supervisor(&state)?.restart()?;
     if let Err(err) = app_handle.emit(sidecar::SIDECAR_RESTARTED_EVENT, &runtime_config) {
         // Don't fail the command on emit error: the sidecar IS restarted; the
         // frontend just won't auto-rotate the token until a manual refresh. Log
@@ -1250,21 +1245,10 @@ fn restart_sidecar(
 
 #[tauri::command]
 fn get_sidecar_stderr(state: tauri::State<'_, SidecarAppState>) -> Vec<String> {
-    if let Some(manager) = state
-        .manager
-        .lock()
-        .expect("sidecar state poisoned")
-        .as_ref()
-    {
-        return manager.recent_stderr();
+    match state.supervisor.as_ref() {
+        Some(supervisor) => supervisor.recent_stderr(),
+        None => vec![SIDECAR_DISABLED.to_string()],
     }
-    state
-        .startup_error
-        .lock()
-        .expect("sidecar error state poisoned")
-        .clone()
-        .map(|error| error.lines().map(str::to_string).collect())
-        .unwrap_or_default()
 }
 
 /// Resolve the sidecar config dir, honoring an explicit `STUDIO_CONFIG_DIR`
@@ -3685,8 +3669,7 @@ fn prepare_code_assistant_open(
 /// tool-surface problem).
 fn studio_mcp_endpoint(app: &tauri::AppHandle) -> Option<StudioMcpEndpoint> {
     let state = app.try_state::<SidecarAppState>()?;
-    let manager = state.manager.lock().ok()?;
-    let runtime = manager.as_ref()?.runtime_config();
+    let runtime = state.supervisor.as_ref()?.runtime_config().ok()?;
     Some(StudioMcpEndpoint {
         port: runtime.port,
         token: runtime.api_token,
@@ -4378,23 +4361,11 @@ pub fn run() {
                 let _ = VENDORED_AH_DIR.set(resource_root.join("vendor").join("ah"));
                 let config = sidecar::SidecarLaunchConfig::from_resource_root(resource_root)
                     .with_config_dir(resolve_config_dir());
-                match sidecar::SidecarManager::start(config) {
-                    Ok(manager) => app.manage(SidecarAppState {
-                        manager: Mutex::new(Some(manager)),
-                        startup_error: Mutex::new(None),
-                    }),
-                    Err(error) => app.manage(SidecarAppState {
-                        manager: Mutex::new(None),
-                        startup_error: Mutex::new(Some(format!(
-                            "failed to start Python sidecar: {error}"
-                        ))),
-                    }),
-                };
-            } else {
                 app.manage(SidecarAppState {
-                    manager: Mutex::new(None),
-                    startup_error: Mutex::new(Some("Python sidecar disabled".to_string())),
+                    supervisor: Some(sidecar::SidecarSupervisor::start(config)),
                 });
+            } else {
+                app.manage(SidecarAppState { supervisor: None });
             }
             Ok(())
         })
@@ -4448,10 +4419,8 @@ pub fn run() {
                 code_assistant_configs.extend(discover_studio_ah_configs());
                 cleanup_registered_code_assistants(code_assistant_configs);
                 if let Some(state) = app_handle.try_state::<SidecarAppState>() {
-                    if let Some(manager) =
-                        state.manager.lock().expect("sidecar state poisoned").take()
-                    {
-                        manager.shutdown_blocking();
+                    if let Some(supervisor) = state.supervisor.as_ref() {
+                        supervisor.shutdown_blocking();
                     }
                 }
                 app_handle.exit(0);
@@ -4534,8 +4503,8 @@ fn shutdown_application<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, reas
         code_assistant_configs.extend(discover_studio_ah_configs());
         cleanup_registered_code_assistants(code_assistant_configs);
         if let Some(state) = app_handle.try_state::<SidecarAppState>() {
-            if let Some(manager) = state.manager.lock().expect("sidecar state poisoned").take() {
-                manager.shutdown_blocking();
+            if let Some(supervisor) = state.supervisor.as_ref() {
+                supervisor.shutdown_blocking();
             }
         }
         log::info!("phase=shutdown action=exit reason={reason}");

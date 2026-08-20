@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
-import { initializeRuntimeConfig, subscribeToSidecarRestart } from '../config/runtime'
+import { initializeRuntimeConfig, restartSidecar, subscribeToSidecarRestart } from '../config/runtime'
 
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 
@@ -55,10 +55,17 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
   const [message, setMessage] = useState('')
   const [attempt, setAttempt] = useState(0)
 
+  // The first pass reads the sidecar the shell already started at boot. Every
+  // later pass is the user pressing Retry, which has to ASK FOR a sidecar
+  // (shell-layout F5): with none running, re-reading the config only replays the
+  // failure the shell recorded at boot — the same string, press after press.
+  // Both paths land on 'loading' first, so a restart that takes its health
+  // timeout looks like work in progress rather than another dead button.
   useEffect(() => {
     let cancelled = false
     setStatus('loading')
-    initializeRuntimeConfig()
+    const connecting = attempt === 0 ? initializeRuntimeConfig() : restartSidecar()
+    connecting
       .then(() => {
         if (!cancelled) {
           setStatus('ready')

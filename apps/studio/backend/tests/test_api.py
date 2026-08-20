@@ -94,7 +94,6 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/golden",
         "/api/skills/{skill_id}/golden/{golden_id}",
         "/api/skills/{skill_id}/runs/{run_id}/compare",
-        "/api/skills/{skill_id}/runs/{run_id}/diff",
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
         "/api/batch/{batch_id}",
@@ -929,7 +928,7 @@ def test_set_golden_and_compare_run_diff(
     assert not (golden_dir / "golden_metadata.json").exists()
 
     diff_response = client.get(
-        "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",
+        "/api/skills/text-segmentation/runs/current-run/compare?against=golden-run",
     )
 
     assert diff_response.status_code == 200
@@ -1059,7 +1058,7 @@ def test_compare_missing_golden_returns_404(
     _skills_dir, workspaces_dir = studio_roots
     _write_final_state(workspaces_dir, "text-segmentation", "current-run", {"answer": "hello"})
 
-    response = client.get("/api/skills/text-segmentation/runs/current-run/diff")
+    response = client.get("/api/skills/text-segmentation/runs/current-run/compare")
 
     assert response.status_code == 404
     assert response.json()["error_code"] == "golden.baseline_not_found"

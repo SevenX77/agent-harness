@@ -128,11 +128,10 @@ BACKEND GET /api/skills/{skill_id}/releases
 BACKEND GET /api/skills/{skill_id}/releases/{release_version}
 BACKEND GET /api/skills/{skill_id}/runtime-config
 BACKEND GET /api/skills/{skill_id}/runs
-BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id}
+BACKEND GET /api/skills/{skill_id}/runs/node-compare/{compare_group_id}
 BACKEND GET /api/skills/{skill_id}/runs/{run_id}
 BACKEND GET /api/skills/{skill_id}/runs/{run_id}/audit
 BACKEND GET /api/skills/{skill_id}/runs/{run_id}/compare
-BACKEND GET /api/skills/{skill_id}/runs/{run_id}/diff
 BACKEND GET /api/skills/{skill_id}/subgraph
 BACKEND GET /api/skills/{skill_id}/test_inputs
 BACKEND GET /api/skills/{skill_id}/test_inputs/{input_id}
@@ -179,8 +178,7 @@ BACKEND POST /api/skills/{skill_id}/runtime-config/inputs/restore
 BACKEND POST /api/skills/{skill_id}/runs
 BACKEND POST /api/skills/{skill_id}/runs/batch-run
 BACKEND POST /api/skills/{skill_id}/runs/predict
-BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare
-BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare
+BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/node-compare
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/pause
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/report
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/stop
@@ -243,7 +241,7 @@ FRONTEND GET /api/skills/{skill_id}/releases
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version}
 FRONTEND GET /api/skills/{skill_id}/runtime-config
 FRONTEND GET /api/skills/{skill_id}/runs
-FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id}
+FRONTEND GET /api/skills/{skill_id}/runs/node-compare/{compare_group_id}
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare
 FRONTEND GET /api/skills/{skill_id}/subgraph
@@ -280,7 +278,7 @@ FRONTEND POST /api/skills/{skill_id}/publish
 FRONTEND POST /api/skills/{skill_id}/revert
 FRONTEND POST /api/skills/{skill_id}/runs
 FRONTEND POST /api/skills/{skill_id}/runs/predict
-FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare
+FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/node-compare
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/pause
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/report
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/stop
@@ -360,11 +358,10 @@ BACKEND GET /api/skills/{skill_id}/releases | ok | specific | Release-management
 BACKEND GET /api/skills/{skill_id}/releases/{release_version} | ok | specific | Explicit release manifest read scoped by release_version; not a broad refresh trigger.
 BACKEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is server-owned truth; reads are cold load or precise import-file/runtime-config revalidation.
 BACKEND GET /api/skills/{skill_id}/runs | ok | shared | Run-history list read scoped to one skill; writes return/project RunMetadata and do not require write-after-read list refresh.
-BACKEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | ok | specific | Scoped compare-group read after an explicit compare run; polling/refresh stays keyed to compare_group_id.
+BACKEND GET /api/skills/{skill_id}/runs/node-compare/{compare_group_id} | ok | specific | Scoped compare-group read after an explicit compare run; polling/refresh stays keyed to compare_group_id.
 BACKEND GET /api/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run detail read for trace/run-ended flows; it never refreshes the run list or skill detail.
 BACKEND GET /api/skills/{skill_id}/runs/{run_id}/audit | ok | specific | Explicit audit detail read for one run id; route is observational and emits no domain refresh.
 BACKEND GET /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit Golden Compare read for one run/baseline pair; response is scoped compare data only.
-BACKEND GET /api/skills/{skill_id}/runs/{run_id}/diff | ok | specific | Explicit diff read alias for one run/baseline pair; response is scoped compare data only.
 BACKEND GET /api/skills/{skill_id}/subgraph | ok | specific | Explicit child-subgraph topology resolution by path; normal node selection does not invoke this route.
 BACKEND GET /api/skills/{skill_id}/test_inputs | ok | shared | Test input metadata list for the I/O panel; frontend uses Studio truth policy and projects create/delete changes.
 BACKEND GET /api/skills/{skill_id}/test_inputs/{input_id} | ok | specific | Explicit Predict/Run preflight reads one selected test input content; selection alone does not hydrate content.
@@ -411,8 +408,7 @@ BACKEND POST /api/skills/{skill_id}/runtime-config/inputs/restore | ok | specifi
 BACKEND POST /api/skills/{skill_id}/runs | ok | specific | Explicit Run command; returns RunMetadata and does not require a run-list refetch.
 BACKEND POST /api/skills/{skill_id}/runs/batch-run | ok | specific | Explicit batch run over selected test inputs; subsequent status reads are scoped to batch_id.
 BACKEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict command; returns diagnostic export used for local projection, not broad refresh.
-BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | ok | specific | Explicit node-compare command keyed by base_run_id; returns compare group metadata.
-BACKEND POST /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit compare command alias for one run id; response is scoped compare result.
+BACKEND POST /api/skills/{skill_id}/runs/{base_run_id}/node-compare | ok | specific | Explicit node-compare command keyed by base_run_id; returns compare group metadata.
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/pause | ok | specific | Explicit pause command; returns the paused RunMetadata and broadcasts the run/paused gate outcome, so no surface polls to learn the run halted.
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/report | ok | specific | Re-renders report.md from the run's sealed artifacts and returns the run's canonical snapshot; idempotent because the report is a pure projection (RUN_EXECUTION-11).
 BACKEND POST /api/skills/{skill_id}/runs/{run_id}/stop | ok | specific | Explicit end command; returns the cancelled RunMetadata and broadcasts the run/stopped gate outcome.
@@ -475,7 +471,7 @@ FRONTEND GET /api/skills/{skill_id}/releases | ok | specific | API client helper
 FRONTEND GET /api/skills/{skill_id}/releases/{release_version} | ok | specific | API client helper reads one release manifest by explicit release-version request; no lifecycle subscriber exists in the production UI.
 FRONTEND GET /api/skills/{skill_id}/runtime-config | ok | shared | Runtime config is shared per-skill truth, revalidated only after import-file events, runtime_config file events, or artifact save.
 FRONTEND GET /api/skills/{skill_id}/runs | ok | shared | Run-history list is a Timeline-owned SWR cold-load key with Studio truth policy; Workspace uses a projection-only hook so skill open/start/resume do not subscribe to or cold-load the list, and writes project returned metadata without a follow-up GET.
-FRONTEND GET /api/skills/{skill_id}/runs/compare/{compare_group_id} | ok | specific | Scoped compare-group read starts only after an explicit node compare run returns a group id; refresh is confined to that compare_group_id.
+FRONTEND GET /api/skills/{skill_id}/runs/node-compare/{compare_group_id} | ok | specific | Scoped compare-group read starts only after an explicit node compare run returns a group id; refresh is confined to that compare_group_id.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id} | ok | specific | Scoped run detail read is driven by an explicit trace/run-ended target run id and does not refresh run lists or skill truth.
 FRONTEND GET /api/skills/{skill_id}/runs/{run_id}/compare | ok | specific | Explicit Golden Compare/Judge action reads the selected run's compare payload; replay stays scoped to the chosen run id and baseline.
 FRONTEND GET /api/skills/{skill_id}/subgraph | ok | specific | Explicit subgraph expand/drill action resolves one child graph topology by path; ordinary node selection and panel open do not resolve subgraphs.
@@ -512,7 +508,7 @@ FRONTEND POST /api/skills/{skill_id}/publish | ok | specific | Explicit Header P
 FRONTEND POST /api/skills/{skill_id}/revert | ok | specific | Explicit Local History revert command; client projects the returned SkillDetail into the skill-detail cache without a follow-up /skills/{skill_id} GET and revalidates only the history list.
 FRONTEND POST /api/skills/{skill_id}/runs | ok | specific | Explicit Run command; backend returns RunMetadata and Workspace projects it into the shared run-history cache without subscribing to or refetching the list.
 FRONTEND POST /api/skills/{skill_id}/runs/predict | ok | specific | Explicit Predict button command; input content is resolved from the selected test input and the returned diagnostic export is projected locally.
-FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/compare | ok | specific | Explicit node Compare LLMs command from Properties; node selection itself is covered as network-silent and never starts compare jobs.
+FRONTEND POST /api/skills/{skill_id}/runs/{base_run_id}/node-compare | ok | specific | Explicit node Compare LLMs command from Properties; node selection itself is covered as network-silent and never starts compare jobs.
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/pause | ok | specific | Fired only by the Pause button on the run in flight; the toolbar follows the broadcast gate outcome rather than refetching run state.
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/report | ok | specific | Fired only by the two Report entries a person can click (run list row, trace outcome row), immediately before the editor opens the file.
 FRONTEND POST /api/skills/{skill_id}/runs/{run_id}/stop | ok | specific | Fired only by the Stop button, which the toolbar shows next to Resume once the run is paused.

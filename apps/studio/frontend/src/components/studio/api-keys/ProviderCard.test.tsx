@@ -66,17 +66,20 @@ function renderCardHtml({
   persisted = null,
   persistedEndpoints,
   showManualModelPanel = false,
+  providerKind,
 }: {
   nextDraft?: ProviderDraft
   persisted?: CredentialsState["providers"][number] | null
   persistedEndpoints?: Record<string, CredentialsState["providers"][number] | null | undefined>
   showManualModelPanel?: boolean
+  providerKind?: "official" | "third-party"
 } = {}): string {
   return renderToStaticMarkup(
     <ProviderCard
       draft={nextDraft}
       persisted={persisted}
       persistedEndpoints={persistedEndpoints}
+      providerKind={providerKind}
       onFieldChange={vi.fn()}
       onGetModels={vi.fn()}
       onEndpointTest={vi.fn()}
@@ -198,12 +201,16 @@ describe("ProviderCard API key masking", () => {
 })
 
 describe("ProviderCard test status badge", () => {
-  it("renders Not configured for untested provider state", () => {
+  it("renders Not tested for a configured provider nobody has probed yet", () => {
+    // This assertion used to read "Not configured" — for a card holding a key.
+    // The two states were merged under one label until 2026-08-20; the fixture
+    // has always been a configured, never-probed card, so the label was wrong,
+    // not the fixture.
     const html = renderCardHtml()
 
-    expect(html).toContain('data-variant="secondary"')
-    expect(html).toContain("Not configured")
-    expect(html).not.toContain("Untested")
+    expect(html).toContain('data-variant="outline"')
+    expect(html).toContain(">Not tested</")
+    expect(html).not.toContain(">Not configured</")
   })
 
   it("renders Testing badge with spinner", () => {
@@ -230,7 +237,7 @@ describe("ProviderCard test status badge", () => {
   })
 
   it.each([
-    ["untested", "Not configured"],
+    ["untested", "Not tested"],
     ["ok", "Connected"],
     ["invalid_key", "Invalid API key"],
     ["rate_limited", "Rate limited"],
@@ -266,6 +273,37 @@ describe("ProviderCard test status badge", () => {
     // while the badge went on lying.
     expect(html).toContain(">Protocol not supported</")
     expect(html).not.toContain(">Not configured</")
+  })
+
+  it("says the card has not been tested instead of calling it unconfigured", () => {
+    // The same lie as the branch above, one state over: a key and a Base URL are
+    // saved and no probe has run yet. `untested` had no branch either, so it fell
+    // onto the same "Not configured" default — which tells the user to enter what
+    // they have already entered. This is the state EVERY card lands in right after
+    // its Base URL is edited (the address moved, so the old verdicts retire), so
+    // the wrong label is now the common case rather than a corner one.
+    const configured = { api_key: "sk-secret-123", base_url: "https://api.acme.example/v1" }
+    const html = renderCardHtml({
+      nextDraft: makeDraft(configured),
+      persisted: makePersisted({ ...configured, last_test_status: "untested" }),
+    })
+
+    expect(html).toContain(">Not tested</")
+    expect(html).not.toContain(">Not configured</")
+  })
+
+  it("still says Not configured when the card really is empty", () => {
+    // The guard on the branch above: "not tested" must not swallow the state it
+    // was split away from. A third-party card with no Base URL has nothing to
+    // test, so that one keeps telling the user to enter something.
+    const html = renderCardHtml({
+      providerKind: "third-party",
+      nextDraft: makeDraft({ api_key: "sk-secret-123", base_url: "" }),
+      persisted: makePersisted({ api_key: "sk-secret-123", base_url: "", last_test_status: "untested" }),
+    })
+
+    expect(html).toContain(">Not configured</")
+    expect(html).not.toContain(">Not tested</")
   })
 
   it("resets persisted test state when editable provider fields diverge from stored values", () => {

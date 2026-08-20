@@ -207,6 +207,8 @@
       "connectedBadge": "Connected",
       "connectedWithLatency": "Connected ({{latencyMs}}ms)",
       "notConfigured": "Not configured",
+      "untestedBadge": "Not tested",
+      "untestedHint": "The key and Base URL are saved. Press Test to check them against the provider.",
       "protocolUnsupportedBadge": "Protocol not supported",
       "protocolUnsupportedHint": "The key and Base URL are saved. This host does not serve this protocol — point the card at a URL that does, or use a cell's Re-probe button to ask this one again.",
       "thirdPartyBadge": "Third-party",

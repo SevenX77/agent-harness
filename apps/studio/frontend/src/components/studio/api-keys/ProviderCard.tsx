@@ -298,6 +298,19 @@ export function TestMessage({
     return <Badge variant="secondary">{t("apiKeys.card.notConfigured")}</Badge>
   }
 
+  if (status === "untested") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="text-muted-foreground">
+            {t("apiKeys.card.untestedBadge")}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>{t("apiKeys.card.untestedHint")}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
   if (status === "protocol_unsupported") {
     // Neither an empty card nor an error to fix: the key and the URL are saved,
     // this host simply does not serve this protocol. It used to fall through
@@ -332,7 +345,10 @@ export function TestMessage({
     )
   }
 
-  return <Badge variant="secondary">{t("apiKeys.card.notConfigured")}</Badge>
+  // Everything above `not_configured` is reached only by a card that HAS a key and
+  // a URL, so an unrecognised status here means "no verdict we can read" — which
+  // is untested, not unconfigured.
+  return <Badge variant="outline" className="text-muted-foreground">{t("apiKeys.card.untestedBadge")}</Badge>
 }
 
 function directPersistedTestResult(
@@ -2014,17 +2030,22 @@ export function ProviderCard({
         : hasReachableModelList
           ? "valid"
           : "unknown"
+  // "Nothing entered" and "entered, nothing asked yet" are two different states,
+  // and only the first one is the user's cue to type something. They used to share
+  // the `not_configured` label, so a card with a key and a URL read as empty —
+  // and every Base URL edit now lands here, because moving the address retires the
+  // observations earned at the old one (§1.2 matrix point 3).
   const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"
     : draft.isTesting
     ? "testing"
     : !hasMatchedTestResult
-      ? "not_configured"
+      ? "untested"
     : matchedStatusForEndpoint === "ok"
       ? "ok"
     : matchedStatusForEndpoint && matchedStatusForEndpoint !== "untested"
       ? matchedStatusForEndpoint
-      : "not_configured"
+      : "untested"
   const endpointSummaries: EndpointSummary[] = endpointStates
     .filter((state) => state.row.value.trim() || isOfficial || state.persisted)
     .map((state) => {

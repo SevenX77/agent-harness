@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { CallbackEvent } from "@/api/types"
 import { buildEdges, INPUT_ID, OUTPUT_ID } from "./buildEdges"
 import {
   GLOBAL_INPUT_SOURCE_HANDLE_ID,
@@ -113,7 +114,7 @@ describe("buildEdges", () => {
   })
 })
 
-describe('edge flow animation', () => {
+describe('edge run state on the canvas', () => {
   const nodes = [
     { id: 'segment', data: { dependsOn: ['setup'], isOutput: false } },
     { id: 'review', data: { dependsOn: ['segment'], isOutput: true } },
@@ -122,24 +123,31 @@ describe('edge flow animation', () => {
   const dispatched = [
     { event_type: 'input_dispatch', from_phases: ['setup'], to_phase: 'segment', changed_keys: ['chapter_lines'], after: { chapter_lines: [] } },
     { event_type: 'input_dispatch', from_phases: ['segment'], to_phase: 'review', changed_keys: ['segments'], after: { segments: [] } },
-  ] as unknown as Parameters<typeof buildEdges>[1]
+  ] as unknown as CallbackEvent[]
 
-  it('flows only into the phase that is executing right now', () => {
-    const edges = buildEdges(nodes, dispatched, 'segment')
+  it('takes each edge state from the edge status map, not from the downstream node', () => {
+    const edges = buildEdges(nodes, {
+      traceEvents: dispatched,
+      statusByEdgeId: { 'setup->segment': 'done', 'segment->review': 'running' },
+    })
 
-    const intoSegment = edges.find((edge) => edge.target === 'segment')
-    const intoReview = edges.find((edge) => edge.target === 'review')
-    expect(intoSegment?.data?.flowing).toBe(true)
-    expect(intoReview?.data?.flowing).toBe(false)
+    expect(edges.find((edge) => edge.target === 'segment')?.data?.runStatus).toBe('done')
+    expect(edges.find((edge) => edge.target === 'review')?.data?.runStatus).toBe('running')
   })
 
-  it('stops flowing when the run ends, though the edges still carry data', () => {
-    // The animation used to key off hasTraceData, which stays true forever once a
-    // run has dispatched anything — so the canvas kept animating long after the
-    // run finished and read as "still running".
-    const edges = buildEdges(nodes, dispatched, null)
+  it('leaves an edge the run never crossed idle', () => {
+    const edges = buildEdges(nodes, { traceEvents: dispatched, statusByEdgeId: {} })
 
+    expect(edges.every((edge) => edge.data?.runStatus === 'idle')).toBe(true)
+    // Carrying data and being traversed are separate facts, and the dispatches
+    // above prove the first without saying anything about the second.
     expect(edges.some((edge) => edge.data?.hasTraceData)).toBe(true)
-    expect(edges.every((edge) => edge.data?.flowing === false)).toBe(true)
+  })
+
+  it('marks exactly the edge whose scope the trace is showing', () => {
+    const edges = buildEdges(nodes, { selectedEdgeId: 'segment->review' })
+
+    expect(edges.find((edge) => edge.id === 'segment->review')?.data?.isSelected).toBe(true)
+    expect(edges.find((edge) => edge.id === 'setup->segment')?.data?.isSelected).toBe(false)
   })
 })

@@ -3,6 +3,7 @@ import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import { EDGE_STROKE_WIDTH } from '@/components/edges/edge-style'
 import { edgeContextFromEvents } from '@/lib/edge-context'
+import type { EdgeRunStatus } from '@/utils/edge-status-projection'
 import {
   GLOBAL_INPUT_SOURCE_HANDLE_ID,
   GLOBAL_OUTPUT_TARGET_HANDLE_ID,
@@ -16,25 +17,37 @@ export const OUTPUT_ID = '__global_output__'
 
 type TraceEventInput = CallbackEvent | EventEnvelope
 
+/**
+ * What the ACTIVE RUN, and the reader's selection, say about individual edges.
+ *
+ * One object rather than a growing tail of positional arguments, and for the
+ * same reason `NodeRunProjection` is one: these are three views of the same
+ * run, and supplying two of them while forgetting the third is how a board ends
+ * up with an edge animating for a run it is not showing.
+ */
+export interface EdgeRunProjection {
+  /** The viewed run's events — what the dot opens (dispatched values). */
+  traceEvents?: TraceEventInput[]
+  /** Per-edge segment state, keyed by `source->target` (deriveEdgeStatuses). */
+  statusByEdgeId?: Record<string, EdgeRunStatus>
+  /** The edge whose scope the trace is currently showing, if any. */
+  selectedEdgeId?: string | null
+}
+
 export function createContextEdge(
   source: string,
   target: string,
-  traceEvents: TraceEventInput[] = [],
-  runningPhase: string | null = null,
+  run: EdgeRunProjection = {},
 ): Edge<ContextEdgeData> {
-  // hasTraceData reflects whether the run actually dispatched data across this
-  // edge — i.e. a matching `input_dispatch` event exists in the stream. Without
-  // a run (empty events) every edge is inert, replacing the old `!isGlobal`
-  // design-time heuristic.
-  const hasTraceData = edgeContextFromEvents(traceEvents, source, target) !== null
-  // Carrying data and carrying it *right now* are different facts. The flow
-  // animation used to key off hasTraceData, which never goes back to false, so
-  // the canvas kept animating after the run had finished. Context is flowing on
-  // exactly the edge feeding the phase that is executing, and nothing is
-  // executing once the run ends.
-  const flowing = runningPhase !== null && target === runningPhase
+  const id = `${source}->${target}`
+  // Two different facts, kept apart on purpose. `runStatus` is whether the run
+  // TRAVERSED this edge — an empty transition (operation_count 0) still opens
+  // and closes, and "nothing happened between these two nodes" is an
+  // observation, not a gap. `hasTraceData` is whether it DISPATCHED anything
+  // here, which is what the dot can open.
+  const hasTraceData = edgeContextFromEvents(run.traceEvents ?? [], source, target) !== null
   return {
-    id: `${source}->${target}`,
+    id,
     source,
     target,
     sourceHandle: source === INPUT_ID ? GLOBAL_INPUT_SOURCE_HANDLE_ID : SKILL_FLOW_SOURCE_HANDLE_ID,
@@ -42,7 +55,8 @@ export function createContextEdge(
     type: 'contextEdge',
     data: {
       hasTraceData,
-      flowing,
+      runStatus: run.statusByEdgeId?.[id] ?? 'idle',
+      isSelected: run.selectedEdgeId === id,
       sourcePhaseId: source,
       targetPhaseId: target,
       showContextControl: true,
@@ -53,16 +67,15 @@ export function createContextEdge(
 
 export function buildEdges(
   phaseNodes: SkillGraphNode[],
-  traceEvents: TraceEventInput[] = [],
-  runningPhase: string | null = null,
+  run: EdgeRunProjection = {},
 ): Edge<ContextEdgeData>[] {
   const edges: Edge<ContextEdgeData>[] = []
   for (const node of phaseNodes) {
     for (const source of node.data.dependsOn) {
-      edges.push(createContextEdge(source === 'input' ? INPUT_ID : source, node.id, traceEvents, runningPhase))
+      edges.push(createContextEdge(source === 'input' ? INPUT_ID : source, node.id, run))
     }
     if (node.data.isOutput === true) {
-      edges.push(createContextEdge(node.id, OUTPUT_ID, traceEvents, runningPhase))
+      edges.push(createContextEdge(node.id, OUTPUT_ID, run))
     }
   }
   return edges

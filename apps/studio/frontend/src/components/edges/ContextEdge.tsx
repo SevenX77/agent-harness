@@ -1,12 +1,27 @@
 import * as ReactFlow from '@xyflow/react'
 import type { Edge, EdgeProps } from '@xyflow/react'
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { EDGE_DOT_RADIUS, EDGE_STROKE_ACCENT, EDGE_STROKE_BASE, EDGE_STROKE_WIDTH } from './edge-style'
+import type { EdgeRunStatus } from '@/utils/edge-status-projection'
+import {
+  EDGE_DOT_RADIUS,
+  EDGE_INTERACTION_WIDTH,
+  EDGE_RUN_STATUS_STROKE,
+  EDGE_STROKE_ACCENT,
+  EDGE_STROKE_BASE,
+  EDGE_STROKE_WIDTH,
+} from './edge-style'
 
 export interface ContextEdgeData extends Record<string, unknown> {
   hasTraceData: boolean
-  /** Context is crossing this edge right now, i.e. its target phase is executing. */
-  flowing?: boolean
+  /**
+   * How this edge's own run segment stands (canvas design F6). Derived from the
+   * engine's edge_start / edge_end brackets — NOT from whether the downstream
+   * node is executing, which lit every incoming edge of a fan-in at once and
+   * could say only "moving / not moving".
+   */
+  runStatus?: EdgeRunStatus
+  /** This edge is the one whose scope the trace panel is showing. */
+  isSelected?: boolean
   contextJson?: unknown
   sourcePhaseId: string
   targetPhaseId: string
@@ -139,8 +154,18 @@ export function ContextEdge({
         targetPosition,
       })
   const hasTraceData = data?.hasTraceData === true
-  const isFlowing = data?.flowing === true
+  const runStatus: EdgeRunStatus = data?.runStatus ?? 'idle'
+  const isSelected = data?.isSelected === true
+  const accentStroke = runStatus === 'idle' ? null : EDGE_RUN_STATUS_STROKE[runStatus]
   const showContextControl = data?.showContextControl !== false
+  const selectEdge = () => {
+    data?.onInspectEdge?.({
+      id,
+      source: data.sourcePhaseId,
+      target: data.targetPhaseId,
+      contextJson: data.contextJson,
+    })
+  }
   const globalProcess = (globalThis as GlobalWithProcess).process
   const isTestEnv = globalProcess?.env?.NODE_ENV === 'test'
 
@@ -161,21 +186,64 @@ export function ContextEdge({
         }}
       />
 
-      {/* Accent overlay marks an edge that carried context; it only *moves* while
-          that context is actually crossing, so a finished run leaves a still canvas. */}
-      {hasTraceData && (
+      {/* Accent overlay carries the edge's own segment state. It *moves* only
+          while the segment is open, so a run at a terminal verdict leaves a
+          still canvas — the same 铁律 that closes node lights (D7). */}
+      {accentStroke !== null && (
         <ReactFlow.BaseEdge
           id={`${id}-flow`}
           path={edgePath}
-          className={isFlowing ? "animated-flow-line" : undefined}
+          className={runStatus === 'running' ? 'animated-flow-line' : undefined}
+          data-edge-run-status={runStatus}
           style={{
-            stroke: EDGE_STROKE_ACCENT,
+            stroke: accentStroke,
             strokeWidth: EDGE_STROKE_WIDTH,
             strokeOpacity: 0.8,
             pointerEvents: 'none',
           }}
         />
       )}
+
+      {/* Selection ring: the edge the trace panel is scoped to reads as chosen
+          from across the board, not only by the panel's chip. */}
+      {isSelected && (
+        <ReactFlow.BaseEdge
+          id={`${id}-selected`}
+          path={edgePath}
+          style={{
+            stroke: EDGE_STROKE_ACCENT,
+            strokeWidth: EDGE_STROKE_WIDTH * 4,
+            strokeOpacity: 0.22,
+            strokeLinecap: 'round',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+
+      {/* The whole line is the hit target, not just the dot at its middle: a
+          1.5px stroke is not something a reader can aim at. Clicking it selects
+          the same edge the dot does — one action, one code path. */}
+      <path
+        d={edgePath}
+        className="nodrag nopan react-flow__edge-interaction"
+        data-edge-hit-path="true"
+        aria-hidden
+        fill="none"
+        stroke="transparent"
+        strokeWidth={EDGE_INTERACTION_WIDTH}
+        style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+        onClick={(event) => {
+          event.stopPropagation()
+          selectEdge()
+        }}
+        onContextMenu={(event) => {
+          const source = data?.sourcePhaseId
+          const target = data?.targetPhaseId
+          if (source && target) {
+            data?.onEdgeContextMenu?.(event, { source, target })
+          }
+        }}
+      />
 
       {showContextControl ? (
         <EdgeContextDot

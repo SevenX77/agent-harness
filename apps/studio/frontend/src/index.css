@@ -91,6 +91,11 @@
     --studio-canvas-edge: var(--ring);
     --studio-canvas-edge-dot-fill: var(--background);
     --studio-canvas-edge-dot-muted: var(--muted-foreground);
+    /* An edge's run segment ended badly / stopped part-way (canvas design F6).
+       Aliases of the product severity tokens, like every other canvas colour —
+       the canvas does not get its own severity palette. */
+    --studio-canvas-edge-failed: var(--destructive);
+    --studio-canvas-edge-paused: var(--warning);
     --studio-canvas-dot: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
     /*
      * shadcn light convention: a resting surface (card/docked panel) separates

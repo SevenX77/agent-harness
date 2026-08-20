@@ -92,6 +92,44 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: mock/target-design(静态推断 = 2026-07-02 新增目标)。
 - 归属: region `canvas`; capability `trace-observability`.
 
+### F6. Edge Run Segment State(边自己的运行态)
+
+- 机制: 一条 edge 是**一段运行分段**,和 node 平级(engine 的 `edge_start` / `edge_end`,
+  决议 2026-08-15 edge-as-run-segment),因此它有**自己的状态**,不靠下游节点倒推:
+  - **词表**:`idle` / `running` / `done` / `failed` / `paused`。
+    用 `done` 而不是 `success`——一段 transition 没有"通过/不通过",它只是走完了。
+  - **视觉**:
+    - `idle` = 底色细线,无强调层;
+    - `running` = 强调色叠加层 + **虚线流动**(`.animated-flow-line`),图案与节奏与
+      running 节点卡片的行进虚线**取同一套**(F3 ④);
+    - `done` = 强调色叠加层,静止;
+    - `failed` = destructive 色叠加层,静止;
+    - `paused` = warning 色叠加层,静止。
+  - **选中**:**整条线可点**,不只中点那颗 dot;选中后线加粗并出现选中环。点线与点 dot
+    进入的是同一个 edge 范围——一个选择动作,一条代码路径。
+  - **线的状态**与 **dot 的"派发了什么"是两件事,分开表达**:一段空 transition
+    (`operation_count = 0`)照样是 `done`,但 dot 里没有派发值。引擎对此有明文:
+    "nothing happened between these two nodes is an observation, not a gap in the record"。
+- 决策:
+  - **状态从 edge 自己的分段事件推导,不从"下游节点是不是在跑"倒推**。旧实现是
+    `flowing = (target === runningPhase)`,那是猜:fan-in 的几条边会被一起点亮,而真正
+    在跑的可能只有其中一条;更要命的是它**没法表达"这条边跑完了"和"这条边就是死在
+    这儿"**——只有"动"和"不动"两档。
+  - run 到终态时,**还开着的 edge 分段按与节点同一张对照表关闭**
+    (success→done / failed→failed / cancelled→paused / paused→paused)。D7 铁律不变:
+    终态的 run 不留任何还在动的东西,edge 和 node 同一条规矩。
+  - 事件按 `from_phases` × `to_phase` 归到画布边 id:空 `from_phases` 归到 Input 边界边
+    (与 `edge-identity` 同一条判定,不另立一套)。fan-in 的一次 transition 同时点亮它
+    join 的每一条边,因为那几条边确实都参与了这一段。
+- 原话/来源: PM 2026-08-19 Q1「运行时分段结构是否明确?input-->edge-->node-->edge-->node
+  -->...-->output。哪一部分运行哪一部分呈现 running 时的前端状态」· Q3-2/5「边框虚线流动
+  (类似 edge 虚线流动)」「subgraph 连接线流动」· Q4-1「edge 选中,点得高亮」。
+- 测试: edge_start 点亮该 transition join 的每一条边为 running 并走流动虚线;edge_end 转
+  done 且动画停;run 终态时仍开着的分段按对照表关闭;空 transition 是 done 而 dot 无派发值;
+  点线任意位置可选中并高亮,与点 dot 落到同一个 edge 范围。
+- Status: live(2026-08-20)。
+- 归属: region `canvas`; capabilities `run-execution`, `trace-observability`。
+
 ## 3. 接口契约
 - Inputs: skill detail, selected node id, status map, compile diagnostics, trace dot data references.
 - Outputs: node selection, file open requests, topology mutation requests, active panel changes.

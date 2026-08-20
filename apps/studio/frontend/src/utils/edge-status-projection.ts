@@ -2,7 +2,8 @@ import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
 import type { SkillNodeStatus } from "@/components/nodes"
 import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 import { isInputBoundaryId, isOutputBoundaryId, upstreamPhasesOf } from "./edge-identity"
-import { runVerdict, type RunVerdict } from "./run-status-projection"
+import { childPhasePath } from "./phase-path"
+import { NODE_STATUS_AT_RUN_END, runVerdict, type RunVerdict } from "./run-status-projection"
 
 // ————————————————————————————————————————————————————————————————————————————
 // edge-status-projection: an edge is a run SEGMENT, peer to a phase segment
@@ -59,21 +60,29 @@ function eventRunId(traceEvent: TraceEventInput, payload: CallbackEvent): string
 }
 
 /**
- * The canvas edge ids one transition belongs to.
+ * The canvas edge ids one transition belongs to, in the SCOPE the engine ran it.
  *
- * A fan-in transition joins several upstream phases, and all of those edges
- * took part in it, so it yields one id per upstream. An EMPTY upstream list is
- * the root transition — the run input, not a phase, is what precedes it — and
- * both boundaries are named by the canvas ids `buildEdges` mints, so a lookup
- * by edge id is a lookup, not a translation.
+ * A fan-in transition joins several upstream phases, and all of those edges took
+ * part in it, so it yields one id per upstream. Both endpoints are named by the
+ * canvas ids `buildEdges` mints, so a lookup by edge id is a lookup, not a
+ * translation.
+ *
+ * Every id is prefixed by `subgraph_path`, the same way a phase's identity is
+ * (canvas F7): `from_phases: []` means "nothing in THIS graph precedes it", and
+ * inside a subgraph that is the CHILD's own entry, not the run's input. Reading
+ * it as the root Input made every child graph's first phase mint a phantom
+ * `__global_input__->setup` and light up the parent's Input endpoint — a
+ * transition three levels down reported as the run receiving its input.
  */
 function edgeIdsOfTransition(event: CallbackEvent): string[] {
   const to = typeof event.to_phase === "string" && event.to_phase !== "" ? event.to_phase : null
   if (to === null) return []
-  const target = isOutputBoundaryId(to) ? OUTPUT_ID : to
+  const scope = typeof event.subgraph_path === "string" ? event.subgraph_path : ""
+  const inScope = (id: string): string => (scope === "" ? id : childPhasePath(scope, id))
+  const target = inScope(isOutputBoundaryId(to) ? OUTPUT_ID : to)
   const upstream = upstreamPhasesOf(event)
-  if (upstream.length === 0) return [`${INPUT_ID}->${target}`]
-  return upstream.map((phase) => `${isInputBoundaryId(phase) ? INPUT_ID : phase}->${target}`)
+  if (upstream.length === 0) return [`${inScope(INPUT_ID)}->${target}`]
+  return upstream.map((phase) => `${inScope(isInputBoundaryId(phase) ? INPUT_ID : phase)}->${target}`)
 }
 
 /**
@@ -114,38 +123,84 @@ export function deriveEdgeStatuses(
 }
 
 /**
- * How an IO BOUNDARY endpoint stands in the run.
+ * How the INPUT boundary stands in the run.
  *
  * Input and Output are not phases — nothing executes in them, so they have no
  * phase segment and never appeared in the node status map at all, which is why
  * they sat blank through every run while every other node lit up (PM: "INPUT/
  * OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一").
  *
- * What they DO have is their own edge segments: the run's input leaves the
- * Input boundary across a real edge, and its outputs arrive at the Output
- * boundary across real edges, bracketed by the same `edge_start`/`edge_end` the
- * rest of the board is drawn from. So an endpoint's state IS the state of the
- * edges at its end of the graph — no second event vocabulary, no separate rule
- * for "the boundary case".
+ * What Input DOES have is its own edge segments: the run's input leaves it
+ * across real edges, bracketed by the same `edge_start`/`edge_end` the rest of
+ * the board is drawn from, so its state IS the state of the edges leaving it.
+ * Only the ones at ITS scope — a child graph's entry edge is scoped
+ * (`segmentation.__global_input__->…`) and belongs to that child's own Input,
+ * which is why the expanded preview passes its container path as `scope`.
  *
- * Several edges fold to the WORST of them, in that order. An Output fed by two
- * branches where one died did not receive what it was owed; reporting success
- * because the sibling arrived would have the endpoint speaking for a branch
- * that is not its own.
+ * Several edges fold to the WORST of them. An endpoint fed by two branches
+ * where one died did not receive what it was owed; reporting success because
+ * the sibling arrived would have it speaking for a branch that is not its own.
  */
-export function boundaryNodeStatus(
+export function inputBoundaryStatus(
   statusByEdgeId: Record<string, EdgeRunStatus>,
-  boundary: "input" | "output",
+  scope = "",
 ): SkillNodeStatus {
-  const boundaryId = boundary === "input" ? INPUT_ID : OUTPUT_ID
+  const boundaryId = scope === "" ? INPUT_ID : childPhasePath(scope, INPUT_ID)
   let seen: EdgeRunStatus = "idle"
   for (const [edgeId, status] of Object.entries(statusByEdgeId)) {
-    const [source, target] = edgeId.split("->")
-    const touchesBoundary = boundary === "input" ? source === boundaryId : target === boundaryId
-    if (!touchesBoundary) continue
+    const [source] = edgeId.split("->")
+    if (source !== boundaryId) continue
     if (EDGE_STATUS_SEVERITY[status] > EDGE_STATUS_SEVERITY[seen]) seen = status
   }
   return BOUNDARY_STATUS_FROM_EDGE[seen]
+}
+
+/**
+ * How the OUTPUT boundary stands in the run — read from the phases that PRODUCE
+ * the output, not from edges into the endpoint.
+ *
+ * Symmetry with Input would say "fold the edges at its end", and that is what
+ * this did first. It left Output permanently Idle on a fully successful run,
+ * because the symmetry is false: the engine emits a transition per real graph
+ * hop, and the output boundary is not a hop. Verified on the whole event stream
+ * of run `predict-2026-08-20T04-09-33` — every `edge_end` names a real
+ * downstream phase, the last being `['story_analysis'] -> 'global_synthesis'`.
+ * NOTHING is ever emitted toward the endpoint, so there are no edges to fold.
+ *
+ * The producing phases are the graph's own answer to "is the output ready": a
+ * phase marked `output` finishing IS the run delivering that output. Folding
+ * their statuses keeps the endpoint honest while it runs (one branch done, one
+ * still going = still going), and the close table then does for it exactly what
+ * it does for every node — a run at a terminal verdict leaves NOTHING running
+ * (D7 铁律). A verdict-only rule was rejected for the same reason: it would
+ * paint the endpoint "running" for the entire run, saying the output is being
+ * produced from the first second.
+ */
+export function outputBoundaryStatus(
+  statusByNodeId: Record<string, SkillNodeStatus>,
+  outputPhasePaths: readonly string[],
+  verdict: RunVerdict,
+): SkillNodeStatus {
+  if (outputPhasePaths.length === 0) return "idle"
+  let seen: SkillNodeStatus = "idle"
+  for (const phasePath of outputPhasePaths) {
+    const status = statusByNodeId[phasePath] ?? "idle"
+    if (NODE_STATUS_SEVERITY[status] > NODE_STATUS_SEVERITY[seen]) seen = status
+  }
+  if (verdict !== "running" && (seen === "running" || seen === "idle")) {
+    return NODE_STATUS_AT_RUN_END[verdict]
+  }
+  return seen
+}
+
+/** Which phase state wins when the endpoint has several producers — worst first. */
+const NODE_STATUS_SEVERITY: Readonly<Record<SkillNodeStatus, number>> = {
+  idle: 0,
+  success: 1,
+  paused: 2,
+  breakpoint: 3,
+  running: 4,
+  error: 5,
 }
 
 /** Which edge state wins when an endpoint has several — worst first. */

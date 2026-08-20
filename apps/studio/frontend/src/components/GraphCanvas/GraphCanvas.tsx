@@ -43,6 +43,7 @@ import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-ha
 import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import type { EdgeRunStatus } from '@/utils/edge-status-projection'
+import type { RunVerdict } from '@/utils/run-status-projection'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
 import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
@@ -160,6 +161,8 @@ interface GraphCanvasProps {
   runtimeByNodeId?: Record<string, NodeRuntime>
   /** Per-edge run-segment state, keyed by `source->target` (deriveEdgeStatuses). */
   edgeStatusByEdgeId?: Record<string, EdgeRunStatus>
+  /** Where the run as a whole stands — the authority that closes anything left open. */
+  runVerdict?: RunVerdict
   // N5 atom #3 (dirty-downstream-graying): the resume-validity `affected_downstream`
   // node ids. Workspace derives this from the real validity response for the node
   // being resumed from; the canvas grays exactly these nodes (unrelated branches
@@ -698,6 +701,7 @@ export function GraphCanvas({
   errorMessageByNodeId,
   runtimeByNodeId,
   edgeStatusByEdgeId,
+  runVerdict,
   dirtyDownstreamNodeIds,
   compact = false,
   hideMiniMap = false,
@@ -1294,8 +1298,9 @@ export function GraphCanvas({
       statusByNodeId: safeStatusByNodeId,
       errorMessageByNodeId: safeErrorMessageByNodeId,
       runtimeByNodeId: runtimeByNodeId ?? {},
+      verdict: runVerdict ?? 'running',
     }),
-    [safeStatusByNodeId, safeErrorMessageByNodeId, runtimeByNodeId],
+    [safeStatusByNodeId, safeErrorMessageByNodeId, runtimeByNodeId, runVerdict],
   )
   const safeDirtyDownstreamNodeIds = useMemo(
     () => dirtyDownstreamNodeIds ?? new Set<string>(),
@@ -1595,6 +1600,7 @@ export function GraphCanvas({
         onToggleSteps: toggleSteps,
         onStepsSave: handleExpandedPreviewStepsSave,
         run: runProjection,
+        edgeRun: edgeRunProjection,
       })
       // The expanded subgraph board carries an "open child canvas" button
       // (drill-in). Double-clicking the subgraph node now opens its file instead.
@@ -1614,6 +1620,7 @@ export function GraphCanvas({
     expandedSubgraphs,
     expandedTopologies,
     handleExpandedPreviewStepsSave,
+    edgeRunProjection,
     runProjection,
     topologyRootSkillId,
     toggleSteps,

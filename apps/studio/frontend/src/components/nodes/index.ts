@@ -1,4 +1,4 @@
-export { buildEdges, createContextEdge, INPUT_ID, OUTPUT_ID } from './buildEdges'
+export { buildEdges, createContextEdge, outputEdgeStatus, INPUT_ID, OUTPUT_ID } from './buildEdges'
 export type { EdgeRunProjection } from './buildEdges'
 export { GlobalInputNode, GlobalOutputNode } from './GlobalInputOutputNode'
 export { SkillNode } from './SkillNode'

@@ -183,25 +183,63 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - 机制: Input / Output 两个端点节点与普通 node、普通 edge **共用同一套运行态**:
   - ① **它们的状态键就是它们的画布 id**(`__global_input__` / `__global_output__`),
     与 phase 的 phase path 同住一张状态表——画布上的每个节点都能在同一张表里查到自己。
-  - ② **端点自己不执行任何东西**,所以它的状态**来自它那一端的边分段**:Input 看所有
-    从它出发的边,Output 看所有到达它的边(`boundaryNodeStatus`)。边开着 = `Running`,
-    合上 = `Success`,死在那儿 = `Failed`,run 被按停 = `Paused`,没跑到 = `Idle`。
-  - ③ **一个端点有多条边时取最差的那条**(failed > running > paused > done > idle)。
-  - ④ 呈现与 phase 卡片完全一致:同一枚状态胶囊(灯 + 词)、running 时同一套行进虚线边框。
+  - ② **端点自己不执行任何东西**,所以它的状态来自它那一端**已经存在的真实证据**,
+    而两端的证据不是同一种(见下「决策」第一条):
+    - **Input 看从它出发的边分段**(`inputBoundaryStatus`):边开着 = `Running`,
+      合上 = `Success`,死在那儿 = `Failed`,run 被按停 = `Paused`,没跑到 = `Idle`。
+    - **Output 看产出它的那些 phase**(`outputBoundaryStatus`,即拓扑里 `output: true`
+      的相位):这些相位跑完 = 这张图交付了它的产物。run 走到终局时仍是 idle/running 的,
+      由与每个 node 完全相同的收口表(`NODE_STATUS_AT_RUN_END`)合上。
+  - ③ **一个端点有多个来源时取最差的那个**(failed > running > paused > done/success > idle)。
+  - ④ **进入 Output 端点的那条边跟着它的产出相位走**(`outputEdgeStatus`),不查边分段表——
+    理由同下:那条线不是一次真实跳转,查不到分段。否则会出现「端点绿了、喂它的线还是灰的」。
+  - ⑤ 呈现与 phase 卡片完全一致:同一枚状态胶囊(灯 + 词)、running 时同一套行进虚线边框。
     **不显示运行时长**——端点没有"执行了多久"这回事,一段瞬时派发的耗时是个假数。
+  - ⑥ **端点按作用域记账**:展开的子图预览有它自己的一对端点,读的是**该容器作用域**下的
+    证据(`expand.__global_input__->…` / `expand.<产出相位>`),不是 run 的两端。
 - 决策:
   - **不给端点造第二套事件语汇**。它们不是 phase,拿不到 `phase_start`/`phase_end`,
-    这正是它们此前在每一次 run 里全程空白的原因;但它们**有**自己的边分段
-    (`edge_start`/`edge_end`),那是引擎已经在发的真实证据。用它,而不是发明一个
-    "边界专用"的判定——否则"统一"就只是外观统一,底下仍是两套。
-  - **多边取最差**:Output 由两条分支喂,其中一条死了,它就没拿到该拿的东西;因为另一条
+    这正是它们此前在每一次 run 里全程空白的原因。
+  - **两端不对称,因为证据不对称。** 本单元初版(2026-08-20 立)写的是「Input 看出边、
+    Output 看入边」,对称漂亮但**与事实不符**:引擎只为**每一次真实的图内跳转**发
+    `edge_start`/`edge_end`,而"到达 Output 端点"不是一次跳转。实测 run
+    `predict-2026-08-20T04-09-33` 全量事件流:每一条 `edge_end` 都指向一个真实下游相位,
+    最后一条是 `['story_analysis'] -> 'global_synthesis'`,**没有任何事件指向端点**。
+    于是「看入边」在一次完全成功的 run 上让 Output 恒为 `Idle`。改判为看产出相位——
+    相位跑完就是图交付了产物,这是图自己对"产物好了没"的回答。
+    (**同时否掉的替代方案**:只看 run verdict。那会让 Output 从 run 第一秒起就是
+    `Running`,等于宣称产物从头到尾都在产出。)
+  - **多来源取最差**:Output 由两条分支喂,其中一条死了,它就没拿到该拿的东西;因为另一条
     到了就报 Success,等于让端点替一条不属于它的分支说话。
   - **端点不能当 resume 锚点**:它们和 phase 同住一张状态表,于是自动 resume 锚点必须
     显式跳过它们——图的两端不是图里的节点,resume 没有可倒回的地方。
 - 原话/来源: "INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一
   (我也说过,也不做)" = PM 2026-08-14 ⑦、2026-08-19 Q7 两次点名。
-- 测试: 端点在 run 前 Idle;其边分段开着时 Running、合上后 Success;分支失败时 Failed;
-  多条边取最差;自动 resume 锚点永不落在端点上。
+- 测试: 端点在 run 前 Idle;Input 的边分段开着时 Running、合上后 Success;Output 跟随产出
+  相位、run 终局时按收口表合上;多来源取最差;子图预览的端点只读本作用域证据;
+  自动 resume 锚点永不落在端点上。
+- Status: target-design(2026-08-20 立;同日按真机实证修正 Output 的证据来源)。
+- 归属: region `canvas`; capability `run-execution`.
+
+### F9. Run State Is Scoped(运行态按子图作用域记账,边与端点一并)
+
+- 机制: F7 把**相位**的身份改成了 phase path,本单元把同一条规则贯彻到**边和端点**:
+  - ① **边分段的 key 是带作用域的两端**:`${subgraph_path}.${from}->${subgraph_path}.${to}`。
+    根图作用域为空,key 与从前逐字节相同。
+  - ② **`from_phases: []` 是"本图里没有上游",不是"run 的输入"**。它在子图内指的是**该子图
+    自己的入口**,记作 `segmentation.__global_input__->segmentation.setup`。
+  - ③ **展开的子图预览按同一 key 查它自己的边**;缓存的子布局仍只按拓扑算,运行态在
+    `inlineChildEdge` / `inlineChildNode` 里按容器路径贴上(与 F7 同一理由:同一个子技能
+    挂在两个容器下是同一份布局、两次不同的执行)。
+- 决策:
+  - **不把子图内的边归给根端点**。改之前,`from_phases: []` 一律映射成
+    `__global_input__->setup`,于是每个子图的第一跳都凭空造出一个根边、并把根 Input
+    端点点亮——"三层深处的一次跳转"被报成"run 收到了输入"。实测 2026-08-20 的 run
+    里,`event_timeline.extract`(82 个事件)与 `story_analysis.analyze_batches`
+    (103 个事件)都带着 `subgraph_path`,这些事件全部落在根端点上。
+  - **一条规则一处实现**:相位、边、端点共用 `phase-path` 的拼接函数,不各写一套前缀逻辑。
+- 测试: 同名边在两个子图里互不串台;子图首跳不落在根 Input 上;展开预览的内部边与两个
+  端点都读本作用域的证据;根图 key 不变(改动对根级读者是恒等变换)。
 - Status: target-design(2026-08-20 立)。
 - 归属: region `canvas`; capability `run-execution`.
 

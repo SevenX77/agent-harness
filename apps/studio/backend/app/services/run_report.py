@@ -22,6 +22,7 @@ from typing import Any
 
 from app.core.adapters.atomic_file import read_published_text
 from app.services.run_report_routes import routes_section
+from app.services.run_report_text import one_line
 
 __all__ = ["build_run_report", "write_run_report"]
 
@@ -37,13 +38,6 @@ RAW_RECORD_FILES = (
     ("input_data.json", "the inputs the run was started with"),
     ("runtime_config.snapshot.json", "the runtime config this run was pinned to"),
 )
-
-
-#: How much of one collected message the report prints. The full text is in
-#: `trace.jsonl`, which the report links to; a real protocol_violation message
-#: has run to several thousand characters, and one printed whole hides every
-#: other failure under it.
-ERROR_MESSAGE_BUDGET = 200
 
 
 @dataclass
@@ -412,23 +406,19 @@ def _as_int(value: Any) -> int:
 
 
 def _error_line(event: dict[str, Any]) -> str:
+    """One failure, named and bounded — whichever field the engine put it in.
+
+    The three branches are three shapes of the same thing, so all three are
+    bounded. Clipping only the last of them is how a rejected
+    `finish_task_verdict`, which arrives in `errors`, printed in full.
+    """
     event_type = str(event.get("event_type", "error"))
-    errors = event.get("errors")
-    if isinstance(errors, list) and errors:
-        return f"{event_type}: " + "; ".join(str(item) for item in errors)
-    violations = event.get("violations")
-    if isinstance(violations, list) and violations:
-        return f"{event_type}: " + "; ".join(str(item) for item in violations)
+    for collected in ("errors", "violations"):
+        entries = event.get(collected)
+        if isinstance(entries, list) and entries:
+            return f"{event_type}: " + one_line("; ".join(str(item) for item in entries))
     message = event.get("message")
-    return f"{event_type}: {_clipped(str(message))}" if message else event_type
-
-
-def _clipped(text: str) -> str:
-    """Enough of a message to recognise it, with the full text one link away."""
-    collapsed = " ".join(text.split())
-    if len(collapsed) <= ERROR_MESSAGE_BUDGET:
-        return collapsed
-    return collapsed[:ERROR_MESSAGE_BUDGET].rstrip() + "…"
+    return f"{event_type}: {one_line(str(message))}" if message else event_type
 
 
 # --------------------------------------------------------------------------
@@ -513,12 +503,12 @@ def _failure_section(metadata: dict[str, Any], nodes: Sequence[_NodeAccount]) ->
 
     lines = ["## Failure", ""]
     if isinstance(error, dict):
-        lines += [
-            f"- **{error.get('code', 'run.failed')}** — {error.get('message', '')}".rstrip(),
-        ]
+        message = one_line(str(error.get("message", "")))
+        lines += [f"- **{error.get('code', 'run.failed')}** — {message}".rstrip()]
         details = error.get("details")
         if isinstance(details, dict) and details:
-            lines.append(f"  - details: `{json.dumps(details, ensure_ascii=False)}`")
+            dumped = one_line(json.dumps(details, ensure_ascii=False))
+            lines.append(f"  - details: `{dumped}`")
     for node_id, line in node_errors:
         lines.append(f"- `{node_id}` — {line}")
     lines.append("")

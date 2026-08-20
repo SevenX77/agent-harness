@@ -51,6 +51,15 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
     - **运行时间**:该节点本次运行段的耗时,挂在状态胶囊正下方。
       **精度随时长下降**(`4s` → `3m 05s` → `2h 03m`),不显示亚秒——运行段由两条
       引擎事件时间戳夹出,亚秒精度是它给不出的准头。
+    - **活动计数**:该节点在本次 run 里做了多少事,挂在运行时间下方。
+      **同一个数字,两种时态**——running 时写序数 `Call 3`(第 3 次调用正在飞),
+      终态时写基数 `3 calls`(一共调了 3 次);时态本身告诉读者这行在回答哪个问题
+      (「它现在在干嘛」还是「它干了多少」)。工具次数只进 tooltip
+      (`3 LLM calls · 5 tool calls`):卡片那一行要在缩到很小的画布上还读得出,
+      所以只留那个**读者盯着看时会变的数**。**一次都没调过的节点不显示这行**,
+      而不是显示 `0 calls`——渲染出来的 0 读起来像一条结论。
+      数据源 `prompt_captured`(调用**开始**)与 `tool_call`,投影
+      `deriveNodeActivity`,与状态灯、运行时间同一条事件流、同一个 run 过滤器。
   - ③ **运行错** = 状态灯变红 + 标签变 `Failed`(不是 `Error`:这一列是运行结论的
     词表,不是异常类名)。
   - ④ **运行中的节点整块卡片走「虚线流动」边框**(marching dashes):虚线图案与行进
@@ -65,13 +74,24 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
   - **运行时间只存两个端点(start / end),不存已算好的时长**:一个还在跑的节点必须
     继续走秒,而把秒数塞进节点数据会逼整块画布每秒重建一次。开着的运行段
     (`endedAtMs === null`)由该卡片自己本地走表。
+  - **计数按「调用开始」数,不按「调用结束」数**:一次 LLM 调用从发出到回来是读者
+    盯着卡片看的那一整段;数结束事件(`llm_call`)会让卡片在这整段里少报一次,
+    恰好在最需要它说话的时候落后一拍。所以数的是 `prompt_captured`。
+  - **计数跨执行累加,时长只取最后一段**:两者刻意不同。时长描述的是**一段**运行,
+    所以取最后那段;计数描述的是**做了多少活**,而一个 iterate 相位确实把每个 item 都
+    跑了——只报最后一个 item 的份额,会把这个节点的工作量少报 item 数倍。
+  - **不报「当前工具」**:引擎只在工具**答复之后**才发 `tool_call`
+    (`middleware/tracing.py` 的 step 在拿到结果时才 close),所以最近一条 `tool_call`
+    是**上一个跑完的**工具,不是正在跑的那个。把它写成「当前」,恰好在工具执行的那段
+    时间里是错的——而那正是读者在看的那段。要真答这个问题,得先在引擎补一条
+    「工具开始」事件,那是另一件事。
   - **运行段开着、但节点已经不是 running(worker 被杀、流断在半路)⇒ 不显示时间**。
     封存的 run 记录只给终态、不给结束时刻,所以"跑了多久"的诚实答案是沉默——既不
     让表继续走,也不拿"读者恰好什么时候看的"编一个数。
 - 原话/来源: `01_workflows/03_compile.md:15`(节点错误标记)、`01_workflows/04_run-and-verify.md:50`(节点运行灯)、`01_workflows/05_debugging.md:14`(失败节点变红);节点 debug 悬浮 bar + agent 子节点对话续跑 = PM 2026-06-04;状态灯闪烁 + 边框虚线流动 + 状态标签(idle/running/success/failed)+ 运行时间 = PM 2026-08-19 原话。
 - 成熟参考: n8n 的节点执行态(marching-ants 边框 + 节点角上的耗时徽标)与 GitHub Actions 步骤计时器(耗时精度随时长下降)。借来的是"边框行进 + 角标耗时 + 精度分档"这三点;**没借**它们把耗时做成 hover tooltip——本仓画布上的节点常年可见,耗时是一眼要看的常驻信息,不是需要悬停去问的细节。
 - 测试: 编译错在对应节点出 badge;运行事件驱动状态灯绿/橙/红且标签同步;running 节点卡片出虚线流动边框、终态即消失;有运行段的节点显示耗时,running 时逐秒推进、终态冻结;运行段开着但节点非 running 时不显示耗时;运行中 focus 节点显 debug bar,可暂停/resume;agent phase 子节点的 bar 聊天框可用、其余 disable;非运行态 hover 显 bar。
-- Status: 状态灯 / 标签 / 虚线流动边框 / 运行时间 = live(2026-08-20);debug 悬浮 bar = target-design。
+- Status: 状态灯 / 标签 / 虚线流动边框 / 运行时间 / 活动计数 = live(2026-08-20);debug 悬浮 bar = target-design。
 - 归属: capabilities `compile-lint`, `run-execution`, `debug-resume`.
 
 ### F4. Subgraph Visual Affordance

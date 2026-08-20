@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
 import { nodeCardClass, type NodeCardRing } from './node-card'
 import { subgraphProgressLabel } from '@/components/GraphCanvas/subgraph-run'
-import { NodeRuntimeClock } from './node-runtime'
+import { NodeRuntimeClock, nodeActivityText } from './node-runtime'
 import { STATUS_STYLE, StatusCapsule } from './StatusCapsule'
 import {
   SKILL_FLOW_SOURCE_HANDLE_ID,
@@ -58,6 +58,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   // states — the chip stays on the board when the container is expanded, so one
   // place carries the count whether the child board is showing or not.
   const subgraphProgressText = data.subgraphProgress ? subgraphProgressLabel(data.subgraphProgress) : null
+  const activityText = data.activity ? nodeActivityText(data.activity, isRunning) : null
 
   const ring: NodeCardRing = data.isConflictCancelled
     ? 'destructive'
@@ -142,6 +143,20 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             <TooltipContent side="top">{statusLabel}</TooltipContent>
           </Tooltip>
           {data.runtime ? <NodeRuntimeClock runtime={data.runtime} running={isRunning} /> : null}
+          {activityText ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  data-node-activity={isRunning ? 'running' : 'settled'}
+                  aria-label="Node activity"
+                  className="text-[10px] tabular-nums leading-none text-muted-foreground"
+                >
+                  {activityText.short}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{activityText.full}</TooltipContent>
+            </Tooltip>
+          ) : null}
           {subgraphProgressText ? (
             <Tooltip>
               <TooltipTrigger asChild>

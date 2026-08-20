@@ -63,6 +63,7 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 | E6 | **run 级 token 汇总漏掉 iterate/batch/loop 下的全部花费(已确诊引擎缺陷)** | 引擎 | ✅ **已修**:根因是 iterate 把每个 item / 每一轮跑在**子状态**上、跑完整个丢掉——相位级换成 `_phase_outputs_delta` 的通道增量,图级换回原始 state;子状态记的花费不在幸存者里就没了(`phase_execution_ids` 当初已被手工牵出过一次,token 是掉进同一个洞的第二样东西)。**四条 iterate 路径全修**(相位 batch / 相位 loop / 图级 batch / 图级 loop):子状态的账**从零起算**(`_accounting_from_zero`),它报回来的就是它自己花的,父层把这些增量加进自己那一份(`_SpendHarvest`)——G-Counter 纪律,拒绝了「继承总数再取差」(N 个兄弟会把基数数 N 遍)。门禁是不变量而非硬编码数字:run 报出的花费 == 它自己报告过的那些 `llm_call` 之和(`tests/core/test_iterate_token_accounting.py`)。**真机点验前须重建 vendor** | 08-19 截图 | 结局卡 token = Σ调用;`report.md` 与 `metrics.json` 两个 token 源不许打架 |
 | E7 | 时间口径:run id/事件 UTC 与本地混用(裁决 08-09:用系统本地时间) | 引擎/后端/前端 | 🧩 **同屏 06:58/11:38 不是串台**——resume 复用同一个 run_id(`routers/runs.py:296-341` 全程用传入 run_id,`record_resume_result` 直接 append 进原 record),两簇时间戳本来就该同屏。剩下的真问题只有"时区口径"本身 | 08-09;08-19 截图 | 全部显示本地时间且互相一致 |
 | E8 | 调用前探针缺失 + 最终报告对本次 run 全部路由做一次 warning 汇总 | gateway→报告 | 🔎 报告已有 Routes 节(`services/run_report.py:76-86` `routes_section(events)`) | 08-10 两条 | 报告有路由汇总节 |
+| E9 | `tool_call` 只在工具**答复之后**才发,没有「工具开始」事件——所以任何界面都答不出「它现在在跑哪个工具」 | 引擎→前端 | ⏳ 已坐实:`middleware/tracing.py:39-63` 的 `wrap_tool_call` 用 `_step(request)` 开一个 `ToolCallStep`,而该 step 只在 `_report_result` 拿到 `ToolMessage` 时才 `finished()` 发事件(`tracing/steps.py:66-78`);工具执行期间事件流里**什么都没有**。后果有二:① 节点卡与 trace 都只能显示**上一个跑完的**工具,写成「当前」就是错的(N2 因此明确不做);② 与 trace F9「呈现单位 = 步骤,开始即出现」不一致——LLM 步骤靠 `prompt_captured` 在开始时就出现,工具步骤却要等结束 | 08-19(N2 派生) | running 节点与 trace 都能显示正在执行的工具名 |
 
 ## 1.1 画布运行时观测
 
@@ -70,28 +71,9 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
 | N1 | 状态只有小胶囊换字,整卡无状态表达;裁决呈现方式:状态灯闪烁+状态标签(idle/running/success/failed)+边框虚线流动+有空间加运行时间,找成熟参考 | 前端 | 🔎 **#875 已合**:状态灯(复用 Settings 路由灯)+ 标签(Idle/Running/Success/Failed)+ running 卡片虚线流动边框(图案与 edge 流动线同源)+ 运行时间(`deriveNodeRuntimes` 投影,running 逐秒推进、终态冻结);设计源 canvas F3 ② 同 PR 改写 | 08-19 Q3 | 扫一眼画布即知进度 |
-| N2 | running 节点不显示"正在干什么"(第几次调用/工具/已耗时) | 前端(事实源已有) | 🧩 #875 已给"已耗时";"第几次调用/当前工具"仍缺 | 08-19 视觉裁决 | running 卡上有活动说明 |
+| N2 | running 节点不显示"正在干什么"(第几次调用/工具/已耗时) | 前端(事实源已有) | 🔎 **已合**:三样里两样齐——已耗时 #875,**第几次调用**本 PR(卡片 running 写 `Call 3`、终态写 `3 calls`,工具次数进 tooltip;投影 `deriveNodeActivity` 数 `prompt_captured`,即调用**开始**,免得整个等待期少报一次)。**"当前工具"做不到且不假装**:引擎只在工具答复后才发 `tool_call`(`middleware/tracing.py` 的 step 拿到结果才 close),最近一条是**上一个跑完的**工具;要真答这个问题得先给引擎补一条"工具开始"事件 → 另立 E9 | 08-19 视觉裁决 | running 卡上有活动说明 |
 | N3 | run 结束动画/running 态残留不清("老生常谈"×3);要求组件建立"状态↔显示效果对照表" | 前端 | 🔎 对照表已存在且有测试:`utils/run-status-projection.ts:38-45` `NODE_STATUS_AT_RUN_END`,`:188-193` 用 run verdict 无条件关掉所有 running。残留风险见 P1(两条终态通道都没送达时仍永久 running) | 08-04②;08-09⑤;08-14⑥ | run 结束 10s 后画布无任何运动元素 |
-| N4 | 完成节点留痕(耗时/调用次数),run 后画布=结果地图 | 前端 | 🗳 耗时已由 #875 落地;"调用次数"待裁 | 08-19 讨论中方案 D | — |
-
-**1.1.2 edge**
-| # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
-|---|---|---|---|---|---|
-| G1 | edge 无任何运行状态;"哪一部分运行哪一部分呈现 running"必须覆盖 edge | 前端(E1 引擎侧已就绪) | 🔎 **#879 已合**:`utils/edge-status-projection.ts` 从 `edge_start`/`edge_end` 派生 idle/running/done/failed/paused,取代 `flowing = (target === runningPhase)` 的倒推;run 终态按与节点同一张对照表关闭 | 08-19 Q1 | 数据流过哪条边哪条边动 |
-| G2 | edge 选中要点得中、有高亮 | 前端 | 🔎 **#879 已合**:整条线加 20px 透明命中路径(`EDGE_INTERACTION_WIDTH`),选中出加粗环 | 08-19 Q4-1 | 点边即高亮 |
-| G3 | 运行中连线虚线流动动画(含 subgraph 连接线) | 前端 | 🔎 **#879 + 本 PR 已合**:数据边由 edge 运行态驱动 `.animated-flow-line`;subgraph 连接线由容器 running 驱动(`isContainerRunning`) | 08-19 Q3-2/5 | — |
-
-**1.1.3 subgraph**
-| # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
-|---|---|---|---|---|---|
-| S1 | 运行状态不递归:展开容器内子节点恒 Idle(状态表按裸 phase 名记账,子图内没人喂) | 前端(E2 就绪) | 🔎 **#882 + 本 PR 已合**:相位投影改按 phase path 记账(`utils/phase-path.ts`,#882);本 PR 把同一条规则贯彻到**边与端点**——边分段 key 带作用域前缀(`edge-status-projection.ts`),`from_phases: []` 在子图内指该子图自己的入口而不是 run 的输入,展开预览的内部边与自己那对端点都读本作用域证据(`inlineChildEdge`/`inlineChildNode`)。根层键逐字不变。设计源 canvas F9 | 08-19 Q2×2 天 | 子图内正在跑的节点亮 |
-| S2 | running 时自动展开,跑完收起,手动操作优先 | 前端 | 🔎 **本 PR 已合**:`containerAutoAction` 按状态**跃迁**驱动;失败的容器保持展开(参考 GitHub Actions 日志分组);本次 run 内手动开合过即接管 | 08-19"running的时候subgraph要打开" | — |
-| S3 | 折叠态容器显示进度(3/7 完成)+ 容器框呼吸/边框流动 | 前端 | 🔎 **本 PR 已合**:容器 chip 常驻 `3/7`(子拓扑未加载时只报 `3 done`,不编分母);容器框走与节点卡片、运行边同一套行进虚线(`.studio-running-dash-frame`),未选"呼吸"是为了三个尺度只有一套运行语汇 | 08-19 Q2/Q3-6 | — |
-
-**1.1.4 input/output 端点**
-| # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
-|---|---|---|---|---|---|
-| IO1 | INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一(重复:"我也说过,也不做") | 前端 | 🔎 **已合**:#878 把根边判定收敛成一处(`utils/edge-identity.ts`,两套逻辑删净),#879 让 IO 边界边与普通边走同一套 edge 运行态与命中区。端点自身与 phase 同住一张状态表、戴同一枚状态胶囊、running 时同一套行进虚线;多来源取最差;端点被显式排除在 resume 锚点之外。**两端的证据来源不同**(2026-08-20 真机实证修正):Input 读从它出发的边分段(`inputBoundaryStatus`);Output 读**产出它的相位**(`outputBoundaryStatus`)——实测 run `predict-2026-08-20T04-09-33` 全量事件流里**没有任何事件指向 output 端点**(最后一条 `edge_end` 是 `[story_analysis] -> global_synthesis`),原先"看入边"让 Output 在完全成功的 run 上恒为 Idle;进入 Output 的那条边同样跟随产出相位(`outputEdgeStatus`),否则端点绿了喂它的线还是灰的。设计源 canvas F8 | 08-14⑦;08-19 Q7 | 同一状态系统驱动全部节点 |
+| N4 | 完成节点留痕(耗时/调用次数),run 后画布=结果地图 | 前端 | 🔎 **已合**:耗时 #875,**调用次数**本 PR 与 N2 同源同修——同一个 `deriveNodeActivity` 投影,running 读作序数、终态读作基数。原先标"待裁"的那一项在此自决:它和 N2 的"第几次调用"**是同一个事实**,分两处裁会得到两个数;而"run 后画布=结果地图"这条本行自己的判据,不给调用次数就达不到。**iterate 相位按全部执行累加**(时长仍只取最后一段),否则一个跑了 N 个 item 的节点会把工作量少报 N 倍 | 08-19 讨论中方案 D | run 后每个跑过的节点都留下耗时与调用次数 |
 
 ## 1.2 trace 面板
 

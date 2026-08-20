@@ -6,6 +6,7 @@ import {
   deriveNodeStatuses,
   runVerdict,
   deriveNodeRuntimes,
+  deriveNodeActivity,
   runningPhaseOf,
 } from "./run-status-projection"
 
@@ -265,5 +266,67 @@ describe("run projections key by phase path, so a subgraph's insides are visible
       "event_timeline.extract": "running",
     })).toBe("event_timeline")
     expect(runningPhaseOf({ "event_timeline.extract": "running" })).toBeNull()
+  })
+})
+
+describe("deriveNodeActivity", () => {
+  it("counts the calls a phase has begun, so a running card can say which one it is on", () => {
+    const activity = deriveNodeActivity([
+      event({ event_type: "phase_start", phase_name: "draft" }),
+      event({ event_type: "prompt_captured", phase_name: "draft" }),
+      event({ event_type: "llm_call", phase_name: "draft" }),
+      event({ event_type: "prompt_captured", phase_name: "draft" }),
+    ])
+    // Three would be a lie and two-minus-one a different one: the third call
+    // has not started. `prompt_captured` marks a call BEGINNING, which is the
+    // question a running card answers.
+    expect(activity.draft).toEqual({ llmCalls: 2, toolCalls: 0 })
+  })
+
+  it("counts the tools a phase reached for", () => {
+    const activity = deriveNodeActivity([
+      event({ event_type: "prompt_captured", phase_name: "draft" }),
+      event({ event_type: "tool_call", phase_name: "draft", tool_name: "read_file" }),
+      event({ event_type: "tool_call", phase_name: "draft", tool_name: "write_file" }),
+    ])
+    expect(activity.draft).toEqual({ llmCalls: 1, toolCalls: 2 })
+  })
+
+  it("adds up EVERY execution of an iterated phase, not just the last one", () => {
+    // The clock deliberately keeps only the last attempt, because a duration is
+    // about one segment. A tally is about work done, and an iterated phase
+    // really did all of it — reporting one item's share would understate the
+    // node by a factor of the item count.
+    const activity = deriveNodeActivity([
+      event({ event_type: "phase_start", phase_name: "work" }),
+      event({ event_type: "prompt_captured", phase_name: "work" }),
+      event({ event_type: "phase_end", phase_name: "work" }),
+      event({ event_type: "phase_start", phase_name: "work" }),
+      event({ event_type: "prompt_captured", phase_name: "work" }),
+      event({ event_type: "phase_end", phase_name: "work" }),
+    ])
+    expect(activity.work).toEqual({ llmCalls: 2, toolCalls: 0 })
+  })
+
+  it("keeps each subgraph child on its own path, like every other projection", () => {
+    const activity = deriveNodeActivity([
+      event({ event_type: "prompt_captured", phase_name: "extract", subgraph_path: "timeline" }),
+      event({ event_type: "prompt_captured", phase_name: "extract" }),
+    ])
+    expect(activity["timeline.extract"]).toEqual({ llmCalls: 1, toolCalls: 0 })
+    expect(activity.extract).toEqual({ llmCalls: 1, toolCalls: 0 })
+  })
+
+  it("ignores frames belonging to another run", () => {
+    const activity = deriveNodeActivity(
+      [envelope({ event_type: "prompt_captured", phase_name: "draft" }, { runId: "run-2" })],
+      "run-1",
+    )
+    expect(activity.draft).toBeUndefined()
+  })
+
+  it("reports nothing for a phase that has not called anything yet", () => {
+    const activity = deriveNodeActivity([event({ event_type: "phase_start", phase_name: "draft" })])
+    expect(activity.draft).toBeUndefined()
   })
 })

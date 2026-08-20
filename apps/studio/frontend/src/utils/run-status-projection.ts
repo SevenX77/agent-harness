@@ -1,5 +1,5 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
-import type { NodeRuntime, SkillNodeStatus } from "@/components/GraphCanvas"
+import type { NodeActivity, NodeRuntime, SkillNodeStatus } from "@/components/GraphCanvas"
 import { ENGINE_EVENT_TYPES } from "./engine-events"
 import { isRootPhasePath, phasePathOf } from "./phase-path"
 
@@ -250,6 +250,49 @@ export function deriveNodeRuntimes(
     }
   }
   return runtimes
+}
+
+/**
+ * How much work each node has done in this run — the tally behind a card's
+ * "Call 3" while it runs and "3 calls" once it is over.
+ *
+ * Calls are counted from `prompt_captured`, which marks a call BEGINNING, not
+ * from `llm_call`, which marks one ending. A running card is answering "what is
+ * it doing NOW", and the call it is waiting on has begun and not ended: counting
+ * endings would leave the card a call behind for the whole time the model is
+ * thinking, which is precisely the interval the reader is watching.
+ *
+ * Unlike the clock in `deriveNodeRuntimes`, this does NOT reset when a phase
+ * executes again. A duration describes one segment, so it takes the last one; a
+ * tally describes work done, and an iterated phase really did every item's
+ * share. Reporting only the last item would understate the node by a factor of
+ * the item count.
+ *
+ * A phase with no calls yet has no entry at all, rather than an entry of zeros:
+ * "it has not called anything" is what the card shows by staying silent, and an
+ * explicit `0` would invite a "0 calls" readout that reads as a finding.
+ */
+export function deriveNodeActivity(
+  events: readonly TraceEventInput[] | null | undefined,
+  runId?: string | null,
+): Record<string, NodeActivity> {
+  const activity: Record<string, NodeActivity> = {}
+  if (!events) return activity
+  for (const traceEvent of events) {
+    const event = callbackPayload(traceEvent)
+    const eventRun = eventRunId(traceEvent, event)
+    if (runId && eventRun && eventRun !== runId) continue
+    const type = event.event_type || ""
+    if (type !== "prompt_captured" && type !== "tool_call") continue
+    const phasePath = phasePathOf(event)
+    if (!phasePath) continue
+    const tally = activity[phasePath] ?? { llmCalls: 0, toolCalls: 0 }
+    activity[phasePath] =
+      type === "prompt_captured"
+        ? { llmCalls: tally.llmCalls + 1, toolCalls: tally.toolCalls }
+        : { llmCalls: tally.llmCalls, toolCalls: tally.toolCalls + 1 }
+  }
+  return activity
 }
 
 function reasonList(value: unknown): string[] {

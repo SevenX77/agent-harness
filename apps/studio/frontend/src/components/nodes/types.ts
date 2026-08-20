@@ -23,6 +23,24 @@ export interface NodeRuntime {
   endedAtMs: number | null
 }
 
+/**
+ * How much work one node has done in this run: the calls it has made and the
+ * tools it reached for.
+ *
+ * Two counters and nothing derived from them — no rate, no "current tool". The
+ * engine reports a tool only once it has ANSWERED (`TracingMiddleware`'s step
+ * closes on the result), so the most recent `tool_call` is the last tool that
+ * finished, not the one running now; presenting it as "current" would be wrong
+ * for exactly the stretch a reader is watching.
+ *
+ * Derived by `deriveNodeActivity` (run-status-projection) from the same event
+ * stream and run filter as the node's status and clock.
+ */
+export interface NodeActivity {
+  llmCalls: number
+  toolCalls: number
+}
+
 export interface SubagentRef {
   name: string
   path: string
@@ -73,6 +91,13 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
    * run never entered, which is why "no duration" and "0s" stay distinct.
    */
   runtime?: NodeRuntime
+  /**
+   * What this node has done in the active run — the tally the card reads as
+   * `Call 3` while it works and `3 calls` once it stops (canvas F3 ②). Absent
+   * for a node that has not called anything, which is why "nothing yet" and
+   * "zero" stay distinct here too.
+   */
+  activity?: NodeActivity
   /** Compile/lint errors attributed to this phase node (separate channel from run status). */
   compileErrors?: CompileError[]
   /**

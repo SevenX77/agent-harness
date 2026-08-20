@@ -373,6 +373,7 @@ function inlineChildNode(
       status: run?.statusByNodeId?.[phasePath] ?? 'idle',
       errorMessage: run?.errorMessageByNodeId?.[phasePath],
       runtime: run?.runtimeByNodeId?.[phasePath],
+      activity: run?.activityByNodeId?.[phasePath],
       isExpanded: isSubgraphNode ? options.expandedSubgraphs?.has(id) === true : false,
       onToggleSubgraph: isSubgraphNode && options.onToggleSubgraph
         ? () => options.onToggleSubgraph?.(id)

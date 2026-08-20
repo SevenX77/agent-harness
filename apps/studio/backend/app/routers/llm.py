@@ -505,10 +505,28 @@ async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretRespon
 @router.put("/registry/endpoints", response_model=RegistryResponse)
 async def put_registry_endpoints(request: EndpointUpsertRequest) -> RegistryResponse:
     """Upsert endpoints; absent endpoint IDs are retained."""
+    route_ids_before = set(load_credentials().provider_routes)
     try:
         data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
     except EndpointInvariantViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # An endpoint whose Base URL moved takes the models discovered at the old
+    # address with it (see ``upsert_endpoints``). Roles pointing at those routes
+    # get the same cleanup ``delete_registry_endpoint`` performs, so editing a
+    # Base URL cannot leave a role addressing a route nobody can resolve.
+    removed_route_ids = route_ids_before - set(data.provider_routes)
+    if removed_route_ids and roles_path().exists():
+        save_roles_file(
+            roles_path(),
+            _remove_route_references_from_roles(_load_roles_or_empty(), removed_route_ids),
+            known_route_ids=set(data.provider_routes),
+        )
+        record_runtime_activity(
+            source_id="llm_roles",
+            action="remove_endpoint_route_references",
+            message="Removed role references to routes owned by an endpoint that changed address.",
+            changes={"route_ids": sorted(removed_route_ids)},
+        )
     record_runtime_activity(
         source_id="llm_credentials",
         action="upsert_endpoints",

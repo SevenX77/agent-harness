@@ -298,6 +298,23 @@ export function TestMessage({
     return <Badge variant="secondary">{t("apiKeys.card.notConfigured")}</Badge>
   }
 
+  if (status === "protocol_unsupported") {
+    // Neither an empty card nor an error to fix: the key and the URL are saved,
+    // this host simply does not serve this protocol. It used to fall through
+    // every branch onto the "Not configured" default, which told the user to
+    // enter what they had already entered (live 2026-08-19, the Jiekou card).
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="text-muted-foreground">
+            {t("apiKeys.card.protocolUnsupportedBadge")}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>{t("apiKeys.card.protocolUnsupportedHint")}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
   if (status === "error" || ["invalid_key", "rate_limited", "quota_exceeded", "network_error", "timeout"].includes(status)) {
     const detail = translateErrorCode(errorCode)
     const badge = (

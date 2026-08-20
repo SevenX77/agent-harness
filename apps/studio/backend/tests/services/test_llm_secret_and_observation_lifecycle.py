@@ -213,3 +213,117 @@ def test_clearing_the_key_outright_still_works(tmp_path: Path) -> None:
     endpoint = _endpoint(path)
     assert endpoint.api_key is None
     assert endpoint.status == "unverified_manual"
+
+
+def _move(path: Path, **payload_overrides: Any) -> None:
+    """Save the card at a NEW address while sending the id the frontend still knows.
+
+    This is what editing the Base URL field does: the client keeps addressing the
+    endpoint by the id it was handed, and the identity — canonical (base_url,
+    protocol) — moves underneath it. The secret field carries the redaction
+    placeholder because the card was showing a stored key it never held in plain.
+    """
+    payload: dict[str, Any] = {
+        "endpoint_id": _endpoint_id(path),
+        "display_name": "Acme",
+        "protocol": "openai_compatible",
+        "base_url": "https://api.acme.example/openai",
+        "api_key": SECRET_REDACTION_PLACEHOLDER,
+    }
+    payload.update(payload_overrides)
+    upsert_endpoints({_endpoint_id(path): payload}, path=path)
+
+
+def test_moving_the_address_does_not_inherit_the_old_addresss_verdict(tmp_path: Path) -> None:
+    # `protocol_unsupported` says THIS host does not speak THIS protocol. Editing
+    # the Base URL replaces the host, so the verdict's subject stops existing —
+    # carrying it forward pre-condemns an address nothing has ever asked.
+    # Live 2026-08-19: jiekou moved from /anthropic to /openai and all three cells
+    # arrived dead with no probe ever run against them.
+    path = tmp_path / "llm_credentials.json"
+    _seed(
+        path,
+        status="failed",
+        last_test_at="2026-08-12T16:34:38+00:00",
+        last_test_message="Endpoint test failed (protocol_unsupported).",
+        last_error_code="protocol_unsupported",
+    )
+
+    _move(path)
+
+    endpoint = _endpoint(path)
+    assert endpoint.base_url == "https://api.acme.example/openai"
+    assert endpoint.status == "unverified_manual"
+    assert endpoint.last_test_at is None
+    assert endpoint.last_test_message is None
+    assert endpoint.last_error_code is None
+
+
+def test_moving_the_address_keeps_the_credential(tmp_path: Path) -> None:
+    # A credential is not an observation: the user pointed the SAME account at a
+    # different address. Making them re-paste the key would be a second defect.
+    path = tmp_path / "llm_credentials.json"
+    _seed(path, status="verified", last_test_at="2026-08-12T16:34:38+00:00")
+
+    _move(path)
+
+    endpoint = _endpoint(path)
+    assert endpoint.api_key is not None
+    assert endpoint.api_key.get_secret_value() == "sk-original-key"
+
+
+def test_moving_the_address_drops_models_discovered_at_the_old_one(tmp_path: Path) -> None:
+    # Routes ARE the discovered-model cache, and every one of them was discovered
+    # by asking the old address. They cannot describe the new one.
+    from app.models.llm_config import ProviderRoute
+    from app.services.llm_credentials import save_credentials
+
+    path = tmp_path / "llm_credentials.json"
+    _seed(path, status="verified")
+    data = load_credentials(path)
+    endpoint_id = _endpoint_id(path)
+    route = ProviderRoute(
+        route_id=f"{endpoint_id}:acme-fast",
+        endpoint_id=endpoint_id,
+        route_slug="acme-fast",
+        provider_model_id="acme-fast",
+        status="verified",
+    )
+    data.provider_routes[route.route_id] = route
+    save_credentials(data, path=path)
+
+    _move(path)
+
+    after = load_credentials(path)
+    assert after.provider_routes == {}, after.provider_routes
+
+
+def test_editing_anything_but_the_address_keeps_the_observation(tmp_path: Path) -> None:
+    # The reset is keyed on identity moving, not on "a save happened". Renaming the
+    # card must not throw away a verdict that still describes the same address.
+    path = tmp_path / "llm_credentials.json"
+    _seed(
+        path,
+        status="verified",
+        last_test_at="2026-08-12T16:34:38+00:00",
+        last_test_message="Generation verified via openai_compatible.",
+    )
+
+    _move(path, base_url="https://api.acme.example/v1", display_name="Acme Renamed")
+
+    endpoint = _endpoint(path)
+    assert endpoint.display_name == "Acme Renamed"
+    assert endpoint.status == "verified"
+    assert endpoint.last_test_at == "2026-08-12T16:34:38+00:00"
+
+
+def test_changing_the_protocol_is_still_refused_rather_than_silently_moved(tmp_path: Path) -> None:
+    # Protocol is the other half of identity, but it is NOT an in-place edit: each
+    # protocol is its own cell, so a protocol swap on one id is an authoring
+    # mistake and keeps its explicit error. The identity-move reset must not turn
+    # it into a silent re-create.
+    path = tmp_path / "llm_credentials.json"
+    _seed(path, status="verified")
+
+    with pytest.raises(EndpointInvariantViolation, match="cannot change protocol"):
+        _move(path, protocol="anthropic_compatible")

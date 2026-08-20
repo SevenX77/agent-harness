@@ -207,6 +207,8 @@
       "connectedBadge": "已连接",
       "connectedWithLatency": "已连接（{{latencyMs}} 毫秒）",
       "notConfigured": "未配置",
+      "protocolUnsupportedBadge": "协议不支持",
+      "protocolUnsupportedHint": "密钥和地址都已保存。这个地址不提供该协议——换一个提供该协议的地址,或用格子上的 Re-probe 再问一次。",
       "thirdPartyBadge": "第三方",
       "copiedToast": "已复制{{label}}",
       "copyFailedToast": "复制{{label}}失败",

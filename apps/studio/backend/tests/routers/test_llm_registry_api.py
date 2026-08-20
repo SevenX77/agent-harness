@@ -27,10 +27,16 @@ from app.routers import llm as llm_router
 from app.services.community_catalog_runtime import (
     promote_community_evidence_into_credentials,
 )
-from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
+from app.services.llm_credentials import (
+    SECRET_REDACTION_PLACEHOLDER,
+    credentials_path,
+    load_credentials,
+    save_credentials,
+)
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from app.services.model_probe import ModelProbeResult
+from app.services.runtime_activity import load_runtime_activity
 from fastapi.testclient import TestClient
 from graph_agent_gateway.probing import EndpointProbeResult, RouteProbeResult
 from graph_agent_gateway.probing import wire as gateway_provider_probe
@@ -2830,6 +2836,89 @@ def test_endpoint_test_protocol_unsupported_gate_expires_after_half_life(
     assert response.status_code == 200
     assert calls["n"] == 1
     assert response.json()["skipped"] is False
+
+def test_moving_the_base_url_lets_the_ordinary_test_probe_again(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # The half-life gate reads the STORED protocol_unsupported observation, so an
+    # endpoint that inherited one it never earned becomes untestable: the routine
+    # Test skips it for 30 days and the button reports an empty queue. Editing the
+    # Base URL retires the observation (see ``upsert_endpoints``), so the very next
+    # ordinary Test must reach the provider. Live 2026-08-19: jiekou moved to
+    # /openai and all three cells arrived pre-condemned by the /anthropic verdict.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "jiekou-anthropic": ProviderEndpoint(
+                    endpoint_id="jiekou-anthropic",
+                    display_name="Jiekou",
+                    protocol="anthropic_compatible",
+                    base_url="https://api.jiekou.example/anthropic",
+                    api_key="secret",
+                    status="failed",
+                    last_test_at=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                    last_test_message="Protocol not supported by this URL.",
+                    last_error_code="protocol_unsupported",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    calls = {"n": 0}
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        calls["n"] += 1
+        return _endpoint_probe_ok(endpoint, latency_ms=12, model_ids=("claude-x",))
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return _route_probe(endpoint, route, status="ok", latency_ms=9)
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    # What the card does when the user edits Base URL and presses Save: it still
+    # addresses the endpoint by the id it holds, and sends the mask back for the
+    # key it has never seen in plain.
+    moved = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "jiekou-anthropic": {
+                    "endpoint_id": "jiekou-anthropic",
+                    "display_name": "Jiekou",
+                    "protocol": "anthropic_compatible",
+                    "base_url": "https://api.jiekou.example/v2",
+                    "api_key": SECRET_REDACTION_PLACEHOLDER,
+                }
+            }
+        },
+    )
+    assert moved.status_code == 200
+    persisted_id, persisted = next(
+        (endpoint_id, entry)
+        for endpoint_id, entry in load_credentials().provider_endpoints.items()
+    )
+    assert persisted.status == "unverified_manual"
+    assert persisted.last_error_code is None
+
+    response = client.post(f"/api/llm/endpoints/{persisted_id}/test")
+
+    assert response.status_code == 200
+    assert calls["n"] == 1  # the routine Test really asked the provider
+    body = response.json()
+    assert body["skipped"] is False
+    assert body["registry"]["provider_endpoints"][persisted_id]["status"] == "verified"
+    activity = load_runtime_activity(source_id="llm_credentials")
+    assert any(entry["action"] == "endpoint_test" for entry in activity), activity
 
 
 def test_endpoint_test_protocol_unsupported_does_not_reuse_previously_verified(

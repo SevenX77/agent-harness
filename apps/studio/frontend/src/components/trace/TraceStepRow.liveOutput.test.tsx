@@ -96,3 +96,45 @@ describe('a running step shows the answer arriving', () => {
     expect(render(opener)).not.toContain('data-trace-live-output')
   })
 })
+
+describe('the arriving answer sits in the flow, not above it (design D1)', () => {
+  it('renders the live output AFTER the prompt entries when the step is expanded', () => {
+    const html = renderToStaticMarkup(
+      <TraceStepRow
+        step={{
+          key: 'evt-0',
+          phase: eventPhase(opener),
+          segment: null,
+          stepId: 'step-1',
+          status: 'running',
+          start: { event: opener, index: 0 },
+          iteration: null,
+          verdicts: [],
+          end: null,
+        }}
+        eventId="evt-0"
+        expanded
+        onToggleExpanded={() => undefined}
+        liveOutput={{ text: 'Hello, wor', thinking: 'let me think' }}
+      />,
+    )
+
+    // 装载 prompt → 渲染后 prompt → 思考 → 回答: the answer arriving cannot
+    // precede the prompt that asked for it.
+    const promptLoaded = html.indexOf('Prompt loaded')
+    const renderedPrompt = html.indexOf('Rendered prompt')
+    const thinking = html.indexOf('let me think')
+    const answer = html.indexOf('Hello, wor')
+
+    expect(promptLoaded).toBeGreaterThanOrEqual(0)
+    expect(renderedPrompt).toBeGreaterThan(promptLoaded)
+    expect(thinking).toBeGreaterThan(renderedPrompt)
+    expect(answer).toBeGreaterThan(thinking)
+  })
+
+  it('still shows the arriving answer on a COLLAPSED row', () => {
+    const html = render(opener, { liveOutput: { text: 'Hello, wor', thinking: '' } })
+
+    expect(html).toContain('Hello, wor')
+  })
+})

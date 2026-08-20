@@ -169,9 +169,15 @@ export function TraceStepRow({
         <ToolHeadline step={step} />
       </button>
       {/* Outside the row button: these carry their own interactive fold
-          controls, and a button inside a button is not a thing. */}
-      {running && liveOutput ? <LiveOutput output={liveOutput} /> : null}
-      {expanded ? <StepBody step={step} /> : null}
+          controls, and a button inside a button is not a thing.
+
+          The arriving answer belongs INSIDE the step's flow when the step is
+          open (design D1: 装载 prompt → 渲染后 prompt → 思考 → 回答), so the
+          expanded body owns it and this standalone copy is what a COLLAPSED
+          row shows — one slot each, never both. */}
+      {expanded
+        ? <StepBody step={step} liveOutput={running ? liveOutput : undefined} />
+        : running && liveOutput ? <LiveOutput output={liveOutput} /> : null}
     </div>
   )
 }
@@ -199,10 +205,10 @@ function ToolHeadline({ step }: { step: TraceStep }) {
   )
 }
 
-function StepBody({ step }: { step: TraceStep }) {
+function StepBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepOutput }) {
   const opener = step.start.event
   if (opener.event_type === 'prompt_captured' || opener.event_type === 'llm_call') {
-    return <LlmFlowBody step={step} />
+    return <LlmFlowBody step={step} liveOutput={liveOutput} />
   }
   const summary = toolCallSummary(step.end?.event ?? opener)
   if (summary) {
@@ -225,13 +231,17 @@ function StepBody({ step }: { step: TraceStep }) {
  * call. The TEMPLATE / VARIABLES / RENDERED / Response containers this replaces
  * arranged the same data by KIND, which is an order no execution ever ran in.
  */
-function LlmFlowBody({ step }: { step: TraceStep }) {
+function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepOutput }) {
   const prompt = step.start.event
   const answered = step.end?.event
   const variables = jsonText(prompt.variables)
   const hasVariables = variables !== '' && variables !== '{}'
-  const reasoning = answerReasoning(answered)
-  const answer = answerContent(answered)
+  // While the call is still open the same two slots carry what has arrived so
+  // far. Never both: once the settled event lands it is the authority, and
+  // keeping the streamed copy beside it would show one answer twice from two
+  // sources that disagree after a dropped piece.
+  const reasoning = answerReasoning(answered) || liveOutput?.thinking || ''
+  const answer = answerContent(answered) || liveOutput?.text || ''
   const toolCalls = answerToolCallsText(answered)
   const bareResponse = answered && !reasoning && !answer && !toolCalls
   return (

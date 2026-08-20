@@ -57,7 +57,7 @@ def test_a_run_row_carries_the_path_to_its_own_report(
     listed = run_manager.list_runs("text-segmentation")
 
     row = next(entry for entry in listed.runs if entry.run_id == RUN_WITH_REPORT)
-    assert row.report_path == str(run_dir / REPORT_FILENAME)
+    assert row.report_path == f".workspace/runs/{run_dir.name}/{REPORT_FILENAME}"
 
 
 def test_a_run_with_no_report_offers_no_link(studio_roots: tuple[Path, Path]) -> None:

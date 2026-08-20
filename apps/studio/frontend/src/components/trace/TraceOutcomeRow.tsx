@@ -1,7 +1,20 @@
 import { AlertCircle, CheckCircle2, Clock, FileText, Hash, XCircle } from 'lucide-react'
-import { openLocalPath } from '../../lib/tauri'
+import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 import { formatRunDuration, formatRunTokens } from '../../utils/run-format'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
+import type { FileOpenRequest } from '../studio/file-types'
+
+/**
+ * The report as a workspace document — the editor opens it, not the OS.
+ *
+ * `report_path` arrives workspace-relative for exactly this reason, and the
+ * editor loads the content itself when a request carries none. Read-only:
+ * the report is a projection of the run (decision 2026-08-09 D8), so an
+ * editable copy would be a second truth about a finished run.
+ */
+export function runReportOpenRequest(reportPath: string): FileOpenRequest {
+  return { path: reportPath, title: 'Run report', language: 'markdown', saveEnabled: false }
+}
 
 const OUTCOME_PRESENTATION = {
   success: { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' },
@@ -20,6 +33,7 @@ const OUTCOME_PRESENTATION = {
  */
 export function TraceOutcomeRow({ outcome }: { outcome: TraceOutcomeEntry }) {
   const { icon: Icon, label, tone } = OUTCOME_PRESENTATION[outcome.status]
+  const onFileOpen = useOptionalWorkspaceContext()?.onFileOpen
   const duration = formatRunDuration(outcome.wallTimeSec)
   const tokens = formatRunTokens(outcome.totalTokens)
 
@@ -49,7 +63,7 @@ export function TraceOutcomeRow({ outcome }: { outcome: TraceOutcomeEntry }) {
           <button
             type="button"
             data-trace-outcome-report
-            onClick={() => { void openLocalPath(outcome.reportPath as string) }}
+            onClick={() => { onFileOpen?.(runReportOpenRequest(outcome.reportPath as string)) }}
             className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
           >
             <FileText className="h-3.5 w-3.5" />

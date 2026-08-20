@@ -717,3 +717,53 @@ describe('TracePanel scope (D6 选中即范围)', () => {
     expect(html).not.toContain('data-trace-scope')
   })
 })
+
+describe('a narrowed trace does not end with a verdict about the whole run (PM 08-19 Q5)', () => {
+  function envelope(seq: number, payload: Partial<CallbackEvent>): EventEnvelope {
+    return {
+      schema_version: 'studio.event.v1',
+      stream_id: 'run:run-1',
+      seq,
+      cursor: `run:run-1:${seq}`,
+      run_id: 'run-1',
+      event_type: String(payload.event_type),
+      timestamp: '2026-06-14T00:00:00Z',
+      payload: { schema_version: '1.0', timestamp: '2026-06-14T00:00:00Z', ...payload } as CallbackEvent,
+    } satisfies EventEnvelope
+  }
+
+  const endedRun = [
+    envelope(1, { event_type: 'phase_start', phase_name: 'draft' }),
+    envelope(2, { event_type: 'phase_start', phase_name: 'review' }),
+    envelope(3, { event_type: 'run_ended', status: 'success' }),
+  ]
+
+  it('drops the outcome row while a node scope is on', () => {
+    // The row says "Run succeeded" at the END of the sequence above it. Under a
+    // scope that sequence is one node's few events, so the verdict reads as a
+    // claim about those — a judgement about a run pasted onto something that is
+    // not the run.
+    expect(render({ traceLogs: endedRun })).toContain('data-trace-outcome')
+    expect(render({ traceLogs: endedRun, scope: { kind: 'node', phase: 'draft' } }))
+      .not.toContain('data-trace-outcome')
+  })
+
+  it('keeps the run identity in the top bar regardless of scope', () => {
+    // The top bar answers "which run is this and how is it doing" (F8). That is
+    // the run's identity, not a statement about the current view.
+    const scoped = render({ traceLogs: endedRun, scope: { kind: 'node', phase: 'draft' } })
+    expect(scoped).toContain('data-trace-verdict')
+  })
+
+  it('counts route issues within the scope, so the chip matches what clicking it reveals', () => {
+    const degraded = [
+      envelope(1, { event_type: 'llm_route_decision', phase_name: 'draft', decision: 'probe_failed' }),
+      envelope(2, { event_type: 'llm_route_decision', phase_name: 'review', decision: 'probe_failed' }),
+    ]
+    expect(render({ traceLogs: degraded })).toContain('2 route issues')
+
+    const scoped = render({ traceLogs: degraded, scope: { kind: 'node', phase: 'draft' } })
+    expect(scoped).toContain('1 route issue')
+    expect(scoped).not.toContain('2 route issues')
+  })
+})

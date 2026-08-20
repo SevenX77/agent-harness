@@ -253,6 +253,7 @@ function RunStatusMark({
       <Tooltip>
         <TooltipTrigger asChild>
           <span
+            data-trace-verdict="running"
             aria-label="Run in progress"
             className="flex size-4 shrink-0 items-center justify-center"
           >
@@ -271,7 +272,7 @@ function RunStatusMark({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Icon aria-label={mark.label} className={`size-4 shrink-0 ${mark.tone}`} />
+        <Icon data-trace-verdict={verdict} aria-label={mark.label} className={`size-4 shrink-0 ${mark.tone}`} />
       </TooltipTrigger>
       <TooltipContent>{mark.label}</TooltipContent>
     </Tooltip>
@@ -324,7 +325,10 @@ export function TracePanel({
   // trace-observability F7: a run that silently fell back to another provider
   // announces it up front; clicking the chip narrows the trace to the fallback
   // events via the existing type filter.
-  const degradedRouteCount = countRouteDegradations(traceEvents)
+  // Scoped, because the chip is ACTIONABLE: clicking it searches THIS list. A
+  // count that does not match what clicking reveals is a promise the panel
+  // cannot keep (2026-08-20 revision of F3).
+  const degradedRouteCount = countRouteDegradations(scopedEvents)
   const activeFilterCount = filter.selectedCategories.length + filter.selectedPhases.length
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
@@ -334,7 +338,12 @@ export function TracePanel({
   const verdict = runVerdict(traceEvents, metadata)
   // D8: the run's conclusion is the last thing in its own trace. Fed the full
   // event list, not the filtered one — the ending of a run is not a search hit.
-  const outcome = traceOutcomeEntry(traceEvents, metadata)
+  // The outcome row sits at the END of the step list and says how the RUN
+  // ended. Under a scope that list is one node's few events, so the verdict
+  // reads as a judgement about them — a statement about the run pasted onto
+  // something that is not the run (PM 08-19 Q5). The run's verdict stays
+  // visible where it belongs: the top bar, which names the run itself (F8).
+  const outcome = scope ? null : traceOutcomeEntry(traceEvents, metadata)
 
   const [nodePromoting, setNodePromoting] = useState(false)
   // atom #32 entry①: offer per-node golden creation for the focused, golden-less

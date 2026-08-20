@@ -298,13 +298,31 @@ _CORRECTION_EVENTS = frozenset({"nudge", "tool_error_handled", "tool_history_rep
 _EXECUTION_OPENS = {"phase_start": "phase_execution_id", "edge_start": "edge_transition_id"}
 _EXECUTION_CLOSES = frozenset({"phase_end", "edge_end"})
 
-#: The field an event uses to say which execution it happened in. The engine
-#: stamps it on everything emitted inside a phase, so attribution is stated by
-#: the producer rather than inferred by position — the inference was wrong
-#: whenever two executions of one node overlapped, which a fan-out makes
-#: routine (run 2026-08-20T13-14-59_14582c6b: `aggregate`, `extrac` and
-#: `settings` each had two open at once, and 4 calls landed in those windows).
-_EXECUTION_NAMED_BY = "phase_execution_id"
+def _execution_named_by(event: dict[str, Any]) -> str | None:
+    """Which execution this event says it happened in, or None if it says nothing.
+
+    Attribution is stated by the producer rather than inferred by position: the
+    inference was wrong whenever two executions of one node overlapped, which a
+    fan-out makes routine (run 2026-08-20T13-14-59_14582c6b: `aggregate`,
+    `extrac` and `settings` each had two open at once, and 4 calls landed in
+    those windows).
+
+    Two identifiers ride on the same event, so the one to read is the one that
+    matches the row being charged — the same decision `_event_node` makes. An
+    event carrying `edge_transition_id` belongs to the TRANSITION row, and the
+    transition is therefore the execution it names; the `phase_execution_id`
+    also stamped on it names the phase the transition leads INTO, which that row
+    never opened. Reading the phase field there split every transition in two
+    (run 2026-08-20T15-50-39_9fd32c27 reported each `X -> Y` as twice its real
+    execution count, alternating "unfinished" and "ok").
+    """
+    transition = event.get("edge_transition_id")
+    if isinstance(transition, str) and transition:
+        return transition
+    phase_execution = event.get("phase_execution_id")
+    if isinstance(phase_execution, str) and phase_execution:
+        return phase_execution
+    return None
 
 
 def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
@@ -333,8 +351,8 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
         falls back to whichever execution of this node is open, because
         charging it somewhere still beats dropping it.
         """
-        named = event.get(_EXECUTION_NAMED_BY)
-        if isinstance(named, str) and named:
+        named = _execution_named_by(event)
+        if named is not None:
             known = execution_by_id.get(named)
             if known is not None:
                 return known

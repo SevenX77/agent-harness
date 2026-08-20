@@ -69,7 +69,7 @@ _ALL_EVENT_CLASSES = [
 
 _MIN_CTOR: dict[type, dict] = {
     PhaseStartEvent: {"phase_name": "p", "phase_execution_id": "exec-1"},
-    PhaseEndEvent: {"phase_name": "p", "phase_execution_id": "exec-1"},
+    PhaseEndEvent: {"phase_name": "p", "phase_execution_id": "exec-1", "status": "completed"},
     EdgeStartEvent: {
         "edge_transition_id": "t-1",
         "from_phases": ["a"],

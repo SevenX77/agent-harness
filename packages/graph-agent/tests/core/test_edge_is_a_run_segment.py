@@ -81,7 +81,11 @@ class TestTransitionBoundaries:
             close_edge_transition([rec])
             execution_id = active_phase_execution_id()
             rec.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id=execution_id))
-            rec.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id=execution_id))
+            rec.on_event(PhaseEndEvent(
+                    phase_name="draft",
+                    phase_execution_id=execution_id,
+                    status="completed",
+                ))
             return {}
 
         node = wrap_edge_transition(

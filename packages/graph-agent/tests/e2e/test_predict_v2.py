@@ -77,6 +77,7 @@ def test_predict_tracing_consumes_mock_source_cache() -> None:
         PhaseEndEvent(
             phase_name="draft",
             phase_execution_id="exec-1",
+            status="completed",
             context={"draft": {"text": "stub"}},
         )
     )

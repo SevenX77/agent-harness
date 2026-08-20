@@ -36,7 +36,7 @@ N/A。
 
 ### 3. 声明式 iterate 对 graph-exec 的接线影响(WS-E1 Step4 已落)
 Step4 没把循环塞回 action,而是在 graph execution 外层接声明式 runtime:
-- phase-level iterate:`_wrap_phase_runtime_node` 先构造 `PhaseWrapper(StateMapper).wrap(_node_with_lifecycle)`,再接 runtime_config import binding 注入,最后由 `_build_iterate_wrapped_phase` 包成 batch/loop。这样每轮 phase body 仍走正常 io slice/merge;若 runtime_config 声明该 phase 的 import binding,文件内容会在目标 phase 执行前注入普通 blackboard,再被 `PhaseWrapper` 按 `io.inputs` 切片给 action。
+- phase-level iterate:`_wrap_phase_runtime_node` 先构造 `PhaseWrapper(StateMapper, lifecycle=...).wrap(node)`(相位的 `phase_start`/`phase_end` 由注入的 `_PhaseEventLifecycle` 从 wrapper **内部**发,见 observability OB13),再接 runtime_config import binding 注入,最后由 `_build_iterate_wrapped_phase` 包成 batch/loop。这样每轮 phase body 仍走正常 io slice/merge;若 runtime_config 声明该 phase 的 import binding,文件内容会在目标 phase 执行前注入普通 blackboard,再被 `PhaseWrapper` 按 `io.inputs` 切片给 action。
 - node batch/range:`_build_batch_iterate_phase` 按 `iterate.over` 解析 list、按 `item_var` 注入每项、按 phase outputs 聚合。
 - node loop:`_build_loop_iterate_phase` 串行执行,每轮把 `accumulate.var` 作为普通 business input 喂给 action,最终只写回 accumulator。
 - graph-level iterate:`assemble_graph` 在 `compiled.manifest.iterate` 存在时,把 compiled LangGraph 包成 `_GraphIterateRuntime`;其 `invoke` 内部执行整图 batch 或整图 loop。

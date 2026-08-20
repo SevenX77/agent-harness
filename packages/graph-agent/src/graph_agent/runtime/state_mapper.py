@@ -6,11 +6,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from graph_agent.callbacks.events import PhaseOutcome
 from graph_agent.core.edge_transition import active_phase_execution_id
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 from graph_agent.core.state import (
@@ -509,6 +510,36 @@ def scratch_from_state(state: WorkflowState) -> dict[str, Any]:
     return state["flow"].working_memory or {}
 
 
+class PhaseLifecycle(Protocol):
+    """Told when one phase execution opens and how it ended.
+
+    The wrapper knows where an execution begins and ends — nothing else does,
+    because building the phase input, running the node and checking the declared
+    output contract are all inside it — but it has no business deciding what the
+    host announces at those boundaries. So it reports, and the host emits.
+
+    ``opened`` hands back the execution's identity and ``ended`` takes it back.
+    Carrying the identity through a local of the running call is what keeps two
+    concurrent executions of one phase (a fan-out, an ``iterate`` item) from
+    swapping ends; an identity kept on the reporter would be shared by both.
+    """
+
+    def opened(self, phase_input: WorkflowState) -> str:
+        """Announce the execution that is starting; return its identity."""
+        ...
+
+    def ended(
+        self,
+        execution_id: str,
+        phase_input: WorkflowState,
+        result: Any,
+        *,
+        status: PhaseOutcome,
+    ) -> None:
+        """Announce how the execution named by ``execution_id`` ended."""
+        ...
+
+
 @dataclass(frozen=True)
 class PhaseWrapper:
     """Common wrapper used by Agent, LOGIC, SUBGRAPH and builtin runtime nodes."""
@@ -517,6 +548,10 @@ class PhaseWrapper:
     node_kind: str = "unknown"
     validator: PhaseValidator | None = None
     validator_error_code: str | None = None
+    #: Who to tell that this phase execution opened and how it ended. ``None``
+    #: for the runtime nodes the host does not announce (the builtin reference
+    #: reader), which is every construction site that leaves it out.
+    lifecycle: PhaseLifecycle | None = None
 
     def wrap(
         self,
@@ -531,19 +566,32 @@ class PhaseWrapper:
             )
 
         def _wrapped(state: WorkflowState) -> dict[str, Any]:
+            lifecycle = self.lifecycle
+            execution_id: str | None = None
+            phase_input: WorkflowState | None = None
+            result: Any = None
+            # Failed until the phase gets all the way through, which includes
+            # its output surviving the validator: a phase that reported
+            # ``completed`` and then died in ``wrap_phase_output`` is exactly
+            # the run that made this field necessary (E17).
+            status: PhaseOutcome = "failed"
             try:
                 # Prepare filtered type-safe inputs
                 phase_input = self.mapper.build_phase_input(state)
+                if lifecycle is not None:
+                    execution_id = lifecycle.opened(phase_input)
                 # Execute the phase node
                 result = node(phase_input)
                 # Map outputs type-safely back to WorkflowState
-                return self.mapper.wrap_phase_output(
+                mapped = self.mapper.wrap_phase_output(
                     state,
                     result,
                     state_slice=phase_input["data"].model_dump(),
                     validator=self.validator,
                     validator_error_code=self.validator_error_code,
                 )
+                status = "completed"
+                return mapped
             except GraphAgentFatalError:
                 raise
             except Exception as exc:
@@ -552,6 +600,13 @@ class PhaseWrapper:
                     detail,
                     payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
                 ) from exc
+            finally:
+                # An execution that opened always closes, however it went: a
+                # phase whose end frame never arrives leaves its node running
+                # forever on the canvas. An input that never built opened
+                # nothing, so there is nothing to close.
+                if lifecycle is not None and execution_id is not None and phase_input is not None:
+                    lifecycle.ended(execution_id, phase_input, result, status=status)
 
         wrapped_attrs = cast(Any, _wrapped)
         wrapped_attrs.__graph_agent_phase_wrapped__ = True
@@ -590,6 +645,7 @@ class ReaderSandboxState:
 
 
 __all__ = [
+    "PhaseLifecycle",
     "PhaseWrapper",
     "ReaderSandboxState",
     "StateMapper",

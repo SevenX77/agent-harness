@@ -42,6 +42,7 @@ def test_phase_end_backfills_mocked_source_from_interception_cache() -> None:
         PhaseEndEvent(
             phase_name="draft",
             phase_execution_id="exec-1",
+            status="completed",
             context={"story": "stub"},
         )
     )
@@ -63,9 +64,9 @@ def test_phase_source_cache_is_consumed_after_backfill() -> None:
 
     callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
     record_mock_source("draft", "manual")
-    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", status="completed", context={}))
     callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
-    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", status="completed", context={}))
 
     assert callback.phases[0]["mocked_source"] == "manual"
     assert "mocked_source" not in callback.phases[1]

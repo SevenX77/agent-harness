@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from graph_agent.callbacks.emit import _safe_emit_event
+from graph_agent.callbacks.emit import _safe_emit_event, active_phase_execution
 from graph_agent.callbacks.events import EdgeEndEvent, EdgeStartEvent
 
 
@@ -145,11 +145,16 @@ def wrap_edge_transition(
             branch_index=branch_index_of(),
         )
         token = active_edge_transition_var.set(transition)
+        # Everything emitted from here to the end of the phase body belongs to
+        # the execution this transition leads into, so it is stamped rather
+        # than passed down through every emitter (E15).
+        execution_token = active_phase_execution.set(transition.to_phase_execution_id)
         _safe_emit_event(callbacks, edge_start_event(transition))
         try:
             return node(state)  # type: ignore[no-any-return]
         finally:
             close_edge_transition(callbacks)
+            active_phase_execution.reset(execution_token)
             active_edge_transition_var.reset(token)
 
     return _run

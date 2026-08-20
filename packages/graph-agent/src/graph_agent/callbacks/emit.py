@@ -123,6 +123,16 @@ active_subgraph_path: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
     "active_subgraph_path", default=()
 )
 
+#: The phase execution the code emitting right now is running inside.
+#: ``wrap_edge_transition`` sets it around the whole phase body, because the
+#: transition already had to mint that id to name its destination — one mint,
+#: one id. Lives here beside ``active_subgraph_path`` so both ambient scopes
+#: are read in one place, and because ``core.edge_transition`` already imports
+#: this module (the reverse would be a cycle).
+active_phase_execution: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "active_phase_execution", default=None
+)
+
 
 def _stamp_subgraph_path(event: Any) -> None:
     """Fill ``subgraph_path`` from ambient scope on events that carry the field.
@@ -141,11 +151,30 @@ def _stamp_subgraph_path(event: Any) -> None:
         pass
 
 
+def _stamp_phase_execution(event: Any) -> None:
+    """Fill ``phase_execution_id`` from ambient scope on events that carry it.
+
+    Only a still-unset field is stamped: the two phase lifecycle events name
+    their own execution, and ``parallel_map`` propagates child events already
+    stamped inside the child context.
+    """
+    if getattr(event, "phase_execution_id", "") is not None:
+        return
+    execution_id = active_phase_execution.get()
+    if not execution_id:
+        return
+    try:
+        event.phase_execution_id = execution_id
+    except (AttributeError, TypeError, ValueError):  # frozen or exotic event objects
+        pass
+
+
 def _safe_emit_event(callbacks: Any | None, event: Any) -> None:
     """Dispatch a typed callback event without letting callback failures abort a run."""
     if callbacks is None:
         return
     _stamp_subgraph_path(event)
+    _stamp_phase_execution(event)
     emit = getattr(callbacks, "emit", None)
     if callable(emit):
         try:
@@ -247,4 +276,5 @@ __all__ = [
     "_TraceJsonlSink",
     "_safe_emit_event",
     "active_subgraph_path",
+    "active_phase_execution",
 ]

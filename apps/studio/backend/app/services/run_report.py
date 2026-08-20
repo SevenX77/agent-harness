@@ -295,35 +295,54 @@ _FAILURE_EVENTS = frozenset(
 _CORRECTION_EVENTS = frozenset({"nudge", "tool_error_handled", "tool_history_repaired"})
 
 #: Events that open one execution of a node, and the field naming that execution.
-#: Everything charged to a node in between belongs to whichever execution is open
-#: at that moment: an `llm_call` carries no execution id of its own, and the
-#: trace is ordered.
 _EXECUTION_OPENS = {"phase_start": "phase_execution_id", "edge_start": "edge_transition_id"}
 _EXECUTION_CLOSES = frozenset({"phase_end", "edge_end"})
+
+#: The field an event uses to say which execution it happened in. The engine
+#: stamps it on everything emitted inside a phase, so attribution is stated by
+#: the producer rather than inferred by position — the inference was wrong
+#: whenever two executions of one node overlapped, which a fan-out makes
+#: routine (run 2026-08-20T13-14-59_14582c6b: `aggregate`, `extrac` and
+#: `settings` each had two open at once, and 4 calls landed in those windows).
+_EXECUTION_NAMED_BY = "phase_execution_id"
 
 
 def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
     accounts: dict[str, _NodeAccount] = {}
     open_execution: dict[str, _Execution] = {}
+    execution_by_id: dict[str, _Execution] = {}
 
     def account_for(node_id: str) -> _NodeAccount:
         if node_id not in accounts:
             accounts[node_id] = _NodeAccount(node_id=node_id)
         return accounts[node_id]
 
-    def execution_for(node_id: str) -> _Execution:
-        """The execution currently charged for this node, opening one if needed.
+    def open_new(node_id: str, execution_id: str, started_at: str | None) -> _Execution:
+        execution = _Execution(execution_id=execution_id, started_at=started_at)
+        account_for(node_id).executions.append(execution)
+        open_execution[node_id] = execution
+        execution_by_id[execution_id] = execution
+        return execution
 
-        An implicit execution covers events that arrive with nothing open — a
-        truncated trace, or a node seen only through events that carry no
-        lifecycle of their own. Charging them somewhere beats dropping them.
+    def execution_for(node_id: str, event: dict[str, Any]) -> _Execution:
+        """The execution this event belongs to, opening one if it is unknown.
+
+        An event that names its execution goes there even when a sibling
+        execution of the same node opened more recently. One that names none —
+        a truncated trace, or an event kind emitted outside any phase scope —
+        falls back to whichever execution of this node is open, because
+        charging it somewhere still beats dropping it.
         """
+        named = event.get(_EXECUTION_NAMED_BY)
+        if isinstance(named, str) and named:
+            known = execution_by_id.get(named)
+            if known is not None:
+                return known
+            return open_new(node_id, named, None)
         current = open_execution.get(node_id)
         if current is None:
             account = account_for(node_id)
-            current = _Execution(execution_id=f"{node_id}#{len(account.executions) + 1}")
-            account.executions.append(current)
-            open_execution[node_id] = current
+            current = open_new(node_id, f"{node_id}#{len(account.executions) + 1}", None)
         return current
 
     for event in events:
@@ -336,21 +355,21 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
 
         if event_type in _EXECUTION_OPENS:
             identifier = event.get(_EXECUTION_OPENS[event_type])
-            execution = _Execution(
-                execution_id=str(identifier)
+            open_new(
+                node_id,
+                str(identifier)
                 if isinstance(identifier, str) and identifier
                 else f"{node_id}#{len(account.executions) + 1}",
-                started_at=timestamp if isinstance(timestamp, str) else None,
+                timestamp if isinstance(timestamp, str) else None,
             )
-            account.executions.append(execution)
-            open_execution[node_id] = execution
         elif event_type in _EXECUTION_CLOSES:
-            execution = execution_for(node_id)
+            execution = execution_for(node_id, event)
             if isinstance(timestamp, str):
                 execution.ended_at = timestamp
-            open_execution.pop(node_id, None)
+            if open_execution.get(node_id) is execution:
+                open_execution.pop(node_id, None)
         elif event_type == "llm_call":
-            execution = execution_for(node_id)
+            execution = execution_for(node_id, event)
             execution.llm_calls += 1
             execution.input_tokens += _as_int(event.get("input_tokens"))
             execution.output_tokens += _as_int(event.get("output_tokens"))
@@ -358,11 +377,11 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
             if isinstance(model, str) and model and model not in account.models:
                 account.models.append(model)
         elif event_type == "tool_call":
-            execution_for(node_id).tool_calls += 1
+            execution_for(node_id, event).tool_calls += 1
         elif event_type == "agent_loop_iteration":
             account.agent_turns = max(account.agent_turns, _as_int(event.get("iteration")))
         elif event_type == "interrupted":
-            execution_for(node_id).interrupted = True
+            execution_for(node_id, event).interrupted = True
         elif event_type in _CORRECTION_EVENTS:
             account.corrections += 1
         elif event_type == "finish_task_verdict":
@@ -370,9 +389,9 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
             # validation_fail event: the attempt failed its checks and the
             # model was sent back to fix it.
             if event.get("verdict") == "rejected":
-                execution_for(node_id).errors.append(_error_line(event))
+                execution_for(node_id, event).errors.append(_error_line(event))
         elif event_type in _FAILURE_EVENTS:
-            execution_for(node_id).errors.append(_error_line(event))
+            execution_for(node_id, event).errors.append(_error_line(event))
 
     return list(accounts.values())
 

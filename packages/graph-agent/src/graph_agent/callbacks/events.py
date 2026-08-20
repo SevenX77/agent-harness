@@ -58,15 +58,27 @@ class _EventBase(BaseModel):
     #: row and lost a ``setup`` node entirely. Stamped centrally in
     #: ``_safe_emit_event`` from the scope ``_build_subgraph_node`` maintains.
     subgraph_path: str | None = None
+    #: Which execution of its phase this event happened in. An outer
+    #: iterate/batch loop runs the same phase several times and those runs
+    #: OVERLAP, so ``phase_name`` cannot say which one an event belongs to:
+    #: run 2026-08-20T13-14-59_14582c6b had ``aggregate``, ``extrac`` and
+    #: ``settings`` each with two executions open at once, and the run report
+    #: — which had to infer the owner from "whichever execution is open right
+    #: now" — charged 4 calls to whichever had opened last. Stamped centrally
+    #: in ``_safe_emit_event`` from the scope ``wrap_edge_transition``
+    #: maintains, for the same reason ``subgraph_path`` is: an emitter that
+    #: has to remember to pass it is an emitter that will one day forget.
+    #: ``None`` on events emitted outside any phase (run start/end).
+    phase_execution_id: str | None = None
 
 
 class PhaseStartEvent(_EventBase):
     event_type: Literal["phase_start"] = "phase_start"
     phase_name: str
-    #: Which execution of this phase — an outer iterate/batch loop runs the
-    #: same phase several times, and each run is its own segment. Distinct
-    #: from ``AgentLoopIterationEvent.iteration``, which counts model turns
-    #: INSIDE one execution (decision 2026-08-15 edge-as-run-segment, D2).
+    #: Required here, unlike on the base: an event that opens an execution
+    #: cannot be ambiguous about which one it opens. Distinct from
+    #: ``AgentLoopIterationEvent.iteration``, which counts model turns INSIDE
+    #: one execution (decision 2026-08-15 edge-as-run-segment, D2).
     phase_execution_id: str
     context: dict[str, Any] = Field(default_factory=dict)
 
@@ -88,6 +100,7 @@ class PhaseEndEvent(_EventBase):
 
     event_type: Literal["phase_end"] = "phase_end"
     phase_name: str
+    #: Required here for the same reason as on ``PhaseStartEvent``.
     phase_execution_id: str
     context: dict[str, Any] = Field(default_factory=dict)
 

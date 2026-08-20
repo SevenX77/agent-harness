@@ -126,6 +126,12 @@ class RunMetadata(BaseModel):
     compare_node_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     candidate_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     candidate_label: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: The run this side-run is a candidate against. Without it a candidate's
+    #: result is unreadable — you cannot say a model did better without saying
+    #: better than what (problem ledger R1③).
+    compare_base_run_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # D8: every run row can reach its own report, so the path travels with the
     # row and not only with the detail. DERIVED at read time from the report
     # file's existence — see ``persisted_json``.

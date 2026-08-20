@@ -176,7 +176,7 @@ def build_run_report(run_dir: Path) -> str:
     sections = [
         _summary_section(run_dir, metadata, events, nodes),
         _failure_section(metadata, nodes),
-        _inputs_section(run_dir, runtime_config),
+        _inputs_section(run_dir, runtime_config, events),
         _nodes_section(nodes),
         _repeats_section(nodes, fan_outs),
         routes_section(events),
@@ -546,7 +546,61 @@ def _input_bindings(active: Any) -> Iterable[tuple[str, dict[str, Any]]]:
                     yield f"{phase_name}.{field_name}", binding
 
 
-def _inputs_section(run_dir: Path, runtime_config: dict[str, Any]) -> str:
+def _workspace_relative_link(run_dir: Path, path: str) -> str | None:
+    """A link from the report to a workspace file, or None when there isn't one.
+
+    Binding paths are relative to the skill's `.workspace` (that is where
+    `_scan_import_files` roots them), and a run directory lives at
+    `<workspace>/runs/<run id>` — so the file is exactly two levels up. Deriving
+    it from the actual directory rather than hard-coding `../..` means a report
+    written somewhere else gets no link instead of a broken one: a link that
+    resolves to nothing invites a click that fails, which is worse than plain
+    text.
+    """
+    if run_dir.parent.name != "runs" or run_dir.parent.parent.name != ".workspace":
+        return None
+    if path.startswith(("/", "\\")) or ".." in Path(path).parts:
+        return None
+    return f"../../{path}"
+
+
+def _injected_files(events: Sequence[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    """(file, node it was handed to, field) for every file the ENGINE injected.
+
+    The runtime snapshot says what the run was configured to read; these say what
+    actually arrived, and mid-run injection happens on an edge transition into
+    one node — so the node is part of the fact, not decoration.
+    """
+    seen: list[tuple[str, str, str]] = []
+    for event in events:
+        if event.get("event_type") != "input_file_injected":
+            continue
+        file_ref = event.get("file_ref")
+        target = event.get("target_field")
+        to_phase = event.get("to_phase")
+        if not isinstance(file_ref, str) or not file_ref:
+            continue
+        entry = (
+            file_ref,
+            to_phase if isinstance(to_phase, str) else "—",
+            target if isinstance(target, str) else "—",
+        )
+        if entry not in seen:
+            seen.append(entry)
+    return seen
+
+
+def _file_line(run_dir: Path, path: str, tail: str) -> str:
+    link = _workspace_relative_link(run_dir, path)
+    named = f"[{path}]({link})" if link else f"`{path}`"
+    return f"- {named}{tail}"
+
+
+def _inputs_section(
+    run_dir: Path,
+    runtime_config: dict[str, Any],
+    events: Sequence[dict[str, Any]],
+) -> str:
     lines = ["## Inputs", ""]
     inputs = runtime_config.get("inputs")
     active = inputs.get("active") if isinstance(inputs, dict) else None
@@ -561,13 +615,19 @@ def _inputs_section(run_dir: Path, runtime_config: dict[str, Any]) -> str:
         sha = binding.get("sha256")
         by_file.setdefault((path, str(sha) if isinstance(sha, str) else ""), []).append(field_name)
 
+    injected = _injected_files(events)
     if by_file:
         for (path, sha), fields in sorted(by_file.items()):
             supplied = ", ".join(f"`{name}`" for name in sorted(fields))
             sha_note = f" · `{sha}`" if sha else ""
-            lines.append(f"- `{path}`{sha_note} → {supplied}")
-    else:
+            lines.append(_file_line(run_dir, path, f"{sha_note} → {supplied}"))
+    elif not injected:
         lines.append("- no input file was pinned for this run")
+
+    for path, node_id, field_name in injected:
+        lines.append(
+            _file_line(run_dir, path, f" → `{field_name}`, handed to `{node_id}` mid-run")
+        )
 
     if (run_dir / "input_data.json").exists():
         lines.append("- run inputs as delivered: [input_data.json](input_data.json)")
@@ -675,16 +735,29 @@ def _artifacts_section(run_dir: Path) -> str:
 
 
 def _compare_section(metadata: dict[str, Any]) -> str:
+    """What this run is a candidate IN, and where the run it answers to lives.
+
+    A candidate side-run is only meaningful next to the run it is measured
+    against, so the report links to that run's report — a sibling directory, one
+    level up. Without a recorded base run there is no link to make, and the
+    section says what it knows rather than guessing at a run id.
+    """
     group_id = metadata.get("compare_group_id")
     if not isinstance(group_id, str) or not group_id:
         return ""
+    label = metadata.get("candidate_label") or metadata.get("candidate_id") or "—"
+    base_run_id = metadata.get("compare_base_run_id")
     lines = [
         "## Model compare",
         "",
-        f"- group `{group_id}`, node `{metadata.get('compare_node_id', '—')}`",
-        f"- candidate `{metadata.get('candidate_label') or metadata.get('candidate_id') or '—'}`",
-        "",
+        f"- candidate `{label}` for node `{metadata.get('compare_node_id', '—')}`",
+        f"- group `{group_id}`",
     ]
+    if isinstance(base_run_id, str) and base_run_id:
+        lines.append(f"- measured against [{base_run_id}](../{base_run_id}/report.md)")
+    else:
+        lines.append("- the run this was measured against was not recorded")
+    lines.append("")
     return "\n".join(lines)
 
 

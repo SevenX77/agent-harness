@@ -409,7 +409,21 @@ describe("useRunHistory list revalidation policy", () => {
     expect(runHistory?.total).toBe(3)
   })
 
-  it("can seed the shared run-history cache without subscribing to the run list", async () => {
+  // Rewritten 2026-08-20. This test used to be called "can seed the shared
+  // run-history cache without subscribing to the run list" and asserted that
+  // projecting with nothing loaded left the key holding exactly that one run,
+  // with the fetcher never called. The intent was right — a run started before
+  // anyone is watching must not be lost — but the shape it pinned is the defect
+  // found on the real machine that day: press Predict before the Trace panel
+  // has ever mounted, then open Trace, and the header reads "1 run" while 32 sit
+  // on disk. A projection that answers for the whole list suppresses the load
+  // that would have brought the rest, because STUDIO_TRUTH_SWR_CONFIG turns off
+  // every automatic revalidation.
+  //
+  // The intent survives, served correctly: leave the unloaded key alone, and the
+  // cold load returns the full server list — which already contains the run,
+  // since it exists server-side before anyone projects it.
+  it("leaves an unloaded run list to its own cold load, which arrives complete", async () => {
     await act(async () => {
       root.render(
         createElement(
@@ -471,8 +485,8 @@ describe("useRunHistory list revalidation policy", () => {
       await settle()
     })
 
-    expect(mocks.fetcher).not.toHaveBeenCalled()
-    expect(runHistory?.runs.map((run) => run.run_id)).toEqual(["run-1"])
-    expect(runHistory?.total).toBe(1)
+    expect(mocks.fetcher).toHaveBeenCalledTimes(1)
+    expect(runHistory?.runs.map((run) => run.run_id)).toEqual(["run-1", "run-2"])
+    expect(runHistory?.total).toBe(2)
   })
 })

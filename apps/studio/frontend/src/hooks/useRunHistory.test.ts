@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunMetadata, TokensMetrics } from '@/api/types'
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, runOutcomeFeedback } from './useRunHistory'
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, projectRunMetadata, runOutcomeFeedback } from './useRunHistory'
 
 // N6 #2 (history-auto-refresh): when a run reaches run_ended the backend has
 // autocommitted a new "Auto run" snapshot, so the Local History list must be
@@ -185,5 +185,57 @@ describe('runOutcomeFeedback', () => {
   it('stays silent for a run that has not concluded (running / paused)', () => {
     expect(runOutcomeFeedback(metadata({ status: 'running' }))).toBeNull()
     expect(runOutcomeFeedback(metadata({ status: 'paused' }))).toBeNull()
+  })
+})
+
+// A projection ADDS a run to the list the server owns. It is not allowed to
+// bring that list into existence, because it only knows about one run.
+//
+// Field evidence, 2026-08-20 real-machine pass: open a skill, press Predict
+// before the Trace panel has ever been mounted, then open Trace — the header
+// read "1 run" while 32 runs sat on disk. `Workspace` calls `projectRun` the
+// moment a run starts, and the Trace panel had not yet cold-loaded
+// `/skills/{id}/runs`, so the projection received `current === undefined` and
+// returned a freshly invented one-element list. Written with
+// `{ revalidate: false }` under STUDIO_TRUTH_SWR_CONFIG (every automatic
+// revalidation off), that synthetic list is what the key holds from then on —
+// the load that would have brought the other 31 runs never happens.
+//
+// This is the SSOT reading rule's own words turned inside out: "a cache key may
+// cold-load once when the owning feature/app scope first needs it, and all
+// consumers must share that in-flight request/result". A consumer that writes a
+// list of its own instead of sharing the load is not a replica of the truth.
+//
+// `projectDeletedRun`, one function above in the same file, already gets this
+// right — it returns `current` untouched when there is nothing to project onto.
+describe('projectRunMetadata', () => {
+  const run = (runId: string): RunMetadata => ({
+    run_id: runId,
+    status: 'running',
+    started_at: '2026-08-20T11:30:38-07:00',
+    metrics: null,
+    input_summary: null,
+  })
+
+  it('does not invent a list when the server list has not loaded yet', () => {
+    expect(projectRunMetadata(undefined, run('run-new'))).toBeUndefined()
+  })
+
+  it('adds the run to a list that has loaded', () => {
+    const current = { total: 2, runs: [run('run-b'), run('run-a')] }
+
+    const next = projectRunMetadata(current, run('run-c'))
+
+    expect(next?.runs.map((item) => item.run_id)).toEqual(['run-c', 'run-b', 'run-a'])
+    expect(next?.total).toBe(3)
+  })
+
+  it('replaces a run already in the list without growing the total', () => {
+    const current = { total: 2, runs: [run('run-b'), run('run-a')] }
+
+    const next = projectRunMetadata(current, run('run-b'))
+
+    expect(next?.runs.map((item) => item.run_id)).toEqual(['run-b', 'run-a'])
+    expect(next?.total).toBe(2)
   })
 })

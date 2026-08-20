@@ -24,12 +24,27 @@ function projectDeletedRun(current: RunListResponse | undefined, runId: string):
   }
 }
 
-function projectRunMetadata(current: RunListResponse | undefined, run: RunMetadata): RunListResponse {
-  const previousRuns = current?.runs ?? []
-  const existed = previousRuns.some((item) => item.run_id === run.run_id)
+/** Put one run at the head of the list the server owns — if that list is here.
+ *
+ * A projection knows about exactly one run, so it can add to a loaded list but
+ * must never bring one into existence: a caller that projects before the key
+ * has cold-loaded would otherwise replace "not loaded yet" with "one run, and
+ * that is all there is", and — written with `revalidate: false` under
+ * `STUDIO_TRUTH_SWR_CONFIG` — that answer sticks. Leaving `undefined` alone
+ * lets the cold load run and return the whole list, this run included: it is
+ * already on the server by the time anyone projects it.
+ */
+export function projectRunMetadata(
+  current: RunListResponse | undefined,
+  run: RunMetadata,
+): RunListResponse | undefined {
+  if (!current) {
+    return current
+  }
+  const existed = current.runs.some((item) => item.run_id === run.run_id)
   return {
-    total: current ? current.total + (existed ? 0 : 1) : 1,
-    runs: [run, ...previousRuns.filter((item) => item.run_id !== run.run_id)],
+    total: current.total + (existed ? 0 : 1),
+    runs: [run, ...current.runs.filter((item) => item.run_id !== run.run_id)],
   }
 }
 

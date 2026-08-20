@@ -129,6 +129,17 @@ before you push or you WILL turn `main` red:
 - **Backend tests**: `uv run pytest apps/studio/backend/tests` ·
   `uv run pytest packages/graph-agent-gateway/tests` ·
   `uv run pytest packages/graph-agent/tests`
+- **Engine contract manifests** — part of the required `graph-agent-tests` check,
+  and NOT covered by pytest, so a green local test run says nothing about it:
+  ```bash
+  uv run python packages/graph-agent/scripts/validate_round28_manifest.py \
+    packages/graph-agent/spec/features.yaml \
+    packages/graph-agent/spec/source_file_map.yaml \
+    packages/graph-agent/spec/contract_map.yaml
+  ```
+  Every callback event class and every error code needs exactly one owning
+  feature in `spec/features.yaml`; adding one without registering it fails all
+  three Python versions with `R28_PRIMARY_OWNER_MISSING` (hit on #899).
 - **Frontend** (in `apps/studio/frontend`): `npm run lint` · `npm run typecheck`
   · `npm test` · `npm run build`
 - **Dependency audit — both ecosystems**:

@@ -39,31 +39,130 @@ RAW_RECORD_FILES = (
 )
 
 
-@dataclass
-class _NodeAccount:
-    """What one node did, folded out of the event stream."""
+#: How much of one collected message the report prints. The full text is in
+#: `trace.jsonl`, which the report links to; a real protocol_violation message
+#: has run to several thousand characters, and one printed whole hides every
+#: other failure under it.
+ERROR_MESSAGE_BUDGET = 200
 
-    node_id: str
+
+@dataclass
+class _Execution:
+    """One time a node ran.
+
+    A plain node has exactly one. An `iterate` node has one per item, and those
+    are the rows that answer 「which item was slow」 and 「which item failed」 —
+    questions a single summed node row cannot answer at all.
+    """
+
+    execution_id: str
     started_at: str | None = None
     ended_at: str | None = None
     llm_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     tool_calls: int = 0
-    iterations: int = 0
-    models: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    interrupted: bool = False
 
     @property
     def wall_time_sec(self) -> float | None:
-        if self.started_at is None or self.ended_at is None:
-            return None
-        try:
-            started = datetime.fromisoformat(self.started_at)
-            ended = datetime.fromisoformat(self.ended_at)
-        except ValueError:
-            return None
-        return round((ended - started).total_seconds(), 2)
+        return _elapsed(self.started_at, self.ended_at)
+
+    @property
+    def status(self) -> str:
+        if self.errors:
+            return "failed"
+        if self.interrupted:
+            return "interrupted"
+        if self.ended_at is None:
+            # The run ended with this execution still open. Neither success nor
+            # failure — and calling it either would be inventing a fact.
+            return "unfinished"
+        return "ok"
+
+
+#: Worst first, so a node's status is the worst of its executions: forty items
+#: of which one failed is a node that failed.
+_STATUS_SEVERITY = ("failed", "interrupted", "unfinished", "ok")
+
+
+@dataclass
+class _NodeAccount:
+    """What one node did across every execution of it, folded out of the stream."""
+
+    node_id: str
+    executions: list[_Execution] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)
+    #: Turns of the ReAct loop INSIDE one execution — how many times the model
+    #: thought, not how many times the node ran. The two were once printed under
+    #: one heading that read as the second while meaning the first.
+    agent_turns: int = 0
+    #: Nudges and handled tool errors: the machinery changed the run's course
+    #: without the run going wrong. Counted here, deliberately not in Failure.
+    corrections: int = 0
+
+    @property
+    def started_at(self) -> str | None:
+        return next((run.started_at for run in self.executions if run.started_at), None)
+
+    @property
+    def ended_at(self) -> str | None:
+        return next((run.ended_at for run in reversed(self.executions) if run.ended_at), None)
+
+    @property
+    def llm_calls(self) -> int:
+        return sum(run.llm_calls for run in self.executions)
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(run.input_tokens for run in self.executions)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(run.output_tokens for run in self.executions)
+
+    @property
+    def tool_calls(self) -> int:
+        return sum(run.tool_calls for run in self.executions)
+
+    @property
+    def errors(self) -> list[str]:
+        return [line for run in self.executions for line in run.errors]
+
+    @property
+    def status(self) -> str:
+        statuses = {run.status for run in self.executions}
+        return next((name for name in _STATUS_SEVERITY if name in statuses), "ok")
+
+    @property
+    def wall_time_sec(self) -> float | None:
+        return _elapsed(self.started_at, self.ended_at)
+
+
+@dataclass
+class _FanOut:
+    """One `parallel_map` group. The engine announces these; nothing read them."""
+
+    group_key: str
+    skill_path: str = "—"
+    item_count: int = 0
+    max_concurrent: int = 0
+    item_as: str = ""
+    succeeded: int | None = None
+    failed: int | None = None
+    wall_time_seconds: float | None = None
+
+
+def _elapsed(started_at: str | None, ended_at: str | None) -> float | None:
+    if started_at is None or ended_at is None:
+        return None
+    try:
+        started = datetime.fromisoformat(started_at)
+        ended = datetime.fromisoformat(ended_at)
+    except ValueError:
+        return None
+    return round((ended - started).total_seconds(), 2)
 
 
 def build_run_report(run_dir: Path) -> str:
@@ -72,12 +171,14 @@ def build_run_report(run_dir: Path) -> str:
     metadata = _read_json(run_dir / "run_metadata.json")
     runtime_config = _read_json(run_dir / "runtime_config.snapshot.json")
     nodes = _account_nodes(events)
+    fan_outs = _account_fan_outs(events)
 
     sections = [
         _summary_section(run_dir, metadata, events, nodes),
         _failure_section(metadata, nodes),
         _inputs_section(run_dir, runtime_config),
         _nodes_section(nodes),
+        _repeats_section(nodes, fan_outs),
         routes_section(events),
         _tools_section(events),
         _artifacts_section(run_dir),
@@ -177,13 +278,59 @@ def _transition_label(event: dict[str, Any]) -> str:
     return f"{' + '.join(from_phases) if from_phases else 'input'} -> {target}"
 
 
+#: A run went WRONG here, and the report has to say so. The common thread: each
+#: of these is the machinery refusing or abandoning what was asked, rather than
+#: correcting it. `tool_error_handled` is deliberately absent — the engine turns
+#: that exception into feedback the model reads and the run carries on, which
+#: makes it a correction (counted below), not a failure.
+_FAILURE_EVENTS = frozenset(
+    {
+        # The state broke a framework contract; the agent loop is about to be cut.
+        "protocol_violation",
+        # The run was cut short for going in circles.
+        "loop_detected",
+        # It finished — on a lesser path than the one it was configured for.
+        # Nothing else in the report would show that it had.
+        "builtin_subagent_fallback",
+    }
+)
+
+#: The machinery changed the run's course and the run carried on. Worth counting
+#: — a node that needed six nudges is worth a look — but not worth listing among
+#: the things that went wrong.
+_CORRECTION_EVENTS = frozenset({"nudge", "tool_error_handled", "tool_history_repaired"})
+
+#: Events that open one execution of a node, and the field naming that execution.
+#: Everything charged to a node in between belongs to whichever execution is open
+#: at that moment: an `llm_call` carries no execution id of its own, and the
+#: trace is ordered.
+_EXECUTION_OPENS = {"phase_start": "phase_execution_id", "edge_start": "edge_transition_id"}
+_EXECUTION_CLOSES = frozenset({"phase_end", "edge_end"})
+
+
 def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
     accounts: dict[str, _NodeAccount] = {}
+    open_execution: dict[str, _Execution] = {}
 
     def account_for(node_id: str) -> _NodeAccount:
         if node_id not in accounts:
             accounts[node_id] = _NodeAccount(node_id=node_id)
         return accounts[node_id]
+
+    def execution_for(node_id: str) -> _Execution:
+        """The execution currently charged for this node, opening one if needed.
+
+        An implicit execution covers events that arrive with nothing open — a
+        truncated trace, or a node seen only through events that carry no
+        lifecycle of their own. Charging them somewhere beats dropping them.
+        """
+        current = open_execution.get(node_id)
+        if current is None:
+            account = account_for(node_id)
+            current = _Execution(execution_id=f"{node_id}#{len(account.executions) + 1}")
+            account.executions.append(current)
+            open_execution[node_id] = current
+        return current
 
     for event in events:
         node_id = _event_node(event)
@@ -191,36 +338,73 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
             continue
         account = account_for(node_id)
         timestamp = event.get("timestamp")
-        event_type = event.get("event_type")
-        if event_type in ("phase_start", "edge_start") and isinstance(timestamp, str):
-            account.started_at = timestamp
-        elif event_type in ("phase_end", "edge_end") and isinstance(timestamp, str):
-            account.ended_at = timestamp
+        event_type = str(event.get("event_type", ""))
+
+        if event_type in _EXECUTION_OPENS:
+            identifier = event.get(_EXECUTION_OPENS[event_type])
+            execution = _Execution(
+                execution_id=str(identifier)
+                if isinstance(identifier, str) and identifier
+                else f"{node_id}#{len(account.executions) + 1}",
+                started_at=timestamp if isinstance(timestamp, str) else None,
+            )
+            account.executions.append(execution)
+            open_execution[node_id] = execution
+        elif event_type in _EXECUTION_CLOSES:
+            execution = execution_for(node_id)
+            if isinstance(timestamp, str):
+                execution.ended_at = timestamp
+            open_execution.pop(node_id, None)
         elif event_type == "llm_call":
-            account.llm_calls += 1
-            account.input_tokens += _as_int(event.get("input_tokens"))
-            account.output_tokens += _as_int(event.get("output_tokens"))
+            execution = execution_for(node_id)
+            execution.llm_calls += 1
+            execution.input_tokens += _as_int(event.get("input_tokens"))
+            execution.output_tokens += _as_int(event.get("output_tokens"))
             model = event.get("resolved_model")
             if isinstance(model, str) and model and model not in account.models:
                 account.models.append(model)
         elif event_type == "tool_call":
-            account.tool_calls += 1
+            execution_for(node_id).tool_calls += 1
         elif event_type == "agent_loop_iteration":
-            account.iterations = max(account.iterations, _as_int(event.get("iteration")))
+            account.agent_turns = max(account.agent_turns, _as_int(event.get("iteration")))
+        elif event_type == "interrupted":
+            execution_for(node_id).interrupted = True
+        elif event_type in _CORRECTION_EVENTS:
+            account.corrections += 1
         elif event_type == "finish_task_verdict":
             # A rejected submission is the live successor of the removed
             # validation_fail event: the attempt failed its checks and the
             # model was sent back to fix it.
             if event.get("verdict") == "rejected":
-                account.errors.append(_error_line(event))
-        elif event_type == "protocol_violation":
-            # The hard failure: the state broke a framework contract and the
-            # agent loop is about to be cut. tool_error_handled is deliberately
-            # NOT counted — the engine turned that exception into feedback the
-            # model reads, and the run carries on.
-            account.errors.append(_error_line(event))
+                execution_for(node_id).errors.append(_error_line(event))
+        elif event_type in _FAILURE_EVENTS:
+            execution_for(node_id).errors.append(_error_line(event))
 
     return list(accounts.values())
+
+
+def _account_fan_outs(events: Iterable[dict[str, Any]]) -> list[_FanOut]:
+    groups: dict[str, _FanOut] = {}
+    for event in events:
+        key = event.get("group_key")
+        if not isinstance(key, str) or not key:
+            continue
+        event_type = event.get("event_type")
+        if event_type == "parallel_map_group_started":
+            group = groups.setdefault(key, _FanOut(group_key=key))
+            skill_path = event.get("skill_path")
+            group.skill_path = skill_path if isinstance(skill_path, str) and skill_path else "—"
+            group.item_count = _as_int(event.get("item_count"))
+            group.max_concurrent = _as_int(event.get("max_concurrent"))
+            item_as = event.get("item_as")
+            group.item_as = item_as if isinstance(item_as, str) else ""
+        elif event_type == "parallel_map_group_ended":
+            group = groups.setdefault(key, _FanOut(group_key=key))
+            group.succeeded = _as_int(event.get("succeeded"))
+            group.failed = _as_int(event.get("failed"))
+            wall = event.get("wall_time_seconds")
+            group.wall_time_seconds = float(wall) if isinstance(wall, (int, float)) else None
+    return list(groups.values())
 
 
 def _as_int(value: Any) -> int:
@@ -236,7 +420,15 @@ def _error_line(event: dict[str, Any]) -> str:
     if isinstance(violations, list) and violations:
         return f"{event_type}: " + "; ".join(str(item) for item in violations)
     message = event.get("message")
-    return f"{event_type}: {message}" if message else event_type
+    return f"{event_type}: {_clipped(str(message))}" if message else event_type
+
+
+def _clipped(text: str) -> str:
+    """Enough of a message to recognise it, with the full text one link away."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= ERROR_MESSAGE_BUDGET:
+        return collapsed
+    return collapsed[:ERROR_MESSAGE_BUDGET].rstrip() + "…"
 
 
 # --------------------------------------------------------------------------
@@ -389,18 +581,65 @@ def _nodes_section(nodes: Sequence[_NodeAccount]) -> str:
     lines = [
         "## Nodes",
         "",
-        "| node | wall | LLM calls | tokens in/out | tools | loop iterations | model |",
-        "|---|---|---|---|---|---|---|",
+        "| node | status | wall | ran | LLM calls | tokens in/out | tools "
+        "| agent turns | corrections | model |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for node in nodes:
         wall = f"{node.wall_time_sec:.2f}s" if node.wall_time_sec is not None else "—"
         models = ", ".join(f"`{model}`" for model in node.models) if node.models else "—"
+        ran = len(node.executions)
         lines.append(
-            f"| `{node.node_id}` | {wall} | {node.llm_calls} | "
+            f"| `{node.node_id}` | {node.status} | {wall} | {ran}× | {node.llm_calls} | "
             f"{node.input_tokens}/{node.output_tokens} | {node.tool_calls} | "
-            f"{node.iterations or '—'} | {models} |"
+            f"{node.agent_turns or '—'} | {node.corrections or '—'} | {models} |"
         )
     lines.append("")
+    return "\n".join(lines)
+
+
+def _repeats_section(nodes: Sequence[_NodeAccount], fan_outs: Sequence[_FanOut]) -> str:
+    """Every node that ran more than once, and every fan-out, itemized.
+
+    The summed row in Nodes answers 「what did this node cost」. It cannot answer
+    「which item was slow」 or 「which item failed」, and for an `iterate` over
+    forty chapters those are the only questions worth asking.
+    """
+    repeated = [node for node in nodes if len(node.executions) > 1]
+    if not repeated and not fan_outs:
+        return ""
+
+    lines = ["## Repeats", ""]
+    for node in repeated:
+        lines += [
+            f"### `{node.node_id}` — {len(node.executions)} executions",
+            "",
+            "| # | wall | LLM calls | tokens in/out | tools | outcome |",
+            "|---|---|---|---|---|---|",
+        ]
+        for index, run in enumerate(node.executions, start=1):
+            wall = f"{run.wall_time_sec:.2f}s" if run.wall_time_sec is not None else "—"
+            lines.append(
+                f"| {index} | {wall} | {run.llm_calls} | "
+                f"{run.input_tokens}/{run.output_tokens} | {run.tool_calls} | {run.status} |"
+            )
+        lines.append("")
+
+    for group in fan_outs:
+        item_as = f" as `{group.item_as}`" if group.item_as else ""
+        wall = (
+            f"{group.wall_time_seconds:.2f}s" if group.wall_time_seconds is not None else "—"
+        )
+        lines += [
+            f"### parallel_map `{group.skill_path}`{item_as}",
+            "",
+            "| items | concurrent | succeeded | failed | wall |",
+            "|---|---|---|---|---|",
+            f"| {group.item_count} | {group.max_concurrent} | "
+            f"{group.succeeded if group.succeeded is not None else '—'} | "
+            f"{group.failed if group.failed is not None else '—'} | {wall} |",
+            "",
+        ]
     return "\n".join(lines)
 
 

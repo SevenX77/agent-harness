@@ -1,6 +1,7 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
 import type { NodeRuntime, SkillNodeStatus } from "@/components/GraphCanvas"
 import { ENGINE_EVENT_TYPES } from "./engine-events"
+import { isRootPhasePath, phasePathOf } from "./phase-path"
 
 // ————————————————————————————————————————————————————————————————————————————
 // run-status-projection (decision 2026-08-13 D7): the ONE module that turns
@@ -149,7 +150,10 @@ function isPausedEvent(type: string, status: string | null | undefined): boolean
 }
 
 /**
- * Derive the per-node status map from an ordered trace event stream.
+ * Derive the per-node status map from an ordered trace event stream, keyed by
+ * PHASE PATH (`phase-path.ts`) — so a phase executing inside an expanded
+ * subgraph gets its own light instead of the container's, and two subgraphs
+ * that each own a `review` never share one.
  *
  * Events are applied in arrival order, last-event-wins per phase. This lets a
  * phase that reports a failure and then progresses anyway end up green, while a
@@ -173,22 +177,22 @@ export function deriveNodeStatuses(
     if (runId && eventRun && eventRun !== runId) continue
     const type = event.event_type || ""
     if (type === "run_ended") continue
-    const phaseName = event.phase_name || event.current_phase
-    if (!phaseName) continue
+    const phasePath = phasePathOf(event)
+    if (!phasePath) continue
     if (isFailureEvent(event)) {
-      statuses[phaseName] = "error"
+      statuses[phasePath] = "error"
     } else if (isPausedEvent(type, event.status)) {
-      statuses[phaseName] = "paused"
+      statuses[phasePath] = "paused"
     } else if (type === "phase_start") {
-      statuses[phaseName] = "running"
+      statuses[phasePath] = "running"
     } else if (type === "phase_end") {
-      statuses[phaseName] = "success"
+      statuses[phasePath] = "success"
     }
   }
   const verdict = runVerdict(events, metadata, runId)
   if (verdict !== "running") {
-    for (const [phaseName, status] of Object.entries(statuses)) {
-      if (status === "running") statuses[phaseName] = NODE_STATUS_AT_RUN_END[verdict]
+    for (const [phasePath, status] of Object.entries(statuses)) {
+      if (status === "running") statuses[phasePath] = NODE_STATUS_AT_RUN_END[verdict]
     }
   }
   return statuses
@@ -229,19 +233,19 @@ export function deriveNodeRuntimes(
       runEndedAtMs = at
       continue
     }
-    const phaseName = event.phase_name || event.current_phase
-    if (!phaseName) continue
+    const phasePath = phasePathOf(event)
+    if (!phasePath) continue
     if (type === "phase_start") {
-      runtimes[phaseName] = { startedAtMs: at, endedAtMs: null }
+      runtimes[phasePath] = { startedAtMs: at, endedAtMs: null }
     } else if (type === "phase_end") {
-      const open = runtimes[phaseName]
-      if (open) runtimes[phaseName] = { startedAtMs: open.startedAtMs, endedAtMs: at }
+      const open = runtimes[phasePath]
+      if (open) runtimes[phasePath] = { startedAtMs: open.startedAtMs, endedAtMs: at }
     }
   }
   if (runEndedAtMs !== null) {
-    for (const [phaseName, runtime] of Object.entries(runtimes)) {
+    for (const [phasePath, runtime] of Object.entries(runtimes)) {
       if (runtime.endedAtMs === null) {
-        runtimes[phaseName] = { startedAtMs: runtime.startedAtMs, endedAtMs: runEndedAtMs }
+        runtimes[phasePath] = { startedAtMs: runtime.startedAtMs, endedAtMs: runEndedAtMs }
       }
     }
   }
@@ -295,34 +299,40 @@ export function deriveNodeErrorMessages(
     const event = callbackPayload(traceEvent)
     const eventRun = eventRunId(traceEvent, event)
     if (runId && eventRun && eventRun !== runId) continue
-    const phaseName = event.phase_name || event.current_phase
-    if (!phaseName) continue
+    const phasePath = phasePathOf(event)
+    if (!phasePath) continue
     const type = event.event_type || ""
     if (isFailureEvent(event)) {
       const message = failureMessageFromEvent(event)
       if (message) {
-        messages[phaseName] = message
+        messages[phasePath] = message
       } else {
-        delete messages[phaseName]
+        delete messages[phasePath]
       }
     } else if (type === "phase_start" || type === "phase_end" || isPausedEvent(type, event.status)) {
       // Phase progressed past / recovered from an earlier failure -> drop stale text.
-      delete messages[phaseName]
+      delete messages[phasePath]
     }
   }
   return messages
 }
 
 /**
- * The phase executing right now, or null when nothing is.
+ * The ROOT-graph phase executing right now, or null when nothing is.
  *
  * One rule with two consumers — the trace panel highlights this phase, and the
  * canvas animates the edge feeding it. Deriving it separately in each would let
  * the two disagree about what "running" means.
+ *
+ * Root-level on purpose: a phase running inside a subgraph means its container
+ * is running too, and both are true at once. Answering with the container is
+ * answering the question the readers actually asked — where the run stands on
+ * the board in front of them (F7 决策 "现在在跑哪个 phase 答的是最外层那个").
  */
 export function runningPhaseOf(
   statuses: Record<string, SkillNodeStatus>,
 ): string | null {
-  const running = Object.entries(statuses).find(([, status]) => status === "running")
+  const running = Object.entries(statuses)
+    .find(([path, status]) => status === "running" && isRootPhasePath(path))
   return running?.[0] ?? null
 }

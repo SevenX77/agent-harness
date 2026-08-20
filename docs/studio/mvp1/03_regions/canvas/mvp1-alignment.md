@@ -130,6 +130,54 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: live(2026-08-20)。
 - 归属: region `canvas`; capabilities `run-execution`, `trace-observability`。
 
+### F7. Subgraph Run Scope(容器与容器内节点的运行态)
+
+- 机制: 一个 SUBGRAPH 节点是一段**嵌套的运行**——容器自己是父图的一个 phase,同时它内部
+  整张子图也在跑。两级都要在画布上看得见:
+  - ① **一个 phase 在一次 run 里的身份是它的 phase path**:自根图起、途经的每一层
+    SUBGRAPH 容器 phase 名 + 它自己的 phase 名,以 `.` 连接(`event_timeline.extract`);
+    根层 phase 的 path 就是它的名字本身。引擎已在每条事件上盖了这条链
+    (`_EventBase.subgraph_path` = 容器链,`phase_name` = 自己),Studio 只是把两段接起来。
+  - ② **状态表按 phase path 记账**,于是展开的容器里那些子节点拿到的是**它们自己的**
+    状态灯、失败原因和运行时长——与根层节点走的是同一套 F3 呈现,不是另一套弱化版。
+  - ③ **容器在 running 时自动展开,成功收起,失败保持展开**;用户在这次 run 里手动开合过
+    某个容器之后,自动开合不再碰它。
+  - ④ **容器显示子图进度**:已达终态的子 phase 数 / 子图 phase 总数(`3/7`)。**总数只有
+    在子拓扑已加载时才算得出**;未加载时只报已完成数(`3 done`),不给分母。
+  - ⑤ **容器在 running 时,容器框走与节点卡片、运行边同一套虚线流动**(`.studio-running-dash-frame`)。
+- 决策:
+  - **phase path 取代裸 phase 名作为状态表的键**。裸名不是身份:两个子图可以各有一个
+    `review`,引擎侧已经因此把两个不同 `review` 的 13 次 llm_call 折进同一行报告并丢掉
+    一个 `setup` 节点(`_EventBase.subgraph_path` 字段注释记录的 run
+    `2026-08-19T01-56-15_d0733362`)。根层 phase 的 path 与它的名字**逐字相同**,所以这次
+    换键对根层的每个读者都是恒等变换,只是表上多出了嵌套条目。
+  - **能 resume 的锚点只在根层**:resume 把图倒回某个根图节点重跑,子图内部的 phase 不是
+    根图的节点,拿它当 `resume_from_node_id` 请求后端等于送一个不存在的 id。所以自动
+    resume 锚点(F-n5 的 dirty-downstream 灰化)**跳过带 `.` 的 path**;子图内失败时,
+    它的容器同样是失败态(容器的 `phase_end` 永远不会到,run 终态把它关成 error),
+    锚点落在容器上——这正是用户要重跑的那个根图节点。
+  - **同理,「现在在跑哪个 phase」答的是最外层那个**:子 phase 在跑蕴含它的容器在跑,
+    两者同时为真;答最外层的那个,读者拿到的才是根图上的位置。
+  - **容器开合的自动化让位于人**。自动开合是省事,不是主张;用户手动开合过就说明他要看
+    的东西和自动规则不一致,此后这个容器由他说了算(本次 run 内)。
+  - **失败的容器不自动收起**:收起会把唯一能解释"为什么失败"的那几个子节点藏起来,而
+    失败恰恰是最需要展开的时刻。
+  - **总数不知道就不写分母**,与 F3 运行时长"开着的段不显示时间"同一条纪律:UI 只报能
+    证明的数,不为了版式凑一个。
+- 原话/来源: 状态要递归进子图 = PM 2026-08-19(两天连续指出"展开容器内子节点恒 Idle");
+  "running的时候subgraph要打开" = PM 2026-08-19 原话;"subgraph框闪烁/边框虚线流动,看哪个
+  效果好,找成熟参考" = PM 2026-08-19 运行态呈现清单第 6 条。
+- 成熟参考: GitHub Actions 的日志分组(运行中的 step 自动展开、成功后自动折叠、**失败的
+  留在展开态**)与 n8n 子工作流节点上的执行计数。借来的是"自动开合 + 失败留开 + 容器上带
+  计数"这三点;**没借** GitHub Actions 把折叠状态一路记进 URL——本仓的画布开合是一次会话
+  内的看图姿势,不是要分享给别人的定位。
+- 测试: 子图内节点按 phase path 拿到自己的状态/失败原因/时长;同名的两个子 phase 不互相
+  串台;容器 running 自动展开、success 自动收起、failed 保持展开;手动开合后自动规则不再
+  介入;容器显示 `已完成/总数`,总数未知时只显示已完成数;running 容器框出虚线流动;
+  自动 resume 锚点永远是根层节点 id。
+- Status: target-design(2026-08-20 立)。
+- 归属: region `canvas`; capability `run-execution`, `trace-observability`.
+
 ## 3. 接口契约
 - Inputs: skill detail, selected node id, status map, compile diagnostics, trace dot data references.
 - Outputs: node selection, file open requests, topology mutation requests, active panel changes.

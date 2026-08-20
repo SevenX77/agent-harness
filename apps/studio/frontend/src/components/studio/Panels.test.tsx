@@ -85,6 +85,7 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'setup',
           data: {
+            phasePath: 'setup',
             skillId: 'demo',
             label:'setup',
             mode: 'logic',
@@ -137,6 +138,7 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'review',
           data: {
+            phasePath: 'review',
             skillId: 'demo',
             label:'review',
             mode: 'skill',
@@ -176,6 +178,7 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'child',
           data: {
+            phasePath: 'child',
             skillId: 'demo',
             label:'child',
             mode: 'subgraph',
@@ -216,6 +219,7 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'broken',
           data: {
+            phasePath: 'broken',
             skillId: 'demo',
             label:'broken',
             mode: 'logic',
@@ -241,6 +245,7 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'main',
           data: {
+            phasePath: 'main',
             skillId: 'demo',
             label:'main',
             mode: 'skill',

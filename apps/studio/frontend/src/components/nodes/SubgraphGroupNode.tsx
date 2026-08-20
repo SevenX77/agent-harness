@@ -19,7 +19,15 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
   const title = subgraphGroupTitle(data)
 
   return (
-    <div className="subgraph-dash-frame studio-subgraph-frame pointer-events-none relative flex size-full overflow-visible rounded-md">
+    <div
+      data-container-run-status={data.runStatus ?? 'idle'}
+      className={[
+        'subgraph-dash-frame studio-subgraph-frame pointer-events-none relative flex size-full overflow-visible rounded-md',
+        // canvas F7 (5): the container frame marches the same dashes as a running
+        // node card and a running edge — one vocabulary at three scales.
+        data.runStatus === 'running' ? 'studio-running-dash-frame' : '',
+      ].filter(Boolean).join(' ')}
+    >
       <div className="flex size-full min-h-0 flex-col overflow-hidden rounded-[inherit]">
         <div
           data-subgraph-group-drag-handle="true"

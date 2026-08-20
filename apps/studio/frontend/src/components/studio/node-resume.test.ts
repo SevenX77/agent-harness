@@ -163,3 +163,19 @@ describe('nodeResumeOptionsFromValidity', () => {
     expect(options.resumeToNodeId).toBe('publish')
   })
 })
+
+describe('resumeAnchorNodeId anchors on the ROOT graph', () => {
+  it('skips a failed phase inside a subgraph and takes its container', () => {
+    // The anchor is sent to the resume-validity endpoint as a node id of the
+    // root graph. `event_timeline.extract` is not a node of that graph — the
+    // container is, and it is the node the user would re-run.
+    expect(resumeAnchorNodeId({
+      'event_timeline.extract': 'error',
+      event_timeline: 'error',
+    })).toBe('event_timeline')
+  })
+
+  it('has no anchor when only a subgraph-internal phase failed', () => {
+    expect(resumeAnchorNodeId({ 'event_timeline.extract': 'error' })).toBeNull()
+  })
+})

@@ -20,6 +20,7 @@ vi.mock("@xyflow/react", () => ({
 
 function baseData(overrides: Partial<SkillGraphNodeData> = {}): SkillGraphNodeData {
   return {
+    phasePath: "Draft",
     skillId: "demo",
     label: "Draft",
     mode: "agent",

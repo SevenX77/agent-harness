@@ -218,6 +218,7 @@ function selectedAgentNode(): { id: string; data: SkillGraphNodeData } {
   return {
     id: "review",
     data: {
+      phasePath: "review",
       skillId: "demo",
       label: "review",
       mode: "llm",

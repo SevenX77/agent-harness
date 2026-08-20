@@ -1,6 +1,7 @@
 import type { Node } from '@xyflow/react'
 import type { CompileError, IoDeclaration, SkillDetail } from '@/api/types'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
+import type { SubgraphProgress } from '@/components/GraphCanvas/subgraph-run'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -36,6 +37,21 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   topologyOwnerSkillId?: string
   /** Canonical phase id inside its own skill. React Flow node ids may be namespaced. */
   phaseId?: string
+  /**
+   * This node's identity in a RUN: the dot-joined chain of enclosing subgraph
+   * container phases plus its own phase name (`event_timeline.extract`). A
+   * root-graph node's path is its phase name, so it reads identically to
+   * `phaseId` there — the two diverge only inside an expanded subgraph, where
+   * `phaseId` stays the child's local name and this becomes the key every run
+   * projection files that node's status, failure and clock under (canvas F7).
+   */
+  phasePath: string
+  /**
+   * For a SUBGRAPH container: how far its own graph got in this run (canvas
+   * F7 ④). Absent when the run never entered it, so the chip shows nothing
+   * rather than `0/n`.
+   */
+  subgraphProgress?: SubgraphProgress
   label: string
   mode: string
   role?: string | null
@@ -132,6 +148,14 @@ export interface SubgraphGroupNodeData extends Record<string, unknown> {
   parentLabel: string
   path: string
   status: 'loading' | 'error' | 'loaded'
+  /**
+   * How the CONTAINER phase itself stands in the run (canvas F7 ⑤) — distinct
+   * from `status`, which is whether the child topology could be fetched. A
+   * running container's frame marches the same dashes as a running node card
+   * and a running edge, so "this is executing" reads as one idea at all three
+   * scales instead of three unrelated effects.
+   */
+  runStatus?: SkillNodeStatus
   childName?: string
   message?: string
   // Drill INTO the child graph (focus the canvas on this subgraph). Wired by the

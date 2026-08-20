@@ -446,7 +446,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
    the provider ring used a soft sweep; background-position drives both. One
    dash cycle is 12px, and the animation travels exactly one cycle, so the
    march is seamless at any card width. */
-@keyframes node-running-dash-flow {
+@keyframes studio-running-dash-flow {
   from {
     background-position: 0 0;
   }
@@ -455,8 +455,8 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   }
 }
 
-.node-running-dash-frame::after {
-  animation: node-running-dash-flow 0.6s linear infinite;
+.studio-running-dash-frame::after {
+  animation: studio-running-dash-flow 0.6s linear infinite;
   background: repeating-linear-gradient(
     90deg,
     var(--primary) 0,
@@ -480,7 +480,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 /* The board can hold dozens of nodes; a reader who asked the OS for less motion
    gets the same information as a steady ring instead of dozens of marches. */
 @media (prefers-reduced-motion: reduce) {
-  .node-running-dash-frame::after {
+  .studio-running-dash-frame::after {
     animation: none;
   }
 }

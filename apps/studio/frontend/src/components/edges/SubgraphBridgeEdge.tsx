@@ -81,6 +81,7 @@ export function subgraphBridgeDashArray(params: Parameters<typeof subgraphBridge
 
 export function SubgraphBridgeEdge({
   id,
+  data,
   sourceX,
   sourceY,
   targetX,
@@ -98,7 +99,7 @@ export function SubgraphBridgeEdge({
     <ReactFlow.BaseEdge
       id={id}
       path={path}
-      className="subgraph-bridge-edge"
+      className={data?.isContainerRunning ? 'subgraph-bridge-edge animated-flow-line' : 'subgraph-bridge-edge'}
       style={{
         pointerEvents: 'none',
         ...style,

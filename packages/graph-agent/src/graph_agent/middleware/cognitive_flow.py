@@ -121,7 +121,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         *,
         schema_engine: SchemaEngine | None = None,
         current_phase_schema: type[BaseModel] | SchemaObject | None = None,
-        business_validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] | None = None,
         phase_name: str = "unknown",
         interrupt_fn: InterruptFn | None = None,
         callbacks: Sequence[Any] | None = None,
@@ -135,18 +134,21 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         # ``schema_cls.model_validate`` (unblocks dotted-path SKILLs whose
         # ``output_schema`` resolves to a Pydantic class at load time).
         #
-        # ``business_validator`` is the per-phase business-rule callable
-        # mounted via the SKILL's ``validator:`` field. It receives the
-        # parsed items list (``list[dict[str, Any]]`` per A1 §2.4) AFTER
-        # Pydantic validation succeeds; failures route back to the LLM as
-        # retry feedback. M7 retired the legacy parallel pipeline so this
-        # middleware is now the sole owner of finish_task validation.
+        # What this gate checks is the SCHEMA, per submitted item, and nothing
+        # else. A phase's business rules live in its sibling ``validator.py``,
+        # whose contract (``core/validator_contract.py``) is a different
+        # signature with a FATAL error code, and which ``PhaseWrapper`` runs on
+        # the phase's whole output after the phase body — not here, and not on
+        # the parsed item list. A ``business_validator`` hook that took the item
+        # list and turned rejections into retry feedback used to sit in this
+        # class; no live caller ever supplied one (the only one that did died
+        # with the legacy execution family in #810), so it could only ever say
+        # "passed" about a check that had not run (ledger E16).
         super().__init__()
         self._io_manager = io_manager
         self._unattended = bool(unattended)
         self._schema_engine = schema_engine or SchemaEngine()
         self._current_phase_schema = current_phase_schema
-        self._business_validator = business_validator
         self._phase_name = phase_name
         self._interrupt_fn = interrupt_fn or interrupt
         # 一轮模型回复最多接受一次 finish_task:并行重复提交若都走接受分支,
@@ -195,17 +197,15 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         output_schema: dict[str, Any] | SchemaObject | None,
         state: dict[str, Any] | None = None,
         phase_name: str = "unknown",
-        business_validator: Callable[..., Any] | None = None,
         schema_engine: SchemaEngine | None = None,
     ) -> FinishTaskSchemaGateResult:
         """Validate finish_task output against compiled ``io.outputs`` before any write.
 
-        PR β keeps this as a small schema gate: business validator wiring
-        is deliberately later, so this method only guarantees that schema
-        failures do not call ``business_validator`` and do not expose a
-        final write candidate.
+        A schema gate and only that: it guarantees a schema failure exposes no
+        final write candidate. Business rules belong to the phase's sibling
+        ``validator.py``, which runs elsewhere and fatally — see ``__init__``.
         """
-        del state, business_validator
+        del state
         engine = schema_engine or SchemaEngine()
 
         if output_schema is None:
@@ -339,7 +339,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             output_schema=output_schema,
             state={"flow": next_flow},
             phase_name=self._phase_name,
-            business_validator=None,
         )
         if not schema_gate.accepted:
             if schema_gate.tool_message is not None:
@@ -656,7 +655,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         self._say_verdict(
             "accepted",
             f"Accepted the finish_task submission in phase {self._phase_name!r}: "
-            f"{accepted_count} item(s) passed schema and business validation.",
+            f"{accepted_count} item(s) passed the finish_task schema check.",
             item_count=accepted_count,
             details=list(validation.story),
         )
@@ -923,49 +922,12 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             )
         story.append(f"Schema check against {schema_label!r}: all {len(blocks)} block(s) passed.")
 
-        business_rejection = self._business_stage_validation(parsed_items, story)
-        if business_rejection is not None:
-            return business_rejection
-
         return _FinishValidation(
             ok=True,
             schema_validation="passed",
             parsed_items=parsed_items,
             story=tuple(story),
         )
-
-    def _business_stage_validation(
-        self,
-        parsed_items: list[dict[str, Any]],
-        story: list[str],
-    ) -> _FinishValidation | None:
-        """Phase 2 A2 v3 (design v4 §3.2 #3): run the per-phase business
-        validator on the parsed items list. Pydantic has already asserted the
-        per-item shape; the business validator owns cross-item /
-        domain-specific rules (e.g. line-number continuity for
-        text-segmentation, ID-uniqueness for event-extraction). Validators
-        receive ``list[dict[str, Any]]`` per A1 §2.4.
-
-        Returns a rejection, or ``None`` when the stage passed — the shape
-        every rejecting stage of ``_validate_finish_args`` now uses, so the
-        pipeline body reads as the sequence of stages it is.
-        """
-        business_errors = self._run_business_validator(parsed_items)
-        if business_errors:
-            story.append(
-                f"Business validator rejected the submission: {len(business_errors)} problem(s)."
-            )
-            return _FinishValidation(
-                ok=False,
-                schema_validation="failed",
-                errors=tuple(business_errors),
-                story=tuple(story),
-            )
-        if self._business_validator is None:
-            story.append("No business validator is declared for this phase.")
-        else:
-            story.append(f"Business validator passed {len(parsed_items)} item(s).")
-        return None
 
     def _parse_finish_markdown(
         self,
@@ -999,49 +961,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         except PydanticValidationError as exc:
             return {}, _finish_block_validation_errors(item_id, exc)
         return dump_without_invented_nones(instance), []
-
-    def _run_business_validator(self, parsed_items: list[dict[str, Any]]) -> list[str]:
-        """Phase 2 A2 v3: invoke the optional business validator and
-        normalise its (passed, errors) return into a list of strings.
-
-        Validators must conform to A1 §2.4 — they take the parsed items
-        list and return ``(bool, list[str])``. Any unexpected exception
-        is captured and surfaced to the LLM as a single retry-feedback
-        line so the agent loop can recover instead of crashing the
-        whole run.
-        """
-        validator = self._business_validator
-        if validator is None:
-            return []
-        try:
-            passed, errors = validator(parsed_items)
-        except Exception as exc:  # noqa: BLE001 - returned to LLM as retry feedback
-            logger.warning(
-                "phase=%s action=cognitive_flow_business_validator decision=fail "
-                "reason=exception exc=%s",
-                self._phase_name,
-                type(exc).__name__,
-            )
-            return [
-                f"[Business] validator 异常：{type(exc).__name__}: {exc}",
-            ]
-        if passed:
-            logger.info(
-                "phase=%s action=cognitive_flow_business_validator decision=pass items=%d",
-                self._phase_name,
-                len(parsed_items),
-            )
-            return []
-        if isinstance(errors, str):
-            errors = [errors] if errors else []
-        elif not isinstance(errors, list):
-            errors = [str(errors)] if errors else []
-        logger.warning(
-            "phase=%s action=cognitive_flow_business_validator decision=reject issue_count=%d",
-            self._phase_name,
-            len(errors),
-        )
-        return [f"[Business] {err}" for err in errors]
 
     def _reject_finish(self, tool_call_id: str, errors: list[str]) -> Command[Any]:
         content = self._REJECTION_PREFIX + "\n" + "\n".join(errors)

@@ -68,7 +68,13 @@ def test_an_accepted_finish_says_so_and_says_what_it_accepted() -> None:
 
 def test_the_verdict_narrates_its_pipeline_like_print() -> None:
     """用户三问「有没有调中间件?有没有调 md2json?validator 检查了什么?」的答案
-    必须写在判决事件里,像 print 一样逐步叙述,而不是让读者去猜。"""
+    必须写在判决事件里,像 print 一样逐步叙述,而不是让读者去猜。
+
+    叙述里的每一步都必须是**这道闸真的跑过**的一步。原来还有第三步「业务校验器
+    的结论」,而这道闸从来就没有业务校验器可调(台账 E16),于是那一步说的是一件
+    没发生的事;相位真正的业务规则在它自己的 `validator.py` 里,由 `PhaseWrapper`
+    在相位跑完之后执行、失败即致命,与这道闸无关。
+    """
     recorder = Recorder()
     middleware = _middleware(recorder)
 
@@ -79,7 +85,7 @@ def test_the_verdict_narrates_its_pipeline_like_print() -> None:
     assert "md2json" in joined, "第一步:md2json 解析了 markdown"
     assert "1" in joined, "叙述必须带上解析出的块数"
     assert "schema" in joined.lower(), "第二步:按 schema 逐块校验"
-    assert "business validator" in joined.lower(), "第三步:业务校验器的结论(本例=未声明)"
+    assert "business validator" not in joined.lower(), "这道闸不跑业务校验,就不许说它跑了"
 
 
 def test_a_rejected_finish_says_why() -> None:
@@ -119,19 +125,25 @@ def test_racing_duplicate_submissions_yield_one_accept_and_one_duplicate() -> No
     import threading
     import time
 
-    recorder = Recorder()
-    engine = SchemaEngine()
+    class SlowSchemaEngine(SchemaEngine):
+        """校验慢一点,把「检查完到收下」之间的窗口拉宽到必现。
 
-    def slow_validator(items: list[dict[str, Any]]) -> tuple[bool, list[str]]:
-        time.sleep(0.05)
-        return True, []
+        窗口本身不是这里造出来的:两个线程本来就都能走到接受分支。慢一点只是
+        让它每次都发生,而不是偶尔。
+        """
+
+        def validate(self, *args: Any, **kwargs: Any) -> Any:
+            time.sleep(0.05)
+            return super().validate(*args, **kwargs)
+
+    recorder = Recorder()
+    engine = SlowSchemaEngine()
 
     middleware = CognitiveFlowMiddleware(
         IOManager([IODef(source_field="business_data_parsed", target_field="items")]),
         schema_engine=engine,
         current_phase_schema=engine.parse_from_md("title: str\nscore: int"),
         phase_name="segment",
-        business_validator=slow_validator,
         callbacks=(recorder,),
     )
     state = _state()

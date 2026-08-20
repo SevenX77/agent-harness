@@ -118,7 +118,7 @@
 
 | # | 模块问题 | 层 | 状态 | 出处 | 验收判据 |
 |---|---|---|---|---|---|
-| L1 | **registry 漂移(头号待查)**:analyst 三个模型组全部 Unavailable in registry,而 06:22 基线 run 时可解析;成因未知,不猜 | gateway/后端 | ⏳待查 | 08-19 Q13+截图 | 找到因果链并修复 |
+| L1 | **模型组身份不稳定(根因已查明 2026-08-19)**:显示层的"同一模型"跨端点合并键被当成组的对外身份 id 发布——`_model_groups_response` 按 `project_model_group_identity` 语义键合并路由(该函数自述只管"列表显示什么",gateway `registry/model_naming.py`),再由 `_representative_canonical_id` **选举**一个代表 canonical id(官方优先→最短者胜,`routers/llm.py:2919-2938`)。角色配置持久化引用的是历史 canonical id;任何端点增删都可能改选代表——08-12 加入 deepseek-official(其 `deepseek-v4-flash` 比 ark 的 `deepseek-v4-flash-260425` 短)后代表翻转,analyst 三个组 id 全部悬空→"Unavailable in registry"。**执行不受影响**(fallback_chain 按 route_id 解析,这也是 badge 挂着 run 照样跑通的原因);受害面=角色卡三态、compare 的 model_group_id 同样引用这个不稳定 id。修复方向(第一性):身份与显示分离——组身份必须是稳定纯函数(语义键本身作 id),不许选举;角色存储引用同步重写,不留双读(no-backward-compat) | gateway→后端→前端 | 🔧 根因已明,修复归本模块包 | 08-19 Q13+截图;复现:离线跑 `_model_groups_response` 对活体凭据,merged 组 canonical_id=`deepseek-v4-flash`,14 路由 | 角色卡三组全绿;增删端点不再翻转任何组身份 |
 | L2 | compare 候选的 UI 链路从未走查(当时绕 API 设置):子图节点属性面板可见/可编辑候选?入 run 方式对用户可见? | 前端 | ⏳ | 08-19 Q12 | UI 全链路走查 |
 | L3 | "我添加一个会出现两个"(添加流程重复条目,待定位是哪个添加) | 待定位 | ⏳ | 08-19[b31d7d1f] | 复现→修复 |
 | L4 | reasoning_effort UI 入口 + 各家枚举查清;temperature=模型上限×百分比;越界 clamp 不 400;top_p 不暴露 | gateway→前端 | ❓(部分已做,枚举与 effort UI 未验) | 08-10 四连 | Settings 走查 |

@@ -973,20 +973,63 @@ def _run_compiled_artifact_graph(
     if checkpointer_spec is None:
         checkpointer_spec = request.execution_context.get("checkpointer")
     started_at = datetime.now(UTC)
-    raw = _run_v030_skill_dict(
-        artifact_root,
-        workspace_dir=workspace_dir,
-        run_root=runs_root(workspace_dir),
-        mock_llm=_NO_MOCK_LLM,
-        thread_id=run_id,
-        event_subscriber=event_subscriber if callable(event_subscriber) else None,
-        skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
-        llm_provider=llm_provider,
-        model_resolver=model_resolver,
-        checkpointer_spec=checkpointer_spec or "auto",
-        runtime_config=runtime_config,
-        **request.inputs,
-    )
+    started_monotonic = time.monotonic()
+    run_dir = runs_root(workspace_dir) / run_id
+    spend = _RunSpendLedger()
+    try:
+        raw = _run_v030_skill_dict(
+            artifact_root,
+            workspace_dir=workspace_dir,
+            run_root=runs_root(workspace_dir),
+            mock_llm=_NO_MOCK_LLM,
+            thread_id=run_id,
+            event_subscriber=event_subscriber if callable(event_subscriber) else None,
+            skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+            llm_provider=llm_provider,
+            model_resolver=model_resolver,
+            checkpointer_spec=checkpointer_spec or "auto",
+            runtime_config=runtime_config,
+            spend=spend,
+            **request.inputs,
+        )
+    except Exception as exc:
+        # A run that got far enough to call a model has a result to report,
+        # even when it ends in an exception: it has a run directory, a trace,
+        # and a bill. Without this exit the exception rose to ``run_artifact``'s
+        # catch-all, which answers with a request-level error carrying no
+        # metrics and writes no ``result.json`` / ``metrics.json`` — so the host
+        # had nothing to read and showed the run as costing nothing (field
+        # failure 2026-08-20: run ``2026-08-20T10-27-18_a98f6ba5`` listed as
+        # "105.6s · 0 tokens" with 12582/4103 tokens in its trace).
+        #
+        # Catching ``Exception`` rather than ``GraphAgentError`` is not
+        # swallowing: the payload below carries the same error the layer above
+        # would have reported, plus what the run spent. Failures that happen
+        # BEFORE a run exists — no artifact root, no workspace — never reach
+        # here and still come back as ``RunArtifactErrorResult``.
+        wall_time = round(time.monotonic() - started_monotonic, 3)
+        trace_file = run_dir / TRACE_FILENAME
+        failed_result = WorkflowResult(
+            success=False,
+            run_id=run_id,
+            skill_id=artifact_root.name,
+            context={},
+            metrics=WorkflowMetrics.from_mapping(
+                _run_metrics(spend, wall_time=wall_time),
+                wall_time_sec=wall_time,
+            ),
+            trace_path=trace_file if trace_file.exists() else None,
+            error=(
+                exc.payload
+                if isinstance(exc, GraphAgentError) and exc.payload
+                else make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc))
+            ),
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            wall_time_sec=wall_time,
+        )
+        _write_workflow_result_artifacts(run_dir, failed_result)
+        return failed_result
     wall_time = float(raw.get("wall_time_sec", 0.0))
     workflow_result = WorkflowResult(
         success=True,
@@ -1000,8 +1043,10 @@ def _run_compiled_artifact_graph(
         finished_at=datetime.now(UTC),
         wall_time_sec=wall_time,
     )
-    run_dir = Path(raw.get("run_dir") or runs_root(workspace_dir) / workflow_result.run_id)
-    _write_workflow_result_artifacts(run_dir, workflow_result)
+    _write_workflow_result_artifacts(
+        Path(raw.get("run_dir") or runs_root(workspace_dir) / workflow_result.run_id),
+        workflow_result,
+    )
     return workflow_result
 
 

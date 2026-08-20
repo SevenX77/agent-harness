@@ -26,9 +26,12 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+from graph_agent.core.adapter_contracts import RunArtifactRequest
+from graph_agent.core.artifacts import compile_artifact
 from graph_agent.core.llm_provider import LLMProviderChunk, LLMProviderRequest
-from graph_agent.core.runner import run_skill
+from graph_agent.core.runner import run_artifact, run_skill
 
 from ._token_spend_invariant import CallRecorder, assert_totals_match_the_calls
 
@@ -168,3 +171,51 @@ def test_a_failed_run_writes_those_tokens_to_its_metrics_file(tmp_path: Path) ->
     )
     assert written["total_input_tokens"] == recorder.input_tokens, written
     assert written["total_output_tokens"] == recorder.output_tokens, written
+
+
+def test_a_failed_run_started_through_run_artifact_reports_what_it_spent(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    """The entry Studio actually uses, which is not ``run_skill``.
+
+    Studio's worker calls ``run_artifact`` (``services/run_manager.py`` →
+    ``adapters/engine.py``), which reaches ``_run_compiled_artifact_graph`` —
+    a path that had no failure exit at all: the exception rose past it to
+    ``run_artifact``'s catch-all, which answers with an error result carrying
+    no metrics and writes no ``metrics.json``. Field evidence
+    (2026-08-20, run ``2026-08-20T10-27-18_a98f6ba5``): the run list showed
+    "105.6s · 0 tokens" for a crashed run whose ``trace.jsonl`` holds 3
+    ``llm_call`` events worth 12582/4103, and its run directory has no
+    ``metrics.json`` or ``result.json`` at all.
+    """
+    provider = _NeverSatisfiesTheSchema()
+    recorder = CallRecorder()
+    skill_root = _skill(tmp_path)
+    manifest = compile_artifact(source_root=skill_root, skill_resolver=mock_skill_resolver)
+    workspace = tmp_path / "ws"
+    run_id = "a-run-that-dies"
+
+    run_artifact(
+        RunArtifactRequest(
+            artifact_ref=manifest.artifact_ref,
+            inputs={"topic": "a topic"},
+            execution_context={
+                "artifact_root": str(skill_root),
+                "workspace_dir": str(workspace),
+                "thread_id": run_id,
+                "event_subscriber": recorder,
+            },
+            idempotency_key=f"idem-{run_id}",
+        ),
+        skill_resolver=mock_skill_resolver,
+        llm_provider=provider,
+    )
+
+    assert provider.call_count > 0, "no model call was made; nothing could have been lost"
+    run_dir = workspace / "runs" / run_id
+    result = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+    assert result["success"] is False, result
+    written = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert_totals_match_the_calls(written, recorder)
+    assert written["total_input_tokens"] > 0, written

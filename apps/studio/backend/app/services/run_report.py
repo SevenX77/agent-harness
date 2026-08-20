@@ -58,6 +58,12 @@ class _Execution:
     tool_calls: int = 0
     errors: list[str] = field(default_factory=list)
     interrupted: bool = False
+    #: The phase itself said it failed. Kept apart from `errors`, which are the
+    #: things that went wrong INSIDE it: a phase can end badly with nothing in
+    #: there — a validator rejecting its declared output happens after the last
+    #: event the phase emits, and run 2026-08-20T15-44-03_98726d7c printed the
+    #: node that killed it as `ok` for exactly that reason (ledger E17).
+    reported_failed: bool = False
 
     @property
     def wall_time_sec(self) -> float | None:
@@ -65,7 +71,7 @@ class _Execution:
 
     @property
     def status(self) -> str:
-        if self.errors:
+        if self.reported_failed or self.errors:
             return "failed"
         if self.interrupted:
             return "interrupted"
@@ -384,6 +390,8 @@ def _account_nodes(events: Iterable[dict[str, Any]]) -> list[_NodeAccount]:
             execution = execution_for(node_id, event)
             if isinstance(timestamp, str):
                 execution.ended_at = timestamp
+            if event.get("status") == "failed":
+                execution.reported_failed = True
             if open_execution.get(node_id) is execution:
                 open_execution.pop(node_id, None)
         elif event_type == "llm_call":

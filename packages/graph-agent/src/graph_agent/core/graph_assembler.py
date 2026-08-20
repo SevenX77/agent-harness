@@ -34,6 +34,7 @@ from graph_agent.callbacks.events import (
     InputDispatchEvent,
     InputFileInjectedEvent,
     PhaseEndEvent,
+    PhaseOutcome,
     PhaseStartEvent,
 )
 from graph_agent.cognitive.critic import (
@@ -1180,6 +1181,59 @@ def _predict_stub_validator_downgrade_hook(
     return _hook
 
 
+class _PhaseEventLifecycle:
+    """Announces one phase execution to the callbacks: it opened, and how it ended.
+
+    Lives on the wrapper's side of the phase rather than around it (where it was
+    until 2026-08-20) because the wrapper's own steps decide the outcome. Its
+    ``wrap_phase_output`` runs the phase's output validator, and a validator
+    rejecting the submission is the phase failing at what it was asked to do —
+    but from outside, that happened after ``phase_end`` had already gone out
+    saying nothing (ledger E17).
+
+    One instance is shared by every execution of the phase, so it keeps no
+    per-execution state: the identity minted at ``opened`` travels back through
+    ``ended`` instead.
+    """
+
+    def __init__(self, *, phase_id: str, callbacks: Any | None) -> None:
+        self._phase_id = phase_id
+        self._callbacks = callbacks
+
+    def opened(self, phase_input: WorkflowState) -> str:
+        # The transition that led here ends where this phase begins: the two
+        # segments are peers and must not overlap.
+        close_edge_transition(self._callbacks)
+        execution_id = active_phase_execution_id()
+        _safe_emit_event(
+            self._callbacks,
+            PhaseStartEvent(
+                phase_name=self._phase_id,
+                phase_execution_id=execution_id,
+                context=_observable_data_context(phase_input),
+            ),
+        )
+        return execution_id
+
+    def ended(
+        self,
+        execution_id: str,
+        phase_input: WorkflowState,
+        result: Any,
+        *,
+        status: PhaseOutcome,
+    ) -> None:
+        _safe_emit_event(
+            self._callbacks,
+            PhaseEndEvent(
+                phase_name=self._phase_id,
+                phase_execution_id=execution_id,
+                status=status,
+                context=_phase_end_context(self._phase_id, phase_input, result or {}),
+            ),
+        )
+
+
 def _wrap_phase_runtime_node(
     phase_id: str,
     phase_ast: Any,
@@ -1212,39 +1266,13 @@ def _wrap_phase_runtime_node(
         enabled=bool(getattr(phase_ast, "validator", False)),
     )
 
-    def _node_with_lifecycle(state: WorkflowState) -> dict[str, Any]:
-        # The transition that led here ends where this phase begins: the two
-        # segments are peers and must not overlap.
-        close_edge_transition(callbacks)
-        execution_id = active_phase_execution_id()
-        _safe_emit_event(
-            callbacks,
-            PhaseStartEvent(
-                phase_name=phase_id,
-                phase_execution_id=execution_id,
-                context=_observable_data_context(state),
-            ),
-        )
-        response_state: dict[str, Any] | None = None
-        try:
-            response_state = node(state)
-            return response_state
-        finally:
-            _safe_emit_event(
-                callbacks,
-                PhaseEndEvent(
-                    phase_name=phase_id,
-                    phase_execution_id=execution_id,
-                    context=_phase_end_context(phase_id, state, response_state or {}),
-                ),
-            )
-
     phase_runner = PhaseWrapper(
         mapper,
         node_kind=node_kind,
         validator=validator,
         validator_error_code=f"[F-v3-{node_kind}-validator-failed]",
-    ).wrap(_node_with_lifecycle)
+        lifecycle=_PhaseEventLifecycle(phase_id=phase_id, callbacks=callbacks),
+    ).wrap(node)
 
     def _dispatch_and_run(state: WorkflowState) -> dict[str, Any]:
         _emit_input_dispatch(callbacks, phase_id=phase_id, mapper=mapper, state=state)

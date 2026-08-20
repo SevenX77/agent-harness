@@ -1432,7 +1432,9 @@ def fake_run_worker(
             output_tokens=2,
             response_data={"content": "ok"},
         ),
-        PhaseEndEvent(phase_name="setup", phase_execution_id="exec-1", context={}),
+        PhaseEndEvent(
+            phase_name="setup", phase_execution_id="exec-1", status="completed", context={}
+        ),
         FinishTaskVerdictEvent(
             phase_name="setup",
             verdict="accepted",

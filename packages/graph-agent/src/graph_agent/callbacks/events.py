@@ -24,6 +24,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION: Literal["1.0"] = "1.0"
 
+#: How one phase execution ended, as the execution itself reports it.
+#:
+#: Deliberately named the same as ``RunEndedEvent.status`` and spelled with the
+#: same vocabulary a reader already applies to any event that states its own
+#: outcome: a phase saying how it went is the same kind of statement a run makes,
+#: and giving it a second name would make every reader learn the difference
+#: before it could believe either.
+PhaseOutcome = Literal["completed", "failed"]
+
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -89,7 +98,7 @@ class PredictChainStartEvent(_EventBase):
 
 
 class PhaseEndEvent(_EventBase):
-    """A phase execution finished, and what it left on the blackboard.
+    """A phase execution finished, how it went, and what it left on the blackboard.
 
     It deliberately carries no spend of its own. What a phase cost is the sum
     over the ``LLMCallEvent``s it made — the same events the run total is built
@@ -102,6 +111,15 @@ class PhaseEndEvent(_EventBase):
     phase_name: str
     #: Required here for the same reason as on ``PhaseStartEvent``.
     phase_execution_id: str
+    #: Required, so "a phase ended without saying how" is not representable.
+    #: Run 2026-08-20T15-44-03_98726d7c died on
+    #: ``[F-v3-agent-validator-failed]`` and nothing in the phase's own frames
+    #: said so — the canvas drew the node that killed the run as Success and the
+    #: run report gave it ``ok``, both correctly reading a ``phase_end`` that
+    #: stated nothing. ``failed`` covers the phase's WHOLE execution, its output
+    #: validator included: the validator judges the phase's declared output
+    #: contract, which is part of doing the phase (ledger E17).
+    status: PhaseOutcome
     context: dict[str, Any] = Field(default_factory=dict)
 
 

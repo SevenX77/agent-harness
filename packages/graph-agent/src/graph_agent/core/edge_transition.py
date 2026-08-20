@@ -125,7 +125,7 @@ def wrap_edge_transition(
 ) -> Any:
     """Open a transition segment before the downstream phase, close it before its start.
 
-    The segment closes from inside ``_node_with_lifecycle`` (just before
+    The segment closes from the phase lifecycle's ``opened`` (just before
     ``phase_start``) so the two segments never overlap; closing here in the
     ``finally`` is the backstop for a phase that dies before it starts.
     """

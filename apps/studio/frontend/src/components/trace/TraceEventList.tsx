@@ -16,6 +16,7 @@ import { buildTraceSteps, type TraceStepStatus } from '../../utils/trace-steps'
 import type { RunVerdict } from '../../utils/run-status-projection'
 import { initialTracePosition } from './trace-initial-scroll'
 import { TraceOutcomeRow } from './TraceOutcomeRow'
+import { TraceResumeSeam } from './TraceResumeSeam'
 import { TraceStepRow } from './TraceStepRow'
 
 interface TraceEventListProps {
@@ -216,6 +217,21 @@ export function TraceEventList({
                   // under it. Phases without loop markers stay flat.
                   const opensIteration = step.iteration !== null
                     && (opensGroup || steps[position - 1].iteration !== step.iteration)
+                  // A resume is a seam, not a step: nothing executed in it, so
+                  // it gets the same treatment as the outcome row at the other
+                  // end of the list rather than a row with a body to expand.
+                  if (step.start.event.event_type === 'resumed') {
+                    return (
+                      <div
+                        key={step.key}
+                        id={`trace-event-${step.key}`}
+                        role="option"
+                        aria-selected={selectedEventId === step.key}
+                      >
+                        <TraceResumeSeam event={step.start.event} />
+                      </div>
+                    )
+                  }
                   return (
                     <div
                       key={step.key}

@@ -312,6 +312,23 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: target-design(2026-08-20 立)。
 - 归属: capability `trace-observability`; region `timeline`.
 
+### F11. resume 是一道可见的接缝
+
+- 机制: `resumed` 事件**不按步骤渲染**,而是渲染成一条横跨列表的接缝行
+  (`data-trace-resume-seam=<相位>`):左右各一条细线,中间一枚 chip 写清三件事——
+  这是一次 resume、从哪个相位接上、人回答了什么(附时间)。
+- 决策:
+  - **它不是步骤,因为它里面没有执行。** 与列表另一端的结局行同理(结局行也明确「不是步骤」),
+    接缝不展开、不参与相位分组的缩进。此前它按普通步骤渲染,于是一路掉进 `GenericPayload`
+    的原始 JSON 兜底,唯一还看得出"这里断过"的线索只剩时间戳的跳变。
+  - **它要修的误读是「串台」。** 同一个 run 被 resume 后复用同一个 `run_id`,于是两簇相隔很远的
+    时间戳同屏出现,读起来像两次运行的事件混进了一条 trace。流层面已被证明是干净的
+    (`useRunStream` 渲染期同步重置 + 每次写入都要报出 subject),缺的是**把断点画出来**。
+- 原话/来源: PM 2026-08-09 与 2026-08-19 截图(跨 run 事件串台);台账 T12 复核结论。
+- 测试: `TraceEventList.test.tsx`(接缝行出现 / 写明相位与人的回答 / 不回落原始 payload)。
+- Status: target-design(2026-08-20 立)。
+- 归属: capability `trace-observability`; region `timeline`.
+
 ## 3. 接口契约
 - Runtime input: run_id websocket events plus persisted `trace.jsonl`.
 - UI output: timeline stream/list, node status map, prompt inspector, dot context。(独立的只读文档面已按 2026-08-09 D1 删除,见 F2。)

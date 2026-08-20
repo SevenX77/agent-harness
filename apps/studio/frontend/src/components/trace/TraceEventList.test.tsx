@@ -116,3 +116,47 @@ describe('TraceEventList terminal entry', () => {
     expect(html).not.toContain('data-trace-outcome')
   })
 })
+
+describe('a resume is a seam in the run, not a step', () => {
+  function listOf(events: Partial<CallbackEvent>[]): string {
+    return renderToStaticMarkup(
+      <TraceEventList
+        events={events.map((event, index) => ({
+          index,
+          event: { schema_version: '1.0', timestamp: '2026-08-08T00:00:00Z', ...event } as CallbackEvent,
+        }))}
+        selectedEventId={null}
+      />,
+    )
+  }
+
+  it('renders the resume as its own seam row', () => {
+    const html = listOf([
+      { event_type: 'interrupted', phase_name: 'review', question: 'Approve?' },
+      { event_type: 'resumed', phase_name: 'review', resumed_from_phase: 'review', human_input: 'Approve' },
+      { event_type: 'phase_start', phase_name: 'publish' },
+    ])
+
+    expect(html).toContain('data-trace-resume-seam')
+  })
+
+  it('names where it picked up and what the human answered', () => {
+    const html = listOf([
+      { event_type: 'resumed', phase_name: 'review', resumed_from_phase: 'review', human_input: 'Approve' },
+    ])
+
+    expect(html).toContain('review')
+    expect(html).toContain('Approve')
+  })
+
+  it('does not fall back to a raw event payload', () => {
+    // Landing in GenericPayload is what made a resume unreadable, and an
+    // unreadable seam is why one run's two time clusters read as two runs
+    // bleeding into each other (ledger T12).
+    const html = listOf([
+      { event_type: 'resumed', phase_name: 'review', resumed_from_phase: 'review', human_input: 'Approve' },
+    ])
+
+    expect(html).not.toContain('Event payload')
+  })
+})

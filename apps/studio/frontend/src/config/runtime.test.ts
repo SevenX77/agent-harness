@@ -12,6 +12,7 @@ import {
   initializeRuntimeConfig,
   isTauriRuntime,
   resolveRuntimeConfig,
+  restartSidecar,
   subscribeToSidecarRestart,
 } from './runtime'
 
@@ -163,5 +164,72 @@ describe('runtime config', () => {
 
     expect(typeof unlisten).toBe('function')
     unlisten()
+  })
+})
+
+/**
+ * Problem ledger P2. Retry used to re-run `initializeRuntimeConfig()`, which
+ * asks the shell for the sidecar's config — and with no sidecar running, the
+ * shell answered with the error it had cached at boot. Same string every time:
+ * to the user, a button that does nothing.
+ *
+ * Retry has to ask for the thing that is missing, which is a sidecar.
+ */
+describe('retrying asks the shell for a sidecar, not for its config', () => {
+  const restarted = {
+    port: 41234,
+    baseURL: 'http://127.0.0.1:41234/api',
+    wsURL: 'ws://127.0.0.1:41234/ws',
+    resourceDir: '/resources',
+    configDir: '/config',
+    api_token: 'token-from-the-new-sidecar',
+  }
+
+  it('calls the shell command that starts one', async () => {
+    const commands: string[] = []
+
+    const config = await restartSidecar({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(command: string): Promise<T> => {
+        commands.push(command)
+        return restarted as T
+      },
+    })
+
+    expect(commands).toEqual(['restart_sidecar'])
+    expect(config.port).toBe(41234)
+  })
+
+  it('routes the next request at the sidecar it just started', async () => {
+    await restartSidecar({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(): Promise<T> => restarted as T,
+    })
+
+    expect(getRuntimeStatus({ __TAURI_INTERNALS__: {} }).sidecar).toBe('ready')
+    expect(api.defaults.baseURL).toBe('http://127.0.0.1:41234/api')
+    expect(currentApiTokenIsSet()).toBe(true)
+  })
+
+  it('surfaces what this attempt hit, so a second press can read differently', async () => {
+    await expect(
+      restartSidecar({
+        windowRef: { __TAURI_INTERNALS__: {} },
+        invoke: async <T,>(): Promise<T> => {
+          throw new Error('failed to start Python sidecar: vendor snapshot missing')
+        },
+      }),
+    ).rejects.toThrow('vendor snapshot missing')
+
+    expect(getRuntimeStatus({ __TAURI_INTERNALS__: {} }).message).toContain('vendor snapshot missing')
+  })
+
+  it('outside Tauri there is no shell to ask, so it re-reads the dev backend', async () => {
+    const config = await restartSidecar({
+      windowRef: {},
+      fallbackBaseURL: 'http://localhost:8787/api',
+    })
+
+    expect(config.baseURL).toBe('http://localhost:8787/api')
   })
 })

@@ -305,6 +305,27 @@ class ToolApprovalResolution:
 
 _safe_write_sinks: dict[str, _SafeWriteSink] = {}
 _pending_tool_approvals: dict[tuple[str, str], asyncio.Future[bool]] = {}
+# Why a held approval stopped being held, kept so a late click can be told which
+# of three very different things happened instead of one shrug that covered all
+# of them (problem ledger CP6). A supervisor keeps its child's exit reason for
+# the same reason: "gone" and "gone because it crashed" are not the same answer.
+# Bounded by the session — cleared with the holds in _cleanup_pending_tool_approvals.
+_settled_tool_approvals: dict[tuple[str, str], str] = {}
+
+_APPROVAL_DECIDED = "decided"
+_APPROVAL_TIMED_OUT = "timed_out"
+
+#: What the reader is told, per way the hold ended. A person reads these in a
+#: toast, so they are sentences, not codes.
+_APPROVAL_GONE_MESSAGE = {
+    _APPROVAL_DECIDED: "This call was already decided.",
+    _APPROVAL_TIMED_OUT: (
+        "This call timed out and the task was stopped — send a new message to continue."
+    ),
+}
+_APPROVAL_SESSION_GONE = (
+    "This session is no longer holding that call; the app or the session restarted."
+)
 # R7-I stop button: the skill's currently-streaming SDK client, set for the
 # duration of one turn so the interrupt endpoint can call client.interrupt()
 # (SDK-native) on it. Cleared when the turn ends (stream_query's finally).
@@ -321,6 +342,8 @@ def _cleanup_pending_tool_approvals(skill_id: str | None = None) -> int:
         future = _pending_tool_approvals.pop(key, None)
         if future is not None and not future.done():
             future.set_result(False)
+    for key in [k for k in _settled_tool_approvals if skill_id is None or k[0] == skill_id]:
+        _settled_tool_approvals.pop(key, None)
     return len(keys)
 
 
@@ -520,6 +543,7 @@ async def _hold_for_tool_approval(
         await sink.queue.put(
             CopilotEventError(message=message, error_code="tool_approval_timeout")
         )
+        _settled_tool_approvals[(skill_id, tool_use_id)] = _APPROVAL_TIMED_OUT
         return PermissionResultDeny(message=message, interrupt=True)
     finally:
         _pending_tool_approvals.pop((skill_id, tool_use_id), None)
@@ -700,13 +724,18 @@ def resolve_tool_approval(
 
     future = _pending_tool_approvals.get((skill_id, tool_use_id))
     if future is None or future.done():
+        settled = _settled_tool_approvals.get((skill_id, tool_use_id))
+        if future is not None and future.done() and settled is None:
+            # Decided inside this call's own hold, before the finally-clause pop.
+            settled = _APPROVAL_DECIDED
         return ToolApprovalResolution(
             tool_use_id=tool_use_id,
             approved=approve,
             resolved=False,
-            message="approval_not_found",
+            message=_APPROVAL_GONE_MESSAGE.get(settled or "", _APPROVAL_SESSION_GONE),
         )
     future.set_result(approve)
+    _settled_tool_approvals[(skill_id, tool_use_id)] = _APPROVAL_DECIDED
     return ToolApprovalResolution(
         tool_use_id=tool_use_id,
         approved=approve,

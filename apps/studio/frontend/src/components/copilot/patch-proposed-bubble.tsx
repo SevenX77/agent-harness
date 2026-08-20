@@ -10,6 +10,7 @@ import {
   restoreWorkspaceFile,
   seedWorkspaceCheckpoint,
 } from '../../lib/tauri'
+import { copilotStore } from '../../store/copilotStore'
 import { resolveWorkspaceIdentity } from '../studio/workspace-identity'
 import { errorMessage } from '../../utils/errors'
 
@@ -95,7 +96,12 @@ export async function seedCopilotRestoreCheckpoint({
 }
 
 function PatchProposedBubbleBase({ event, skillId, workspaceRoot, onFileChanged }: PatchProposedBubbleProps) {
-  const [review, setReview] = useState<Review>('pending')
+  // The verdict is read from the event, which is what gets persisted; a
+  // bubble that remembered its own came back unreviewed on every remount
+  // (problem ledger CP6).
+  const review = event.review
+  const setReview = (next: Exclude<Review, 'pending'>) =>
+    copilotStore.reviewPatch(event.id, next)
   const [busy, setBusy] = useState(false)
   const [showCompare, setShowCompare] = useState(false)
   const [checkpointStatus, setCheckpointStatus] = useState<CheckpointStatus>({ state: 'seeding' })

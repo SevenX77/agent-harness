@@ -314,13 +314,14 @@ def test_bash_approval_times_out_to_deny(
     assert result.interrupt is True
     assert "timed out" in result.message
     assert isinstance(_drain(queue)[0], CopilotEventToolApprovalRequired)
-    # 超时后审批号已清理,再批复报 not found。
+    # 超时后审批号已清理。晚到的批复要说清是**超时**——CP6 之前这里回的是
+    # `approval_not_found`,同一个串还兼指「已决议」和「会话没了」,读者无从分辨。
     late = copilot.resolve_tool_approval("skill-timeout", "tu-timeout", approve=True)
     assert late.resolved is False
-    assert late.message == "approval_not_found"
+    assert "timed out" in (late.message or "")
 
 
-def test_resolve_twice_reports_not_found(tmp_path: Path) -> None:
+def test_resolve_twice_reports_already_decided(tmp_path: Path) -> None:
     queue = _register_sink("skill-twice", tmp_path)
 
     async def scenario() -> None:
@@ -334,7 +335,8 @@ def test_resolve_twice_reports_not_found(tmp_path: Path) -> None:
         )
         second = copilot.resolve_tool_approval("skill-twice", "tu-twice", approve=True)
         assert second.resolved is False
-        assert second.message == "approval_not_found"
+        # 第二次点击是「已经决议过了」,不是「找不到」(CP6)。
+        assert "already" in (second.message or "").lower()
 
     asyncio.run(scenario())
 

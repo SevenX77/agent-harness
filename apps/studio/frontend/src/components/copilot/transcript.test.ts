@@ -144,6 +144,7 @@ function toolApprovalRequired(
     toolUseId,
     toolName,
     detail,
+    decision: 'pending' as const,
   }
 }
 

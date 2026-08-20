@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { resolveCopilotToolApproval, type CopilotToolApprovalResponse } from '../../api/client'
 import type { CopilotToolApprovalRequiredEvent } from '../../types/copilot'
+import { copilotStore } from '../../store/copilotStore'
 import { Button } from '../ui/button'
 
 interface ResolveToolApprovalDecisionInput {
@@ -28,8 +29,10 @@ export async function resolveToolApprovalDecision({
   })
 
   if (!response.resolved) {
-    // The hold no longer exists: already resolved, timed out, or session reset.
-    throw new Error(`Approval expired: ${response.message ?? 'approval_not_found'}`)
+    // The hold is gone. WHICH way it went is the backend's to say — this used to
+    // prefix "Approval expired:", asserting the timeout case whichever of the
+    // three had actually happened (problem ledger CP6).
+    throw new Error(response.message ?? 'This call is no longer being held.')
   }
 
   if (!approve) {
@@ -46,12 +49,16 @@ interface ToolApprovalCardProps {
 }
 
 export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
-  const [decisionLabel, setDecisionLabel] = useState<string | null>(null)
+  // Only the in-flight moment is local. The DECISION is read from the event,
+  // which is what gets persisted — a card that remembered its own verdict came
+  // back undecided every time it remounted (problem ledger CP6).
   const [errorLabel, setErrorLabel] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
+  const settled = event.decision !== 'pending'
+  const decisionLabel = settled ? `${event.toolName} ${event.decision}.` : null
 
   async function decide(approve: boolean) {
-    if (!skillId || isResolving || decisionLabel) {
+    if (!skillId || isResolving || settled) {
       return
     }
 
@@ -59,7 +66,7 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
     try {
       const result = await resolveToolApprovalDecision({ skillId, event, approve })
       setErrorLabel(null)
-      setDecisionLabel(result.label)
+      copilotStore.decideToolApproval(event.id, approve ? 'approved' : 'denied')
       toast.success(result.label)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to resolve tool approval.'
@@ -70,7 +77,7 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
     }
   }
 
-  const disabled = !skillId || isResolving || Boolean(decisionLabel)
+  const disabled = !skillId || isResolving || settled
   // Mirrors the backend's _EXECUTION_CLASS_TOOLS: command runners whose detail
   // is the raw command line.
   const isExecution = event.toolName === 'Bash' || event.toolName === 'PowerShell'
@@ -93,29 +100,31 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
           <Icon className="size-3.5 text-link" />
           <span>{title}</span>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void decide(true)}
-            disabled={disabled}
-            aria-label={`Approve ${event.toolName}`}
-          >
-            <Check data-icon="inline-start" />
-            Approve
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            onClick={() => void decide(false)}
-            disabled={disabled}
-            aria-label={`Reject ${event.toolName}`}
-          >
-            <X data-icon="inline-start" />
-            Reject
-          </Button>
-        </div>
+        {settled ? null : (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void decide(true)}
+              disabled={disabled}
+              aria-label={`Approve ${event.toolName}`}
+            >
+              <Check data-icon="inline-start" />
+              Approve
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => void decide(false)}
+              disabled={disabled}
+              aria-label={`Reject ${event.toolName}`}
+            >
+              <X data-icon="inline-start" />
+              Reject
+            </Button>
+          </div>
+        )}
       </div>
       <pre className="mt-1.5 max-h-40 overflow-auto rounded-md bg-background p-2 font-mono text-foreground">
         {event.detail}

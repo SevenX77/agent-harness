@@ -21,6 +21,7 @@ function heldEvent(
     toolUseId: 'tu-tool',
     toolName: 'Bash',
     detail: 'printf approved > approved.txt',
+    decision: 'pending',
     ...overrides,
   }
 }
@@ -106,12 +107,14 @@ describe('ToolApprovalCard', () => {
     expect(result.label).toBe('Bash approved.')
   })
 
-  it('treats an unresolved (expired) approval as a failure', async () => {
+  it('surfaces whatever account the backend gives of where the hold went', async () => {
+    // It used to prefix 'Approval expired:', which asserts one of three very
+    // different situations as fact. The backend knows which; the card says it.
     vi.mocked(resolveCopilotToolApproval).mockResolvedValue({
       tool_use_id: 'tu-tool',
       approved: true,
       resolved: false,
-      message: 'approval_not_found',
+      message: 'This call was already decided.',
     })
 
     await expect(
@@ -120,7 +123,7 @@ describe('ToolApprovalCard', () => {
         event: heldEvent(),
         approve: true,
       }),
-    ).rejects.toThrow('Approval expired: approval_not_found')
+    ).rejects.toThrow('This call was already decided.')
   })
 
   it('rejects a held tool call', async () => {

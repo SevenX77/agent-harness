@@ -18,7 +18,7 @@ const accidentEvents: CopilotEvent[] = [
   { id: 'e4', receivedAt: 4, raw: null, type: 'tool_use_start', status: 'running', tool_name: 'Read', tool_input: { file_path: 'GRAPH.md' } },
   { id: 'e5', receivedAt: 5, raw: null, type: 'tool_use_result', status: 'success', tool_name: 'Read', success: true, result_summary: 'ok' },
   { id: 'e6', receivedAt: 6, raw: null, type: 'tool_use_start', status: 'running', tool_name: 'Bash', tool_input: { command: 'Get-ChildItem -Recurse' } },
-  { id: 'e7', receivedAt: 7, raw: null, type: 'tool_approval_required', status: 'pending', toolUseId: 'call_bash_1', toolName: 'Bash', detail: 'Get-ChildItem -Recurse -Depth 3' },
+  { id: 'e7', receivedAt: 7, raw: null, type: 'tool_approval_required', status: 'pending', toolUseId: 'call_bash_1', toolName: 'Bash', detail: 'Get-ChildItem -Recurse -Depth 3', decision: 'pending' },
   { id: 'e8', receivedAt: 8, raw: null, type: 'tool_use_start', status: 'running', tool_name: 'Glob', tool_input: { pattern: '**/*.md' } },
   { id: 'e9', receivedAt: 9, raw: null, type: 'tool_use_start', status: 'running', tool_name: 'Glob', tool_input: { pattern: '**/*.yaml' } },
 ]

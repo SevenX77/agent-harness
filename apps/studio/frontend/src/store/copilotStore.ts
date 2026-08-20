@@ -1,4 +1,4 @@
-import type { CopilotMessage } from '../types/copilot'
+import type { CopilotEvent, CopilotMessage } from '../types/copilot'
 import {
   writeWorkspaceFile,
   ensureWorkspaceSupportDirs,
@@ -195,6 +195,42 @@ function persistWindowState(
     emit()
   })
 }
+
+/**
+ * Apply a decision to one event, wherever it lives, and persist its session.
+ *
+ * Unlike `updateMessage`, this writes even while the owning message is still
+ * running: the model is BLOCKED on this approval, so the turn cannot settle
+ * until the decision is in — waiting for a settled message would mean never
+ * persisting the very decision that lets it settle.
+ */
+function settleEvent(eventId: string, settle: (event: CopilotEvent) => CopilotEvent) {
+  let owner: CopilotSession | null = null
+  state.sessions = state.sessions.map((session) => {
+    if (!session.messages.some((message) => message.events.some((e) => e.id === eventId))) {
+      return session
+    }
+    const updated = {
+      ...session,
+      messages: session.messages.map((message) =>
+        message.events.some((e) => e.id === eventId)
+          ? {
+              ...message,
+              events: message.events.map((e) => (e.id === eventId ? settle(e) : e)),
+            }
+          : message,
+      ),
+    }
+    owner = updated
+    return updated
+  })
+  syncCurrentContext()
+  emit()
+  if (state.workspaceId && state.skillId && owner) {
+    void persistSessionToDisk(state.workspaceId, state.skillId, owner)
+  }
+}
+
 
 async function persistSessionToDisk(
   workspaceId: string,
@@ -456,6 +492,24 @@ export const copilotStore = {
     ) {
       void persistSessionToDisk(state.workspaceId, state.skillId, owningSession)
     }
+  },
+  /**
+   * Record what the user decided about a held tool call, on the event itself.
+   *
+   * The decision belongs to the message, not to the card that collected it: a
+   * card unmounts every time the panel collapses, while the message is what
+   * gets written to disk and read back (problem ledger CP6). Same reasoning for
+   * `reviewPatch` below.
+   */
+  decideToolApproval(eventId: string, decision: 'approved' | 'denied') {
+    settleEvent(eventId, (event) =>
+      event.type === 'tool_approval_required' ? { ...event, decision } : event,
+    )
+  },
+  reviewPatch(eventId: string, review: 'accepted' | 'rejected') {
+    settleEvent(eventId, (event) =>
+      event.type === 'patch_proposed' ? { ...event, review } : event,
+    )
   },
   clearMessages() {
     state.sessions = state.sessions.map((s) => {

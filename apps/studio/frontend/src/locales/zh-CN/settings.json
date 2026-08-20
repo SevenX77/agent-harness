@@ -207,6 +207,8 @@
       "connectedBadge": "已连接",
       "connectedWithLatency": "已连接（{{latencyMs}} 毫秒）",
       "notConfigured": "未配置",
+      "untestedBadge": "未测试",
+      "untestedHint": "密钥和 Base URL 都已保存,还没向提供商问过。点 Test 测一次。",
       "protocolUnsupportedBadge": "协议不支持",
       "protocolUnsupportedHint": "密钥和地址都已保存。这个地址不提供该协议——换一个提供该协议的地址,或用格子上的 Re-probe 再问一次。",
       "thirdPartyBadge": "第三方",

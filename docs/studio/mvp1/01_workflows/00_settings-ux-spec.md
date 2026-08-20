@@ -462,6 +462,13 @@ Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/mo
   它**不得**落回 **"Not configured"**：那句话是在叫用户去填他已经填好的两个字段
   （实证 2026-08-19：jiekou 卡 key 与 Base URL 俱在、状态为 `protocol_unsupported`，
   头部却显示 Not configured，因为该状态没有分支、穿过所有分支落到了默认值）。
+- **头部徽章也要把 `untested` 与 `not_configured` 分开（PM 2026-08-20）。** 这是上一条
+  同一个缺陷的另一半：**"什么都没填"** 与 **"填好了，还没问过"** 是两种处境，只有前者
+  才是"请去输入"的提示。`untested` 在头部的文案是 **"Not tested"**，tooltip 说明
+  「密钥和 Base URL 都已保存，点 Test 测一次」。**"Not configured" 只保留给真的缺东西
+  的卡**：第三方卡没有任何一条非空 Base URL，或者没有密钥——此时确实没有可测对象。
+  这条在本次修复后从边角变成常态：地址一搬家，旧观察按第 3 点全部作废，卡片**必然**
+  先落在 `untested`；若仍沿用旧标签，等于每改一次 Base URL 就告诉用户"你什么都没填"。
 
 ### 4.3 测试落点：role card 里的 model 才做真实测试
 - **API key 页**：只验证 **endpoint**（轻量：连通 / get-models / 第三方加一次模型探测）。

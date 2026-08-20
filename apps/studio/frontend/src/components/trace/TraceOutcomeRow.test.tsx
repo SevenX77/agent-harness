@@ -5,13 +5,24 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../studio/WorkspaceContext'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
-import { TraceOutcomeRow, runReportOpenRequest } from './TraceOutcomeRow'
+import { runReportOpenRequest } from '../../utils/run-report'
+import { TraceOutcomeRow } from './TraceOutcomeRow'
+
+const mocks = vi.hoisted(() => ({ rebuildRunReport: vi.fn() }))
+vi.mock('@/api/client', () => ({ rebuildRunReport: mocks.rebuildRunReport }))
 
 // React 19's act() warns unless the environment opts in.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 function outcome(overrides: Partial<TraceOutcomeEntry> = {}): TraceOutcomeEntry {
-  return { status: 'success', wallTimeSec: 12, totalTokens: 400, reportPath: null, ...overrides }
+  return {
+    status: 'success',
+    wallTimeSec: 12,
+    totalTokens: 400,
+    reportPath: null,
+    runId: 'run-1',
+    ...overrides,
+  }
 }
 
 function workspaceValue(onFileOpen: WorkspaceContextValue['onFileOpen']): WorkspaceContextValue {
@@ -34,26 +45,9 @@ function workspaceValue(onFileOpen: WorkspaceContextValue['onFileOpen']): Worksp
   }
 }
 
-describe('runReportOpenRequest (PM 08-19 Q6: the report opens in the app)', () => {
-  it('names the report as a read-only workspace document', () => {
-    expect(runReportOpenRequest('.workspace/runs/run-1/report.md')).toEqual({
-      path: '.workspace/runs/run-1/report.md',
-      title: 'Run report',
-      language: 'markdown',
-      saveEnabled: false,
-    })
-  })
-
-  it('carries no content, so the editor loads the file itself', () => {
-    // The report is on disk, not in the event stream. Leaving `content` unset
-    // is what makes the editor read it — inventing a content field here would
-    // mean the trace panel shipping its own file reader.
-    expect(runReportOpenRequest('.workspace/runs/run-1/report.md')).not.toHaveProperty('content')
-  })
-})
-
 describe('TraceOutcomeRow report entry', () => {
-  it('opens the report through workspace onFileOpen, not the operating system', () => {
+  it('opens the report through workspace onFileOpen, not the operating system', async () => {
+    mocks.rebuildRunReport.mockResolvedValue({ report_path: '.workspace/runs/run-1/report.md' })
     const onFileOpen = vi.fn()
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -68,9 +62,12 @@ describe('TraceOutcomeRow report entry', () => {
 
     const button = container.querySelector('[data-trace-outcome-report]') as HTMLButtonElement
     expect(button).not.toBeNull()
-    act(() => {
+    await act(async () => {
       button.click()
     })
+    // The report is re-rendered first, so what opens is today's rendering of
+    // this run rather than the one written the day it finished.
+    expect(mocks.rebuildRunReport).toHaveBeenCalledWith('demo', 'run-1')
     expect(onFileOpen).toHaveBeenCalledWith(runReportOpenRequest('.workspace/runs/run-1/report.md'))
 
     act(() => {

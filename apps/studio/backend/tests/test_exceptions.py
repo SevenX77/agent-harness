@@ -25,6 +25,7 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "SUBGRAPH_PATH_NOT_FOUND": 404,
         "RUN_REQUIRES_PREDICT": 409,
         "RUN_NOT_RUNNING": 409,
+        "RUN_NOT_CONCLUDED": 409,
     }
 
     assert set(STANDARD_ERROR_MAP) == set(expected)

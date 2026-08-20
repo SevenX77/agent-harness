@@ -76,6 +76,7 @@ describe('TraceEventList terminal entry', () => {
     wallTimeSec: 12.5,
     totalTokens: 115117,
     reportPath: 'D:/skills/demo/.workspace/runs/run-1/report.md',
+    runId: 'run-1',
   }
 
   function markupWithOutcome(

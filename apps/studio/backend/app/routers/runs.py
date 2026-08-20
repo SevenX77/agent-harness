@@ -215,6 +215,21 @@ def _tokens_metrics_payload(raw: Any) -> TokensMetrics | None:
 
 
 @router.post(
+    "/{run_id}/report",
+    response_model=RunMetadata,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def rebuild_run_report(skill_id: str, run_id: str) -> RunMetadata:
+    """Re-render the run's report so opening it shows today's rendering.
+
+    A POST because it writes `report.md`, even though the write is idempotent:
+    the report is a pure projection of sealed artifacts (RUN_EXECUTION-5), so
+    running it twice produces the same file.
+    """
+    return await asyncio.to_thread(run_manager.rebuild_run_report, skill_id, run_id)
+
+
+@router.post(
     "/{run_id}/pause",
     response_model=RunMetadata,
     responses={409: {"model": ErrorResponse}},

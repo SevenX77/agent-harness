@@ -470,6 +470,20 @@ export async function stopRun(skillId: string, runId: string): Promise<RunMetada
   return response.data
 }
 
+/**
+ * Re-render a finished run's report from its sealed artifacts.
+ *
+ * The report is a pure projection, so this is idempotent — and it is the only
+ * reason a run that finished months ago can still be read with today's
+ * renderer instead of the one that happened to exist that day.
+ */
+export async function rebuildRunReport(skillId: string, runId: string): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(
+    `/skills/${skillId}/runs/${encodeURIComponent(runId)}/report`,
+  )
+  return response.data
+}
+
 export interface CopilotToolApprovalRequest {
   toolUseId: string
   approve: boolean

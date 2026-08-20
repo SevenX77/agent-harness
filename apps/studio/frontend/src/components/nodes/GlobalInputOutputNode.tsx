@@ -1,5 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
+import { STATUS_STYLE, StatusCapsule } from './StatusCapsule'
 import { NODE_CAPSULE_BASE, nodeCardClass } from './node-card'
 import { GLOBAL_INPUT_SOURCE_HANDLE_ID, GLOBAL_OUTPUT_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { GlobalNodeData } from './types'
@@ -13,13 +15,19 @@ type GlobalNode = Node<GlobalNodeData>
 export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>) {
   const isInput = data.type === 'global-input'
   const compileErrors = data.compileErrors ?? []
+  // canvas F8: the endpoints wear the same status capsule and the same running
+  // frame as a phase card. They are not phases, but from the reader's side of
+  // the screen they are nodes on the board, and a board where two of the nodes
+  // are permanently blank is not one status system.
+  const status = data.status ?? 'idle'
+  const isRunning = status === 'running'
 
   return (
     <div
       className={nodeCardClass({
         minWidth: 'min-w-[220px]',
         ring: selected ? 'selected' : 'none',
-        extra: ['text-sm'],
+        extra: ['text-sm', isRunning && 'studio-running-dash-frame'],
       })}
     >
       {isInput ? (
@@ -49,6 +57,14 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
           <span className={[NODE_CAPSULE_BASE, 'border-border bg-card text-muted-foreground'].join(' ')}>
             {isInput ? 'INPUT' : 'OUTPUT'}
           </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <StatusCapsule status={status} />
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {isInput ? 'Run input dispatch' : 'Run output collection'}: {STATUS_STYLE[status].label}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

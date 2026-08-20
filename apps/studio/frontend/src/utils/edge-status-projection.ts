@@ -1,4 +1,5 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
+import type { SkillNodeStatus } from "@/components/nodes"
 import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 import { isInputBoundaryId, isOutputBoundaryId, upstreamPhasesOf } from "./edge-identity"
 import { runVerdict, type RunVerdict } from "./run-status-projection"
@@ -110,4 +111,56 @@ export function deriveEdgeStatuses(
     }
   }
   return statuses
+}
+
+/**
+ * How an IO BOUNDARY endpoint stands in the run.
+ *
+ * Input and Output are not phases — nothing executes in them, so they have no
+ * phase segment and never appeared in the node status map at all, which is why
+ * they sat blank through every run while every other node lit up (PM: "INPUT/
+ * OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一").
+ *
+ * What they DO have is their own edge segments: the run's input leaves the
+ * Input boundary across a real edge, and its outputs arrive at the Output
+ * boundary across real edges, bracketed by the same `edge_start`/`edge_end` the
+ * rest of the board is drawn from. So an endpoint's state IS the state of the
+ * edges at its end of the graph — no second event vocabulary, no separate rule
+ * for "the boundary case".
+ *
+ * Several edges fold to the WORST of them, in that order. An Output fed by two
+ * branches where one died did not receive what it was owed; reporting success
+ * because the sibling arrived would have the endpoint speaking for a branch
+ * that is not its own.
+ */
+export function boundaryNodeStatus(
+  statusByEdgeId: Record<string, EdgeRunStatus>,
+  boundary: "input" | "output",
+): SkillNodeStatus {
+  const boundaryId = boundary === "input" ? INPUT_ID : OUTPUT_ID
+  let seen: EdgeRunStatus = "idle"
+  for (const [edgeId, status] of Object.entries(statusByEdgeId)) {
+    const [source, target] = edgeId.split("->")
+    const touchesBoundary = boundary === "input" ? source === boundaryId : target === boundaryId
+    if (!touchesBoundary) continue
+    if (EDGE_STATUS_SEVERITY[status] > EDGE_STATUS_SEVERITY[seen]) seen = status
+  }
+  return BOUNDARY_STATUS_FROM_EDGE[seen]
+}
+
+/** Which edge state wins when an endpoint has several — worst first. */
+const EDGE_STATUS_SEVERITY: Readonly<Record<EdgeRunStatus, number>> = {
+  idle: 0,
+  done: 1,
+  paused: 2,
+  running: 3,
+  failed: 4,
+}
+
+const BOUNDARY_STATUS_FROM_EDGE: Readonly<Record<EdgeRunStatus, SkillNodeStatus>> = {
+  idle: "idle",
+  running: "running",
+  done: "success",
+  failed: "error",
+  paused: "paused",
 }

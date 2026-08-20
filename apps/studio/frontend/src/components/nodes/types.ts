@@ -133,6 +133,14 @@ export interface GlobalNodeData extends Record<string, unknown> {
   schema: IoDeclaration
   skillId?: string
   workspaceRoot?: string | null
+  /**
+   * How this endpoint stands in the run (canvas F8). The endpoints are not
+   * phases and execute nothing, so this comes from the run segments of the
+   * edges at their end of the graph (`boundaryNodeStatus`) — the same status
+   * vocabulary and the same capsule a phase node wears, which is what "IO
+   * 端点与普通 node 统一" means concretely.
+   */
+  status?: SkillNodeStatus
   /** Compile/lint errors attributed to this global I/O boundary. */
   compileErrors?: CompileError[]
 }

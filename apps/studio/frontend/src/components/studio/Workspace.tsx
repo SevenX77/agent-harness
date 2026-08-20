@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
+import { INPUT_ID, OUTPUT_ID, type SkillNodeStatus } from "@/components/nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import type { CliTerminalSession } from "@/components/copilot/cli-terminal-session"
 import { CopilotFab } from "@/components/copilot/copilot-fab"
@@ -46,7 +47,7 @@ import {
   projectGateEvent,
   type SkillGateEvent,
 } from "./gate-state"
-import { deriveEdgeStatuses } from "@/utils/edge-status-projection"
+import { boundaryNodeStatus, deriveEdgeStatuses } from "@/utils/edge-status-projection"
 import { deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runningPhaseOf } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
@@ -873,9 +874,21 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [viewedTrace, runId, liveRunMetadata, runStream.events],
   )
   const viewedTraceEvents = viewedRun.events
-  const statusByNodeId = useMemo(
-    () => deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
+  const edgeStatusByEdgeId = useMemo(
+    () => deriveEdgeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
     [viewedRun],
+  )
+  // canvas F8: the IO endpoints live in the SAME status map as every phase,
+  // under their own canvas ids. They are not phases and execute nothing, so
+  // their state comes from the edge segments at their end of the graph — one
+  // status system driving the whole board, which is exactly what was asked for.
+  const statusByNodeId = useMemo<Record<string, SkillNodeStatus>>(
+    () => ({
+      ...deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
+      [INPUT_ID]: boundaryNodeStatus(edgeStatusByEdgeId, "input"),
+      [OUTPUT_ID]: boundaryNodeStatus(edgeStatusByEdgeId, "output"),
+    }),
+    [viewedRun, edgeStatusByEdgeId],
   )
   const errorMessageByNodeId = useMemo(
     () => deriveNodeErrorMessages(viewedRun.events, viewedRun.runId),
@@ -883,10 +896,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   )
   const runtimeByNodeId = useMemo(
     () => deriveNodeRuntimes(viewedRun.events, viewedRun.runId),
-    [viewedRun],
-  )
-  const edgeStatusByEdgeId = useMemo(
-    () => deriveEdgeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
     [viewedRun],
   )
   const selectedNodeStatus = useMemo(

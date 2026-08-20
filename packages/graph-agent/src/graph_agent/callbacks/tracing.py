@@ -178,7 +178,7 @@ class TracingCallback(Callback):
         self._write_event(
             event.event_type,
             phase_name,
-            {"context_keys": list(event.context.keys()), "metrics": event.metrics},
+            {"context_keys": list(event.context.keys())},
         )
 
     def _record_llm_call(self, event: LLMCallEvent) -> None:

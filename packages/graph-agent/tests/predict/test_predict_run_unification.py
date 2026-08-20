@@ -82,7 +82,7 @@ def test_predict_reuses_run_v030_skill_dict_single_path(
         for callback in callbacks:
             callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
             callback.on_event(
-                PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={"text": "hello"}, metrics={})
+                PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={"text": "hello"})
             )
         return {
             "run_id": kwargs.get("thread_id") or "predict-run",
@@ -208,7 +208,7 @@ def test_predict_wrapper_still_returns_path_diff_and_deadlock(
         for callback in callbacks:
             callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
             callback.on_event(
-                PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={"text": "hello"}, metrics={})
+                PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={"text": "hello"})
             )
         return {
             "run_id": kwargs.get("thread_id") or "predict-run",
@@ -247,7 +247,7 @@ def test_predict_wrapper_still_returns_path_diff_and_deadlock(
             for _ in range(11):
                 callback.on_event(PhaseStartEvent(phase_name="loop", phase_execution_id="exec-1", context={}))
                 callback.on_event(
-                    PhaseEndEvent(phase_name="loop", phase_execution_id="exec-1", context={"text": "hello"}, metrics={})
+                    PhaseEndEvent(phase_name="loop", phase_execution_id="exec-1", context={"text": "hello"})
                 )
         return {
             "run_id": kwargs.get("thread_id") or "predict-run",

@@ -78,7 +78,6 @@ def test_predict_tracing_consumes_mock_source_cache() -> None:
             phase_name="draft",
             phase_execution_id="exec-1",
             context={"draft": {"text": "stub"}},
-            metrics={"total_input_tokens": 123},
         )
     )
 

@@ -77,11 +77,19 @@ class PredictChainStartEvent(_EventBase):
 
 
 class PhaseEndEvent(_EventBase):
+    """A phase execution finished, and what it left on the blackboard.
+
+    It deliberately carries no spend of its own. What a phase cost is the sum
+    over the ``LLMCallEvent``s it made — the same events the run total is built
+    from (OB10) and the same ones the run report groups per node. A ``metrics``
+    field lived here for a while and was never once filled, so every reader saw
+    ``{}`` and could not tell "spent nothing" from "nobody set this".
+    """
+
     event_type: Literal["phase_end"] = "phase_end"
     phase_name: str
     phase_execution_id: str
     context: dict[str, Any] = Field(default_factory=dict)
-    metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMCallEvent(_EventBase):

@@ -164,6 +164,7 @@ describe('nodeResumeOptionsFromValidity', () => {
   })
 })
 
+<<<<<<< HEAD
 describe('resumeAnchorNodeId anchors on the ROOT graph', () => {
   it('skips a failed phase inside a subgraph and takes its container', () => {
     // The anchor is sent to the resume-validity endpoint as a node id of the
@@ -177,5 +178,13 @@ describe('resumeAnchorNodeId anchors on the ROOT graph', () => {
 
   it('has no anchor when only a subgraph-internal phase failed', () => {
     expect(resumeAnchorNodeId({ 'event_timeline.extract': 'error' })).toBeNull()
+=======
+describe('resumeAnchorNodeId ignores the IO boundaries', () => {
+  it('never anchors a resume on Input or Output', () => {
+    // The endpoints share the status map with phases (canvas F8) but are not
+    // nodes of the graph — the resume endpoint has nothing to rewind them to.
+    expect(resumeAnchorNodeId({ __global_output__: 'error' })).toBeNull()
+    expect(resumeAnchorNodeId({ __global_output__: 'error', draft: 'error' })).toBe('draft')
+>>>>>>> 49188f6b (feat(studio): the IO endpoints join the run status system)
   })
 })

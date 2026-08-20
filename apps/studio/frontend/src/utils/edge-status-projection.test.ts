@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
-import { EDGE_STATUS_AT_RUN_END, deriveEdgeStatuses } from "./edge-status-projection"
+import { EDGE_STATUS_AT_RUN_END, boundaryNodeStatus, deriveEdgeStatuses } from "./edge-status-projection"
 
 function event(partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent {
   return {
@@ -128,5 +128,47 @@ describe("EDGE_STATUS_AT_RUN_END — the registered close table", () => {
       cancelled: "paused",
       paused: "paused",
     })
+  })
+})
+
+describe("boundaryNodeStatus — the IO endpoints join the same status system", () => {
+  it("is idle before the run touches the boundary", () => {
+    expect(boundaryNodeStatus({}, "input")).toBe("idle")
+    expect(boundaryNodeStatus({ "draft->review": "running" }, "output")).toBe("idle")
+  })
+
+  it("runs while the boundary's own edge segment is open, and succeeds when it closes", () => {
+    expect(boundaryNodeStatus({ "__global_input__->draft": "running" }, "input")).toBe("running")
+    expect(boundaryNodeStatus({ "__global_input__->draft": "done" }, "input")).toBe("success")
+    expect(boundaryNodeStatus({ "review->__global_output__": "running" }, "output")).toBe("running")
+    expect(boundaryNodeStatus({ "review->__global_output__": "done" }, "output")).toBe("success")
+  })
+
+  it("reads only the edges that touch ITS end of the graph", () => {
+    const statuses = {
+      "__global_input__->draft": "done" as const,
+      "review->__global_output__": "running" as const,
+    }
+
+    expect(boundaryNodeStatus(statuses, "input")).toBe("success")
+    expect(boundaryNodeStatus(statuses, "output")).toBe("running")
+  })
+
+  it("takes the worst answer when a boundary has several edges", () => {
+    // The run died on one of the branches feeding Output: the endpoint did not
+    // receive what it was owed, and saying "success" because a sibling arrived
+    // would be the endpoint reporting on someone else's branch.
+    expect(boundaryNodeStatus({
+      "a->__global_output__": "done",
+      "b->__global_output__": "failed",
+    }, "output")).toBe("error")
+    expect(boundaryNodeStatus({
+      "a->__global_output__": "done",
+      "b->__global_output__": "running",
+    }, "output")).toBe("running")
+    expect(boundaryNodeStatus({
+      "a->__global_output__": "done",
+      "b->__global_output__": "paused",
+    }, "output")).toBe("paused")
   })
 })

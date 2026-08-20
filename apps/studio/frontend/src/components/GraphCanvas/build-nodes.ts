@@ -321,14 +321,14 @@ export function buildNodes(
       id: INPUT_ID,
       type: 'globalInput',
       position: { x: 0, y: 0 },
-      data: { type: 'global-input', schema: io, skillId, workspaceRoot, compileErrors: compileErrorsByNodeId[INPUT_ID] ?? [] } satisfies GlobalNodeData,
+      data: { type: 'global-input', schema: io, skillId, workspaceRoot, status: run.statusByNodeId?.[INPUT_ID] ?? 'idle', compileErrors: compileErrorsByNodeId[INPUT_ID] ?? [] } satisfies GlobalNodeData,
     },
     ...phaseNodes,
     {
       id: OUTPUT_ID,
       type: 'globalOutput',
       position: { x: 0, y: 0 },
-      data: { type: 'global-output', schema: io, skillId, workspaceRoot, compileErrors: compileErrorsByNodeId[OUTPUT_ID] ?? [] } satisfies GlobalNodeData,
+      data: { type: 'global-output', schema: io, skillId, workspaceRoot, status: run.statusByNodeId?.[OUTPUT_ID] ?? 'idle', compileErrors: compileErrorsByNodeId[OUTPUT_ID] ?? [] } satisfies GlobalNodeData,
     },
   ]
 }

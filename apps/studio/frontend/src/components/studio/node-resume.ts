@@ -1,6 +1,6 @@
 import type { CallbackEvent, EventEnvelope, ResumeValidityResponse } from '@/api/types'
 import type { ResumeRunOptions } from '@/api/client'
-import type { SkillNodeStatus } from '@/components/nodes'
+import { INPUT_ID, OUTPUT_ID, type SkillNodeStatus } from '@/components/nodes'
 import { isRootPhasePath } from '@/utils/phase-path'
 
 export interface NodeResumeCheckpoint {
@@ -45,11 +45,15 @@ export function nodeResumeOptionsFromValidity(
  * When an inner phase fails its container fails with it (the container's `phase_end` never
  * arrives and the run's verdict closes it), so the anchor lands on the container: the root
  * node the user would actually re-run.
+ *
+ * The IO endpoints share this map too (canvas F8) and are skipped for the same reason:
+ * Input and Output are the ENDS of the graph, not nodes in it.
  */
 export function resumeAnchorNodeId(
   statusByNodeId: Record<string, SkillNodeStatus>,
 ): string | null {
   for (const [nodeId, status] of Object.entries(statusByNodeId)) {
+    if (nodeId === INPUT_ID || nodeId === OUTPUT_ID) continue
     if (status === 'error' && isRootPhasePath(nodeId)) {
       return nodeId
     }

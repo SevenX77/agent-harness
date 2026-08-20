@@ -58,10 +58,27 @@
           "最近观察的投影"，而每次观察都是拿**某一把具体密钥**做的，换了密钥就没有任何针对新
           密钥的观察，`status` 回 `unverified_manual`、`last_test_*` 清空。唯一例外是
           `protocol_unsupported`——它是关于 (base_url, protocol) 的事实，与拿哪把密钥无关，
-          且按第 4 点持有 30 天半衰期，换密钥不该悄悄重置那个时钟。
+          且按第 4 点持有 30 天半衰期，换密钥不该悄悄重置那个时钟。**这条豁免只对"换密钥"这
+          一个轴成立**：它说的是"换了钥匙，门还是那扇门"，因此当门本身被换掉——即下一条的
+          地址搬家——豁免不适用，见下。
+        - **改地址即作废旧观察（身份搬家）**：一个 endpoint **就是**它那对规范化后的
+          (base_url, protocol)；它携带的每一条观察，都是向那一对地址提问换来的。用户改
+          Base URL 字段就是把这一对换掉，于是所有观察的**主语不存在了**——不是"旧但可能还准"，
+          是"在描述这个 endpoint 已经不再指向的那个地址"。因此身份一旦搬家，一切依赖身份的
+          观察必须全部作废、回到 `unverified_manual`：`status`、`last_test_at`、
+          `last_test_message`、`last_error_code`，以及缓存下来的已发现事实（名下 routes、
+          `metadata.capability_library`）。**`protocol_unsupported` 在这里没有豁免**：上一条
+          的豁免钉在密钥轴上，而这里换掉的正是它自称描述的那对地址。
+          **密钥不是观察**——用户是把同一个账号指到了别处，密钥跟着这次编辑走，不清。
+          **纯改 id 拼写（同一对 (base_url, protocol)）不算搬家**，什么都不丢。
+          实证 2026-08-19：jiekou 卡从 `/anthropic` 改到 `/openai` 后三个格子全部到达即死，
+          `/anthropic` 上得出的 `protocol_unsupported` 被继承到一个从未被探测过的新地址上，
+          再被第 4 点的半衰期门挡住日常 Test —— 用户点 Test 只会收到"没有可测项"，无法自证清白
+          （而 `https://api.jiekou.ai/openai/v1/models` 实测 HTTP 200、返回 196 个模型，
+          那条被继承的判决在新地址上根本是假的）。
      4. **失败分类定半衰期**：`protocol_unsupported` 是提供商架构级事实 → 长半衰期（**30 天**内日常 Test 跳过该格子，到期自动补测；用户可对单格子强制 re-probe）；瞬时类不设门。"哪天 qiniu 支持 gemini 了"由半衰期复测或手动 re-probe 重新发现 —— 能力不会永久丢失，只有"多久发现"。
      5. **protocol 单写真相**：`protocol` 唯一权威 = 后端 credentials 存储的字段。前端**不得**从 endpoint id 的 slug 反推协议，upsert **不得**修改既有 endpoint 的 `protocol`（后端拒绝 422）；(canonical base_url, protocol) 唯一性是存储不变量（历史被改写产生的重复格子视为坏数据清除，数据可丢弃）。
-     6. **routes 只挂在活格子上**：格子被观察为 `protocol_unsupported` 时清除其名下 routes（协议都不通的格子上不存在"模型清单"）；瞬时失败不清。
+     6. **routes 只挂在活格子上**：格子被观察为 `protocol_unsupported` 时清除其名下 routes（协议都不通的格子上不存在"模型清单"）；瞬时失败不清。**格子身份搬家时同样清除**（第 3 点"改地址即作废旧观察"）：routes 就是"在那个地址问出来的模型清单"，地址换了它们描述的就是别处；清除后走与 endpoint 删除相同的级联，把 role 里指向这些 route 的引用一并摘掉，不留下解析不了的悬空引用。
      7. **日志完整性**：每个格子测自己 → `probe_attempts` 天然覆盖全部尝试（旧轮换里中间候选的失败探测不落日志、协议翻转无因无果，随轮换机一并消灭）；runtime activity 时间戳统一 **UTC**（与 credentials 对齐）。
      8. **catalog 只当线索，不当真相**（后续 PR）：探测观察（**含失败**）双向进 Probe Knowledge Catalog（对齐 §1.4 #2.4"失败也是历史"）；catalog 与本地观察冲突（别人通了我这标 unsupported）只**提前本地复测**，永远不直接改本地状态 —— 别人的 key 套餐/区域/网络与我不同，"他通我不通"是常态。
      9. **unsupported 格子必须"指路"到同域名的活协议**（UX，PM 2026-07-02）：格子被判 `protocol_unsupported` 不是死胡同 —— 提供商返回的信号本身就在指路（`anthropic.qnaigc.com` 对 `/v1/chat/completions` 明确回 "Use /v1/messages instead"，实证 2026-07-02：换到 `/v1/messages` 用 `x-api-key` 或 `Bearer` 均 HTTP 200，但**回来的是 Anthropic 信封**`type:message`/`content[]`、**无 `choices`** → OpenAI 客户端解析不了，所以"换后缀能连"= 走回了 Anthropic 协议，不是 OpenAI 协议复活）。tooltip 要把这条指路讲给用户：**"此域名不支持 {当前协议} 协议 —— 请改用同域名下的 {已验证的兄弟协议} 路由"**（同域名 = 同 hostname；兄弟协议 = 同 hostname 下 status=verified 的其它格子协议，可多个）。实证：`anthropic.qnaigc.com × OpenAI` 灰格子指向同域名 `× Anthropic` 绿格子；`api.qnaigc.com × Gemini` 灰格子指向同域名 `× OpenAI / × Anthropic` 两个绿格子；同域名无任何活协议时只说"此域名不支持 {当前协议} 协议"。目的：让用户一眼看懂"能力没丢、在隔壁格子"，而不是把灰色误读成"这把 key / 这个域名废了"（对齐 §4.2 灰 = 非用户可修的架构事实，红才 = 用户要动手）。
@@ -438,6 +455,13 @@ Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/mo
 - **可点性:除 `protocol_unsupported` 外全部状态都直接点击即测**（PM 2026-07-03）。verified（绿）/ untested / failed（红）/ not_configured 都可点复测。**唯一不可直接点的是 `protocol_unsupported`**（"disabled"）:格子本体 `cursor-not-allowed`，只能走尾部显式 Re-probe 按钮（force、绕半衰期门）;`testing`（正在测）瞬态也不可点。即 `endpointTagIsTestable` = 除 `testing` / `protocol_unsupported` 外全 true。
 - **protocol_unsupported = 架构事实，格子本体不可点（`cursor-not-allowed`）。** 它是「同域名不服务此协议」的死格子（§1.2 矩阵第 9 点：tooltip 指路同域名的活协议），日常不重测（30 天半衰期门）；唯一动手入口是格子尾巴那个**显式 Re-probe 按钮**（force 复测、绕过半衰期门，§1.2 矩阵第 4 点），不是点格子本体。→ 灰 = 非用户可修的架构事实，与 untested 的「还没测」灰在**可点性**上必须分得开。
 - **not_configured（缺 key / base_url）** 仍是 muted 死态（没东西可测）；**testing** 中的格子走边框流动动画、不可点（正在测）。
+- **卡片头部徽章同样要认 `protocol_unsupported`（PM 2026-08-19）。** 上面几条约束的是卡片里
+  每个 endpoint 格子；卡片**头部**那一个汇总徽章是另一处表面，必须遵守同一条「灰的两义要分开」
+  原则。`protocol_unsupported` 在头部的文案是 **"Protocol not supported"**，tooltip 说明
+  「密钥和 Base URL 都已保存，是这个地址不提供该协议」并指向换地址或用格子上的 Re-probe。
+  它**不得**落回 **"Not configured"**：那句话是在叫用户去填他已经填好的两个字段
+  （实证 2026-08-19：jiekou 卡 key 与 Base URL 俱在、状态为 `protocol_unsupported`，
+  头部却显示 Not configured，因为该状态没有分支、穿过所有分支落到了默认值）。
 
 ### 4.3 测试落点：role card 里的 model 才做真实测试
 - **API key 页**：只验证 **endpoint**（轻量：连通 / get-models / 第三方加一次模型探测）。

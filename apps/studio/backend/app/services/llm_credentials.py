@@ -148,6 +148,7 @@ def upsert_endpoints(
     with _credentials_lock:
         data = load_credentials(credential_path)
         endpoints = dict(data.provider_endpoints)
+        routes = dict(data.provider_routes)
         for endpoint_id, payload in endpoint_payloads.items():
             incoming = _endpoint_from_payload(_endpoint_authoring_payload(payload))
             canonical_base_url = canonicalize_base_url(incoming.base_url, incoming.protocol)
@@ -183,13 +184,24 @@ def upsert_endpoints(
                             f"protocol {incoming.protocol!r}; (base_url, protocol) must be "
                             f"unique, so {persisted_endpoint_id} cannot be saved."
                         )
+            # An endpoint IS its (canonical base_url, protocol) pair, and every
+            # observation it carries was earned by asking that pair. Move the pair
+            # — what editing the Base URL field does — and the record has no past:
+            # the verdict describes an address this endpoint no longer points at.
+            # A pure id rename (same pair, new id spelling) is NOT a move, so it
+            # keeps everything. The credential is not an observation: the user is
+            # still pointing the same account somewhere, so it always follows.
+            observed = None if combo_changed else current
             _reject_mask_artifact_secret(persisted_endpoint_id, incoming.api_key)
             api_key = _preserved_secret(incoming, current)
             updates: dict[str, Any] = {
                 "endpoint_id": persisted_endpoint_id,
                 "api_key": api_key,
                 "base_url": canonical_base_url,
-                **_carried_observation(current, rotated=_secret_rotated(current, api_key)),
+                **_carried_observation(observed, rotated=_secret_rotated(observed, api_key)),
+                "metadata": _authoring_metadata(incoming.metadata)
+                if observed is None
+                else incoming.metadata,
             }
             curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(persisted_endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
@@ -203,9 +215,22 @@ def upsert_endpoints(
             if current is not None and _field_omitted(payload, "credential_ref"):
                 updates["credential_ref"] = current.credential_ref
             if persisted_endpoint_id != endpoint_id:
-                endpoints.pop(endpoint_id, None)
+                dropped = endpoints.pop(endpoint_id, None)
+                if dropped is not None and combo_changed:
+                    # Every route under the old id is a model the OLD address
+                    # answered for, so it describes a place this endpoint no
+                    # longer points at. They leave with it — the same cascade
+                    # ``delete_endpoint`` runs, for the same reason. A rename
+                    # keeps them: the address they were discovered at is intact.
+                    routes = {
+                        route_id: route
+                        for route_id, route in routes.items()
+                        if route.endpoint_id != endpoint_id
+                    }
             endpoints[persisted_endpoint_id] = incoming.model_copy(update=updates)
-        data = data.model_copy(update={"provider_endpoints": endpoints})
+        data = data.model_copy(
+            update={"provider_endpoints": endpoints, "provider_routes": routes}
+        )
         _save_credentials_unlocked(data, credential_path)
         return data
 
@@ -520,6 +545,19 @@ def _carried_observation(
         "last_test_message": current.last_test_message,
         "last_error_code": current.last_error_code,
     }
+
+
+# Metadata keys that record what a PROBE SAW rather than what the user typed.
+# Each one describes one (base_url, protocol) pair, so an endpoint that moves to a
+# new address leaves them behind with the observations in the endpoint's own
+# fields. A new observation cache belongs in this set; authoring input (e.g.
+# ``studio_base_url``) must not be added, because it follows the edit.
+_OBSERVED_METADATA_KEYS = frozenset({"capability_library"})
+
+
+def _authoring_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """What an endpoint with no past keeps: the authored keys, none of the seen ones."""
+    return {key: value for key, value in metadata.items() if key not in _OBSERVED_METADATA_KEYS}
 
 
 def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) -> None:

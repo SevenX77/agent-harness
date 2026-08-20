@@ -249,6 +249,25 @@ describe("ProviderCard test status badge", () => {
     },
   )
 
+  it("says the protocol is unsupported instead of calling a configured card unconfigured", () => {
+    // `protocol_unsupported` used to fall through every branch of the badge and
+    // land on the "Not configured" default (live 2026-08-19: the Jiekou card had
+    // a key and a URL and still read as if nothing had been entered). "Nothing
+    // entered" and "entered, but this host does not serve this protocol" are
+    // different situations and must not share a label.
+    const configured = { api_key: "sk-secret-123", base_url: "https://api.jiekou.ai/openai" }
+    const html = renderCardHtml({
+      nextDraft: makeDraft(configured),
+      persisted: makePersisted({ ...configured, last_test_status: "protocol_unsupported" }),
+    })
+
+    // Scoped to the header badge on purpose: the endpoint chip's tooltip already
+    // names the protocol correctly, so an unscoped match would pass on its text
+    // while the badge went on lying.
+    expect(html).toContain(">Protocol not supported</")
+    expect(html).not.toContain(">Not configured</")
+  })
+
   it("resets persisted test state when editable provider fields diverge from stored values", () => {
     const html = renderCardHtml({
       nextDraft: makeDraft({ api_key: "sk-edited" }),

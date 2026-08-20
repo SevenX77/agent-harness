@@ -653,6 +653,39 @@ Command 带 `goto="model"` 会与 tools→model 常规边双路由,把 agent 循
 |---|---|---|---|
 | C-1 | `compile_skill` 把前端负载原样返给 agent | ✅ 随本行同 PR | 根因在 `services/copilot_tools.py` 的 handler 直接 `result.model_dump()` 回整个 `CompileSuccess` —— 那是**前端**的负载:`detail.files`(68 个文件的完整正文)165,910 字符占 88%,`node_schema_v21` 再占 14,254,前端要它们填编辑器和画布。工具**自己的描述**写的却是「成功给编译产物摘要」——描述与实现打架,描述才是设计意图。修法照仓内既有范式(`diagnostic_export.export_predict_diagnostics`:一个纯投影函数,前端与内部判定同源):新增 `CompileDiagnosticExport` 模型 + `export_compile_diagnostics()`,只留裁决所需(status / phase_count / lint_status / **全量 issues** / file_paths / execution_fingerprint),文件正文交回 `read_skill_file`(本就分页)、图结构交回 `get_skill_overview`。**HTTP 路由与前端不动**,仍拿完整 `CompileSuccess`。诊断 SSOT 守住:`issues` 绝不截断(AGENTS.md「一趟返回引擎的 FULL aggregated defect set」),测试用 12 条错误钉死顺序与条数。**在真实那份 dump 上验证:186,276 → 799 字符,缩减 99.57%,issue 一条不少** |
 
+### 审计发现批次 2026-08-20:API Keys 整页保存的差集删除(误删路径已坐实)
+
+**来源**:用户 2026-08-19 要求在修 endpoint 身份变更丢观测(#PR 见下)之前,先单独审计
+`putCredentials` 的整页差集删除,确认误删路径就**作为独立问题**处理、不夹带进那条修复。
+
+**机制(事实)**:`apps/studio/frontend/src/api/llm.ts:1720-1743` 的 `putCredentials`
+把入参当作**整页的完整申报**:凡是 `cachedRegistry.provider_endpoints` 里有、而 payload
+里没有的 endpoint id,一律 `deleteEndpoint(id)`。payload 来自
+`buildPutPayload(draftsRef.current)`(`SettingsPage.tsx:777`),即整页草稿的投影。
+于是**任何一个后端存在、但 `draftsFromCredentials → buildPutPayload` 这条往返链没能覆盖
+到的 endpoint id,都会在用户改任意一张卡的任意一个字段时被删掉**——连同它名下的 routes、
+role 里指向这些 route 的引用,以及重建时拿不回来的密钥(后端 `delete_registry_endpoint`
+的既有级联)。
+
+| # | 项 | 状态 | 处置 |
+|---|---|---|---|
+| A-1 | 往返链漏掉 `ark_runtime` 协议的格子 | 待开工 | `provider-utils.ts:382` 的 `if (!thirdPartyProtocolCandidates.includes(providerType)) continue` 把不在候选表里的协议整个跳过,而候选表(同文件 54-58 行)只有 openai/anthropic/google,**没有 `ark_runtime`**;`buildPutPayload`(`useDebouncedCredentialsSave.ts:198`)对第三方卡也只按这三个协议出 id。**可达路径已实测**:Ark Official 卡的 Base URL 一旦被改离厂商默认值 `https://ark.cn-beijing.volces.com/api/v3`,`isOfficialProviderDraft`(`provider-utils.ts:317-333`)的厂商 URL 判据不再成立,整张卡被重分类为第三方,它的 `ark_runtime` 格子就此从 payload 里消失。对照实验:同一张卡仍在默认 URL 上时(后端持久 id = `ark-official`)覆盖完整 |
+| A-2 | 往返链把只差一个尾部 `/v1` 的两个地址并成一行 | 待开工 | `normalizeBaseUrlGroupKey`(`provider-utils.ts:367-369`)在分组前把结尾的 `/v1` 剥掉,而后端的 `canonicalize_base_url`(`packages/graph-agent-gateway/.../registry/base_url.py`)**只对 `anthropic_compatible` / `ark_runtime` 改写地址**——所以对 `openai_compatible` 来说 `https://api.x.com/v1` 与 `https://api.x.com` 是两个合法且不同的格子,在 UI 里却被并成同一行;`baseUrlRowsFromCredentialProviders` 的 `endpointIds[providerType] ??= provider.id`(同文件 383 行)每个协议槽只留先到的那个 id,后到的那个从此不在 payload 里。**已实测**:两条同协议、只差尾部 `/v1` 的记录,第二条必被判为待删 |
+| A-3 | 修法方向(待裁,不在本批实施) | 待开工 | 删除是**用户意图**,不该由"某个派生 payload 恰好没提到"推断出来。仓内已有显式出口:`deleteEndpoint`,以及 `SettingsPage` 已经在维护的 `deletedProviderIds`。第一性原理的修法是让删除只走显式调用、把 `putCredentials` 的差集删除整段拿掉(不向后兼容原则:直接删旧路径,不留开关)。A-1/A-2 若只各自补一个映射,是症状级补丁——它们是同一个形状的第三、第四次复发(前两次:2026-08-19 的 id-slug 嗅探误判 google 兄弟格子、以及同日 qiniu 卡被整卡误删,PR #866) |
+| A-4 | 纯改 id 拼写(地址不变)会把名下 routes 变成悬空引用 | 待开工 | `upsert_endpoints`(`apps/studio/backend/app/services/llm_credentials.py:216-218`)在 `persisted_endpoint_id != endpoint_id` 时把旧 id 从 `provider_endpoints` 里 pop 掉,但 `provider_routes` 里的 `route.endpoint_id` 仍指着那个已经不存在的旧 id。**已实测**:磁盘上一条 id 为 `legacy-hand-written`、地址 `https://api.legacy.example/v1` 的记录,原样存一次就被改钉到 `api-legacy-example-v1-openai-ce3238d3f5`,而它名下的 `legacy-hand-written:m1` 仍写着旧 endpoint_id,成为孤儿。这是**本次修复之前就存在**的行为(我这次只给"地址搬家"补了级联,没有动"纯改名"这一支,以免把两个不同的问题塞进一个 PR)。修法方向:改名时把 routes 一并改钉到新 id(改名不是搬家,模型清单仍然成立),而不是像搬家那样删掉 |
+
+**既有测试覆盖(审计结论)**:① `apps/studio/frontend/src/api/llm.test.ts:1620`「deletes cached
+endpoints that are absent from the API Keys save snapshot」只钉住"差集删除这个行为是故意的",
+不校验往返链是否完整;② `apps/studio/frontend/src/hooks/useDebouncedCredentialsSave.test.ts:257`
+的往返覆盖测试**只有一个 fixture**(jiekou 的 openai/anthropic/google 三格),照不到 `ark_runtime`,
+也照不到只差 `/v1` 的两个地址。→ 缺口 = 没有跨协议全集、跨 base_url 分组冲突的表驱动测试。
+
+**审计中被证伪的假设(记下来免得下次重走)**:我原本怀疑"服务端改了 id 之后,还脏着的草稿仍
+拿着旧 id,于是下一次 PUT 把新 id 删掉"。实测不成立:`reconcileDraftsWithCredentials`
+(`SettingsPage.tsx:152-160`)用 `providerDraftIdentityKey` 认出旧草稿与新快照是同一张卡、
+把旧草稿丢弃并采用新快照,所以下一次 payload 带的是**新** id。(副作用另说:用户当时正在输入的
+内容会被服务端快照盖掉——那是 UX 问题,不是误删。)
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

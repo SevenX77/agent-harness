@@ -364,10 +364,15 @@ function VerdictBlocks({ verdicts, onlyProblems = false }: { verdicts: TraceStep
   }
   return (
     <>
-      {shown.map(({ event, index }) => {
+      {shown.map(({ event, index, occurrence }) => {
         const route = routeDecisionDetails(event)
         if (route) {
-          return <RouteDecisionBlock key={`verdict-${index}`} details={route} severity={eventSeverity(event)} />
+          // The reason was already given the first time this exact degradation
+          // appeared. Repeating the whole block on every subsequent call turned
+          // one dead endpoint into a wall of identical warnings.
+          return occurrence > 1
+            ? <RouteDecisionRepeat key={`verdict-${index}`} details={route} occurrence={occurrence} severity={eventSeverity(event)} />
+            : <RouteDecisionBlock key={`verdict-${index}`} details={route} severity={eventSeverity(event)} />
         }
         const settings = callSettingsDetails(event)
         if (settings) {
@@ -463,6 +468,38 @@ const DECISION_TONE: Record<TraceSeverity, { box: string; title: string; arrow: 
     title: 'text-muted-foreground',
     arrow: 'text-muted-foreground',
   },
+}
+
+/**
+ * A degradation the reader has already had explained: this call hit it too.
+ *
+ * One line, no reason, no route table — the full block for this exact
+ * complaint is further up the trace. What the repeat still has to say is that
+ * THIS call fell back as well, which is a fact about this call.
+ */
+function RouteDecisionRepeat({
+  details,
+  occurrence,
+  severity,
+}: {
+  details: RouteDecisionDetails
+  occurrence: number
+  severity: TraceSeverity
+}) {
+  const tone = DECISION_TONE[severity]
+  return (
+    <div
+      data-trace-route-repeat={occurrence}
+      className={`mt-2 flex flex-wrap items-center gap-1.5 rounded border px-2 py-1 text-xs ${tone.box}`}
+    >
+      <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${tone.title}`} />
+      <span className={tone.title}>{DECISION_TITLE[details.decision]} again</span>
+      {details.endpointId ? (
+        <span className="text-muted-foreground">endpoint: {details.endpointId}</span>
+      ) : null}
+      <span className="text-muted-foreground">({occurrence} times so far — reason above)</span>
+    </div>
+  )
 }
 
 function RouteDecisionBlock({

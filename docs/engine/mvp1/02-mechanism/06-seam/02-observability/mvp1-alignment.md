@@ -33,6 +33,7 @@ observability = 引擎执行的**可观测事件流**——把"发生了什么"�
 | OB6 | **一步的开始和结束,都由执行这一步的那个单元自己发**,不由包在某类调用方外面的装饰器发、也不由事后读消息列表的人补发。LLM 往返的两半都发自 chat model 内部(`LLMProviderChatModel._generate` / `PredictGatewayChatModel._generate`):请求 provider **之前**发 `prompt_captured`,拿到回答**当场**发 `llm_call`;工具调用的开始事件 `tool_call_started` 发自 Tracing 中间件(它就套在工具执行外面) | 两个失效模式,同一个病根。①**装饰器**只对"以它预期的方式调用模型"的调用方生效:旧实现 `TracingClientProxy` 拦 `.invoke()`,只有 LLM phase 节点那样调;AGENT phase 把模型交给 `create_agent`,LangChain 走 `_generate`,于是**耗时最长的那条路一个开始信号都没有**——一次 5 分钟的 phase 在 UI 上全程空白(实测 2026-08-09)。②**事后读消息列表**的人只能在 phase 跑完后一次性补发所有 `llm_call`,于是这个 phase 开出去的每一步都要等到 phase 结束才关得上:一次 162 秒的 run 报成功之后,trace 里仍有 5 步在转圈(实测 2026-08-09,修复前)。放到调用点后,新增节点类型不可能漏发、没有能被绕过的包装层、开始与结束也不可能来自两个不同的 owner。代价:模型多背 `sub_run_id`/`group_key`/`parent_node_id`/`node_type` 四个只用于上报的字段 |
 | OB8 | **做决定的报每一次决定,只做断言的只报断言失败**:一个组件的输出会改变后续控制流,它就是决定者,每一次决定都发事件(`ExitControlMiddleware` 的五个退出决策 → `AgentExitDecisionEvent`);不改变控制流的检查是断言,只在失败时发(`ProtocolValidationMiddleware` → `ProtocolViolationEvent`) | 引擎其实一直把这些句子写出来了,只是写成 `logger.info` —— 而循环最常见的结局(提交被接受、相位正常结束)因此对每一个运行的读者都不存在(实测:真实 8 相位 run 里,结束了 4 个相位的那个组件贡献 0 条事件)。反过来,给「每次都通过」的断言加事件只会把 trace 淹掉:一个相位每次模型调用要断言两次 |
 | OB7 | **调用方自带的 chat model(`run_skill(mock_llm=...)`)从 Port 进,不从 model 层进**——`ChatModelProvider` 把它适配成 `LLMProvider`,仍由 `LLMProviderChatModel` 驱动 | OB6 把上报责任放在"引擎自己写的 model"身上,那么引擎驱动的每个 model 都必须是这一种,否则外来 model 跑的 run 单纯因为"不是我们写的"而失去全部 `llm_call`(实测:改动后 5 个断言 llm_call 的用例直接失灵)。外来 chat model 本质就是"另一种回答方式"= provider 变体,按稳定依赖原则它归 Adapter 层。副产品:`_resolve_phase_chat_model` 里那条平行的 `chat_model` 分支删掉,phase 之上只剩一种 model、一个 reporter、一套事件 |
+| OB9 | **一次 run 里的每一条事件都要说清自己发生在哪个子图里——包括不是引擎造的那些。**网关不依赖引擎,所以它自己造 `llm_route_decision` / `llm_call_settings` 两种事件,而引擎从前把回调清单**原样**交给它:于是这两种是全程唯一绕过 `_safe_emit_event` 的事件,也就是唯一学不到 `subgraph_path` 的事件。修法是在交界处**由引擎把它们复述成引擎自己的事件**(`_GatewayEventSink`),再从引擎自己的出口发出去。**不是**给网关的事件加一个 `subgraph_path` 字段——「图会嵌套」是引擎的概念,往网关里塞它就是把上层概念漏进底座 | 实测 run `2026-08-20T10-27-18_a98f6ba5`:这两种事件是该 run trace 里仅有的 `subgraph_path: null`,同一个相位的其它事件都写着 `segmentation`。于是 run 报告把**同一个相位记成了两个节点**——`segmentation/segment` 带着它真实的执行,外加一个跑了 `0×` 的幽灵 `segment` 行。这与 `_EventBase.subgraph_path` 字段注释里记的run `2026-08-19T01-56-15_d0733362` 是同一个病根的第二次发作:**裸相位名不是身份**。顺带把引擎早就声明、却从来没有人构造过的那两个类(它们一直列在 `CallbackEvent` 联合里)变成真的 |
 | OB5 | reducer 前后态 diff(REQ-7)= **前端近似**(从 OB4 边操作事件带的黑板快照 + phase 边界比对),engine **不加** authoritative 逐 reducer diff 事件(PM 2026-06-06 选 A) | 边操作事件已带黑板快照、足够前端近似"哪个 key 变了";authoritative 逐 reducer emit = 引擎复杂度↑、调试边际价值↓,deferred(工程取舍,非业务判断) |
 
 ## 6. 测试关键点
@@ -53,6 +54,14 @@ observability = 引擎执行的**可观测事件流**——把"发生了什么"�
 6. **OB7:调用方自带的 model 与引擎自己的 model 产出同一套事件。**
    用一个只会返回固定回答、且 `invoke` 不接任何多余 kwarg 的 chat model 走
    `ChatModelProvider`,事件序列同样是 `prompt_captured` → `llm_call`(同上文件)。
+
+7. **OB9:网关造的事件也要带子图作用域。** 单元层钉一条:把一个网关形状的
+   `llm_route_decision`(用桩对象写出它的 `model_dump`,**不 import 网关**——引擎不依赖它,
+   这正是同一份契约要写两遍的原因)投进 `_GatewayEventSink`,在 `active_subgraph_path`
+   有值时收到的必须是引擎自己的 `LLMRouteDecisionEvent` 且 `subgraph_path` 已填
+   (`tests/callbacks/test_an_event_names_its_subgraph.py`)。同一处再钉两条边界:根层发出的
+   作用域是 `None` 而不是空串;引擎没有对应类的网关事件**照原样送达**——不带作用域比凭空消失好,
+   一种新网关事件类型悄悄从所有 trace 里蒸发要等很久才会有人发现。
 
 ## 7. 涉及 region / platform
 engine 全权;trace 被 studio trace-inspector 消费(前端挂载归 studio)。

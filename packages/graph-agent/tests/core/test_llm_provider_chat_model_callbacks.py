@@ -19,6 +19,12 @@ from graph_agent.core.llm_provider import FakeLLMProvider, LLMProviderChatModel
 class _EngineCallback:
     """Stand-in for graph_agent.callbacks.base.Callback — NOT a LangChain handler."""
 
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    def on_event(self, event: object) -> None:
+        self.events.append(event)
+
     def on_phase_start(self) -> None:  # pragma: no cover - never called here
         pass
 
@@ -41,9 +47,22 @@ def test_invoke_survives_attached_engine_callbacks() -> None:
     assert result.content == "fake response"
 
 
-def test_engine_callbacks_are_forwarded_to_provider_metadata() -> None:
+def test_what_the_provider_emits_reaches_the_engine_callbacks() -> None:
+    """Forwarded, but not the same objects — and the difference is the point.
+
+    The provider hands whatever it emits to the gateway, whose events know
+    nothing about graphs and so cannot say which subgraph they ran in. What
+    goes down is therefore the engine's own relay, and this asserts what the
+    caller actually depends on: an event emitted down there arrives up here.
+    """
     provider = FakeLLMProvider()
-    model = _model_with_engine_callbacks(provider)
+    engine_callback = _EngineCallback()
+    model = LLMProviderChatModel(
+        provider=provider,
+        role="analyst",
+        phase_name="segment",
+        event_callbacks=(engine_callback,),
+    )
 
     model.invoke([HumanMessage(content="hi")])
 
@@ -51,7 +70,10 @@ def test_engine_callbacks_are_forwarded_to_provider_metadata() -> None:
     forwarded = provider.requests[0].metadata.get("callbacks")
     assert isinstance(forwarded, tuple)
     assert len(forwarded) == 1
-    assert isinstance(forwarded[0], _EngineCallback)
+
+    sentinel = object()
+    forwarded[0].on_event(sentinel)
+    assert sentinel in engine_callback.events
 
 
 def test_langchain_callbacks_field_keeps_base_class_semantics() -> None:

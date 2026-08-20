@@ -2355,6 +2355,18 @@ export function ProviderCard({
                   if (!visible) setApiKeyEditing(true)
                   onFieldChange({ api_key: event.target.value })
                 }}
+                onFocus={() => {
+                  // Only a value the client already holds — revealed via Eye, or
+                  // typed in this session — un-masks for editing; that is what
+                  // `editing` has always meant and it discloses nothing the
+                  // server withheld. The redaction placeholder stays masked:
+                  // there is no secret here to edit, so input replaces it whole
+                  // (see apiKeySecretFromMaskedInput). Un-masking it instead put
+                  // the placeholder on screen as if it were the key.
+                  if (!visible && hasApiKey && !isRedactedEndpointSecret(draft.api_key)) {
+                    setApiKeyEditing(true)
+                  }
+                }}
                 onBlur={() => setApiKeyEditing(false)}
                 placeholder={t("apiKeys.card.apiKeyPlaceholder", { providerName: apiKeyProviderName })}
                 name={`provider-secret-${draft.id}`}

@@ -319,4 +319,52 @@ describe("ProviderCard API key explicit reveal", () => {
 
     expect(changes).toEqual(["sk-live-openrouter-2"])
   })
+  it("lets a masked real secret be edited in place after focus", async () => {
+    // The mask-replacement rule is about the REDACTION PLACEHOLDER — a value the
+    // client never held. A real secret the client already has (revealed via Eye,
+    // or typed in this session) is merely drawn masked; focusing it shows it so
+    // it can be corrected, which is how the field has always worked. Without
+    // that, its mask characters get merged into the secret by the next keystroke
+    // and the save is refused at the backend boundary (live 2026-08-20).
+    const changes: string[] = []
+
+    function Harness() {
+      const [draft, setDraft] = useState({ ...baseDraft, api_key: "sk-typed-earlier" })
+      return (
+        <ProviderCard
+          draft={draft}
+          persisted={basePersisted}
+          onFieldChange={(patch) => {
+            if (typeof patch.api_key === "string") changes.push(patch.api_key)
+            setDraft((current) => ({ ...current, ...patch }))
+          }}
+          onGetModels={vi.fn()}
+          onDelete={vi.fn()}
+          onRevealApiKey={vi.fn()}
+        />
+      )
+    }
+
+    await act(async () => {
+      root.render(<Harness />)
+    })
+
+    const input = container.querySelector<HTMLInputElement>(SECRET_INPUT)!
+    expect(input.value).toBe(MASK_CHAR.repeat("sk-typed-earlier".length))
+
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(input.value).toBe("sk-typed-earlier")
+
+    await act(async () => {
+      typeInto(input, "sk-typed-earlier2")
+      await Promise.resolve()
+    })
+
+    expect(changes).toEqual(["sk-typed-earlier2"])
+    expect(changes[0]).not.toContain(MASK_CHAR)
+  })
 })

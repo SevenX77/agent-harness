@@ -139,7 +139,11 @@ describe("ProviderCard API key masking", () => {
     // Once the field holds a real value (revealed / freshly typed), its own
     // length wins \u2014 the registry length only describes the redacted placeholder.
     expect(apiKeyDisplayValue("sk-secret-123", false, false, 51)).toBe("\u2022".repeat("sk-secret-123".length))
-    expect(apiKeyDisplayValue(REDACTED_ENDPOINT_SECRET, true, false, 51)).toBe(REDACTED_ENDPOINT_SECRET)
+    // The placeholder is never shown, not even with the field "visible": it is a
+    // stand-in for a secret the server withheld, so displaying it would show a
+    // 10-character string as if it were a 51-character key. Eye fetches the real
+    // value first (design A10), and only then is there anything to reveal.
+    expect(apiKeyDisplayValue(REDACTED_ENDPOINT_SECRET, true, false, 51)).toBe("•".repeat(51))
   })
 
   it("renders the true-length mask for a redacted persisted key", () => {

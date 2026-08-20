@@ -48,6 +48,17 @@
      2. **`protocol_unsupported` 一等分类**（gateway 探测分类新增）：路径级 404/405（如 "not found or method not allowed"、"Use /v1/messages instead"，响应体**不含**模型语义错误）= **该 URL 不支持该协议**，与 `invalid_model`（协议通了、模型 id 不对）**必须区分**。旧实现把协议 404 归进 `invalid_model` 是三个假象的共同根因（"Untested"假状态、google 赢检测、6/6 失败仍 verified）。
         - **补充信号（PM 2026-07-02，误路由与路由拒绝）**：判据不止 404/405。① **路由级拒绝**：`5xx` 明说该协议路径不存在（实证：`anthropic.qnaigc.com × google` 的 `GET /v1beta/models` → HTTP 500 `"Unsupported fixed route: /v1beta/models"`）也是 `protocol_unsupported`（标记扩到 `unsupported fixed route` / `unknown route` / `route not found`）。② **误路由到异协议**：某些网关对不支持的协议**不报错而是静默转发到自己的另一协议上游**，把那个上游的错误原样吐回 —— 探 `google` 却收到 `"OpenAI API error: 401 invalid api key"`（实证：`anthropic.qnaigc.com × gemini` 生成 500 包着七牛内部 OpenAI 上游的 401）。**探 X 协议却收到 Y 协议的 API 错误 = 该 URL 不说 X**，判 `protocol_unsupported`（此判据须早于 401 分支，否则异协议的 401 会被误当成"我这把 key 失效"）。真机验证 2026-07-02：修后该格子稳定判 `protocol_unsupported`、名下 6 条幽灵路由被清空（deepseek-v4-pro 的 qiniu 路由 4→3）。
      3. **格子永不删除、永不手工 disable，状态 = 最近观察的投影**：`verified`（最近生成 ok）/ `untested`（无观察）/ `unsupported`（最近观察 = protocol_unsupported，展示观察时间 + 下次复查时间）/ 瞬时失败（网络/限流/超时 → 下次 Test 即重试）/ 结构失败（invalid_key / quota → 账号级，与格子生死无关）。
+        - **"与格子生死无关"的落地含义（2026-08-19 补明）**：`invalid_key` 让格子记下一次
+          `failed` 观察（§4.2 的红＝要你修），**不把 endpoint 置为 `disabled`**。停用只落在它
+          名下的 **route** 上（死密钥不该继续把路由摆给 role 选），一次成功的 Test 把它们捞回。
+          曾经把 endpoint 一起置 `disabled` 的实现，连带让这个格子**不可再测**——于是"把密钥
+          修好"成了死路，因为能解除这个状态的唯一动作正是被这个状态挡住的那个动作
+          （实证 2026-08-19：deepseek-official / gemini-official 在界面里彻底砖化）。
+        - **换密钥即作废旧观察**（呼应原子 21「改后旧测试失效→badge 回 untested」）：状态既然是
+          "最近观察的投影"，而每次观察都是拿**某一把具体密钥**做的，换了密钥就没有任何针对新
+          密钥的观察，`status` 回 `unverified_manual`、`last_test_*` 清空。唯一例外是
+          `protocol_unsupported`——它是关于 (base_url, protocol) 的事实，与拿哪把密钥无关，
+          且按第 4 点持有 30 天半衰期，换密钥不该悄悄重置那个时钟。
      4. **失败分类定半衰期**：`protocol_unsupported` 是提供商架构级事实 → 长半衰期（**30 天**内日常 Test 跳过该格子，到期自动补测；用户可对单格子强制 re-probe）；瞬时类不设门。"哪天 qiniu 支持 gemini 了"由半衰期复测或手动 re-probe 重新发现 —— 能力不会永久丢失，只有"多久发现"。
      5. **protocol 单写真相**：`protocol` 唯一权威 = 后端 credentials 存储的字段。前端**不得**从 endpoint id 的 slug 反推协议，upsert **不得**修改既有 endpoint 的 `protocol`（后端拒绝 422）；(canonical base_url, protocol) 唯一性是存储不变量（历史被改写产生的重复格子视为坏数据清除，数据可丢弃）。
      6. **routes 只挂在活格子上**：格子被观察为 `protocol_unsupported` 时清除其名下 routes（协议都不通的格子上不存在"模型清单"）；瞬时失败不清。
@@ -530,9 +541,29 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | A7 capability 回填 | 显示能力 | 投影 | **list-models 富字段归一化** + 缺则 probe |
 | A8 Probe Knowledge Catalog 赋能/写回 | 蓝标签渲染 | 调 ③b 读写 + 远端源 + 上传审批/脱敏 | **catalog 读写语义 + probe 结果合并 + provider 分区 + probe priority** |
 | A9 6 态标签 | 渲染色 | 6 态结果转 DTO | **6 态标准总结（含读 catalog 出蓝）+ RouteStatus + 熔断** |
-| A10 secret reveal | Eye/Copy 等显式用户动作才换单条真值；进 tab 只投影 redacted registry（掩码点数 = `api_key_length` 真实位数，非占位符 10 位） | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
+| A10 secret reveal | Eye/Copy 等显式用户动作才换单条真值；进 tab 只投影 redacted registry（掩码点数 = `api_key_length` 真实位数，非占位符 10 位）；**占位符本身永不作为内容显示**、聚焦不改变显示、掩码态输入 = 整把替换（见下「密钥字段的三态」） | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
 | A11 删 endpoint | 二次确认 | `PUT endpoints`（整表 upsert） | — |
 | A12 save-status badge | 统一 badge ← saveStatus | save 端点返回状态 | — |
+
+#### 密钥字段的三态（A10 / 原子 21、22 的落地语义，2026-08-19 补齐）
+
+> 这条补的是原设计**没定**的一格：用户在一个**从未 reveal 过**的密钥字段里打字会怎样。
+> 缺了它，实现让占位符变成可编辑文本，一次退格就把一把好密钥覆盖成九个星号
+> （实证 2026-08-19，决议 `docs/design/2026-08-19-api-key-test-revive-and-secret-field-lifecycle.md` D3）。
+
+字段里的值只可能是三样东西之一，三者不可互换，界面按各自规则处理：
+
+| 态 | 草稿里是什么 | 显示 | 输入行为 |
+|---|---|---|---|
+| `stored` | registry 回读的 redaction 占位符（服务器有密钥但没发下来） | 恒为 `api_key_length` 个掩码点；**占位符本身永不显示**，聚焦也不改变显示 | 输入/粘贴 = **整把替换**（取插入的那段做新密钥）；只删掉掩码点 = **不改动已存密钥** |
+| `plaintext` | 真实密钥（Eye 取回的，或本次刚输入的） | 遵从 Eye 的明文/掩码开关；正在输入时可见 | 正常就地编辑 |
+| `empty` | 空 | 显示 placeholder 提示文案 | 正常输入 |
+
+三条判据的理由：① 占位符是"有密钥"的信物、不是密钥，显示它既谎报长度又诱导用户去编辑它；
+② 掩码不可能被"改成"密钥，所以掩码态的第一次输入只能是新密钥的开头——这与密码管理器对待
+已存条目的做法一致，也是唯一产不出 `**********sk-live` 这种混合体的规则；③ 删掉一个掩码点
+不构成"密钥少一个字符"，要清空密钥走 Eye 揭示后全选删除，那条路径对"正在销毁什么"是显式的。
+**聚焦不是 reveal 动作**——A10 只授权 Eye / Copy 换真值。
 
 > **守边界检查**：③b 列是公共能力内核（协议探测/list 解析/capability 归一化/route probe/错误分类/base_url 归一化/**endpoint 拆分 + canonical id / 批量探测策略 / Probe Knowledge Catalog / 6 态总结**）；③a 列是应用加工（upsert + 存储 / job-进度-HTTP / 远端源 + 上传审批 / 颜色转 DTO）；① 只录入 + 渲染。⚠️ 原"前端拆分 / 前端生成 id / `_stable_endpoint_id` 退役"已反转——endpoint 标准化拆分 + canonical id 归 ③b。
 

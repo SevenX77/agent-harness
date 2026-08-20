@@ -615,7 +615,12 @@ describe("useSettingsPageController lifecycle", () => {
     )
   })
 
-  it("omits explicitly disabled endpoints from the full-card routine Test queue", async () => {
+  it("still tests an endpoint the backend disabled after a bad key", async () => {
+    // Pressing Test IS the "下次测试成功再恢复" the design promises for a
+    // disabled cell (D13, 2026-08-12) — and §4.2 makes every state but
+    // `protocol_unsupported` click-to-test. Skipping it made fixing a rejected
+    // key impossible: the one action that could clear the state was the one
+    // action the state suppressed.
     configureApiToken("sidecar-token")
     mockEventStream.connectionLost = false
     vi.mocked(getCredentials).mockResolvedValue({
@@ -672,10 +677,100 @@ describe("useSettingsPageController lifecycle", () => {
       for (let index = 0; index < 10; index += 1) await Promise.resolve()
     })
 
-    expect(getProviderModels).toHaveBeenCalledTimes(2)
     expect(vi.mocked(getProviderModels).mock.calls.map(([request]) => request.id)).toEqual([
       "openrouter-openai",
       "openrouter-anthropic",
+      "openrouter-google",
     ])
+  })
+
+  it("tests a card whose only endpoint was disabled", async () => {
+    // The live failure (2026-08-19, deepseek-official / gemini-official): an
+    // official card holds ONE endpoint, so filtering it emptied the queue and
+    // the press returned before any request or any toast. Nothing distinguished
+    // "refused" from "broken".
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    vi.mocked(getCredentials).mockResolvedValue({
+      providers: [
+        {
+          id: "deepseek-official",
+          name: "DeepSeek Official",
+          api_key: "sk-deepseek",
+          base_url: "https://api.deepseek.com",
+          provider_type: "openai_compatible",
+          endpoint_status: "disabled",
+          last_test_status: "invalid_key",
+          last_test_message: "Invalid API key (invalid_request_error).",
+        },
+      ],
+    })
+    vi.mocked(getProviderModels).mockResolvedValue({
+      status: "ok",
+      latency_ms: null,
+      model_seen: "deepseek-v4-flash",
+      message: "Generation verified.",
+      available_models: [{ id: "deepseek-v4-flash" }],
+      available_sdks: ["openai_compatible"],
+    })
+
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      capturedController?.onGetProviderModels("deepseek-official")
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+
+    expect(vi.mocked(getProviderModels).mock.calls.map(([request]) => request.id)).toEqual([
+      "deepseek-official",
+    ])
+  })
+
+  it("answers the press when every endpoint is a dormant protocol_unsupported cell", async () => {
+    // `protocol_unsupported` is the one state the design keeps out of routine
+    // testing (§1.2 matrix point 4: 30-day half-life, explicit Re-probe button).
+    // Skipping it is correct; skipping it SILENTLY is not — a press that leaves
+    // no trace is indistinguishable from a dead button.
+    configureApiToken("sidecar-token")
+    mockEventStream.connectionLost = false
+    vi.mocked(getCredentials).mockResolvedValue({
+      providers: [
+        {
+          id: "gemini-official",
+          name: "Gemini Official",
+          api_key: "sk-gemini",
+          base_url: "https://generativelanguage.googleapis.com",
+          provider_type: "google_genai",
+          endpoint_status: "failed",
+          last_test_status: "protocol_unsupported",
+          last_error_code: "protocol_unsupported",
+          last_test_message: "Protocol not supported.",
+        },
+      ],
+    })
+
+    await act(async () => {
+      root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      capturedController?.onGetProviderModels("gemini-official")
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+
+    expect(getProviderModels).not.toHaveBeenCalled()
+    expect(vi.mocked(toast.info)).toHaveBeenCalled()
   })
 })

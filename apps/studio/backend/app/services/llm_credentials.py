@@ -27,6 +27,10 @@ from app.services.provider_config import official_endpoint_id_for_host_protocol
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK
 SECRET_REDACTION_PLACEHOLDER = "**********"
+# U+2022 BULLET is what the API-key field renders a stored secret as; an asterisk
+# is what the redaction placeholder is made of. Neither appears in issued keys.
+_SECRET_MASK_GLYPH = "•"
+_SECRET_MASK_CHARACTERS = frozenset({"*", _SECRET_MASK_GLYPH})
 LEGACY_FAKE_TEST_MESSAGE = "Credential present."
 LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE = "Needs retest after v4 provider probe upgrade."
 CATALOG_ONLY_PROBE_MESSAGE = "No verified language route profile."
@@ -117,10 +121,16 @@ def serialize_for_response(data: LLMCredentialsFile, *_args: Any, **_kwargs: Any
 
 
 class EndpointInvariantViolation(ValueError):
-    """An endpoint upsert would break a storage invariant of the protocol matrix.
+    """An endpoint upsert would break a storage invariant.
 
-    Design §1.2 (protocol matrix, 2026-07-02): ``(canonical base_url, protocol)``
-    is an endpoint's immutable identity and must be unique across the store.
+    Two invariants share this exception because both are refused the same way —
+    at the write boundary, with a diagnosis, before anything reaches disk:
+
+    * Design §1.2 (protocol matrix, 2026-07-02): ``(canonical base_url,
+      protocol)`` is an endpoint's immutable identity and must be unique across
+      the store.
+    * A secret must not be the mask a UI drew over it (see
+      ``_reject_mask_artifact_secret``).
     """
 
 
@@ -173,18 +183,13 @@ def upsert_endpoints(
                             f"protocol {incoming.protocol!r}; (base_url, protocol) must be "
                             f"unique, so {persisted_endpoint_id} cannot be saved."
                         )
+            _reject_mask_artifact_secret(persisted_endpoint_id, incoming.api_key)
             api_key = _preserved_secret(incoming, current)
             updates: dict[str, Any] = {
                 "endpoint_id": persisted_endpoint_id,
                 "api_key": api_key,
                 "base_url": canonical_base_url,
-                "status": current.status if current is not None else "unverified_manual",
-                "last_test_at": current.last_test_at if current is not None else None,
-                "last_test_message": current.last_test_message if current is not None else None,
-                # last_error_code is a test FACT like status/last_test_*: the
-                # protocol_unsupported half-life gate reads it, so the pre-test
-                # upsert must not wipe the observation.
-                "last_error_code": current.last_error_code if current is not None else None,
+                **_carried_observation(current, rotated=_secret_rotated(current, api_key)),
             }
             curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(persisted_endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
@@ -436,6 +441,85 @@ def _preserved_secret(
 def _is_new_secret(secret: SecretStr) -> bool:
     value = secret.get_secret_value()
     return bool(value) and value != SECRET_REDACTION_PLACEHOLDER
+
+
+def _reject_mask_artifact_secret(endpoint_id: str, secret: SecretStr | None) -> None:
+    """Refuse a "secret" that is really the mask a UI drew over one.
+
+    A field that displays a stored credential can only hand back mask characters,
+    never the credential. The bare ``SECRET_REDACTION_PLACEHOLDER`` is the one
+    legitimate such value — it is the protocol token for "unchanged", which
+    ``_preserved_secret`` honours. Everything else mask-shaped is a client
+    defect: it reached this boundary because some field let the mask be edited,
+    and storing it destroys a working credential in a way nothing downstream can
+    detect (live 2026-08-19: one backspace on the placeholder arrived here as a
+    nine-asterisk "new key"). Refuse it here, loudly, rather than dropping it
+    silently — a caller that believes it saved a key and did not is the same
+    defect one layer further on.
+
+    Three shapes qualify, chosen so no plausible real credential is caught: made
+    only of mask characters; carrying the placeholder as a prefix (typing into a
+    masked field's tail); or containing U+2022, which is this UI's mask glyph and
+    is not issued in anyone's API keys.
+    """
+    if secret is None:
+        return
+    value = secret.get_secret_value()
+    if not value or value == SECRET_REDACTION_PLACEHOLDER:
+        return
+    mask_shaped = (
+        all(character in _SECRET_MASK_CHARACTERS for character in value)
+        or value.startswith(SECRET_REDACTION_PLACEHOLDER)
+        or _SECRET_MASK_GLYPH in value
+    )
+    if mask_shaped:
+        raise EndpointInvariantViolation(
+            f"Endpoint {endpoint_id} was sent a mask instead of an API key. A masked field "
+            "must send either the untouched redaction placeholder (meaning 'unchanged') or a "
+            "whole new key — never a partially edited mask."
+        )
+
+
+def _secret_rotated(current: ProviderEndpoint | None, api_key: SecretStr | None) -> bool:
+    if current is None:
+        return False
+    previous = current.api_key.get_secret_value() if current.api_key is not None else None
+    incoming = api_key.get_secret_value() if api_key is not None else None
+    return previous != incoming
+
+
+def _carried_observation(
+    current: ProviderEndpoint | None,
+    *,
+    rotated: bool,
+) -> dict[str, Any]:
+    """The endpoint's last-test facts, carried forward or retired with the key.
+
+    Design §1.2 matrix point 3: a cell's status is "最近观察的投影" — a projection
+    of its last observation. Every observation was made through one specific
+    credential, so rotating the key retires all of them; keeping them lets a
+    verdict about a key that no longer exists pre-condemn (or pre-approve) its
+    replacement. Retiring means `unverified_manual`, the same "no observation
+    yet" state a brand-new endpoint starts in.
+
+    `protocol_unsupported` is the exception, because it is not a fact about the
+    credential: it says this host does not speak this protocol, which holds
+    whichever key you present. Matrix point 4 gives it a 30-day half-life, and a
+    key change must not silently restart that clock.
+    """
+    if current is None or (rotated and current.last_error_code != "protocol_unsupported"):
+        return {
+            "status": "unverified_manual",
+            "last_test_at": None,
+            "last_test_message": None,
+            "last_error_code": None,
+        }
+    return {
+        "status": current.status,
+        "last_test_at": current.last_test_at,
+        "last_test_message": current.last_test_message,
+        "last_error_code": current.last_error_code,
+    }
 
 
 def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) -> None:

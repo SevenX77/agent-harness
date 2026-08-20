@@ -42,6 +42,17 @@ describe('eventInScope', () => {
     expect(eventInScope(event({ event_type: 'input_dispatch', from_phases: ['other'], to_phase: 'draft' }), scope)).toBe(false)
   })
 
+  it('edge scope keeps the segment brackets, not only the operations between them', () => {
+    // The engine brackets every transition with edge_start / edge_end, and the
+    // brackets carry the segment's own summary (changed_keys, operation_count).
+    // Filtering them out left the selected edge showing its contents while
+    // hiding the segment the reader clicked on.
+    const scope: TraceScope = { kind: 'edge', source: 'draft', target: 'review' }
+    expect(eventInScope(event({ event_type: 'edge_start', from_phases: ['draft'], to_phase: 'review' }), scope)).toBe(true)
+    expect(eventInScope(event({ event_type: 'edge_end', from_phases: ['draft'], to_phase: 'review' }), scope)).toBe(true)
+    expect(eventInScope(event({ event_type: 'edge_end', from_phases: ['other'], to_phase: 'review' }), scope)).toBe(false)
+  })
+
   it('Input scope shows what leaves the input boundary; Output what arrives at it', () => {
     expect(eventInScope(event({ event_type: 'input_dispatch', to_phase: 'draft' }), { kind: 'input' })).toBe(true)
     expect(eventInScope(event({ event_type: 'input_dispatch', from_phases: ['draft'], to_phase: 'review' }), { kind: 'input' })).toBe(false)

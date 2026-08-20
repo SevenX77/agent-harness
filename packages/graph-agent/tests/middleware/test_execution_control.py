@@ -31,7 +31,7 @@ class _RecordingCallback(Callback):
 def _state(messages: list[Any] | None = None) -> WorkflowState:
     return {
         "data": BusinessData(),
-        "flow": FrameworkState(metrics={"tokens": 100}),
+        "flow": FrameworkState(),
         "messages": messages if messages is not None else [],
     }
 
@@ -170,28 +170,6 @@ class TestDeadEndDetection:
         result = mw.after_model(_state(messages=messages), runtime=None)  # type: ignore[arg-type]
 
         assert result is None
-
-
-class TestCollectMetrics:
-    def test_collect_metrics_returns_flow_metrics(self) -> None:
-        mw = ExecutionControlMiddleware()
-        state = _state()
-        # Default fixture sets metrics={'tokens': 100}.
-
-        snap = mw.collect_metrics(state)
-
-        assert snap == {"tokens": 100}
-        # Returned a copy — caller mutation must not affect state.
-        snap["tokens"] = 0
-        assert state["flow"].metrics == {"tokens": 100}
-
-    def test_collect_metrics_handles_non_workflow_state(self) -> None:
-        mw = ExecutionControlMiddleware()
-
-        # LangGraph default AgentState — no flow key.
-        assert mw.collect_metrics({"messages": []}) == {}
-        # Non-dict input — returns empty.
-        assert mw.collect_metrics(None) == {}
 
 
 class TestNoOpForNonWorkflowState:

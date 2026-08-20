@@ -72,7 +72,6 @@ def test_update_framework_partial_update_preserves_others() -> None:
     state = _state(
         flow={
             "thread_id": "thread-1",
-            "metrics": {"tokens": 10},
             "working_memory": {"plan": "step 1"},
         }
     )
@@ -83,6 +82,5 @@ def test_update_framework_partial_update_preserves_others() -> None:
     assert next_state["flow"] is not state["flow"]
     assert next_state["flow"].current_phase == "phase-a"
     assert next_state["flow"].thread_id == "thread-1"
-    assert next_state["flow"].metrics == {"tokens": 10}
     assert next_state["flow"].working_memory == {"plan": "step 1"}
     assert next_state["data"] is state["data"]

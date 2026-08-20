@@ -40,7 +40,6 @@ class TestFrameworkState:
         fs = FrameworkState()
         assert fs.finish_task_result is None
         assert fs.current_phase == ""
-        assert fs.metrics == {}
         assert fs.unattended is False
 
     def test_framework_state_serialization_round_trip(self) -> None:

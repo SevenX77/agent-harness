@@ -36,12 +36,6 @@ from graph_agent.callbacks.events import (
     PhaseEndEvent,
     PhaseStartEvent,
 )
-from graph_agent.callbacks.token_accounting import (
-    account_llm_call,
-    fold_spend,
-    spend_of,
-    token_usage_of,
-)
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -468,53 +462,10 @@ def _phase_result_payload(
     return {key: after_data[key] for key in output_keys if key in after_data}
 
 
-class _SpendHarvest:
-    """What the child states an iterate throws away had already spent.
-
-    A batch item and a loop round run against a CHILD state, and that state is
-    then discarded — in favour of `_phase_outputs_delta` for an in-graph phase,
-    in favour of the original state for a graph-level iterate. Anything the
-    child recorded that the survivor does not carry is simply gone, which is how
-    every LLM call made under an ``iterate`` came to be missing from the run's
-    token totals (field evidence in
-    ``tests/core/test_iterate_token_accounting.py``). Execution ids were already
-    threaded out of that same hole by hand; spend is the second thing to need it.
-
-    Items run on their own threads and only add, which needs no lock under the
-    GIL; passing this object in rather than reaching for module state keeps its
-    owner visible.
-    """
-
-    def __init__(self) -> None:
-        self.total: dict[str, Any] = {}
-
-    def take(self, result: Any) -> None:
-        """Fold in what one item or round reported spending."""
-        fold_spend(self.total, spend_of(result))
-
-    def added_to(self, state: WorkflowState) -> dict[str, Any]:
-        """The run's metrics after this iterate: the total before it, plus its children's."""
-        merged = dict(getattr(state["flow"], "metrics", {}) or {})
-        fold_spend(merged, self.total)
-        return merged
-
-
-def _accounting_from_zero(state: WorkflowState) -> WorkflowState:
-    """A child state whose token counters start at zero.
-
-    An item is asked what IT spent, not what the run had spent before it began.
-    Letting it inherit the running total would make the answers unsummable: N
-    siblings would each report the same base, and adding them would count that
-    base N times (see ``token_accounting.fold_spend``).
-    """
-    return StateManager.update_framework(state, metrics={})
-
-
 def _phase_outputs_delta(
     phase_outputs: dict[str, dict[str, Any]],
     *,
     phase_execution_ids: dict[str, list[str]],
-    metrics: dict[str, Any],
 ) -> dict[str, Any]:
     """Channel delta carrying business payloads plus their phase_outputs entries.
 
@@ -530,10 +481,11 @@ def _phase_outputs_delta(
     left, and reported an empty ``from_phase_execution_ids`` for the very
     topology that field is plural for.
 
-    ``metrics`` is the run's token counters INCLUDING what the rounds spent, for
-    the same reason and by the same route: the flow channel folds a dict delta
-    per key by overwriting, so this is the whole running total, not an
-    increment. Build it with ``_SpendHarvest.added_to``.
+    Token counters are deliberately NOT here (OB10). They used to ride along
+    for the same reason, and it never worked: the flow channel folds a dict
+    delta per key by OVERWRITING, so when several phases write in one superstep
+    only one survives. What a run spent is now counted as each call reports
+    itself, on the run's event sink, where a channel cannot drop it.
     """
     data_delta: dict[str, Any] = {}
     for payload in phase_outputs.values():
@@ -543,7 +495,7 @@ def _phase_outputs_delta(
     }
     return {
         "data": data_delta,
-        "flow": {"phase_execution_ids": phase_execution_ids, "metrics": metrics},
+        "flow": {"phase_execution_ids": phase_execution_ids},
     }
 
 
@@ -733,14 +685,10 @@ def _batch_payload_runner(
     item_var: str,
     output_keys: set[str] | None,
     invoke_child: Callable[[int, WorkflowState], Awaitable[Any]],
-    spend: _SpendHarvest,
 ) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
     async def _run_one(index: int, item: Any) -> dict[str, Any]:
-        child_state = _accounting_from_zero(
-            StateManager.update_business(base_state, **{item_var: item})
-        )
+        child_state = StateManager.update_business(base_state, **{item_var: item})
         result = await invoke_child(index, child_state)
-        spend.take(result)
         return _phase_result_payload(child_state, result, output_keys)
 
     return _run_one
@@ -754,7 +702,6 @@ def _phase_batch_runner(
     *,
     phase_id: str,
     item_executions: list[str],
-    spend: _SpendHarvest,
 ) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
     """Run the phase once per item, recording which execution produced each.
 
@@ -781,7 +728,7 @@ def _phase_batch_runner(
         item_executions.extend(phase_execution_ids_of(result).get(phase_id, ()))
         return result
 
-    return _batch_payload_runner(workflow_state, item_var, output_keys, _invoke_child, spend)
+    return _batch_payload_runner(workflow_state, item_var, output_keys, _invoke_child)
 
 
 def _graph_batch_runner(
@@ -792,7 +739,6 @@ def _graph_batch_runner(
     *,
     config: RunnableConfig | None,
     invoke_kwargs: dict[str, Any],
-    spend: _SpendHarvest,
 ) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
     async def _invoke_child(index: int, child_state: WorkflowState) -> Any:
         return await _run_with_iteration_context_async(
@@ -806,7 +752,7 @@ def _graph_batch_runner(
             ),
         )
 
-    return _batch_payload_runner(state, iterate.item_var, output_keys, _invoke_child, spend)
+    return _batch_payload_runner(state, iterate.item_var, output_keys, _invoke_child)
 
 
 def _phase_batch_payload(
@@ -820,7 +766,6 @@ def _phase_batch_payload(
     node: Any,
     include_batch_outputs: bool,
     phase_id: str,
-    spend: _SpendHarvest,
 ) -> tuple[dict[str, Any], list[str]]:
     """Aggregate the items' outputs and the ids of the executions that made them."""
     item_executions: list[str] = []
@@ -837,7 +782,6 @@ def _phase_batch_payload(
             output_keys,
             phase_id=phase_id,
             item_executions=item_executions,
-            spend=spend,
         ),
         include_batch_outputs=include_batch_outputs,
     )
@@ -852,7 +796,6 @@ def _graph_batch_payload_and_namespaces(
     *,
     config: RunnableConfig | None,
     invoke_kwargs: dict[str, Any],
-    spend: _SpendHarvest,
 ) -> tuple[dict[str, Any], list[str]]:
     items, aggregated = _collect_batch_iteration(
         state,
@@ -867,7 +810,6 @@ def _graph_batch_payload_and_namespaces(
             output_keys=output_keys,
             config=config,
             invoke_kwargs=invoke_kwargs,
-            spend=spend,
         ),
     )
     namespaces = [_iteration_namespace(index) for index in range(1, len(items) + 1)]
@@ -977,7 +919,6 @@ def _build_batch_iterate_phase(
 ) -> Any:
     def _batch_phase(state: WorkflowState) -> dict[str, Any]:
         workflow_state = _coerce_workflow_state(state)
-        spend = _SpendHarvest()
         payload, item_executions = _phase_batch_payload(
             workflow_state,
             over=over,
@@ -988,12 +929,10 @@ def _build_batch_iterate_phase(
             node=node,
             include_batch_outputs=include_batch_outputs,
             phase_id=phase_id,
-            spend=spend,
         )
         return _phase_outputs_delta(
             {phase_id: payload},
             phase_execution_ids={phase_id: item_executions},
-            metrics=spend.added_to(workflow_state),
         )
 
     return _batch_phase
@@ -1018,14 +957,8 @@ def _build_loop_iterate_phase(
         acc = copy.deepcopy(accumulate.init)
         loop_state = StateManager.update_business(workflow_state, **{accumulate.var: acc})
         round_executions: list[str] = []
-        spend = _SpendHarvest()
         for index, item in enumerate(items, start=1):
-            child_state = _accounting_from_zero(
-                StateManager.update_business(
-                    loop_state,
-                    **{iterate.item_var: item, accumulate.var: acc},
-                )
-            )
+            child_state = StateManager.update_business( loop_state, **{iterate.item_var: item, accumulate.var: acc}, )
 
             def _invoke_node(child: WorkflowState = child_state) -> Any:
                 return node(child)
@@ -1036,7 +969,6 @@ def _build_loop_iterate_phase(
             # agent-loop budget — the graph-level loop below already gets this right.
             result = _run_with_iteration_context(index, _iteration_namespace(index), _invoke_node)
             round_executions.extend(phase_execution_ids_of(result).get(phase_id, ()))
-            spend.take(result)
             payload = _phase_result_payload(child_state, result, output_keys)
             if accumulate.from_ not in payload:
                 _iterate_merge_fatal(
@@ -1055,7 +987,6 @@ def _build_loop_iterate_phase(
         return _phase_outputs_delta(
             {phase_id: final_payload},
             phase_execution_ids={phase_id: round_executions},
-            metrics=spend.added_to(workflow_state),
         )
 
     return _loop_phase
@@ -1135,7 +1066,6 @@ def _run_graph_batch_iterate(
     config: RunnableConfig | None,
     invoke_kwargs: dict[str, Any],
 ) -> WorkflowState:
-    spend = _SpendHarvest()
     payload, namespaces = _graph_batch_payload_and_namespaces(
         graph,
         state,
@@ -1143,7 +1073,6 @@ def _run_graph_batch_iterate(
         output_schema,
         config=config,
         invoke_kwargs=invoke_kwargs,
-        spend=spend,
     )
     final_state = _with_phase_outputs(
         state,
@@ -1152,7 +1081,6 @@ def _run_graph_batch_iterate(
     # The items' whole states were dropped in favour of `state`, so what they
     # spent has to be carried across explicitly or the run reports zero for
     # every call an item made.
-    final_state = StateManager.update_framework(final_state, metrics=spend.added_to(state))
     return _with_graph_iterate_signal(final_state, mode="batch", namespaces=namespaces)
 
 
@@ -1175,16 +1103,10 @@ def _run_graph_loop_iterate(
     acc = copy.deepcopy(accumulate.init)
     loop_state = StateManager.update_business(state, **{accumulate.var: acc})
     namespaces: list[str] = []
-    spend = _SpendHarvest()
     for index, item in enumerate(items, start=1):
         namespace = _iteration_namespace(index)
         namespaces.append(namespace)
-        child_state = _accounting_from_zero(
-            StateManager.update_business(
-                loop_state,
-                **{iterate.item_var: item, accumulate.var: acc},
-            )
-        )
+        child_state = StateManager.update_business( loop_state, **{iterate.item_var: item, accumulate.var: acc}, )
 
         def _invoke_graph_iteration(
             child: WorkflowState = child_state,
@@ -1201,7 +1123,6 @@ def _run_graph_loop_iterate(
             namespace,
             _invoke_graph_iteration,
         )
-        spend.take(result)
         payload = _phase_result_payload(child_state, result, output_keys)
         if accumulate.from_ not in payload:
             _iterate_merge_fatal(
@@ -1228,7 +1149,6 @@ def _run_graph_loop_iterate(
     )
     # Same reason as the graph batch twin: the rounds' states were dropped in
     # favour of `state`, so their spend travels here or nowhere.
-    final_state = StateManager.update_framework(final_state, metrics=spend.added_to(state))
     return _with_graph_iterate_signal(final_state, mode="loop", namespaces=namespaces)
 
 
@@ -2400,15 +2320,12 @@ def _build_skill_node(
                     if tc_name not in valid_tool_names:
                         _graph_fatal(f"LLM called unknown tool {tc_name!r} in phase {phase_id!r}")
 
-        # What the phase spent is the fold of its calls, and this list is where
-        # the phase learns of them all. Reporting each call is NOT done here —
-        # the model does that as the call happens, because a reader of a
-        # finished list can only ever say the work is already over.
-        phase_metrics: dict[str, Any] = {}
+        # Tool calls are reported from here because they really are already
+        # over by the time the inner graph returns. Token spend is NOT counted
+        # here (OB10): a reader of a finished message list can only describe
+        # what remained, and the run's ledger counts each call as it happens.
         for i, msg in enumerate(new_messages):
             if isinstance(msg, AIMessage):
-                input_tokens, output_tokens = token_usage_of(msg)
-                account_llm_call(phase_metrics, input_tokens, output_tokens)
                 for tc in getattr(msg, "tool_calls", []) or []:
                     tc_id = tc.get("id")
                     tc_name = tc.get("name")
@@ -2433,15 +2350,10 @@ def _build_skill_node(
 
         if result is not None and isinstance(result, dict) and "flow" in result:
             retries = getattr(state["flow"], "subagent_validation_retries", {})
-            run_metrics = dict(getattr(state["flow"], "metrics", {}) or {})
-            for key, spent in phase_metrics.items():
-                run_metrics[key] = int(run_metrics.get(key, 0)) + int(spent)
             if isinstance(result["flow"], dict):
                 result["flow"]["subagent_validation_retries"] = retries
-                result["flow"]["metrics"] = run_metrics
             else:
                 result["flow"].subagent_validation_retries = retries
-                result["flow"].metrics = run_metrics
         return cast(dict[str, Any] | WorkflowState, result)
 
     return _skill_node

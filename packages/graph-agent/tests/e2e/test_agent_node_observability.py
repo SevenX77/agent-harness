@@ -162,16 +162,6 @@ def _run(tmp_path: Path, mock_skill_resolver: object) -> tuple[dict[str, Any], _
     return result, recorder
 
 
-def test_agent_node_folds_its_tokens_into_the_run_metrics(
-    tmp_path: Path, mock_skill_resolver: object
-) -> None:
-    result, _ = _run(tmp_path, mock_skill_resolver)
-
-    metrics = result["flow"].metrics
-    assert metrics["total_input_tokens"] == 3
-    assert metrics["total_output_tokens"] == 5
-
-
 def test_agent_node_llm_call_says_which_node_and_which_model(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
@@ -183,6 +173,11 @@ def test_agent_node_llm_call_says_which_node_and_which_model(
     assert call.parent_node_id == "main"
     assert call.node_type == "agent"
     assert call.resolved_model == "deepseek-v4-flash"
+    # The event carries what the call cost, because the run's total is built
+    # from these events and nowhere else (OB10). A report that named the node
+    # but not the spend would leave the total with nothing to add up.
+    assert call.input_tokens == 3
+    assert call.output_tokens == 5
 
 
 def test_agent_node_tool_call_is_attributed_to_its_node(
@@ -201,11 +196,11 @@ def test_run_result_metrics_report_the_tokens_the_run_actually_spent(
 ) -> None:
     """``metrics.json`` must report the run's real token spend, not a zero.
 
-    Both phase runtimes accumulate into ``flow.metrics``; the runner is what
-    turns a finished graph into a ``RunResult``, so it owes that state to the
-    caller. Observed 2026-08-08 on exp-b-round7 run
-    2026-08-08T12-53-23_f90d8d60: 11 llm_call events totalling 120073 input
-    tokens, ``metrics.json`` still reporting ``total_tokens: 0``.
+    The run's totals come from its own ``llm_call`` events (OB10), and this is
+    the end of that path: what the ledger counted has to survive into
+    ``RunResult`` and therefore into ``metrics.json``. Observed 2026-08-08 on
+    exp-b-round7 run 2026-08-08T12-53-23_f90d8d60: 11 llm_call events totalling
+    120073 input tokens, ``metrics.json`` still reporting ``total_tokens: 0``.
     """
     skill_root = tmp_path / "skill"
     _agent_skill(skill_root)

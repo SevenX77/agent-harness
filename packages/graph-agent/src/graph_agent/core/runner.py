@@ -42,6 +42,7 @@ from langchain_core.messages import ToolMessage
 from graph_agent.callbacks.emit import (
     _CallbackSink,
     _CompositeEventSink,
+    _RunSpendLedger,
     _safe_emit_event,
     _SubscriberSink,
     _TraceJsonlSink,
@@ -1821,18 +1822,16 @@ def _business_context_from_graph_result(result: Any) -> dict[str, Any]:
     return {}
 
 
-def _run_metrics_from_graph_result(result: Any, *, wall_time: float) -> dict[str, Any]:
-    """Project the finished graph's own accounting into the run's metrics.
+def _run_metrics(event_sink: Any, *, wall_time: float) -> dict[str, Any]:
+    """What the run spent, as counted while it spent it (OB10).
 
-    Both phase runtimes accumulate token spend into ``flow.metrics`` — the
-    legacy LLM phase node through ``_HarnessCallbackBridge``, the V4 agent node
-    inline. Wall time is the runner's own measurement, so it is layered on top.
+    The ledger lives on the run's event sink, so this reads the same calls
+    ``trace.jsonl`` recorded rather than a second tally kept in graph state —
+    which is what makes ``metrics.json`` and ``report.md`` agree by
+    construction. Wall time is the runner's own measurement, layered on top.
     """
-    metrics: dict[str, Any] = {}
-    flow = result.get("flow") if isinstance(result, dict) else None
-    raw = flow.get("metrics") if isinstance(flow, dict) else getattr(flow, "metrics", None)
-    if isinstance(raw, dict):
-        metrics.update(raw)
+    ledger = getattr(event_sink, "spend", None)
+    metrics: dict[str, Any] = dict(ledger.totals()) if ledger is not None else {}
     metrics["wall_time_sec"] = wall_time
     return metrics
 
@@ -1986,7 +1985,7 @@ def _prepare_v030_event_sink(
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     callbacks: list[Any] | None = None,
 ) -> _CompositeEventSink:
-    sinks: list[Any] = [_TraceJsonlSink(trace_output)]
+    sinks: list[Any] = [_TraceJsonlSink(trace_output), _RunSpendLedger()]
     if event_subscriber is not None:
         sinks.append(_SubscriberSink(event_subscriber))
     if callbacks:
@@ -2192,7 +2191,7 @@ def _run_v030_skill_dict(
             return {
                 "run_id": run_id,
                 "context": final_context,
-                "metrics": _run_metrics_from_graph_result(result, wall_time=wall_time),
+                "metrics": _run_metrics(event_sink, wall_time=wall_time),
                 "trace_path": saved_trace_path,
                 "run_dir": str(trace_output),
                 "wall_time_sec": wall_time,
@@ -2227,7 +2226,7 @@ def _run_v030_skill_dict(
     return {
         "run_id": run_id,
         "context": final_context,
-        "metrics": _run_metrics_from_graph_result(result, wall_time=wall_time),
+        "metrics": _run_metrics(event_sink, wall_time=wall_time),
         "trace_path": saved_trace_path,
         "run_dir": str(trace_output),
         "wall_time_sec": wall_time,

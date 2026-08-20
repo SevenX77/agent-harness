@@ -879,10 +879,19 @@ export function useSettingsPageController(): SettingsPageController {
     void deleteProviderEndpoints(endpointIds)
   }
 
+  /**
+   * The one and only place that deletes an endpoint. Both paths into it are
+   * explicit user actions behind a confirm dialog — removing a provider card and
+   * removing one of its Base URL rows — because saving no longer infers deletion
+   * from what a payload happens to omit (docs/design/2026-08-20-deletion-is-explicit.md).
+   */
   async function deleteProviderEndpoints(endpointIds: string[]) {
     if (!ensureBackendReachable()) return
     const uniqueEndpointIds = Array.from(new Set(endpointIds.filter(Boolean)))
     if (uniqueEndpointIds.length === 0) return
+    // Land any debounced save first, so the delete cannot race a write that is
+    // still creating the very endpoints it is about to remove.
+    await flushCredentialsSave()
     pendingRoleProjectionRefreshRef.current = true
     try {
       for (const endpointId of uniqueEndpointIds) {

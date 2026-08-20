@@ -327,3 +327,99 @@ def test_changing_the_protocol_is_still_refused_rather_than_silently_moved(tmp_p
 
     with pytest.raises(EndpointInvariantViolation, match="cannot change protocol"):
         _move(path, protocol="anthropic_compatible")
+
+
+def test_normalizing_the_id_repins_routes_instead_of_orphaning_them(tmp_path: Path) -> None:
+    """A record stored under a non-canonical id keeps its models when it is re-keyed.
+
+    Renaming is not moving: the address the models were discovered at is intact, so
+    the routes stay — but their ids embed the endpoint id, so they must be re-pinned
+    in the same write. Leaving them behind produced routes whose ``endpoint_id``
+    named an endpoint that no longer existed.
+    """
+    from app.models.llm_config import ProviderRoute
+    from app.services.llm_credentials import save_credentials
+
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        load_credentials(path).model_copy(
+            update={
+                "provider_endpoints": {
+                    "legacy-hand-written": _legacy_endpoint(),
+                },
+                "provider_routes": {
+                    "legacy-hand-written:m1": ProviderRoute(
+                        route_id="legacy-hand-written:m1",
+                        endpoint_id="legacy-hand-written",
+                        route_slug="m1",
+                        provider_model_id="m1",
+                        status="verified",
+                    )
+                },
+            }
+        ),
+        path=path,
+    )
+
+    upsert_endpoints({"legacy-hand-written": _legacy_payload()}, path=path)
+
+    after = load_credentials(path)
+    endpoint_id = _endpoint_id(path)
+    assert endpoint_id != "legacy-hand-written"
+    assert list(after.provider_routes) == [f"{endpoint_id}:m1"]
+    route = after.provider_routes[f"{endpoint_id}:m1"]
+    assert route.route_id == f"{endpoint_id}:m1"
+    assert route.endpoint_id == endpoint_id
+    assert route.route_slug == "m1"
+    orphans = [
+        route_id
+        for route_id, entry in after.provider_routes.items()
+        if entry.endpoint_id not in after.provider_endpoints
+    ]
+    assert orphans == []
+
+
+def test_normalizing_the_id_keeps_the_observation_and_the_credential(tmp_path: Path) -> None:
+    # A rename changes what the record is CALLED, not what it IS, so nothing it
+    # learned about its address is retired.
+    from app.services.llm_credentials import save_credentials
+
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        load_credentials(path).model_copy(
+            update={"provider_endpoints": {"legacy-hand-written": _legacy_endpoint()}}
+        ),
+        path=path,
+    )
+
+    upsert_endpoints({"legacy-hand-written": _legacy_payload()}, path=path)
+
+    endpoint = _endpoint(path)
+    assert endpoint.status == "verified"
+    assert endpoint.last_test_at == "2026-08-12T16:34:38+00:00"
+    assert endpoint.api_key is not None
+    assert endpoint.api_key.get_secret_value() == "sk-original-key"
+
+
+def _legacy_endpoint() -> Any:
+    from app.models.llm_config import ProviderEndpoint
+
+    return ProviderEndpoint(
+        endpoint_id="legacy-hand-written",
+        display_name="Legacy",
+        protocol="openai_compatible",
+        base_url="https://api.legacy.example/v1",
+        api_key="sk-original-key",
+        status="verified",
+        last_test_at="2026-08-12T16:34:38+00:00",
+    )
+
+
+def _legacy_payload() -> dict[str, Any]:
+    return {
+        "endpoint_id": "legacy-hand-written",
+        "display_name": "Legacy",
+        "protocol": "openai_compatible",
+        "base_url": "https://api.legacy.example/v1",
+        "api_key": SECRET_REDACTION_PLACEHOLDER,
+    }

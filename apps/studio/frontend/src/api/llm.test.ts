@@ -7,6 +7,7 @@ import {
   getRegistry,
   getProviderModels,
   getRoles,
+  deleteEndpoint,
   deleteModelBundle,
   deleteRole,
   deleteRoute,
@@ -1617,27 +1618,148 @@ describe('API Keys v4 registry adapter', () => {
     expect(result.error_code).toBe('invalid_request_error')
   })
 
-  it('deletes cached endpoints that are absent from the API Keys save snapshot', async () => {
-    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
-    let currentRegistry = registry()
-    api.defaults.adapter = adapter((config) => {
+  // Deletion must be expressed, not inferred. `putCredentials` used to treat
+  // "this endpoint id is not in the payload" as "the user deleted it" and issue a
+  // DELETE for every absent id — even though the backend it calls says
+  // `"""Upsert endpoints; absent endpoint IDs are retained."""` and the design
+  // source says 「格子永不删除」(00_settings-ux-spec.md §1.2 matrix point 3).
+  // Decision: docs/design/2026-08-20-deletion-is-explicit.md.
+  //
+  // The two fixtures below are the two shapes that were observed losing an id on
+  // the drafts→payload trip. They are regression tests for the ROOT CAUSE, not
+  // for the two derivation rules: whatever the payload happens to omit, saving
+  // must not destroy it.
+  function deletesIssued(seen: Array<{ method?: string; url?: string }>): string[] {
+    return seen.filter((item) => item.method === 'delete').map((item) => String(item.url))
+  }
+
+  function trackedAdapter(
+    seen: Array<{ method?: string; url?: string; data?: unknown }>,
+    getRegistry: () => RegistryResponse,
+  ) {
+    return adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
-      if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
-        return { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' }
+      if (String(config.url).endsWith('/secret')) {
+        return { endpoint_id: 'x', api_key: 'sk-real' }
       }
-      if (config.method === 'get') return currentRegistry
-      currentRegistry = registry({ provider_endpoints: {}, provider_routes: {} })
-      return currentRegistry
+      return getRegistry()
     })
+  }
+
+  function endpointNamed(
+    endpointId: string,
+    overrides: Partial<ProviderEndpoint> = {},
+  ): ProviderEndpoint {
+    return { ...endpoint, endpoint_id: endpointId, ...overrides }
+  }
+
+  it('keeps an ark_runtime cell the payload never mentions', async () => {
+    // Reachable today: an Ark card whose Base URL is edited away from the vendor
+    // default is re-classified third-party, and the third-party payload only ever
+    // emits openai/anthropic/google ids — so the ark cell silently left the
+    // payload and was deleted on the next keystroke-batch.
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    const current = registry({
+      provider_endpoints: {
+        'gw-example-openai-cccc': endpointNamed('gw-example-openai-cccc', {
+          display_name: 'MyGateway',
+          protocol: 'openai_compatible',
+          base_url: 'https://gw.example.com',
+        }),
+        'gw-example-ark-dddd': endpointNamed('gw-example-ark-dddd', {
+          display_name: 'MyGateway',
+          protocol: 'ark_runtime',
+          base_url: 'https://gw.example.com',
+        }),
+      },
+      provider_routes: {},
+    })
+    api.defaults.adapter = trackedAdapter(seen, () => current)
 
     await getCredentials()
-    const saved = await putCredentials([])
+    const saved = await putCredentials([
+      {
+        id: 'gw-example-openai-cccc',
+        name: 'MyGateway',
+        api_key: 'sk-live',
+        base_url: 'https://gw.example.com',
+        provider_type: 'openai_compatible',
+      },
+    ])
+
+    expect(deletesIssued(seen)).toEqual([])
+    expect(saved.providers.map((provider) => provider.id)).toContain('gw-example-ark-dddd')
+  })
+
+  it('keeps a sibling cell whose URL differs only by a trailing /v1', async () => {
+    // The UI groups Base URLs after stripping a trailing `/v1`; the backend does
+    // not rewrite that suffix for openai_compatible, so these are two legitimate
+    // endpoints that the UI shows as one row — and only the first id survived the
+    // trip into the payload.
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    const current = registry({
+      provider_endpoints: {
+        'api-x-com-v1-openai-aaaa': endpointNamed('api-x-com-v1-openai-aaaa', {
+          display_name: 'Acme',
+          base_url: 'https://api.x.com/v1',
+        }),
+        'api-x-com-openai-bbbb': endpointNamed('api-x-com-openai-bbbb', {
+          display_name: 'Acme',
+          base_url: 'https://api.x.com',
+        }),
+      },
+      provider_routes: {},
+    })
+    api.defaults.adapter = trackedAdapter(seen, () => current)
+
+    await getCredentials()
+    const saved = await putCredentials([
+      {
+        id: 'api-x-com-v1-openai-aaaa',
+        name: 'Acme',
+        api_key: 'sk-live',
+        base_url: 'https://api.x.com/v1',
+        provider_type: 'openai_compatible',
+      },
+    ])
+
+    expect(deletesIssued(seen)).toEqual([])
+    expect(saved.providers.map((provider) => provider.id)).toContain('api-x-com-openai-bbbb')
+  })
+
+  it('sends nothing but the upsert when a card is edited', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    const current = registry()
+    api.defaults.adapter = trackedAdapter(seen, () => current)
+
+    await getCredentials()
+    await putCredentials([
+      {
+        id: 'openrouter-custom',
+        name: 'OpenRouter Custom',
+        api_key: 'sk-live',
+        base_url: 'https://openrouter.ai/api/v1',
+        provider_type: 'openai_compatible',
+      },
+    ])
 
     expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
       'get /llm/registry',
-      'delete /llm/registry/endpoints/openrouter-custom',
+      'put /llm/registry/endpoints',
     ])
-    expect(saved.providers).toEqual([])
+    const sent = JSON.parse(String(seen[1].data)).provider_endpoints
+    expect(Object.keys(sent)).toEqual(['openrouter-custom'])
+  })
+
+  it('deletes exactly the endpoint the user asked to delete', async () => {
+    // The other half of the contract: the explicit path must really delete, or
+    // "deletion is explicit" would just mean "deletion is impossible".
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = trackedAdapter(seen, () => registry({ provider_endpoints: {}, provider_routes: {} }))
+
+    await deleteEndpoint('openrouter-custom')
+
+    expect(deletesIssued(seen)).toEqual(['/llm/registry/endpoints/openrouter-custom'])
   })
 
   it('manual model test posts model ids to the endpoint-scoped API and projects models from returned routes', async () => {

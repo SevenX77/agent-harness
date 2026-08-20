@@ -2711,6 +2711,267 @@ def test_endpoint_test_protocol_unsupported_removes_routes_and_role_refs(
     assert "qiniu-google:gemini-2.5-pro" not in referenced
 
 
+def test_normalizing_an_endpoint_id_repins_every_role_reference(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A rename must cost the user nothing — not a route, not a role binding.
+
+    Re-keying a record from a hand-written id onto its canonical one changes what
+    it is CALLED, not what it is, so its routes come along. A route id embeds its
+    endpoint's id, so "coming along" renames the routes too, and every reference
+    held outside the credentials file has to follow in the same request. Stripping
+    them instead (what the endpoint-moved cascade does, correctly, for a real
+    address change) would silently unbind the user's roles.
+
+    Decision: docs/design/2026-08-20-deletion-is-explicit.md §4.4.
+    """
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    legacy_route_id = "legacy-hand-written:gpt-5"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "legacy-hand-written": ProviderEndpoint(
+                    endpoint_id="legacy-hand-written",
+                    display_name="Legacy",
+                    protocol="openai_compatible",
+                    base_url="https://api.legacy.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                legacy_route_id: ProviderRoute(
+                    route_id=legacy_route_id,
+                    endpoint_id="legacy-hand-written",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="verified",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    # All five places a route id can be referenced, so none of them can be missed
+    # by a re-pin that only walks the obvious one.
+    group = RoleModelGroup(
+        canonical_id="gpt-5",
+        display_name="GPT-5",
+        provider_models=[RoleProviderModel(route_id=legacy_route_id)],
+    )
+    save_roles_file(
+        active_roles_path(),
+        RolesData(
+            roles={
+                "graph_agent": RoleEntry(
+                    fallback_chain=[RoleRouteEntry(route_id=legacy_route_id)],
+                    model_groups=[group],
+                )
+            },
+            model_profiles={
+                "GPT5": ModelProfile(
+                    model_profile_id="GPT5",
+                    display_name="GPT-5",
+                    canonical_id="gpt-5",
+                    fallback_chain=[RoleRouteEntry(route_id=legacy_route_id)],
+                )
+            },
+            model_bundles={
+                "bundle-gpt5": ModelBundle(
+                    model_profile_id="bundle-gpt5",
+                    display_name="Bundle",
+                    canonical_id="gpt-5",
+                    fallback_chain=[RoleRouteEntry(route_id=legacy_route_id)],
+                    model_groups=[group],
+                )
+            },
+        ),
+        known_route_ids={legacy_route_id},
+    )
+
+    response = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "legacy-hand-written": {
+                    "endpoint_id": "legacy-hand-written",
+                    "display_name": "Legacy",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://api.legacy.example/v1",
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    credentials = load_credentials()
+    persisted_endpoint_id = next(iter(credentials.provider_endpoints))
+    assert persisted_endpoint_id != "legacy-hand-written"
+    new_route_id = f"{persisted_endpoint_id}:gpt-5"
+    assert list(credentials.provider_routes) == [new_route_id]
+    assert [
+        route_id
+        for route_id, route in credentials.provider_routes.items()
+        if route.endpoint_id not in credentials.provider_endpoints
+    ] == []
+
+    roles = load_roles_file(active_roles_path())
+    referenced = [
+        roles.roles["graph_agent"].fallback_chain[0].route_id,
+        roles.roles["graph_agent"].model_groups[0].provider_models[0].route_id,
+        roles.model_profiles["GPT5"].fallback_chain[0].route_id,
+        roles.model_bundles["bundle-gpt5"].fallback_chain[0].route_id,
+        roles.model_bundles["bundle-gpt5"].model_groups[0].provider_models[0].route_id,
+    ]
+    assert referenced == [new_route_id] * 5
+
+
+def test_moving_an_endpoint_still_strips_role_references_rather_than_repinning(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # The guard on the test above: a real address change is NOT a rename. Those
+    # routes describe a place the endpoint no longer points at, so they go, and
+    # the references to them go with them (#876). Re-pinning there would hand the
+    # role a model the new address was never asked about.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    legacy_route_id = "legacy-hand-written:gpt-5"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "legacy-hand-written": ProviderEndpoint(
+                    endpoint_id="legacy-hand-written",
+                    display_name="Legacy",
+                    protocol="openai_compatible",
+                    base_url="https://api.legacy.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                legacy_route_id: ProviderRoute(
+                    route_id=legacy_route_id,
+                    endpoint_id="legacy-hand-written",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="verified",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    save_roles_file(
+        active_roles_path(),
+        RolesData(
+            roles={"graph_agent": RoleEntry(fallback_chain=[RoleRouteEntry(route_id=legacy_route_id)])},
+        ),
+        known_route_ids={legacy_route_id},
+    )
+
+    response = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "legacy-hand-written": {
+                    "endpoint_id": "legacy-hand-written",
+                    "display_name": "Legacy",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://api.moved.example/v1",
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert load_credentials().provider_routes == {}
+    assert load_roles_file(active_roles_path()).roles["graph_agent"].fallback_chain == []
+
+
+def test_a_failed_role_cascade_leaves_the_credentials_file_untouched(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Roles are written first so that failing costs nothing.
+
+    The credentials file is the only record that the old route ids ever existed.
+    Commit it first and a failing roles write strands every reference with nothing
+    left to derive the repair from — retrying the same save would find the endpoint
+    already canonical, re-key nothing, and cascade nothing, so the dangling
+    references would stay dangling forever. Writing roles first turns the same
+    failure into a no-op the user can simply repeat.
+    """
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    legacy_route_id = "legacy-hand-written:gpt-5"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "legacy-hand-written": ProviderEndpoint(
+                    endpoint_id="legacy-hand-written",
+                    display_name="Legacy",
+                    protocol="openai_compatible",
+                    base_url="https://api.legacy.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                legacy_route_id: ProviderRoute(
+                    route_id=legacy_route_id,
+                    endpoint_id="legacy-hand-written",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="verified",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    save_roles_file(
+        active_roles_path(),
+        RolesData(
+            roles={"graph_agent": RoleEntry(fallback_chain=[RoleRouteEntry(route_id=legacy_route_id)])},
+        ),
+        known_route_ids={legacy_route_id},
+    )
+
+    def refuse_to_write_roles(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("roles file unwritable")
+
+    monkeypatch.setattr(llm_router, "save_roles_file", refuse_to_write_roles)
+
+    with pytest.raises(RuntimeError, match="roles file unwritable"):
+        client.put(
+            "/api/llm/registry/endpoints",
+            json={
+                "provider_endpoints": {
+                    "legacy-hand-written": {
+                        "endpoint_id": "legacy-hand-written",
+                        "display_name": "Legacy",
+                        "protocol": "openai_compatible",
+                        "base_url": "https://api.legacy.example/v1",
+                    }
+                }
+            },
+        )
+
+    credentials = load_credentials()
+    assert list(credentials.provider_endpoints) == ["legacy-hand-written"]
+    assert list(credentials.provider_routes) == [legacy_route_id]
+    assert load_roles_file(active_roles_path()).roles["graph_agent"].fallback_chain[0].route_id == legacy_route_id
+
+
 def test_endpoint_test_protocol_unsupported_is_gated_within_half_life(
     client: TestClient,
     tmp_path: Path,

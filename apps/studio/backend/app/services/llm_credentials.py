@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -138,17 +140,46 @@ def _endpoint_combo_key(base_url: str, protocol: str) -> tuple[str, str]:
     return (base_url.strip().rstrip("/").lower(), protocol)
 
 
+@dataclass(frozen=True)
+class EndpointRouteCascade:
+    """The route identity changes an upsert is about to commit.
+
+    An endpoint id can be re-keyed for two opposite reasons, and whoever holds
+    references to its routes has to tell them apart: the endpoint MOVED to another
+    address (its routes describe somewhere it no longer points, so they are gone),
+    or its id was merely NORMALIZED (same address, canonical spelling, so its
+    routes came along under new ids). Reporting both explicitly beats making the
+    receiver diff route id sets and guess which happened.
+    """
+
+    routes_left_behind: frozenset[str]
+    routes_renamed: Mapping[str, str]
+    route_ids_after: frozenset[str]
+
+
 def upsert_endpoints(
     endpoint_payloads: dict[str, dict[str, Any] | ProviderEndpoint],
     *,
     path: Path | None = None,
+    cascade: Callable[[EndpointRouteCascade], None] | None = None,
 ) -> LLMCredentialsFile:
-    """Upsert endpoints while retaining absent endpoints and omitted secrets."""
+    """Upsert endpoints while retaining absent endpoints and omitted secrets.
+
+    ``cascade`` is called with the route identity changes — if there are any —
+    BEFORE this file is written, and anything it raises aborts the write. The
+    ordering is the whole point: this file is the only record that the old route
+    ids ever existed, so committing it last means a crash partway through leaves
+    work a retry can still redo, while committing it first would erase the
+    evidence and strand every outside reference permanently. Same rule git
+    follows when it writes objects before moving the ref that names them.
+    """
     credential_path = path or credentials_path()
     with _credentials_lock:
         data = load_credentials(credential_path)
         endpoints = dict(data.provider_endpoints)
         routes = dict(data.provider_routes)
+        routes_left_behind: set[str] = set()
+        routes_renamed: dict[str, str] = {}
         for endpoint_id, payload in endpoint_payloads.items():
             incoming = _endpoint_from_payload(_endpoint_authoring_payload(payload))
             canonical_base_url = canonicalize_base_url(incoming.base_url, incoming.protocol)
@@ -220,17 +251,39 @@ def upsert_endpoints(
                     # Every route under the old id is a model the OLD address
                     # answered for, so it describes a place this endpoint no
                     # longer points at. They leave with it — the same cascade
-                    # ``delete_endpoint`` runs, for the same reason. A rename
-                    # keeps them: the address they were discovered at is intact.
+                    # ``delete_endpoint`` runs, for the same reason.
+                    routes_left_behind.update(
+                        route_id
+                        for route_id, route in routes.items()
+                        if route.endpoint_id == endpoint_id
+                    )
                     routes = {
                         route_id: route
                         for route_id, route in routes.items()
                         if route.endpoint_id != endpoint_id
                     }
+                elif dropped is not None:
+                    # Same address, canonical spelling: the record changed what it
+                    # is CALLED, not what it is. Its routes still describe this
+                    # address, so they follow — but a route id embeds its
+                    # endpoint's id, so following means being re-pinned here, in
+                    # the same write that renames the endpoint. Leaving them under
+                    # the old spelling produced routes naming an endpoint that no
+                    # longer existed.
+                    routes, renamed = _repin_routes(routes, endpoint_id, persisted_endpoint_id)
+                    routes_renamed.update(renamed)
             endpoints[persisted_endpoint_id] = incoming.model_copy(update=updates)
         data = data.model_copy(
             update={"provider_endpoints": endpoints, "provider_routes": routes}
         )
+        if cascade is not None and (routes_left_behind or routes_renamed):
+            cascade(
+                EndpointRouteCascade(
+                    routes_left_behind=frozenset(routes_left_behind),
+                    routes_renamed=routes_renamed,
+                    route_ids_after=frozenset(routes),
+                )
+            )
         _save_credentials_unlocked(data, credential_path)
         return data
 
@@ -560,6 +613,30 @@ def _authoring_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in metadata.items() if key not in _OBSERVED_METADATA_KEYS}
 
 
+def _repin_routes(
+    routes: dict[str, ProviderRoute],
+    old_endpoint_id: str,
+    new_endpoint_id: str,
+) -> tuple[dict[str, ProviderRoute], dict[str, str]]:
+    """Move every route of ``old_endpoint_id`` onto ``new_endpoint_id``.
+
+    Returns the rewritten route table and the old-id -> new-id mapping the caller
+    needs to re-pin references held outside this file.
+    """
+    repinned: dict[str, ProviderRoute] = {}
+    renamed: dict[str, str] = {}
+    for route_id, route in routes.items():
+        if route.endpoint_id != old_endpoint_id:
+            repinned[route_id] = route
+            continue
+        new_route_id = f"{new_endpoint_id}:{route.route_slug}"
+        renamed[route_id] = new_route_id
+        repinned[new_route_id] = route.model_copy(
+            update={"route_id": new_route_id, "endpoint_id": new_endpoint_id}
+        )
+    return repinned, renamed
+
+
 def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) -> None:
     """Atomic write without acquiring the lock; caller must hold it."""
     payload = _credentials_payload_for_storage(data)
@@ -598,6 +675,7 @@ __all__ = [
     "load_credentials",
     "save_credentials",
     "serialize_for_response",
+    "EndpointRouteCascade",
     "upsert_endpoints",
     "upsert_routes",
     "validate_credentials_payload",

@@ -163,6 +163,22 @@
 1. **新建 role**（弹框命名，允许建无模型空壳）。
 2. **拖动 model group 到 role card**：
    - model group = **相同模型合并**（同一个模型跨多个 provider 归一成一张组卡）。
+   - **组身份 = 合并键本身，永远不选举（2026-08-20 落地，问题台账 L1）**：组卡对外的 id 就是把这些
+     route 归到一起的那个**语义键**（`project_model_group_identity(...).key`，即投影出的显示名规范化后
+     的字符串）。**不许**再从组内选一条 route、拿它的 `canonical_id` 当组 id——那是选举，而选举的结果会
+     随端点增删翻转。实测 2026-08-20（开发机真实凭据）：400 个组publish 出来的 id 与它自己的合并键不同；
+     `analyst` 角色里三张组卡因此全部失联，其中 `deepseek-v4-flash-260425` 正是 08-12 加入
+     deepseek-official **之前**选出来的那个 id。
+     **显示名仍然可以择优**（`_route_preference_rank`），因为一个会变的显示名只是换个说法，读者不吃亏；
+     一个会变的 **id** 会让每一个把它写下来的角色瞬间失联。这就是「身份与显示分离」的全部含义。
+   - **角色里的组按它持有的 route 重新认领身份**：一个组**就是**它列出的那些 route，旁边的 id 是派生标签；
+     两者打架时以 route 为准（它们才是真正要被执行的东西）。所以读/存角色时，每个组的 id 由它自己的
+     route 重算：①标签过期的组自动接回；②算出同一个身份的两张卡合并成一张，并保留两边列过的全部 route
+     （用户在两个标签下把同一张卡建了两次，显示两次只是标签造成的假象）；③**一条 route 都不列的组直接丢弃**
+     ——它什么都没引用，物化不出 fallback 链，也永远解析不了，留着只会渲染成一张永久坏卡。
+     注册表里一条 route 都不认识的组**不丢**：那是「route 被删了」而不是「标签过期」，此时存下的标签是这份
+     意图仅存的记录，原样保留（前端按 `is_unresolved` 显示）。
+   - **执行从来不依赖这个 id**：fallback 链按 `route_id` 解析——这正是三张卡全挂着、run 却照跑通的原因。
    - endpoint 的**状态颜色与 API key 页面一致**（同一套 UI state 投影；🔵 蓝=以前联通过）。
    - 拖入后**默认选 provider**：含 ready + untested + 🔵 蓝（可用候选），排除 failed / off，cooling_down 有替代则不默认选；official 优先（除非 role 偏好覆盖）。算法见 §6.2 引用的 765 设计 7 步。
    - **provider 排序三模式 + manual_order 锁（回填 B3，2026-06-03）**：`RoleIntent.provider_preference` 三档驱动默认排序——`official_first`（默认）按 `provider_kind`（official 先；用持久化 kind，不靠前端猜名）/ `ready_first` 按 UI 态（Ready 先于 Untested）/ `manual_order` 保留 registry/用户顺序。**锁**：一旦设 `manual_order`，materialize **不得**再为 official/ready 自动重排——用户手排即权威。

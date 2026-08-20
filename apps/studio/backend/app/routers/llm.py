@@ -2831,13 +2831,13 @@ def _model_groups_response(
     adapter = build_gateway_adapter()
     model_groups = [
         _model_group_response(
-            _representative_canonical_id(routes, credentials),
+            identity,
             routes,
             credentials,
             adapter=adapter,
             circuits_index=circuits_index,
         )
-        for routes in routes_by_identity.values()
+        for identity, routes in routes_by_identity.items()
     ]
     return sorted(
         model_groups,
@@ -2918,18 +2918,18 @@ def _model_group_identity_key(
     return projection.key or normalize_model_group_key(route.canonical_id or route.route_slug)
 
 
-def _representative_canonical_id(
-    routes: list[ProviderRoute],
-    credentials: LLMCredentialsFile,
-) -> str:
-    route = sorted(routes, key=lambda item: _route_preference_rank(item, credentials))[0]
-    return route.canonical_id or route.route_slug
-
-
 def _route_preference_rank(
     route: ProviderRoute,
     credentials: LLMCredentialsFile,
 ) -> tuple[int, int, int, str, str]:
+    """Which of a group's routes gets to name it on screen.
+
+    Display only. Identity is NOT elected — see ``_model_groups_response``,
+    where a group is published under the key its routes were merged by. An
+    elected DISPLAY name can change when endpoints come and go and costs a
+    reader nothing; an elected ID doing the same orphans every role that wrote
+    it down (ledger L1).
+    """
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     return (
         _provider_kind_rank(endpoint.provider_kind if endpoint else "third_party"),
@@ -2946,6 +2946,94 @@ def _provider_kind_rank(kind: str) -> int:
     if kind == "custom":
         return 1
     return 2
+
+
+def _role_group_identity(
+    group: RoleModelGroup,
+    credentials: LLMCredentialsFile,
+) -> tuple[str, str] | None:
+    """What model group a role's stored group actually names, read from its routes.
+
+    A group IS the routes it names; the id beside them is a label. When the two
+    disagree the routes win, because they are what the role will execute and the
+    label is derived from them. Returns ``None`` when the registry knows none of
+    the routes — then there is nothing to derive from, and the stored label is
+    the only record of the intent, so it is kept verbatim.
+
+    The display name comes from the first known route's own projection rather
+    than from an election across the group: routes that share an identity key
+    differ in their display names only by case and punctuation (the key IS that
+    name normalized), so there is nothing to elect between.
+    """
+    known = sorted(
+        (
+            route
+            for model in group.provider_models
+            if (route := credentials.provider_routes.get(model.route_id)) is not None
+        ),
+        key=lambda route: route.route_id,
+    )
+    if not known:
+        return None
+    route = known[0]
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    if endpoint is None:
+        return None
+    projection = project_model_group_identity(
+        route=route, endpoint=endpoint, provider_label=endpoint.display_name
+    )
+    return projection.key, projection.display_name
+
+
+def _reidentified_role_groups(
+    groups: list[RoleModelGroup],
+    credentials: LLMCredentialsFile,
+) -> list[RoleModelGroup]:
+    """Re-link a role's groups to the registry by what they reference.
+
+    Two things happen here, and both follow from "a group is its routes":
+
+    * A group whose stored label went stale is re-labelled from its routes, so
+      an id that moved under the role's feet stops mattering. (Ids no longer
+      move — see ``_model_groups_response`` — but the ones already written down
+      moved before this rule existed.)
+    * Two groups that turn out to name the same model become one, keeping every
+      route both of them listed. The user authored one card twice under two
+      labels; showing it twice would be showing an artefact of the labelling.
+
+    A group listing NO routes is dropped: it references nothing, cannot be
+    materialized into a fallback chain, and can never resolve — so it can only
+    ever render as a permanently broken card.
+    """
+    reidentified: list[RoleModelGroup] = []
+    position_by_id: dict[str, int] = {}
+    for group in groups:
+        if not group.provider_models:
+            continue
+        identity = _role_group_identity(group, credentials)
+        group_id, display_name = identity or (group.canonical_id, group.display_name)
+        position = position_by_id.get(group_id)
+        if position is None:
+            position_by_id[group_id] = len(reidentified)
+            reidentified.append(
+                group.model_copy(update={"canonical_id": group_id, "display_name": display_name})
+            )
+            continue
+        held = reidentified[position]
+        listed = {model.route_id for model in held.provider_models}
+        reidentified[position] = held.model_copy(
+            update={
+                "provider_models": [
+                    *held.provider_models,
+                    *(
+                        model
+                        for model in group.provider_models
+                        if model.route_id not in listed
+                    ),
+                ]
+            }
+        )
+    return reidentified
 
 
 def _model_group_response(
@@ -5697,6 +5785,7 @@ def _materialize_roles_for_response(
     data: RolesData,
     credentials: LLMCredentialsFile | None = None,
 ) -> RolesData:
+    data = _roles_with_groups_reidentified(data, credentials)
     has_role_authoring = any(role.model_groups for role in data.roles.values())
     has_bundle_authoring = any(bundle.model_groups for bundle in data.model_bundles.values())
     # #51: a pure bundle-reference role (bundle_id set, no own model_groups) also
@@ -5730,6 +5819,52 @@ def _materialize_roles_for_response(
                 for role_name, role in data.roles.items()
             },
             "model_bundles": materialized_bundles,
+        }
+    )
+
+
+def _roles_with_groups_reidentified(
+    data: RolesData,
+    credentials: LLMCredentialsFile | None,
+) -> RolesData:
+    """Re-link every authored group — in roles and in bundles — before anything reads it.
+
+    This sits at the front of materialization rather than in the read path so
+    that the answer is the same whether the caller is rendering roles or saving
+    them: a save runs through here first, so the file converges on ids derived
+    from its own routes instead of carrying a label from whenever it was written.
+    """
+    if not any(role.model_groups for role in data.roles.values()) and not any(
+        bundle.model_groups for bundle in data.model_bundles.values()
+    ):
+        return data
+    active_credentials = credentials or load_credentials()
+    return data.model_copy(
+        update={
+            "roles": {
+                name: role.model_copy(
+                    update={
+                        "model_groups": _reidentified_role_groups(
+                            role.model_groups, active_credentials
+                        )
+                    }
+                )
+                if role.model_groups
+                else role
+                for name, role in data.roles.items()
+            },
+            "model_bundles": {
+                bundle_id: bundle.model_copy(
+                    update={
+                        "model_groups": _reidentified_role_groups(
+                            bundle.model_groups, active_credentials
+                        )
+                    }
+                )
+                if bundle.model_groups
+                else bundle
+                for bundle_id, bundle in data.model_bundles.items()
+            },
         }
     )
 
@@ -5856,13 +5991,12 @@ def _compare_candidate_routes(
 
     candidate_groups: list[list[ProviderRoute]] = []
     for identity_key, routes in routes_by_identity.items():
-        representative = _representative_canonical_id(routes, credentials)
+        # A group answers to its own id, and to the canonical id of any model in
+        # it. The second is not a legacy alias: a caller naming one concrete
+        # model is naming the group that model belongs to, and that stays true
+        # however the group is labelled.
         route_canonical_ids = {route.canonical_id for route in routes if route.canonical_id}
-        if (
-            identity_key == normalized_id
-            or normalize_model_group_key(representative) == normalized_id
-            or canonical_id in route_canonical_ids
-        ):
+        if identity_key == normalized_id or canonical_id in route_canonical_ids:
             candidate_groups.append(routes)
 
     if not candidate_groups:

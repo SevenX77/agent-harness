@@ -1,60 +1,100 @@
-"""MVP-3 T11: middleware chain topological order regression test.
+"""The middleware chain's order is a contract, and this pins it.
 
-The test pins the design.md §5.6 specification: the four-slot
-middleware chain runs in the order
-``ProtocolValidation → CognitiveFlow → ExecutionControl`` (Logging
-slot reserved for a future commit). Re-ordering the slots silently
-is the latent bug class the fixed order was introduced to make
-impossible — this test catches a slot swap at collection time
-rather than waiting for a tool-failure scenario to surface it.
+Re-ordering the chain silently is the latent bug class the fixed order exists to
+make impossible, and 2026-08-20 showed what that bug looks like when nothing
+catches it: with tracing sitting BELOW the middlewares that answer tool calls
+themselves, `ToolCallStartedEvent` was emitted zero times in a real run while
+every layer above it — the type, the export, the frontend mirror, the trace
+renderer — looked perfectly wired.
+
+The order is stated once, in `MVP0_MIDDLEWARE_ORDER_CONTRACT`. There used to be a
+second statement of the same fact (`DEFAULT_MIDDLEWARE_ORDER`, a three-class
+tuple asserted to equal the contract's first three), and it is gone: one fact
+described in two places is a fact that can disagree with itself, and this move
+is precisely the edit that would have made it disagree.
 """
 
 from __future__ import annotations
 
+from graph_agent.core.io_manager import IOManager
 from graph_agent.middleware import (
-    DEFAULT_MIDDLEWARE_ORDER,
+    MVP0_MIDDLEWARE_ORDER_CONTRACT,
     CognitiveFlowMiddleware,
+    CompactionMiddleware,
     ExecutionControlMiddleware,
+    ExitControlMiddleware,
+    LoopDetectionMiddleware,
     ProtocolValidationMiddleware,
+    ToolErrorHandlingMiddleware,
+    TracingMiddleware,
 )
+from graph_agent.middleware.factory import build_middleware_chain
 
 
-def test_middleware_chain_topological_order_is_fixed() -> None:
-    """ProtocolValidation runs first, CognitiveFlow second, ExecutionControl third.
-
-    ProtocolValidation must precede CognitiveFlow because state
-    contract checks gate every later middleware (CognitiveFlow's
-    ``IOManager.resolve_hoist`` assumes ``state['data']`` carries no
-    ``_``-prefixed keys when it runs). CognitiveFlow must precede
-    ExecutionControl because dead-end / loop detection relies on
-    ToolMessages already routed through CognitiveFlow's
-    ``wrap_tool_call``.
-    """
-    assert (
-        ProtocolValidationMiddleware,
-        CognitiveFlowMiddleware,
-        ExecutionControlMiddleware,
-    ) == DEFAULT_MIDDLEWARE_ORDER, (
-        "DEFAULT_MIDDLEWARE_ORDER drifted from the design.md §5.6 "
-        f"specification; got {[c.__name__ for c in DEFAULT_MIDDLEWARE_ORDER]!r}"
+def test_the_chain_order_is_the_contract() -> None:
+    assert MVP0_MIDDLEWARE_ORDER_CONTRACT == (
+        "Tracing",
+        "ProtocolValidation",
+        "CognitiveFlow",
+        "ExecutionControl",
+        "Compaction",
+        "ToolError",
+        "LoopDetection",
+        "ExitControl",
     )
 
 
-def test_middleware_chain_classes_are_distinct() -> None:
-    """Each slot must be a unique middleware class.
+def test_tracing_wraps_every_middleware_that_can_answer_a_tool_call() -> None:
+    """The observer sits outside the deciders, or it observes only their leftovers.
 
-    Repeating the same class twice is meaningless (the registry
-    treats identity, not substitution); we pin uniqueness so the
-    factory cannot accidentally double-register.
+    `CognitiveFlowMiddleware` answers the tools it intercepts without calling
+    `handler(request)`, so anything below it in the chain never sees those calls
+    — and those are most of the calls an agent phase makes. Same reasoning as
+    registering the logger first in Django's `MIDDLEWARE` or Express's
+    `app.use`: the layer that must see everything goes on the outside.
     """
-    assert len(DEFAULT_MIDDLEWARE_ORDER) == len(set(DEFAULT_MIDDLEWARE_ORDER))
+    order = MVP0_MIDDLEWARE_ORDER_CONTRACT
+    for decider in ("CognitiveFlow", "ToolError"):
+        assert order.index("Tracing") < order.index(decider), (
+            f"{decider} can answer a tool call without calling through, so "
+            "Tracing placed after it stops seeing those calls entirely"
+        )
 
 
-def test_middleware_chain_names_match_design_doc() -> None:
-    """Names track design.md §5.2 / §5.3 / §5.4 verbatim."""
-    names = [cls.__name__ for cls in DEFAULT_MIDDLEWARE_ORDER]
-    assert names == [
-        "ProtocolValidationMiddleware",
-        "CognitiveFlowMiddleware",
-        "ExecutionControlMiddleware",
+def test_state_guards_still_precede_every_middleware_that_reads_state() -> None:
+    """Moving the observer must not cost the state guard its position.
+
+    ProtocolValidation runs before CognitiveFlow / ExecutionControl / Compaction
+    because each of them assumes the state shape is already valid
+    (CognitiveFlow's `IOManager.resolve_hoist` assumes `state['data']` carries no
+    `_`-prefixed keys). Tracing is exempt: it reads no state, only tool calls.
+    """
+    order = MVP0_MIDDLEWARE_ORDER_CONTRACT
+    for reader in ("CognitiveFlow", "ExecutionControl", "Compaction", "ExitControl"):
+        assert order.index("ProtocolValidation") < order.index(reader)
+
+
+def test_each_slot_is_a_distinct_middleware() -> None:
+    assert len(MVP0_MIDDLEWARE_ORDER_CONTRACT) == len(set(MVP0_MIDDLEWARE_ORDER_CONTRACT))
+
+
+def test_the_built_chain_matches_the_contract() -> None:
+    """The contract is only worth pinning if the factory actually follows it.
+
+    Compared as CLASSES, not as names derived from them: a slot's contract name
+    is deliberately shorter than its class name (`ToolError` /
+    `ToolErrorHandlingMiddleware`), and a test that re-derives one from the other
+    would be asserting a naming convention instead of the order it exists for.
+    """
+    chain = build_middleware_chain(io_manager=IOManager([]), phase_name="main")
+
+    assert [type(middleware) for middleware in chain] == [
+        TracingMiddleware,
+        ProtocolValidationMiddleware,
+        CognitiveFlowMiddleware,
+        ExecutionControlMiddleware,
+        CompactionMiddleware,
+        ToolErrorHandlingMiddleware,
+        LoopDetectionMiddleware,
+        ExitControlMiddleware,
     ]

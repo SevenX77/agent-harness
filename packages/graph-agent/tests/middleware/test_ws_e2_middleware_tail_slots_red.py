@@ -212,13 +212,15 @@ def test_live_agent_assembly_passes_tail_slots_to_create_agent(
     )
 
     names = [type(middleware).__name__ for middleware in captured["middleware"]]
-    tracing_index = names.index("TracingMiddleware")
-    assert names[tracing_index : tracing_index + 3] == [
-        "TracingMiddleware",
+    # The tail slots stay adjacent and in order; tracing left the tail on
+    # 2026-08-20 (it belongs outside the middlewares that answer tool calls on
+    # their own), so it is no longer the anchor this block hangs off.
+    tail_index = names.index("ToolErrorHandlingMiddleware")
+    assert names[tail_index : tail_index + 3] == [
         "ToolErrorHandlingMiddleware",
         "LoopDetectionMiddleware",
+        "ExitControlMiddleware",
     ]
-    assert names[tracing_index + 3] == "ExitControlMiddleware"
 
 
 def _write(path: Path, text: str) -> None:

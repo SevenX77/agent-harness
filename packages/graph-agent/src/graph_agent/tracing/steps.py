@@ -64,6 +64,7 @@ class ToolCallStep:
         self._started_at = started_at
 
     def finished(self, result: str) -> None:
+        self._reporter._reported_tool_calls.add(self._tool_call_id)
         self._reporter._emit(
             ToolCallEvent(
                 tool_call_id=self._tool_call_id,
@@ -167,6 +168,14 @@ class StepReporter:
         # about what a callback is.
         self._callbacks = callbacks
         self.phase_name = phase_name
+        # Which calls have already been reported as over. Two places close a
+        # tool call — the middleware for the ones that answered with a
+        # ToolMessage, the agent node afterwards for the ones that answered
+        # with a Command and never closed — and a phase gets ONE reporter
+        # precisely so "has this been reported" has an answer. Without it the
+        # two places report the same call twice and every reader downstream
+        # (trace list, per-node tool tally, run report) counts it twice.
+        self._reported_tool_calls: set[str] = set()
 
     @contextmanager
     def llm_call(
@@ -263,7 +272,15 @@ class StepReporter:
 
         No duration and no start event: both would have to be invented, and an
         invented moment is worse than an absent one.
+
+        Silent when the call has already been reported. The caller is the agent
+        node sweeping the finished message list, and most of what it finds there
+        the middleware already closed as it happened — this is the backstop for
+        the calls that answered with a ``Command`` and so never closed, not a
+        second report of every call.
         """
+        if tool_call_id in self._reported_tool_calls:
+            return
         self._emit(
             ToolCallEvent(
                 tool_call_id=tool_call_id,

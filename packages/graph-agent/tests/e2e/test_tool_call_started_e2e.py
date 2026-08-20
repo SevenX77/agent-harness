@@ -161,7 +161,7 @@ def test_run_announces_a_tool_call_with_the_provider_identity(
     spy = _run(tmp_path, mock_skill_resolver)
 
     started = [e for e in spy.events if isinstance(e, ToolCallStartedEvent)]
-    assert [e.tool_name for e in started] == ["inspect_payload"]
+    assert [e.tool_name for e in started] == ["inspect_payload", "finish_task"]
     assert started[0].tool_call_id == "inspect-1"
     assert started[0].phase_name == "main"
     assert started[0].args == {"topic": "observability"}
@@ -181,23 +181,26 @@ def test_run_announces_a_tool_call_with_the_provider_identity(
     assert reported_at and min(reported_at) > announced_at
 
 
-def test_finish_task_is_not_announced_because_cognitive_flow_intercepts_it(
+def test_an_intercepted_tool_is_announced_like_any_other(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """A known gap, pinned so it cannot change silently.
+    """The gap this used to pin is closed, and the closing is what it asked for.
 
-    `MVP0_MIDDLEWARE_ORDER_CONTRACT` puts CognitiveFlow ahead of Tracing, and
-    `CognitiveFlowMiddleware.wrap_tool_call` answers `finish_task` itself
-    instead of calling the inner handler. Tracing therefore never sees that
-    call, and nothing else on the path holds the moment it starts — the agent
-    node only reconstructs it afterwards from the message list. Closing this
-    needs a decision about who owns tracing on the agent path, so it is not
-    papered over with a synthesised start here.
+    Until 2026-08-20 this test asserted the opposite — that `finish_task` is
+    never announced — and said why it stood: `MVP0_MIDDLEWARE_ORDER_CONTRACT`
+    put CognitiveFlow ahead of Tracing, `CognitiveFlowMiddleware.wrap_tool_call`
+    answers `finish_task` itself instead of calling the inner handler, so
+    Tracing never saw the call. Its own note named the missing piece: "a
+    decision about who owns tracing on the agent path".
+
+    The decision: the observer sits outside the deciders. Tracing is now the
+    first slot in the contract, so a middleware answering a call on its own
+    still cannot answer it unobserved.
     """
     spy = _run(tmp_path, mock_skill_resolver)
 
     started = {e.tool_name for e in spy.events if isinstance(e, ToolCallStartedEvent)}
     reported = {e.tool_name for e in spy.events if isinstance(e, ToolCallEvent)}
     assert "finish_task" in reported
-    assert "finish_task" not in started
+    assert "finish_task" in started

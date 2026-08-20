@@ -190,7 +190,7 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: skill-spec, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/cognitive/middlewares.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/middleware/test_chain_topology.py::test_middleware_chain_topological_order_is_fixed]`
+- `[Covered By: packages/graph-agent/tests/middleware/test_chain_topology.py::test_the_chain_order_is_the_contract]`
 
 ### F-middleware-mounting: Enable and disable runtime middleware based on attended, unattended, and configuration modes.
 - **Boundary**: lifecycle-behavior - middleware factory

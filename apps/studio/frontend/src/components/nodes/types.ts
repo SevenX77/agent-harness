@@ -24,14 +24,13 @@ export interface NodeRuntime {
 }
 
 /**
- * How much work one node has done in this run: the calls it has made and the
- * tools it reached for.
+ * How much work one node has done in this run, and what it is inside right now:
+ * the calls it has made, the tools it reached for, and the tool still running.
  *
- * Two counters and nothing derived from them — no rate, no "current tool". The
- * engine reports a tool only once it has ANSWERED (`TracingMiddleware`'s step
- * closes on the result), so the most recent `tool_call` is the last tool that
- * finished, not the one running now; presenting it as "current" would be wrong
- * for exactly the stretch a reader is watching.
+ * `runningTool` is a real answer rather than a guess because the engine
+ * announces a tool call when it STARTS (`ToolCallStartedEvent`) as well as when
+ * it ends — so "still open" means an announcement with no completion, not "the
+ * last one we heard about".
  *
  * Derived by `deriveNodeActivity` (run-status-projection) from the same event
  * stream and run filter as the node's status and clock.
@@ -39,6 +38,7 @@ export interface NodeRuntime {
 export interface NodeActivity {
   llmCalls: number
   toolCalls: number
+  runningTool: string | null
 }
 
 export interface SubagentRef {

@@ -704,7 +704,7 @@ features:
     description: Round 28 invariant guard protects this behavior from silent drift.
     evidence: tests/test_round28_invariant_guards.py::test_round28_middleware_order_keeps_observation_before_control
   targeted_tests:
-  - tests/middleware/test_chain_topology.py::test_middleware_chain_topological_order_is_fixed
+  - tests/middleware/test_chain_topology.py::test_the_chain_order_is_the_contract
 - id: F-middleware-mounting
   description: Enable and disable runtime middleware based on attended, unattended,
     and configuration modes.

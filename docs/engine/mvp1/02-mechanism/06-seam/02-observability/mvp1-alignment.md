@@ -70,8 +70,30 @@ engine 全权;trace 被 studio trace-inspector 消费(前端挂载归 studio)。
        - **`InputDispatchEvent` 专有**:`dispatched_keys: list[str]`(按 `io.inputs` 切给该节点的 key)· `branch_index: int | None`(并联/iterate 扇出时的分支/item 序号,让前端把并联分发画成各自的边;非并联为 `None`)。
        - **`InputFileInjectedEvent` 专有**:`file_ref: str`(注入文件路径/ref)· `target_field: str`(文件内容注入到的黑板字段名)。
    - **Prompt 三视图 = 已满足**(2026-06-06 核实):`PromptCapturedEvent`(`events.py:217`)已同时带 `template_source`(模板)+ `variables`(喂入变量)+ `resolved_prompt`(渲染后)三视图——无需补(06 #7 待办关闭)。
-2. **subagent lifecycle 事件(A2)**:builtin subagent 已有 `BuiltinSubagentEnter/Exit/FallbackEvent`(`events.py:178/188/198`);**用户 subagent** 的 lifecycle 事件待补(与 `07-subagent` 协同,impl 归 kiro)。
-3. **reducer 前后态 diff(REQ-7)= 前端近似(OB5)**:OB4 边操作事件已带黑板快照,前端按 phase 边界(`PhaseStart`/`PhaseEnd` + 边操作族)近似"哪个 reducer 改了哪个 key";engine-authoritative 逐 reducer diff 事件 = deferred enhancement,**不在 mvp1 engine 范围**(PM 2026-06-06 选 A)。
+2. **观察者必须在决策者外面(2026-08-20 落地)**:`ToolCallStartedEvent` 从 2026-06 就
+   定义好、导出、镜像进前端事件表、被 `TraceStepRow` 消费,却**只对 skill 自带工具生效**;
+   `finish_task` / `update_working_memory` / `ask_clarification` 这些框架工具一次都没被宣告过
+   ——而它们才是一个 agent 相位大部分时间在调的东西。
+   **根因是顺序,不是少了发射点**:`CognitiveFlowMiddleware` 排在 `TracingMiddleware` 前面,
+   而它对自己拦下的工具**直接作答、不调 `handler(request)`**,于是包括观察者在内的整条
+   wrapper 链被跳过。实测 2026-08-20:一个先调 `update_working_memory` 再调 `finish_task`
+   的相位产出 2 条 `tool_call`、0 条 `tool_call_started`,给
+   `TracingMiddleware.wrap_tool_call` / `awrap_tool_call` 各挂一个探针,两边都是 0 次调用。
+   **裁决**:`MVP0_MIDDLEWARE_ORDER_CONTRACT` 把 `Tracing` 放到**第 1 位**。一个能被决策者
+   跳过的观察者,观察的不是这个系统,而是别人的控制流剩给它的那个子集。借的是 Django
+   `MIDDLEWARE` 与 Express `app.use` 的既有约定——日志/追踪层注册在最外面,所以下层 auth
+   短路掉的请求它照样看得见;**没借**它们的「响应也逐层回穿」那部分,因为这里的 wrapper
+   是一次性 handler 链,不需要。移动的代价为零:Tracing 只实现工具钩子,所以
+   ProtocolValidation 依旧排在每一个**读状态**的中间件之前。
+   **配套的去重**:观察者一旦生效,以 `ToolMessage` 作答的调用由它 close,而 agent 节点
+   事后扫消息列表本来就是为了兜住那些以 `Command` 作答、永远不 close 的调用——两边同时在,
+   同一次调用会被报两遍。所以「报告这次调用」的含义收紧为「除非已经报过」,这份记忆归
+   相位那**唯一一个** `StepReporter`(`tracing/steps.py`)。
+   门禁:`tests/callbacks/test_a_tool_is_announced_when_it_starts.py`(每次调用先宣告后报告、
+   每次调用只报告一次)、`tests/middleware/test_chain_topology.py`(Tracing 排在每个会抢答的
+   中间件之前;状态守卫仍排在每个读状态的中间件之前)。
+3. **subagent lifecycle 事件(A2)**:builtin subagent 已有 `BuiltinSubagentEnter/Exit/FallbackEvent`(`events.py:178/188/198`);**用户 subagent** 的 lifecycle 事件待补(与 `07-subagent` 协同,impl 归 kiro)。
+4. **reducer 前后态 diff(REQ-7)= 前端近似(OB5)**:OB4 边操作事件已带黑板快照,前端按 phase 边界(`PhaseStart`/`PhaseEnd` + 边操作族)近似"哪个 reducer 改了哪个 key";engine-authoritative 逐 reducer diff 事件 = deferred enhancement,**不在 mvp1 engine 范围**(PM 2026-06-06 选 A)。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §3 · `02-middleware`(Tracing 槽,双向)· `07-subagent`(lifecycle)· `03-api-contract`(事件协议)· `data-contracts`

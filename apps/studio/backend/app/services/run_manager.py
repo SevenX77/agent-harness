@@ -799,6 +799,7 @@ class RunManager:
                 compare_node_id=node_id,
                 candidate_id=candidate.candidate_id,
                 candidate_label=candidate.model_group_id,
+                base_run_id=base_run_id,
                 roles_path_override=str(roles_file),
                 runtime_config=runtime_config,
             )
@@ -826,6 +827,7 @@ class RunManager:
         compare_node_id: str,
         candidate_id: str,
         candidate_label: str,
+        base_run_id: str,
         roles_path_override: str,
         runtime_config: dict[str, Any] | None,
     ) -> RunMetadata:
@@ -847,6 +849,7 @@ class RunManager:
             compare_node_id=compare_node_id,
             candidate_id=candidate_id,
             candidate_label=candidate_label,
+            compare_base_run_id=base_run_id,
             **_metadata_artifact_fields(art_ref),
         )
         _write_run_metadata(run_dir, metadata)

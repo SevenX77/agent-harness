@@ -170,6 +170,24 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   **单条消息必须截断**(200 字符):实测一条 `protocol_violation` 消息几千字,原样打印会把
   同一节里其他失败全部压到屏幕外;全文就在报告已经链接着的 `trace.jsonl` 里,报告欠读者的是
   "认得出是哪个失败",不是一份逐字誊本。
+- 决策 RUN_EXECUTION-10(报告点了名就要能点开;2026-08-20 立,问题台账 R1①③): 报告里凡是
+  **指名道姓提到的东西**——输入文件、被比较的那次 run——都必须是**能点开的相对链接**,
+  而不是一段代码字体的路径。链接**从实际目录推出来**,不写死 `../..`:
+  - **输入文件**:绑定路径相对于 skill 的 `.workspace`,而 run 目录在 `<workspace>/runs/<run id>`,
+    所以文件正好在上两级。若这份报告不在那个位置(布局不同、被拷走),**就不给链接、只给路径**——
+    **点不开的链接比纯文本更坏**,它引诱一次注定失败的点击。
+  - **输入文件要报两种来源**:快照 `runtime_config.snapshot.json` 说的是**启动时声明**读哪些文件;
+    引擎的 `input_file_injected` 事件说的是**跑的过程中真的送进去了什么**(它挂在一条边上,
+    所以"送给了哪个节点"是这条事实的一部分,不是修饰)。只报前者,答案在 run 开始时为真、
+    到结束就过期了。
+  - **compare 候选**:一次候选 side-run 只有摆在**它对照的那次 run** 旁边才有意义,所以报告
+    链到那次 run 的 `report.md`(同级目录上一层)。这一条同时是**数据缺口**而不只是渲染缺口:
+    side-run 此前**根本没记**自己是对着哪次 run 跑的,`RunMetadata.compare_base_run_id` 本次补上。
+    没记到 base 的候选**照实说"没记录"**,不猜 run id。
+  - **基准 run 那一侧仍然没有 compare 节**,而且**在报告可重生成之前也不可能有**:compare 发生在
+    基准 run 结束**之后**,而报告是在 run 终态写一次的纯投影。要么让报告可重生成(见下面的
+    已知缺口),要么去 UI 的 compare 面板看——不能让报告去扫兄弟目录,那会让"这份报告说什么"
+    取决于此后又跑了什么。
 - 决策 RUN_EXECUTION-7(格式 = 单份 markdown): 只写 `report.md`,不并写 `report.json`。
   **为什么**:结构化真相已经在 `trace.jsonl` / `metrics.json` 里;再存一份 JSON 投影
   等于第三份副本(违 KISS/YAGNI 与 SSOT),而 markdown 在文件管理器、编辑器和 Studio 里
@@ -222,6 +240,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 | RUN_EXECUTION-2 | 节点态 | 单元 `run-execution-node-status`；**为什么**：run events 经 state-engine 投到节点灯/边，非画布默认假态 |
 | RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
 | RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
+| RUN_EXECUTION-10 | 点了名的东西要能点开 | F6；**为什么**：输入文件与被对照的 run 从前只是文本；链接从实际目录推出,推不出就不给,点不开的链接比纯文本更坏 |
 | RUN_EXECUTION-8 | 重复逐次记账 + 节点状态入表 | F6；**为什么**：求和行回答不了「哪个 item 慢/挂了」，而「跑了几次」与「一次里想了几轮」是两件事 |
 | RUN_EXECUTION-9 | Failure 只收「拒绝或放弃」，纠正只计数 | F6；**为什么**：把每次 nudge 塞进 Failure 会淹没真失败，完全不记又丢掉「这个节点被推了六次」 |
 | RUN_EXECUTION-5 | run 报告 = 已封存产物的纯投影 | F6；**为什么**：用户要一页可读的 run 总账，但底座一不允许再立一份并行真相——投影可重生成、删了不丢信息 |

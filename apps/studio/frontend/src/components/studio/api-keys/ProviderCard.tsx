@@ -116,21 +116,53 @@ export function apiKeyInputType(): "text" {
   return "text"
 }
 
+/**
+ * What the API-key field shows for a draft value.
+ *
+ * The draft carries one of three things, and they are not interchangeable:
+ * a real secret (revealed via Eye, or freshly typed here), the registry's
+ * redaction placeholder (a secret exists on the server and was not sent), or
+ * nothing at all.
+ *
+ * The placeholder is never displayed. It is a fixed 10-character token standing
+ * in for a secret of some other length, so showing it both leaks a false length
+ * and invites the user to edit a string that is not their key — one backspace
+ * on it produced a nine-asterisk "new key" that overwrote the real one. It is
+ * always drawn as a mask of `redactedKeyLength` dots (2026-08-12 decision); to
+ * see the real value the user presses Eye, which fetches it (design A10).
+ *
+ * A real value obeys `visible` (Eye) and `editing` (the user is typing it right
+ * now, and must see what they type).
+ */
 export function apiKeyDisplayValue(
   value: string,
   visible: boolean,
   editing = false,
   redactedKeyLength?: number | null,
 ): string {
-  if (visible || editing || !value) return value
-  // 2026-08-12 决议: a redacted registry value is a fixed 10-char placeholder,
-  // not the key — mask with the secret's true length so the dot count never
-  // reads as a truncated key. A real value (revealed / freshly typed) masks by
-  // its own length.
-  const maskLength = isRedactedEndpointSecret(value) && redactedKeyLength
-    ? redactedKeyLength
-    : value.length
-  return apiKeyMaskChar.repeat(maskLength)
+  if (!value) return value
+  if (isRedactedEndpointSecret(value)) {
+    return apiKeyMaskChar.repeat(redactedKeyLength || value.length)
+  }
+  if (visible || editing) return value
+  return apiKeyMaskChar.repeat(value.length)
+}
+
+/**
+ * The secret a keystroke in a MASKED field means, or null for "no edit".
+ *
+ * A masked field hands back its mask plus whatever was inserted, because the
+ * mask is what was in it. Since a mask is not a credential, the inserted text
+ * cannot be an edit OF the secret — it can only be the start of a new one, so
+ * it replaces the secret whole (what password managers do with a stored entry).
+ * A callback that only removes mask characters is not an edit at all: deleting
+ * a dot cannot produce "the key minus one character", because the dots were
+ * never the key. Clearing a key stays possible through Eye + select-all, which
+ * is explicit about what is being destroyed.
+ */
+export function apiKeySecretFromMaskedInput(inputValue: string): string | null {
+  const inserted = inputValue.split(apiKeyMaskChar).join("")
+  return inserted === "" ? null : inserted
 }
 
 export function apiKeyInputClassName(
@@ -2312,12 +2344,16 @@ export function ProviderCard({
                 type={apiKeyInputType()}
                 value={apiKeyDisplayValue(draft.api_key, visible, apiKeyEditing, persisted?.api_key_length)}
                 onChange={(event) => {
-                  if (!visible) setApiKeyEditing(true)
                   if (apiKeyError) setApiKeyError("")
+                  if (isRedactedEndpointSecret(draft.api_key)) {
+                    const replacement = apiKeySecretFromMaskedInput(event.target.value)
+                    if (replacement === null) return
+                    setApiKeyEditing(true)
+                    onFieldChange({ api_key: replacement })
+                    return
+                  }
+                  if (!visible) setApiKeyEditing(true)
                   onFieldChange({ api_key: event.target.value })
-                }}
-                onFocus={() => {
-                  if (!visible && hasApiKey) setApiKeyEditing(true)
                 }}
                 onBlur={() => setApiKeyEditing(false)}
                 placeholder={t("apiKeys.card.apiKeyPlaceholder", { providerName: apiKeyProviderName })}

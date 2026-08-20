@@ -981,9 +981,21 @@ export function useSettingsPageController(): SettingsPageController {
       : allEndpointDrafts
     const persistedByEndpointId = new Map(credentialsRef.current.providers.map((provider) => [provider.id, provider]))
     const endpointDrafts = requestedEndpointDrafts.filter((endpointDraft) => (
-      routineEndpointTestShouldQueue(endpointDraft, persistedByEndpointId.get(endpointDraft.id))
+      endpointTestShouldQueue(endpointDraft, persistedByEndpointId.get(endpointDraft.id))
     ))
-    if (endpointDrafts.length === 0) return
+    if (endpointDrafts.length === 0) {
+      // Every requested cell is a dormant `protocol_unsupported` one (the only
+      // state the queue skips). Say so: a press that leaves no toast, no
+      // spinner and no request is indistinguishable from a broken button, and
+      // that is exactly how the disabled-endpoint filter used to read.
+      toast.info(
+        requestedEndpointDrafts.length === 1
+          ? "This URL does not speak this protocol, so a routine test has nothing to check. Use the cell's Re-probe button to ask the provider again."
+          : "Every endpoint here is a dormant protocol_unsupported cell, so a routine test has nothing to check. Use a cell's Re-probe button to ask the provider again.",
+        { id: `get-models-${providerId}` },
+      )
+      return
+    }
     const baseUrlSteps = isOfficial ? [] : providerBaseUrlStepsForEndpointDrafts(endpointDrafts)
     const baseUrlStepByKey = new Map(baseUrlSteps.map((step, index) => [step.key, { ...step, index }]))
     const totalProgressSteps = endpointDrafts.length + baseUrlSteps.length
@@ -1257,12 +1269,27 @@ function providerEndpointIdentityMatches(left: ProviderDraft, right: ProviderDra
   )
 }
 
-function routineEndpointTestShouldQueue(
+/**
+ * Whether an endpoint enters the queue of a Test press.
+ *
+ * Both callers — the card's Test button and a click on an endpoint tag — are
+ * EXPLICIT user commands, so the default is to test. Design §4.2 (PM 2026-07-03)
+ * puts it directly: "除 `protocol_unsupported` 外全部状态都直接点击即测",
+ * `protocol_unsupported` alone stays out because it is an architectural fact
+ * about (URL, protocol) with a 30-day half-life and its own Re-probe button
+ * (§1.2 matrix point 4).
+ *
+ * A `disabled` endpoint used to be filtered here too. That inverted the one
+ * state that most needs re-testing: the backend sets it when a key is rejected,
+ * and the design says it recovers on "下次测试成功" — but the press that would
+ * run that test was the press this filter swallowed, so a rejected key could
+ * never be cleared, not even by pasting a new one (live 2026-08-19).
+ */
+function endpointTestShouldQueue(
   endpointDraft: ProviderDraft,
   persisted: CredentialsState["providers"][number] | undefined,
 ): boolean {
   if (!persisted) return true
-  if (persisted.endpoint_status === "disabled") return false
   if (!providerTestParamsMatch(endpointDraft, persisted)) return true
   const cached = providerCachedTestResult(persisted, endpointDraft)
   const status = cached?.last_test_status ?? persisted.last_test_status

@@ -3908,9 +3908,12 @@ def test_endpoint_test_rejects_invalid_api_key(
     endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
     assert body["tested_endpoint_id"] == "openai-direct"
     assert body["discovered_model_count"] == 0
-    # R-E2: an invalid API key makes the endpoint unusable => disabled (not a
-    # transient "failed"), and its routes are disabled too (cascade).
-    assert endpoint["status"] == "disabled"
+    # R-E2 (revised 2026-08-19): an invalid API key is an ACCOUNT-level structural
+    # fact — design §1.2 matrix point 3 says it is "与格子生死无关", so the cell
+    # records the observation as `failed` (red = the user must fix it, §4.2) and
+    # stays testable. Only its ROUTES are disabled, so no role can pick a route
+    # backed by a dead key until a later test revives them.
+    assert endpoint["status"] == "failed"
     assert "Invalid API key" in endpoint["last_test_message"]
     assert "invalid_api_key" in endpoint["last_test_message"]
     # W2-B.3: the STRUCTURED error code is persisted so the frontend reads it directly.
@@ -3918,13 +3921,16 @@ def test_endpoint_test_rejects_invalid_api_key(
     assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
 
 
-def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
+def test_endpoint_test_invalid_key_revives_on_plain_retest(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    # R-E2: an invalid key disables the endpoint + its routes, but that is NOT a
-    # terminal lock — fixing the key and re-testing successfully revives them.
+    # R-E2 is not a terminal lock: fixing the key and pressing Test again revives
+    # the endpoint and its routes. The retest below carries NO `force=true` on
+    # purpose — an ordinary Test press is exactly the "下次测试成功再恢复" the
+    # design promises (D13, 2026-08-12), so recovery must not depend on a flag
+    # that the UI only ever offers for `protocol_unsupported` cells.
     _seed(tmp_path, monkeypatch)
 
     async def bad_key(endpoint: ProviderEndpoint) -> EndpointProbeResult:
@@ -3939,7 +3945,7 @@ def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
     first = client.post("/api/llm/endpoints/openai-direct/test")
     assert first.status_code == 200
     first_body = first.json()
-    assert first_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "disabled"
+    assert first_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "failed"
     assert first_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "disabled"
 
     async def good_key(endpoint: ProviderEndpoint) -> EndpointProbeResult:
@@ -3955,7 +3961,7 @@ def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
 
     monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", good_key)
     monkeypatch.setattr(llm_router, "_gateway_test_provider_route", ok_probe)
-    second = client.post("/api/llm/endpoints/openai-direct/test?force=true")
+    second = client.post("/api/llm/endpoints/openai-direct/test")
     assert second.status_code == 200
     second_body = second.json()
     assert second_body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "verified"
@@ -3963,11 +3969,16 @@ def test_endpoint_test_invalid_key_disable_revives_on_successful_retest(
     assert second_body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
 
 
-def test_endpoint_test_skips_disabled_endpoint_without_provider_probe(
+def test_endpoint_test_probes_endpoint_left_disabled_by_older_builds(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # Endpoints persisted as `disabled` by the retired R-E2 endpoint cascade are
+    # ordinary testable cells again: the probe runs and the fresh observation
+    # replaces the stale verdict. Without this, every such record on disk is a
+    # permanent brick — an official card cannot even be deleted and recreated
+    # (live 2026-08-19: deepseek-official / gemini-official).
     _seed(tmp_path, monkeypatch)
     credentials = load_credentials(credentials_path())
     credentials.provider_endpoints["openai-direct"] = credentials.provider_endpoints[
@@ -3984,33 +3995,31 @@ def test_endpoint_test_skips_disabled_endpoint_without_provider_probe(
     ].model_copy(update={"status": "disabled"})
     save_credentials(credentials)
 
-    async def unexpected_endpoint_probe(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        raise AssertionError(f"disabled endpoint should not be probed: {endpoint.endpoint_id}")
+    probed: list[str] = []
 
-    async def unexpected_route_probe(
+    async def good_key(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        probed.append(endpoint.endpoint_id)
+        return _endpoint_probe_ok(endpoint, latency_ms=42, model_ids=("gpt-5",))
+
+    async def ok_probe(
         endpoint: ProviderEndpoint,
         route: ProviderRoute,
         *,
         runtime_settings: dict[str, object] | None = None,
     ) -> RouteProbeResult:
-        raise AssertionError(
-            f"disabled endpoint route should not be probed: {endpoint.endpoint_id}/{route.route_id}"
-        )
+        return _route_probe(endpoint, route, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", unexpected_endpoint_probe)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_route_probe)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", good_key)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", ok_probe)
 
     response = client.post("/api/llm/endpoints/openai-direct/test")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["skipped"] is True
-    assert body["discovered_model_count"] == 0
-    endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
-    route = body["registry"]["provider_routes"]["openai-direct:gpt-5"]
-    assert endpoint["status"] == "disabled"
-    assert endpoint["last_error_code"] == "invalid_api_key"
-    assert route["status"] == "disabled"
+    assert probed == ["openai-direct"]
+    assert body.get("skipped") is not True
+    assert body["registry"]["provider_endpoints"]["openai-direct"]["status"] == "verified"
+    assert body["registry"]["provider_routes"]["openai-direct:gpt-5"]["status"] == "verified"
 
 
 def test_endpoint_test_logs_discovered_models_and_reachability(
@@ -4217,45 +4226,6 @@ def test_official_call_method_atom_publishes_active_model_events(
     assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
 
 
-def test_official_call_method_atom_skips_disabled_endpoint(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed(tmp_path, monkeypatch)
-    endpoint = ProviderEndpoint(
-        endpoint_id="openai-direct",
-        display_name="OpenAI",
-        provider_kind="official",
-        protocol="openai_compatible",
-        base_url="https://api.openai.example/v1",
-        api_key="secret",
-        status="disabled",
-    )
-    active_events: list[tuple[str, tuple[str, ...]]] = []
-
-    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
-        active_events.append((endpoint_id, active_model_ids))
-
-    async def unexpected_call_method(*args: object, **kwargs: object) -> ModelProbeResult:
-        raise AssertionError("disabled official call-method atom should not hit provider")
-
-    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
-    monkeypatch.setattr(llm_router, "_gateway_probe_official_call_method", unexpected_call_method)
-
-    result = asyncio.run(
-        llm_router._probe_official_call_method_generation_atom(
-            endpoint,
-            "gpt-5",
-            "openai_responses",
-        )
-    )
-
-    assert result.model_id == "gpt-5"
-    assert result.status == "error"
-    assert result.message == llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE
-    assert active_events == []
-
-
 def test_official_role_route_test_uses_call_method_atom_events(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4324,50 +4294,6 @@ def test_official_role_route_test_uses_call_method_atom_events(
 
     assert result.status == "ok"
     assert active_events == [("openai-direct", ("gpt-5",)), ("openai-direct", ())]
-
-
-def test_endpoint_generation_probe_skips_disabled_endpoint_atom(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed(tmp_path, monkeypatch)
-    endpoint = ProviderEndpoint(
-        endpoint_id="openai-direct",
-        display_name="OpenAI",
-        protocol="openai_compatible",
-        base_url="https://api.openai.example/v1",
-        api_key="secret",
-        status="disabled",
-    )
-    active_events: list[tuple[str, tuple[str, ...]]] = []
-
-    async def unexpected_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        raise AssertionError(
-            f"disabled endpoint atom should not hit provider: {endpoint.endpoint_id}/{route.route_id}"
-        )
-
-    async def fake_publish(endpoint_id: str, active_model_ids: tuple[str, ...]) -> None:
-        active_events.append((endpoint_id, active_model_ids))
-
-    monkeypatch.setattr(llm_router, "_publish_llm_probe_active", fake_publish)
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_test_route)
-
-    result = asyncio.run(
-        llm_router._verify_endpoint_by_generation_probe(
-            endpoint,
-            ("gpt-5", "gpt-5-mini"),
-            {},
-        )
-    )
-
-    assert result.status == "skipped_disabled"
-    assert result.verified_model_id is None
-    assert active_events == []
 
 
 def test_official_endpoint_test_verifies_via_one_generation_probe(
@@ -5109,60 +5035,6 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     assert "Provider rejected model." in (failed_evidence[0].reason or "")
 
 
-def test_endpoint_scoped_manual_model_test_skips_disabled_endpoint(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _seed(tmp_path, monkeypatch)
-    credentials = load_credentials(credentials_path())
-    credentials.provider_endpoints["openai-direct"] = credentials.provider_endpoints[
-        "openai-direct"
-    ].model_copy(update={"status": "disabled"})
-    credentials.provider_routes["openai-direct:gpt-5"] = credentials.provider_routes[
-        "openai-direct:gpt-5"
-    ].model_copy(update={"status": "disabled"})
-    save_credentials(credentials)
-
-    async def unexpected_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *,
-        runtime_settings: dict[str, object] | None = None,
-    ) -> RouteProbeResult:
-        raise AssertionError(
-            f"disabled endpoint model test should not hit provider: {endpoint.endpoint_id}/{route.route_id}"
-        )
-
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_test_route)
-
-    response = client.post(
-        "/api/llm/endpoints/openai-direct/models/test",
-        json={"model_ids": ["gpt-5-mini", "missing-model"]},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["results"] == [
-        {
-            "model_id": "gpt-5-mini",
-            "status": "error",
-            "route_id": None,
-            "message": llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE,
-        },
-        {
-            "model_id": "missing-model",
-            "status": "error",
-            "route_id": None,
-            "message": llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE,
-        },
-    ]
-    endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
-    route = body["registry"]["provider_routes"]["openai-direct:gpt-5"]
-    assert endpoint["status"] == "disabled"
-    assert route["status"] == "disabled"
-
-
 def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
     client: TestClient,
     tmp_path: Path,
@@ -5282,59 +5154,6 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
     assert [e.trust_state for e in failed_ev] == ["probe-failed"]
     assert failed_ev[0].model_id == "bad-pro"
     assert failed_ev[0].reason == "Responses API rejected reasoning.effort low."
-
-
-def test_official_manual_model_test_skips_disabled_endpoint(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _seed(tmp_path, monkeypatch)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "openai-official": ProviderEndpoint(
-                    endpoint_id="openai-official",
-                    display_name="OpenAI Official",
-                    protocol="openai_compatible",
-                    base_url="https://api.openai.example/v1",
-                    api_key="secret",
-                    provider_kind="official",
-                    status="disabled",
-                )
-            },
-            provider_routes={},
-        ),
-        credentials_path(),
-    )
-
-    async def unexpected_profile_probe(
-        endpoint: ProviderEndpoint,
-        model_id: str,
-    ) -> llm_router.OfficialModelProfileProbeResult:
-        raise AssertionError(
-            f"disabled official endpoint should not hit profile probe: {endpoint.endpoint_id}/{model_id}"
-        )
-
-    monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", unexpected_profile_probe)
-
-    response = client.post(
-        "/api/llm/endpoints/openai-official/models/test",
-        json={"model_ids": ["gpt-5-pro"]},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["results"] == [
-        {
-            "model_id": "gpt-5-pro",
-            "status": "error",
-            "route_id": None,
-            "message": llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE,
-        }
-    ]
-    assert body["registry"]["provider_endpoints"]["openai-official"]["status"] == "disabled"
-    assert body["registry"]["provider_routes"] == {}
 
 
 def test_endpoint_test_does_not_resurrect_secret_cleared_during_probe(
@@ -5814,42 +5633,6 @@ def test_route_probe_calls_real_provider_probe(
         }
     ]
     assert _registry_response_route(response.json())["status"] == "verified"
-
-
-def test_route_probe_skips_disabled_endpoint(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _seed(tmp_path, monkeypatch)
-    credentials = load_credentials(credentials_path())
-    credentials.provider_endpoints["openai-direct"] = credentials.provider_endpoints[
-        "openai-direct"
-    ].model_copy(update={"status": "disabled"})
-    credentials.provider_routes["openai-direct:gpt-5"] = credentials.provider_routes[
-        "openai-direct:gpt-5"
-    ].model_copy(update={"status": "disabled"})
-    save_credentials(credentials)
-
-    async def unexpected_test_route(
-        endpoint: ProviderEndpoint,
-        route: ProviderRoute,
-        *_args: object,
-        **_kwargs: object,
-    ) -> RouteProbeResult:
-        raise AssertionError(
-            f"disabled endpoint route force should not hit provider: {endpoint.endpoint_id}/{route.route_id}"
-        )
-
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", unexpected_test_route)
-
-    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe")
-
-    assert response.status_code == 200
-    route = _registry_response_route(response.json())
-    assert route["status"] == "disabled"
-    assert route["metadata"]["reason_code"] == "endpoint_disabled"
-    assert route["metadata"]["last_probe_message"] == llm_router.DISABLED_ENDPOINT_PROBE_MESSAGE
 
 
 def test_route_probe_delegates_scoped_route_probe_to_gateway(

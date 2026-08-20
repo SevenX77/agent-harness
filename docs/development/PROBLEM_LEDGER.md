@@ -124,6 +124,8 @@
 | L4 | reasoning_effort UI 入口 + 各家枚举查清;temperature=模型上限×百分比;越界 clamp 不 400;top_p 不暴露 | gateway→前端 | ❓(部分已做,枚举与 effort UI 未验) | 08-10 四连 | Settings 走查 |
 | L5 | key 掩码位数与真实长度一致(把长度传前端) | 后端→前端 | ❓ | 08-12 | 走查 |
 | L6 | 探测能力 T1(通/model list)/T2(真跑探参数含 effort 枚举)/T3(tool call/ReAct)整合成可复用接口;provider chip 真聚合等遗留 | gateway | 🔧(矩阵已做,遗留在册) | 08-11 | — |
+| L7 | **密钥被拒后端点永久砖化**:`invalid_key` 把 endpoint 判 `disabled`,而前端测试队列跳过 disabled、后端不带 `force` 不探 disabled、UI 只给 `protocol_unsupported` 提供 force 入口——三道门叠加,点 Test 连请求都发不出;换新密钥也解不开(保存保留旧 status),官方卡还不能删重建。设计早有裁决:§1.2 矩阵第 3 点「invalid_key 与格子生死无关」、§4.2「除 protocol_unsupported 外点击即测」、D13「下次测试成功再恢复」 | 后端(事实源)→前端(队列/反馈) | ❓ 随本 PR 修,待真机点验 | 08-19 用户「为什么点 test 会失效」 | DeepSeek 卡点 Test 真发起测试并如实反映结果 |
+| L8 | **聚焦密钥输入框露出 `**********` 占位符**,且它可被就地编辑:退格一次或在尾部粘贴都会生成"新密钥"写盘,把一把好密钥覆盖成垃圾;随后必然 `invalid_key` → 掉进 L7 的陷阱。设计 A10 只授权 Eye/Copy 换真值、掩码点数按 `api_key_length`(2026-08-12) | 前端(+后端边界校验) | ❓ 随本 PR 修,待真机点验 | 08-19 用户「点击激活 api key 的 input 组件为什么显示成这样」 | 点击输入框显示掩码点而非星号;掩码态输入=整把替换 |
 
 ## 4 Copilot(MoirAI)
 

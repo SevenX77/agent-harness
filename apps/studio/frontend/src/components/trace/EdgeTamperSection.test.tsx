@@ -71,6 +71,30 @@ describe("EdgeTamperSection", () => {
     expect(html).toContain("topic")
   })
 
+  it("shows what the run produced at the Output boundary, and offers no resume there", () => {
+    // The Output boundary is a canvas pseudo-node: nothing runs after it, so
+    // "tamper the context and resume downstream" has no downstream to aim at —
+    // `resumeFromNodeId` would be an id the engine has never heard of. What the
+    // dot owes the reader here is the run's produced values (ledger E14).
+    const html = render({
+      id: "global_synthesis->__global_output__",
+      source: "global_synthesis",
+      target: "__global_output__",
+      contextJson: {
+        blackboard_snapshot: { story_framework: { acts: 3 } },
+        from_phase: "global_synthesis",
+        to_phase: "__global_output__",
+        changed_keys: ["story_framework"],
+      },
+    })
+
+    expect(html).toContain("Run output")
+    expect(html).toContain("global_synthesis")
+    expect(html).toContain("story_framework")
+    expect(html).not.toContain("Tamper")
+    expect(html).not.toContain("Resume downstream")
+  })
+
   it("shows an honest empty state when no transition was recorded", () => {
     const html = render({ id: "draft->review", source: "draft", target: "review" })
     expect(html).toContain("No transition recorded")

@@ -3,6 +3,7 @@ import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import { EDGE_STROKE_WIDTH } from '@/components/edges/edge-style'
 import { edgeContextFromEvents } from '@/lib/edge-context'
+import { GLOBAL_INPUT_NODE_ID, GLOBAL_OUTPUT_NODE_ID } from '@/utils/edge-identity'
 import type { EdgeRunStatus } from '@/utils/edge-status-projection'
 import {
   GLOBAL_INPUT_SOURCE_HANDLE_ID,
@@ -12,8 +13,8 @@ import {
 } from './subgraph-bridge-handles'
 import type { SkillGraphNode, SkillNodeStatus } from './types'
 
-export const INPUT_ID = '__global_input__'
-export const OUTPUT_ID = '__global_output__'
+export const INPUT_ID = GLOBAL_INPUT_NODE_ID
+export const OUTPUT_ID = GLOBAL_OUTPUT_NODE_ID
 
 type TraceEventInput = CallbackEvent | EventEnvelope
 

@@ -145,6 +145,24 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
     哪些字段。没跑过就没有事件,trace 行天然空白——静态推断正是补这块的。
   - **篡改黑板续跑(操作,不是展示)**:`EdgeTamperEditor` 编辑该边派发的黑板 JSON 并从
     checkpoint 恢复下游,这是一个动作入口,不属于事件流呈现,留在面板。
+  - **通往 Output 边界的那条终止边**(2026-08-20 新增):它的下游 `__global_output__` 是
+    **画布自己铸的伪节点**——这个 id 在 engine、gateway、studio backend 三处各出现 **0 次**
+    (由 `components/nodes/buildEdges.ts` 铸出),所以**没有任何运行事件会指向它**,
+    trace 行在这条边上天然为空,静态推断也解释不了「已经跑完了」。这颗 dot 该显示的是
+    **这次 run 交出去的那份东西**,它的唯一发布方是 run 自己在结束时报的那一次:
+    `run_ended.final_context.phase_outputs[<带 output 标记的相位>]`。实测 run
+    `2026-08-20T13-14-59_14582c6b`:`phase_outputs.global_synthesis` 恰好是
+    `{story_framework: …}`,与该 skill `GRAPH.md` 的 `io.outputs.required: [story_framework]`
+    逐字对应——**声明的产出与实际产出是同一份数据**,不需要第二个来源。
+    三条随之而定的规则:
+    - **不新增引擎事件**。那份值 run 结束时已经报过一次;再发一条携带同样值的事件,
+      就是同一个事实有两个发布方(与可观测性设计源的 OB11/OB12 同一条纪律)。
+    - **判别用伪节点 id 本身,不用「是不是输出边界」**。skill 可以声明一个真名叫
+      `output` 的相位,那是**真节点、有真迁移、有真 `input_dispatch`**;只有画布伪节点
+      `__global_output__` 是没有事件的那一个。
+    - **终止边不提供 tamper / resume**。边界之后没有下游,续跑请求的 `resumeFromNodeId`
+      会是引擎不认识的 id;面板在这条边上给出**只读的产出值**(`Run output` 段,并标明
+      是哪个相位产出的,长文本走同一个 text-well 原语),不给一个按下去必然报错的操作。
 - 决策: dot 仍是节点间状态机转换点(2026-07-02 语义不变),但**运行期"真实快照/操作记录"
   的呈现载体从独立的 EdgeContextView 面板改组为 trace 行本身**(D5:"边点显示 phase 间
   步骤,与节点步骤同样式")。理由:边操作本来就是事件流里的事件,再养一个平行面板等于同一
@@ -154,9 +172,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
   (静态推断 + 运行期都要)继续有效,变的只是运行期呈现的载体。
 - 测试: `trace-scope.test.ts`(边范围恰好收进该边的边操作事件、`artifact_saved` 归上游、
   Input 边界边接受 null `from_phase`);`EdgeTamperSection.test.tsx`(静态推断体 / tamper
-  编辑器 / 无记录时的诚实空态);`TracePanel.test.tsx`(边范围时 tamper 区出现在范围 chip 下)。
+  编辑器 / 无记录时的诚实空态 / **Output 边界只读产出体且不出现 Tamper 与 Resume**);
+  `edge-context.test.ts`(**终止边读 `run_ended` 的 `phase_outputs`;run 未结束时留给静态推断;
+  真名叫 `output` 的相位仍走 `input_dispatch`**);`TracePanel.test.tsx`(边范围时 tamper 区
+  出现在范围 chip 下)。
 - Status: live(2026-08-14:EdgeContextView 删除,EdgeTamperSection + edge 范围接管;
-  静态推断 lib/edge-static-inference.ts 不变)。
+  静态推断 lib/edge-static-inference.ts 不变;2026-08-20:终止边接 `run_ended` 产出值)。
 - 归属: rendering `graph-authoring`/`canvas`; data `trace-observability`.
 
 ### F5. Prompt 就在它自己的步骤里,并说清每一段字是谁写的

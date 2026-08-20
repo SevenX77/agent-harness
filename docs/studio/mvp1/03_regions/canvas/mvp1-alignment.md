@@ -178,6 +178,33 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design(2026-08-20 立)。
 - 归属: region `canvas`; capability `run-execution`, `trace-observability`.
 
+### F8. IO Boundary Run State(端点也在同一套状态系统里)
+
+- 机制: Input / Output 两个端点节点与普通 node、普通 edge **共用同一套运行态**:
+  - ① **它们的状态键就是它们的画布 id**(`__global_input__` / `__global_output__`),
+    与 phase 的 phase path 同住一张状态表——画布上的每个节点都能在同一张表里查到自己。
+  - ② **端点自己不执行任何东西**,所以它的状态**来自它那一端的边分段**:Input 看所有
+    从它出发的边,Output 看所有到达它的边(`boundaryNodeStatus`)。边开着 = `Running`,
+    合上 = `Success`,死在那儿 = `Failed`,run 被按停 = `Paused`,没跑到 = `Idle`。
+  - ③ **一个端点有多条边时取最差的那条**(failed > running > paused > done > idle)。
+  - ④ 呈现与 phase 卡片完全一致:同一枚状态胶囊(灯 + 词)、running 时同一套行进虚线边框。
+    **不显示运行时长**——端点没有"执行了多久"这回事,一段瞬时派发的耗时是个假数。
+- 决策:
+  - **不给端点造第二套事件语汇**。它们不是 phase,拿不到 `phase_start`/`phase_end`,
+    这正是它们此前在每一次 run 里全程空白的原因;但它们**有**自己的边分段
+    (`edge_start`/`edge_end`),那是引擎已经在发的真实证据。用它,而不是发明一个
+    "边界专用"的判定——否则"统一"就只是外观统一,底下仍是两套。
+  - **多边取最差**:Output 由两条分支喂,其中一条死了,它就没拿到该拿的东西;因为另一条
+    到了就报 Success,等于让端点替一条不属于它的分支说话。
+  - **端点不能当 resume 锚点**:它们和 phase 同住一张状态表,于是自动 resume 锚点必须
+    显式跳过它们——图的两端不是图里的节点,resume 没有可倒回的地方。
+- 原话/来源: "INPUT/OUTPUT 节点及其连线的显示与状态管理必须与普通 node/edge 统一
+  (我也说过,也不做)" = PM 2026-08-14 ⑦、2026-08-19 Q7 两次点名。
+- 测试: 端点在 run 前 Idle;其边分段开着时 Running、合上后 Success;分支失败时 Failed;
+  多条边取最差;自动 resume 锚点永不落在端点上。
+- Status: target-design(2026-08-20 立)。
+- 归属: region `canvas`; capability `run-execution`.
+
 ## 3. 接口契约
 - Inputs: skill detail, selected node id, status map, compile diagnostics, trace dot data references.
 - Outputs: node selection, file open requests, topology mutation requests, active panel changes.

@@ -43,7 +43,6 @@ def test_phase_end_backfills_mocked_source_from_interception_cache() -> None:
             phase_name="draft",
             phase_execution_id="exec-1",
             context={"story": "stub"},
-            metrics={"input_tokens": 41, "output_tokens": 19, "total_cost": 3.14},
         )
     )
 
@@ -51,9 +50,11 @@ def test_phase_end_backfills_mocked_source_from_interception_cache() -> None:
     assert phase["inputs"] == {"topic": "mars"}
     assert phase["outputs"] == {"story": "stub"}
     assert phase["mocked_source"] == "heuristic_stub"
-    assert phase["metrics"]["input_tokens"] == 0
-    assert phase["metrics"]["output_tokens"] == 0
-    assert phase["metrics"]["total_cost"] == 0
+    # A stubbed phase makes no call, so the phase's own tally stays at zero —
+    # which is the tally every reader uses, not a zeroed copy handed along.
+    assert phase["input_tokens"] == 0
+    assert phase["output_tokens"] == 0
+    assert phase["llm_calls"] == []
 
 
 def test_phase_source_cache_is_consumed_after_backfill() -> None:
@@ -62,9 +63,9 @@ def test_phase_source_cache_is_consumed_after_backfill() -> None:
 
     callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
     record_mock_source("draft", "manual")
-    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}, metrics={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
     callback.on_event(PhaseStartEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
-    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}, metrics={}))
+    callback.on_event(PhaseEndEvent(phase_name="draft", phase_execution_id="exec-1", context={}))
 
     assert callback.phases[0]["mocked_source"] == "manual"
     assert "mocked_source" not in callback.phases[1]

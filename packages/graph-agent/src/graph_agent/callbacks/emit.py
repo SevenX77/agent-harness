@@ -101,10 +101,6 @@ class _CompositeEventSink:
             (sink.path for sink in self._sinks if isinstance(sink, _TraceJsonlSink)),
             None,
         )
-        self.spend = next(
-            (sink for sink in self._sinks if isinstance(sink, _RunSpendLedger)),
-            None,
-        )
 
     def emit(self, event: Any) -> None:
         for sink in self._sinks:

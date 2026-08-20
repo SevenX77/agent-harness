@@ -472,6 +472,16 @@ def run_skill(
     run_dir = run_root / run_id
     trace_file = run_dir / TRACE_FILENAME
 
+    # The run's spend belongs to the same set of decisions, for the same
+    # reason: a run that dies still made the calls it made, and this function
+    # still owes it a ``metrics.json``. Held here rather than deeper in, the
+    # ledger survives the exception that unwinds the graph invocation, so the
+    # failure exit below reports the same calls ``trace.jsonl`` recorded
+    # instead of a fresh zero (field failure 2026-08-20: a run that spent
+    # 55/35 tokens over five calls before exhausting ``max_iterations``
+    # reported ``0 / 0 / 0``).
+    spend = _RunSpendLedger()
+
     try:
         raw = _run_skill_dict(
             skill_path,
@@ -488,6 +498,7 @@ def run_skill(
             model_resolver=model_resolver,
             llm_provider=llm_provider,
             runtime_config=runtime_config,
+            spend=spend,
             **inputs,
         )
     except GraphAgentError as exc:
@@ -498,7 +509,10 @@ def run_skill(
             run_id=run_id,
             skill_id=skill_id,
             context={},
-            metrics=WorkflowMetrics(wall_time_sec=wall_time),
+            metrics=WorkflowMetrics.from_mapping(
+                _run_metrics(spend, wall_time=wall_time),
+                wall_time_sec=wall_time,
+            ),
             # The trace sink creates and truncates ``trace.jsonl`` the moment it
             # opens, so the file's presence is the honest answer to "did this
             # run leave a trace": a run rejected before the graph was assembled
@@ -569,9 +583,11 @@ def resume_skill(
     )
 
     trace_output = runs_root(workspace_root) / run_id
+    spend = _RunSpendLedger()
     event_sink = _prepare_v030_event_sink(
         trace_output=trace_output,
         event_subscriber=event_subscriber,
+        spend=spend,
     )
 
     logger.info(
@@ -670,6 +686,7 @@ def resume_skill(
             # Unlike ``run_skill``, the resume path holds its own sink, so the
             # dead result can name the trace directly instead of inferring it.
             trace_path=event_sink.trace_path,
+            spend=spend,
             started_at=started_at,
             started_monotonic=started_monotonic,
         )
@@ -707,7 +724,13 @@ def resume_skill(
         run_id=run_id,
         skill_id=skill_id,
         context=final_context,
-        metrics=WorkflowMetrics.from_mapping({"wall_time_sec": wall_time}, wall_time_sec=wall_time),
+        # A resumed run counts what the resumed segment spent, which is exactly
+        # what its ``trace.jsonl`` holds — the sink truncates the file on open,
+        # so the two describe the same segment (OB10).
+        metrics=WorkflowMetrics.from_mapping(
+            _run_metrics(spend, wall_time=wall_time),
+            wall_time_sec=wall_time,
+        ),
         trace_path=Path(saved_trace_path) if saved_trace_path else None,
         error=None,
         started_at=started_at,
@@ -756,6 +779,7 @@ def _run_skill_dict(
     model_resolver: Any | None = None,
     llm_provider: LLMProvider | None = None,
     runtime_config: dict[str, Any] | None = None,
+    spend: _RunSpendLedger | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -787,6 +811,10 @@ def _run_skill_dict(
         - ``metrics``: Token usage and timing stats
         - ``trace_path``: Path to ``trace.jsonl``
         - ``wall_time_sec``: Total wall time
+
+    Args (continued):
+        spend: The run's token ledger, when the caller needs to read the
+            totals on a path this function does not return through.
     """
     resolver = require_skill_resolver(skill_resolver, caller="_run_skill_dict")
     skill_path = Path(skill_path)
@@ -797,6 +825,7 @@ def _run_skill_dict(
             run_root=run_root,
             mock_llm=mock_llm,
             thread_id=thread_id,
+            spend=spend,
             event_subscriber=event_subscriber,
             callbacks=callbacks,
             skill_resolver=resolver,
@@ -1822,16 +1851,17 @@ def _business_context_from_graph_result(result: Any) -> dict[str, Any]:
     return {}
 
 
-def _run_metrics(event_sink: Any, *, wall_time: float) -> dict[str, Any]:
+def _run_metrics(spend: _RunSpendLedger, *, wall_time: float) -> dict[str, Any]:
     """What the run spent, as counted while it spent it (OB10).
 
-    The ledger lives on the run's event sink, so this reads the same calls
-    ``trace.jsonl`` recorded rather than a second tally kept in graph state —
-    which is what makes ``metrics.json`` and ``report.md`` agree by
-    construction. Wall time is the runner's own measurement, layered on top.
+    The ledger is fed by the same events ``trace.jsonl`` records, so this is a
+    reading of the calls that were actually made rather than a second tally
+    kept in graph state — which is what makes ``metrics.json`` and ``report.md``
+    agree by construction. Wall time is the runner's own measurement, layered
+    on top. Every exit of a run — finished, interrupted, crashed — reports
+    through here, so none of them can quietly report a different number.
     """
-    ledger = getattr(event_sink, "spend", None)
-    metrics: dict[str, Any] = dict(ledger.totals()) if ledger is not None else {}
+    metrics: dict[str, Any] = dict(spend.totals())
     metrics["wall_time_sec"] = wall_time
     return metrics
 
@@ -1947,6 +1977,7 @@ def _resume_failed_result(
     run_id: str,
     skill_id: str,
     trace_path: Path | None,
+    spend: _RunSpendLedger,
     started_at: datetime,
     started_monotonic: float,
 ) -> WorkflowResult:
@@ -1956,7 +1987,10 @@ def _resume_failed_result(
         run_id=run_id,
         skill_id=skill_id,
         context={},
-        metrics=WorkflowMetrics(wall_time_sec=wall_time),
+        metrics=WorkflowMetrics.from_mapping(
+            _run_metrics(spend, wall_time=wall_time),
+            wall_time_sec=wall_time,
+        ),
         trace_path=trace_path,
         error=_resume_error_payload(exc),
         started_at=started_at,
@@ -1984,8 +2018,16 @@ def _prepare_v030_event_sink(
     trace_output: Path,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     callbacks: list[Any] | None = None,
+    spend: _RunSpendLedger,
 ) -> _CompositeEventSink:
-    sinks: list[Any] = [_TraceJsonlSink(trace_output), _RunSpendLedger()]
+    """Build the sink every event of one run passes through.
+
+    ``spend`` is supplied rather than created here because the caller has to
+    outlive the graph invocation to report on it: an exception unwinds past
+    whoever built the sink, so a ledger owned in here is invisible to the exit
+    that reports the failure.
+    """
+    sinks: list[Any] = [_TraceJsonlSink(trace_output), spend]
     if event_subscriber is not None:
         sinks.append(_SubscriberSink(event_subscriber))
     if callbacks:
@@ -2096,9 +2138,16 @@ def _run_v030_skill_dict(
     predict_context: SDKPredictContext | None = None,
     unattended: bool = False,
     persist_declared_outputs: bool = True,
+    spend: _RunSpendLedger | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
-    """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
+    """Execute a V0.3.0 skill root through compile_skill + assemble_graph.
+
+    ``spend`` is the run's token ledger. A caller that has to report on a run
+    it may not get a return value from — ``run_skill``, whose ``except`` branch
+    still owes the run a ``metrics.json`` — passes its own; a caller that only
+    ever reads the returned dict lets this create one.
+    """
 
     from graph_agent.core.checkpointer import resolve_checkpointer
     from graph_agent.core.compiler import compile_skill
@@ -2112,10 +2161,12 @@ def _run_v030_skill_dict(
     root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_dir)
     if root_runtime_inputs:
         inputs = {**inputs, **root_runtime_inputs}
+    spend = spend if spend is not None else _RunSpendLedger()
     event_sink = _prepare_v030_event_sink(
         trace_output=trace_output,
         event_subscriber=event_subscriber,
         callbacks=callbacks,
+        spend=spend,
     )
     _emit_v030_event(
         event_sink,
@@ -2191,7 +2242,7 @@ def _run_v030_skill_dict(
             return {
                 "run_id": run_id,
                 "context": final_context,
-                "metrics": _run_metrics(event_sink, wall_time=wall_time),
+                "metrics": _run_metrics(spend, wall_time=wall_time),
                 "trace_path": saved_trace_path,
                 "run_dir": str(trace_output),
                 "wall_time_sec": wall_time,
@@ -2226,7 +2277,7 @@ def _run_v030_skill_dict(
     return {
         "run_id": run_id,
         "context": final_context,
-        "metrics": _run_metrics(event_sink, wall_time=wall_time),
+        "metrics": _run_metrics(spend, wall_time=wall_time),
         "trace_path": saved_trace_path,
         "run_dir": str(trace_output),
         "wall_time_sec": wall_time,

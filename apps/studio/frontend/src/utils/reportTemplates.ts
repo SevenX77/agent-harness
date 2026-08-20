@@ -9,6 +9,7 @@ import type {
   TokensMetrics,
 } from '../api/types'
 import { eventSeverity } from './trace'
+import { fileStamp, momentInFull } from './wall-clock'
 
 export type ExportFormat = 'markdown' | 'html'
 
@@ -42,7 +43,7 @@ export function renderBatchReport(data: BatchReportData, format: ExportFormat): 
 }
 
 export function reportTimestamp(date = new Date()): string {
-  return date.toISOString().replace(/[:.]/g, '-')
+  return fileStamp(date)
 }
 
 export function reportFileBase(...parts: Array<string | null | undefined>): string {
@@ -293,8 +294,7 @@ function jsonBlock(value: unknown): string {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return momentInFull(value)
 }
 
 function statusIcon(status: string): string {

@@ -55,9 +55,31 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   分开只多一个名字,这些全部消失。**磁盘分开、UI 仍是一个列表**:`list_runs` 同时扫两个根,
   行的类型仍由 `RunMetadata.kind` 区分(C7 / 2026-08-07 D2 不变)。
   按不向后兼容原则,已存在的 run/predict 目录直接丢弃,不写迁移。
+  ⑤ **(2026-08-20 落地)D13 的理由管的是读者,不是 run id**——所以它对**每一个人会读到的
+  时刻**都成立:存的是带时区的 UTC 瞬间(那是代码用来算的东西,也是机器换时区后仍然正确的
+  东西),**呈现一律换算成读者本机的墙钟**,换算只发生在"值变成给人看的文字"那一个边界上。
+  没有这条规则时的实测(2026-08-20,真报告 `2026-08-19T06-58-15_179d1440/report.md`):
+  同一份报告相隔两行写着 `| Run | 2026-08-19T06-58-15_179d1440 |` 与
+  `| Started | 2026-08-19T13:58:15.556101Z |`——一个瞬间、两个读数、差七小时,
+  而报告读者和文件树读者是同一个人。**三处落地**:后端报告的 `Started`
+  (`services/run_report.py` 的 `_wall_clock`)、前端的唯一换算出口
+  (`utils/wall-clock.ts`,收编了此前散在五处的读法,其中 Settings 真相源那处是把偏移量
+  从字符串上抹掉、把 UTC 数字当本地显示)、导出文件名(`reportTimestamp` 改用同一个
+  `fileStamp`,与 run 目录同形)。
+  **两种读数格式不同是故意的**:报告里的 `2026-08-19 06:58:15 -07:00` 带偏移量,因为
+  一个光秃秃的本地戳说不出自己是哪个时区(借 `git log` 的既有做法——它就是这样打印
+  作者本地时间加偏移量的;偏移量写成 `-07:00` 而不是 git 的 `-0700`,是为了与本产品其它
+  地方写偏移量的拼法一致);run id 不带,因为文件名塞不下冒号,这也正是 id 用短横线的原因。
+  **不带时区的裸戳按本地读、不平移**:引擎处处写的是带时区的 UTC,所以真出现裸戳时,
+  给它加一次偏移会把读数搬走整整一个时区,报出一个这次 run 根本没有过的时刻。
 - 原话/来源: `01_workflows/04_run-and-verify.md` C17;决议
-  `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D13。
-- 测试: 冻结本地时钟后 run/predict id 形状锁定且共享同一戳;两者都能通过 run-id 路径段校验;
+  `docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md` D13;
+  2026-08-19 用户报障「run id/事件 UTC 与本地混用」(问题台账 E7)。
+- 测试: 报告的 `Started` 行读作存储瞬间的本机墙钟并带偏移量、不出现 `Z`,裸戳不被平移
+  (`tests/services/test_run_report_reads_in_local_time.py`);前端同一瞬间的三种写法
+  (`Z` / `-07:00` / `+02:00`)渲染出同一段文字,`fileStamp` 与 run id 同形且不含冒号
+  (`utils/wall-clock.test.ts`)。
+  冻结本地时钟后 run/predict id 形状锁定且共享同一戳;两者都能通过 run-id 路径段校验;
   team-save force-add 的是最新 run 目录本身;predict 跑完后 trace 落在 predicts 根、
   `runs/` 根**根本不存在**;`list_runs` 在两个根各放一条时返回两条;
   `list_workspace_dir` 为每个条目报出 `modified_ms`;两个 run 根按 mtime 倒序、

@@ -1,6 +1,7 @@
 import { FileText, FlaskConical, Play, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { formatRunDuration, formatRunTokens } from "@/utils/run-format"
+import { relativeTime } from "@/utils/wall-clock"
 import { runStatusMark } from "@/utils/run-status-mark"
 import type { RunMetadata } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
@@ -9,26 +10,6 @@ import { runReportOpenRequest } from "../../trace/TraceOutcomeRow"
 import { Button } from "../../ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip"
 import { PanelHeader } from "./_shared/PanelHeader"
-
-const relativeTime = (value: string): string => {
-  const timestamp = new Date(value).getTime()
-  if (Number.isNaN(timestamp)) {
-    return value
-  }
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
-  if (seconds < 60) {
-    return `${seconds}s ago`
-  }
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) {
-    return `${minutes}m ago`
-  }
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) {
-    return `${hours}h ago`
-  }
-  return `${Math.floor(hours / 24)}d ago`
-}
 
 const shortHash = (value?: string | null): string | null => {
   if (!value) return null

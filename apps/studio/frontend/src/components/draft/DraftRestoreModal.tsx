@@ -1,5 +1,6 @@
 import { AlertTriangle } from 'lucide-react'
 import type { StoredDraft } from '../../hooks/useDraftPersist'
+import { momentInFull } from '../../utils/wall-clock'
 import { Alert, AlertDescription } from '../ui/alert'
 import {
   AlertDialog,
@@ -21,13 +22,6 @@ interface DraftRestoreModalProps {
   onRestore: () => void
   onDiscard: () => void
   onCancel: () => void
-}
-
-function formatTime(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(timestamp))
 }
 
 function lineCount(value: string): number {
@@ -70,7 +64,7 @@ export function DraftRestoreModal({
         </AlertDialogHeader>
 
         <div className="grid gap-3 text-sm md:grid-cols-2">
-          <DraftStat label="Saved" value={formatTime(draft.timestamp)} />
+          <DraftStat label="Saved" value={momentInFull(draft.timestamp)} />
           <DraftStat label="Draft Size" value={`${lineCount(draft.content)} lines`} />
         </div>
 

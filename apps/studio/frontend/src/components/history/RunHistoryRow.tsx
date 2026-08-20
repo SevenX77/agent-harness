@@ -3,6 +3,7 @@ import type { RunMetadata } from '../../api/types'
 import { runTokenTotal } from '../../hooks/useRunHistory'
 import { ExportButton } from '../export/ExportButton'
 import type { ExportFormat } from '../../utils/reportTemplates'
+import { relativeTime } from '../../utils/wall-clock'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { TableCell, TableRow } from '../ui/table'
@@ -28,26 +29,6 @@ function statusVariant(status: RunMetadata['status']): 'default' | 'destructive'
 
 function shortRunId(runId: string): string {
   return runId.length > 18 ? `${runId.slice(0, 18)}...` : runId
-}
-
-function relativeTime(value: string): string {
-  const timestamp = new Date(value).getTime()
-  if (Number.isNaN(timestamp)) {
-    return value
-  }
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
-  if (seconds < 60) {
-    return `${seconds}s ago`
-  }
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) {
-    return `${minutes}m ago`
-  }
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) {
-    return `${hours}h ago`
-  }
-  return `${Math.floor(hours / 24)}d ago`
 }
 
 export function RunHistoryRow({

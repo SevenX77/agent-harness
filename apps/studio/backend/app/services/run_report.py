@@ -243,6 +243,41 @@ def _error_line(event: dict[str, Any]) -> str:
 # rendering
 
 
+def _wall_clock(value: Any) -> str:
+    """One stored instant, read on the clock of the person reading the report.
+
+    Decision D13 (`run-execution/mvp1-alignment.md` F1b) already settled this for
+    the run id — a UTC stamp reads as the wrong time to the person looking at it
+    — and the report is the same person looking at the same run. Printing the
+    stored value verbatim put both readings on one page seven hours apart.
+
+    Storage stays aware UTC: an instant is what everything computes with, and a
+    local stamp on disk is ambiguous the moment the machine's zone changes. The
+    conversion belongs here, at the edge where a value becomes text for a human.
+
+    The offset rides along because a bare local stamp cannot say which zone it
+    is. Borrowed from `git log`, which prints the author's local time with its
+    offset for that reason; spelled `-07:00` rather than git's `-0700` so the
+    offset reads the same here as everywhere else this product writes one. The
+    run id carries no offset at all — a filename has no room for one — which is
+    why the two readings are formatted differently on purpose.
+    """
+    if not isinstance(value, str) or not value:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        # Already a local wall clock — shifting it would name a moment the run
+        # never had. Stamped without an offset because inventing one would
+        # claim a zone the value never carried.
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    local = parsed.astimezone()
+    offset = local.strftime("%z")
+    return f"{local.strftime('%Y-%m-%d %H:%M:%S')} {offset[:3]}:{offset[3:]}"
+
+
 def _summary_section(
     run_dir: Path,
     metadata: dict[str, Any],
@@ -263,7 +298,7 @@ def _summary_section(
         ("Run", f"`{run_dir.name}`"),
         ("Status", str(metadata.get("status", "unknown"))),
         ("Kind", str(metadata.get("kind", "run"))),
-        ("Started", str(metadata.get("started_at", "—"))),
+        ("Started", _wall_clock(metadata.get("started_at"))),
         ("Wall time", f"{float(wall_time):.2f}s" if isinstance(wall_time, (int, float)) else "—"),
         ("Tokens", f"{input_tokens} in / {output_tokens} out / {input_tokens + output_tokens} total"),
         ("LLM calls", str(llm_calls)),

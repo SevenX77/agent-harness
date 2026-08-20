@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, Copy, ExternalLink, FolderOpen, RotateCcw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { dateAndTime, timeOfDay } from "@/utils/wall-clock"
 import { toast } from "sonner"
 import {
   type CommunityCatalogConfig,
@@ -632,17 +633,11 @@ function formatSize(size: number | null): string {
 
 function formatTimestamp(value: string | null): string {
   if (!value) return "-"
-  return value.replace("T", " ").replace(/\+\d\d:\d\d$/, "")
+  return dateAndTime(value)
 }
 
 function formatLogTime(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return value
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date)
+  return timeOfDay(value) ?? value
 }
 
 function timestampValue(value: string): number {

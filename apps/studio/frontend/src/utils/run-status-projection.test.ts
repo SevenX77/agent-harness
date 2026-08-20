@@ -5,6 +5,7 @@ import {
   deriveNodeErrorMessages,
   deriveNodeStatuses,
   runVerdict,
+  deriveNodeRuntimes,
   runningPhaseOf,
 } from "./run-status-projection"
 
@@ -142,5 +143,60 @@ describe("deriveNodeErrorMessages / runningPhaseOf — migrated behaviors", () =
       event({ event_type: "phase_start", phase_name: "draft" }),
     ])
     expect(runningPhaseOf(statuses)).toBe("draft")
+  })
+})
+
+describe("deriveNodeRuntimes", () => {
+  it("times a finished phase from its own start and end frames", () => {
+    const runtimes = deriveNodeRuntimes([
+      event({
+        event_type: "phase_start",
+        phase_name: "draft",
+        timestamp: "2026-06-15T00:00:00Z",
+      }),
+      event({
+        event_type: "phase_end",
+        phase_name: "draft",
+        timestamp: "2026-06-15T00:00:12.500Z",
+      }),
+    ])
+    expect(runtimes.draft).toEqual({ startedAtMs: Date.parse("2026-06-15T00:00:00Z"), endedAtMs: Date.parse("2026-06-15T00:00:12.500Z") })
+  })
+
+  it("leaves a still-running phase open-ended so the card can tick", () => {
+    const runtimes = deriveNodeRuntimes([
+      event({ event_type: "phase_start", phase_name: "draft", timestamp: "2026-06-15T00:00:00Z" }),
+    ])
+    expect(runtimes.draft).toEqual({ startedAtMs: Date.parse("2026-06-15T00:00:00Z"), endedAtMs: null })
+  })
+
+  it("keeps the LAST attempt's clock when a phase runs twice in one run", () => {
+    const runtimes = deriveNodeRuntimes([
+      event({ event_type: "phase_start", phase_name: "draft", timestamp: "2026-06-15T00:00:00Z" }),
+      event({ event_type: "phase_end", phase_name: "draft", timestamp: "2026-06-15T00:00:05Z" }),
+      event({ event_type: "phase_start", phase_name: "draft", timestamp: "2026-06-15T00:00:20Z" }),
+      event({ event_type: "phase_end", phase_name: "draft", timestamp: "2026-06-15T00:00:26Z" }),
+    ])
+    expect(runtimes.draft).toEqual({ startedAtMs: Date.parse("2026-06-15T00:00:20Z"), endedAtMs: Date.parse("2026-06-15T00:00:26Z") })
+  })
+
+  it("ignores frames belonging to another run", () => {
+    const runtimes = deriveNodeRuntimes(
+      [
+        envelope({ event_type: "phase_start", phase_name: "draft", timestamp: "2026-06-15T00:00:00Z" }, { runId: "run-2" }),
+      ],
+      "run-1",
+    )
+    expect(runtimes.draft).toBeUndefined()
+  })
+
+  it("closes an open clock at the run's own end so a dead stream stops ticking", () => {
+    const runtimes = deriveNodeRuntimes(
+      [
+        event({ event_type: "phase_start", phase_name: "draft", timestamp: "2026-06-15T00:00:00Z" }),
+        event({ event_type: "run_ended", timestamp: "2026-06-15T00:00:30Z", status: "completed" }),
+      ],
+    )
+    expect(runtimes.draft).toEqual({ startedAtMs: Date.parse("2026-06-15T00:00:00Z"), endedAtMs: Date.parse("2026-06-15T00:00:30Z") })
   })
 })

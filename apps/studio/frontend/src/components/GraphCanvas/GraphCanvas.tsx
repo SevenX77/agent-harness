@@ -38,7 +38,7 @@ import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
-import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildEdges, createContextEdge, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
 import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
@@ -53,7 +53,7 @@ import { edgeContextFromEvents } from '@/lib/edge-context'
 import { staticEdgeInference } from '@/lib/edge-static-inference'
 import { errorMessage } from '@/utils/errors'
 import type { PanelKind } from '@/components/studio/Toolbar'
-import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
+import { buildNodes, buildNodesFromTopology, phaseKindFile, type NodeRunProjection } from './build-nodes'
 import {
   type NewPhaseKind,
   addSequentialOverwriteField,
@@ -155,6 +155,8 @@ interface GraphCanvasProps {
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   errorMessageByNodeId?: Record<string, string>
+  /** Per-node run segments (start / end) for the elapsed time on each card. */
+  runtimeByNodeId?: Record<string, NodeRuntime>
   // N5 atom #3 (dirty-downstream-graying): the resume-validity `affected_downstream`
   // node ids. Workspace derives this from the real validity response for the node
   // being resumed from; the canvas grays exactly these nodes (unrelated branches
@@ -691,6 +693,7 @@ export function GraphCanvas({
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
+  runtimeByNodeId,
   dirtyDownstreamNodeIds,
   compact = false,
   hideMiniMap = false,
@@ -1273,6 +1276,17 @@ export function GraphCanvas({
   )
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
   const safeErrorMessageByNodeId = useMemo(() => errorMessageByNodeId ?? {}, [errorMessageByNodeId])
+  // The three run-derived maps travel to buildNodes as ONE projection (see
+  // NodeRunProjection): status, failure reason and clock all describe the same
+  // run and must never be supplied piecemeal.
+  const runProjection = useMemo<NodeRunProjection>(
+    () => ({
+      statusByNodeId: safeStatusByNodeId,
+      errorMessageByNodeId: safeErrorMessageByNodeId,
+      runtimeByNodeId: runtimeByNodeId ?? {},
+    }),
+    [safeStatusByNodeId, safeErrorMessageByNodeId, runtimeByNodeId],
+  )
   const safeDirtyDownstreamNodeIds = useMemo(
     () => dirtyDownstreamNodeIds ?? new Set<string>(),
     [dirtyDownstreamNodeIds],
@@ -1399,7 +1413,7 @@ export function GraphCanvas({
       // as a first-class editable graph with buildNodes (reusing the root edit
       // wiring). Until then, render the topology-only projection.
       if (childDetail && !isDrilledChildReadOnly) {
-        return buildNodes(childNodeSkillId, childDetail, expandedSubgraphs, toggleSubgraph, {}, {}, {}, {}, childAgentSteps, childGraph.path)
+        return buildNodes(childNodeSkillId, childDetail, expandedSubgraphs, toggleSubgraph, {}, {}, {}, childAgentSteps, childGraph.path)
           .map((node) => node.type === 'skill'
             ? { ...node, data: { ...node.data, resolvedSkillDetail: childDetail } }
             : node)
@@ -1407,8 +1421,8 @@ export function GraphCanvas({
       return buildNodesFromTopology(childNodeSkillId, childGraph.phases, childGraph.graph_topology, {}, childAgentSteps, childGraph.path)
     }
     if (isLoading && !skillDetail) return []
-    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, agentStepsInputs, workspaceRoot ?? null)
-  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, isLoading, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph, workspaceRoot])
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, runProjection, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, agentStepsInputs, workspaceRoot ?? null)
+  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, isLoading, runProjection, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, skillDetail, skillId, toggleSubgraph, workspaceRoot])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],

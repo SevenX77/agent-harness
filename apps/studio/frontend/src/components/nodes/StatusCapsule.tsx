@@ -1,41 +1,52 @@
 import type { ComponentProps } from 'react'
-import { AlertTriangle, CheckCircle2, Circle, Pause, Radio, Workflow } from 'lucide-react'
 import { NODE_CAPSULE_BASE } from './node-card'
 import type { SkillNodeStatus } from './types'
 
 // The run-status capsule (decision 2026-08-13 D8): ONE definition of how a
 // node status looks, consumed wherever a canvas card shows one. The status
 // VALUES come from run-status-projection (D7) — this is only their clothes.
-export const STATUS_STYLE: Record<SkillNodeStatus, { label: string; className: string; icon: typeof Circle }> = {
+//
+// The mark is a LAMP DOT, not a glyph: canvas design F3 ② specifies 小圆点灯,
+// and the dot it names is the one Settings already uses for a live route
+// (`roleRouteStatusLightClass` in settings/llm-roles/role-route-status.tsx) —
+// same size, same ring, same pulse while working. A per-status icon set was
+// drift: six glyphs to learn where one dot's colour already says it, and the
+// two states a reader most needs to tell apart at a glance (running vs
+// success) differed by icon SHAPE, which is the slowest difference to read on
+// a zoomed-out board.
+export const STATUS_STYLE: Record<SkillNodeStatus, { label: string; className: string; lampClassName: string }> = {
   idle: {
     label: 'Idle',
     className: 'border-border bg-card text-muted-foreground',
-    icon: Circle,
+    lampClassName: 'bg-muted-foreground/50 ring-border',
   },
   running: {
     label: 'Running',
-    className: 'animate-pulse-primary border-primary bg-primary/10 text-link',
-    icon: Radio,
+    className: 'border-primary bg-primary/10 text-link',
+    lampClassName: 'animate-pulse bg-primary ring-primary/30',
   },
   success: {
     label: 'Success',
     className: 'border-success-border/60 bg-success/10 text-success',
-    icon: CheckCircle2,
+    lampClassName: 'bg-success ring-success-border',
   },
+  // "Failed", not "Error": the label sits in the same row as the run's own
+  // vocabulary (idle / running / success / failed), and a node that failed is
+  // reporting its outcome, not naming an exception class.
   error: {
-    label: 'Error',
+    label: 'Failed',
     className: 'border-destructive/50 bg-destructive/10 text-destructive',
-    icon: AlertTriangle,
+    lampClassName: 'bg-destructive ring-destructive-border',
   },
   paused: {
     label: 'Paused',
     className: 'border-warning-border/60 bg-warning/10 text-warning',
-    icon: Pause,
+    lampClassName: 'bg-warning ring-warning-border',
   },
   breakpoint: {
     label: 'Breakpoint',
     className: 'border-primary/45 bg-primary/10 text-link',
-    icon: Workflow,
+    lampClassName: 'bg-primary ring-primary/30',
   },
 }
 
@@ -46,10 +57,12 @@ export function StatusCapsule({
   ...spanProps
 }: { status: SkillNodeStatus } & ComponentProps<'span'>) {
   const style = STATUS_STYLE[status]
-  const StatusIcon = style.icon
   return (
     <span {...spanProps} className={[NODE_CAPSULE_BASE, style.className].join(' ')}>
-      <StatusIcon className="size-3" />
+      <span
+        aria-hidden
+        className={['inline-flex size-1.5 shrink-0 rounded-full ring-1', style.lampClassName].join(' ')}
+      />
       {style.label}
     </span>
   )

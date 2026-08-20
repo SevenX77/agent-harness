@@ -1,5 +1,6 @@
 import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { EdgeContextJson } from '@/components/studio/WorkspaceContext'
+import { eventCrossesEdge } from '@/utils/edge-identity'
 
 type TraceEventInput = CallbackEvent | EventEnvelope
 
@@ -11,29 +12,15 @@ function callbackPayload(event: TraceEventInput): CallbackEvent {
   return event as CallbackEvent
 }
 
-function isInputDispatch(event: CallbackEvent): boolean {
-  return event.event_type === 'input_dispatch'
-}
-
-function phaseMatches(eventPhase: unknown, edgePhase: string): boolean {
-  return eventPhase === edgePhase
-}
-
-/**
- * An edge operation names the phases its transition joins as a LIST: a fan-in
- * transition genuinely has several upstreams, so asking "did this come from
- * that phase" is a membership question, not an equality one.
- */
-function upstreamIncludes(event: CallbackEvent, fromPhase: string): boolean {
-  const from = event.from_phases
-  return Array.isArray(from) && from.includes(fromPhase)
-}
-
 /**
  * Resolve the real transition data that flowed across one graph edge for the
- * selected run. Scans `events` for the LAST `input_dispatch` event whose
- * from/to phases match the edge (source -> target) and maps its flat
- * `blackboard_snapshot` into the shape the Properties panel renders.
+ * selected run. Scans `events` for the LAST `input_dispatch` belonging to the
+ * edge (source -> target) and maps its flat `blackboard_snapshot` into the
+ * shape the Properties panel renders.
+ *
+ * Whether an event belongs to the edge is `edge-identity`'s answer, shared with
+ * the trace scope — including the root edge, whose transition reports an empty
+ * upstream list because the run input, not a phase, is what precedes it.
  *
  * Returns `null` when no matching transition exists (caller shows an empty
  * state instead of falling back to mock data).
@@ -46,10 +33,10 @@ export function edgeContextFromEvents(
   let match: CallbackEvent | null = null
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
-    if (!isInputDispatch(event)) {
+    if (event.event_type !== 'input_dispatch') {
       continue
     }
-    if (upstreamIncludes(event, fromPhase) && phaseMatches(event.to_phase, toPhase)) {
+    if (eventCrossesEdge(event, fromPhase, toPhase)) {
       match = event
     }
   }

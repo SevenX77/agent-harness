@@ -89,21 +89,41 @@ describe('edgeContextFromEvents', () => {
     expect(result?.inputs).toEqual({ attempt: 2 })
   })
 
-  it('matches a literal input dependency only when the event reports input', () => {
+  it('resolves the Input-boundary edge, whether or not the engine names the boundary', () => {
+    // The first phase has no predecessor, so the engine emits from_phases: []
+    // (core/edge_transition.py sets it from the compiled upstream list). That
+    // empty list IS the root transition — reading it as "no match" is what left
+    // the run's first edge dot showing the pre-run static guess after a green
+    // run (ledger T6 缺陷①).
     const snapshot = { query: 'kick off' }
-    const fromNull = edgeContextFromEvents(
+    const fromEmpty = edgeContextFromEvents(
       [dispatchEvent(null, 'planner', snapshot)],
       'input',
       'planner',
     )
-    const fromInput = edgeContextFromEvents(
+    const fromNamed = edgeContextFromEvents(
       [dispatchEvent('input', 'planner', snapshot)],
       'input',
       'planner',
     )
+    const fromCanvasId = edgeContextFromEvents(
+      [dispatchEvent(null, 'planner', snapshot)],
+      '__global_input__',
+      'planner',
+    )
 
-    expect(fromNull).toBeNull()
-    expect(fromInput?.inputs).toEqual(snapshot)
+    expect(fromEmpty?.inputs).toEqual(snapshot)
+    expect(fromNamed?.inputs).toEqual(snapshot)
+    expect(fromCanvasId?.inputs).toEqual(snapshot)
+  })
+
+  it('does not hand a root transition to an ordinary phase-to-phase edge', () => {
+    const snapshot = { query: 'kick off' }
+    expect(edgeContextFromEvents(
+      [dispatchEvent(null, 'planner', snapshot)],
+      'upstream',
+      'planner',
+    )).toBeNull()
   })
 
   it('returns null when no event matches the edge', () => {

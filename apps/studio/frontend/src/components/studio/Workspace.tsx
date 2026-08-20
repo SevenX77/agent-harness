@@ -733,9 +733,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [updateStage])
 
   const runStream = useRunStream(skillId, runId)
-  // The ONE event source the trace reads: live stream while viewing live, the
-  // fetched history otherwise — fix C, decision 2026-08-07.
-  const viewedTraceEvents = viewedTrace?.source === "history" ? viewedTrace.events : runStream.events
+  const isViewingHistory = viewedTrace?.source === "history"
   // F7: a finished run (run_ended in the stream) drives the copilot analysis bar.
   const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
     ? runId
@@ -856,17 +854,35 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // kill the stream before `run_ended` ever arrives, and only the record then
   // says the run is over.
   const liveRunMetadata = liveRunRecord?.runId === runId ? liveRunRecord.metadata : null
+
+  // The ONE run this workspace is showing, as the whole triple: which run, its
+  // record, its events. Live stream + live record while viewing live; the
+  // fetched history once the reader opens an older run (fix C, decision
+  // 2026-08-07 — "every reader of this run takes the same viewed events").
+  //
+  // Both canvas projections and the trace panel read it, because they render
+  // the same run from two angles. They used not to: the panel followed the
+  // viewed run while the canvas was hard-wired to the live stream, so opening
+  // a finished run from the timeline left every edge dot with no transition to
+  // find and the pre-run static guess back on screen (ledger T6 缺陷②).
+  const viewedRun = useMemo(
+    () => (viewedTrace?.source === "history"
+      ? { runId: viewedTrace.runId, metadata: viewedTrace.metadata, events: viewedTrace.events }
+      : { runId, metadata: liveRunMetadata, events: runStream.events }),
+    [viewedTrace, runId, liveRunMetadata, runStream.events],
+  )
+  const viewedTraceEvents = viewedRun.events
   const statusByNodeId = useMemo(
-    () => deriveNodeStatuses(runStream.events, runId, liveRunMetadata),
-    [runId, runStream.events, liveRunMetadata],
+    () => deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
+    [viewedRun],
   )
   const errorMessageByNodeId = useMemo(
-    () => deriveNodeErrorMessages(runStream.events, runId),
-    [runId, runStream.events],
+    () => deriveNodeErrorMessages(viewedRun.events, viewedRun.runId),
+    [viewedRun],
   )
   const runtimeByNodeId = useMemo(
-    () => deriveNodeRuntimes(runStream.events, runId),
-    [runId, runStream.events],
+    () => deriveNodeRuntimes(viewedRun.events, viewedRun.runId),
+    [viewedRun],
   )
   const selectedNodeStatus = useMemo(
     () => selectedNodeId
@@ -2256,7 +2272,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     selectedEdge,
     setSelectedEdge,
     onPanelChange: setActivePanel,
-    traceEvents: runStream.events,
+    traceEvents: viewedTraceEvents,
   }), [
     activeFileDetails,
     closeFile,
@@ -2277,7 +2293,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     selectedEdge,
     setSelectedEdge,
     setActivePanel,
-    runStream.events,
+    viewedTraceEvents,
   ])
 
   const handleCompile = useCallback(() => {
@@ -2518,7 +2534,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // resume target) and re-run it whenever the skill content changes (skillDetail.files flips on
   // SWR revalidation after a save). The backend per-node slice (B1) keeps unrelated side-branches
   // out of `affected_downstream`, so graying stays scoped to nodes the edit actually reaches.
-  const resumeAnchorId = useMemo(() => resumeAnchorNodeId(statusByNodeId), [statusByNodeId])
+  // Resume acts on the LIVE run, so its anchor may only be read off a live
+  // board. Now that the canvas lights follow whichever run the reader opened, a
+  // failed node in a run from last week would otherwise anchor a resume-validity
+  // probe against today's run id — a question about two different runs at once.
+  const resumeAnchorId = useMemo(
+    () => (isViewingHistory ? null : resumeAnchorNodeId(statusByNodeId)),
+    [isViewingHistory, statusByNodeId],
+  )
   const resumeAnchorCheckpoint = useMemo(
     () => (resumeAnchorId ? nodeResumeCheckpointFromEvents(runStream.events, resumeAnchorId, runId) : null),
     [resumeAnchorId, runStream.events, runId],

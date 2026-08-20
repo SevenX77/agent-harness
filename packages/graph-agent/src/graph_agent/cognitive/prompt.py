@@ -171,58 +171,18 @@ def apply_cognitive_template(
 """.strip()
 
 
-def apply_v030_cognitive_template(
-    *,
-    phase_name: str,
-    role: str,
-    goal: str,
-    steps: list[dict[str, str]],
-    protocols: list[dict[str, str]],
-    output_schema: dict[str, Any] | None = None,
-    knowledge_base: str = "",
-    knowledge_base_markdown: str | None = None,
-    reference_registry_listing: str = "",
-    inline_examples: list[str] | None = None,
-    document_examples: list[dict[str, str]] | None = None,
-    example_registry_listing: str = "",
-    role_prefix: str = "",
-) -> str:
-    """Compose the V0.3.0 eight-slot cognitive template for Agent phases."""
-
-    role_prefix_section = (
-        f"<llm_role_prefix>\n{role_prefix.strip()}\n</llm_role_prefix>\n"
-        if role_prefix and role_prefix.strip()
-        else ""
-    )
-    steps_md = (
-        "\n".join(
-            f"- [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".strip()
-            for item in steps
-        )
-        or "无显式步骤"
-    )
-    protocols_md = (
-        "\n".join(
-            f"- [protocol:{item.get('id', '')}] {item.get('content', '')}".strip()
-            for item in protocols
-        )
-        or "无显式协议"
-    )
-    inline_examples_md = "\n\n".join(inline_examples or []) or "无内联示范"
-    if not example_registry_listing:
-        example_registry_listing = _format_document_examples(document_examples or [])
-    if not reference_registry_listing:
-        reference_registry_listing = "无注册 Reference"
-    aligned_markdown = (
-        knowledge_base_markdown if knowledge_base_markdown is not None else knowledge_base
-    ).strip() or "无预读取参考资料"
-    schema_md = json.dumps(output_schema, ensure_ascii=False, indent=2) if output_schema else "{}"
-    skeleton_md = _render_business_data_md_skeleton(output_schema)
-    business_data_md_shape = (
-        f"{_BUSINESS_DATA_MD_SHAPE_RULE}\n\n{skeleton_md}\n" if skeleton_md else ""
-    )
-
-    return f"""
+#: The V0.3.0 eight-slot cognitive template, un-substituted.
+#:
+#: A module constant rather than an f-string body so the TEXT itself is a
+#: value the run can report. A reader looking at a prompt has to be able to
+#: tell "the model was told this because the template says so" from "because
+#: the phase author wrote it" — the template id alone cannot answer that
+#: without the text to compare against, and no file on disk holds it.
+#:
+#: Substituted with ``str.format``, so every ``{name}`` here is a slot and a
+#: literal brace would have to be doubled. There are none today, and a test
+#: pins the rendered output byte-for-byte against what the f-string produced.
+V030_COGNITIVE_TEMPLATE_TEXT = """\
 <role>
 {role}
 </role>
@@ -289,7 +249,73 @@ def apply_v030_cognitive_template(
 {schema_md}
 </output_schema>
 {business_data_md_shape}</exit_contract>
-""".strip()
+"""
+
+def apply_v030_cognitive_template(
+    *,
+    phase_name: str,
+    role: str,
+    goal: str,
+    steps: list[dict[str, str]],
+    protocols: list[dict[str, str]],
+    output_schema: dict[str, Any] | None = None,
+    knowledge_base: str = "",
+    knowledge_base_markdown: str | None = None,
+    reference_registry_listing: str = "",
+    inline_examples: list[str] | None = None,
+    document_examples: list[dict[str, str]] | None = None,
+    example_registry_listing: str = "",
+    role_prefix: str = "",
+) -> str:
+    """Compose the V0.3.0 eight-slot cognitive template for Agent phases."""
+
+    role_prefix_section = (
+        f"<llm_role_prefix>\n{role_prefix.strip()}\n</llm_role_prefix>\n"
+        if role_prefix and role_prefix.strip()
+        else ""
+    )
+    steps_md = (
+        "\n".join(
+            f"- [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".strip()
+            for item in steps
+        )
+        or "无显式步骤"
+    )
+    protocols_md = (
+        "\n".join(
+            f"- [protocol:{item.get('id', '')}] {item.get('content', '')}".strip()
+            for item in protocols
+        )
+        or "无显式协议"
+    )
+    inline_examples_md = "\n\n".join(inline_examples or []) or "无内联示范"
+    if not example_registry_listing:
+        example_registry_listing = _format_document_examples(document_examples or [])
+    if not reference_registry_listing:
+        reference_registry_listing = "无注册 Reference"
+    aligned_markdown = (
+        knowledge_base_markdown if knowledge_base_markdown is not None else knowledge_base
+    ).strip() or "无预读取参考资料"
+    schema_md = json.dumps(output_schema, ensure_ascii=False, indent=2) if output_schema else "{}"
+    skeleton_md = _render_business_data_md_skeleton(output_schema)
+    business_data_md_shape = (
+        f"{_BUSINESS_DATA_MD_SHAPE_RULE}\n\n{skeleton_md}\n" if skeleton_md else ""
+    )
+
+    return V030_COGNITIVE_TEMPLATE_TEXT.format(
+        role=role,
+        role_prefix_section=role_prefix_section,
+        goal=goal,
+        steps_md=steps_md,
+        aligned_markdown=aligned_markdown,
+        reference_registry_listing=reference_registry_listing,
+        inline_examples_md=inline_examples_md,
+        example_registry_listing=example_registry_listing,
+        protocols_md=protocols_md,
+        V030_AGENT_EXIT_CONTRACT_TEXT=V030_AGENT_EXIT_CONTRACT_TEXT,
+        schema_md=schema_md,
+        business_data_md_shape=business_data_md_shape,
+    ).strip()
 
 
 def _format_document_examples(document_examples: list[dict[str, str]]) -> str:

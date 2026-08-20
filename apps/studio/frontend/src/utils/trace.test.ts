@@ -7,6 +7,7 @@ import {
   eventColor,
   eventFacts,
   machineryNarration,
+  promptMessages,
   eventMessageIsRedundant,
   eventMessage,
   eventModelName,
@@ -379,5 +380,45 @@ describe('every machinery step says what it did (glass-box D4)', () => {
     const unread = ENGINE_EVENT_TYPES.filter((type) => eventFacts(ev({ event_type: type })) === null)
 
     expect(unread).toEqual([])
+  })
+})
+
+describe('a prompt says where each part of it came from', () => {
+  function ev(payload: Partial<CallbackEvent>): CallbackEvent {
+    return { schema_version: '1.0', timestamp: '2026-08-20T00:00:00Z', ...payload } as CallbackEvent
+  }
+
+  it('splits the sent messages by who spoke', () => {
+    expect(promptMessages(ev({
+      event_type: 'prompt_captured',
+      resolved_prompt: [
+        { role: 'system', content: 'you are an analyst' },
+        { role: 'human', content: 'summarize this' },
+      ],
+    }))).toEqual([
+      { role: 'System', text: 'you are an analyst' },
+      { role: 'User', text: 'summarize this' },
+    ])
+  })
+
+  it('names a role it has no friendly word for rather than dropping the message', () => {
+    expect(promptMessages(ev({
+      event_type: 'prompt_captured',
+      resolved_prompt: [{ role: 'tool', content: 'result' }],
+    }))).toEqual([{ role: 'tool', text: 'result' }])
+  })
+
+  it('keeps a structured content block readable instead of "[object Object]"', () => {
+    const messages = promptMessages(ev({
+      event_type: 'prompt_captured',
+      resolved_prompt: [{ role: 'human', content: [{ type: 'text', text: 'hello' }] }],
+    }))
+
+    expect(messages[0].text).toContain('hello')
+    expect(messages[0].text).not.toContain('[object Object]')
+  })
+
+  it('is empty when the call carried no messages, rather than inventing one', () => {
+    expect(promptMessages(ev({ event_type: 'prompt_captured' }))).toEqual([])
   })
 })

@@ -119,6 +119,11 @@ class LLMProviderChatModel(BaseChatModel):
     # call should not have to find the phase that built the model to learn why
     # the prompt says what it says.
     prompt_template_source: str | None = None
+    #: The un-substituted template text and the authored document's path — the
+    #: other two halves of "why does this prompt say what it says". Constant for
+    #: the phase, announced on every call for the same reason the source id is.
+    prompt_template_text: str | None = None
+    prompt_source_path: str | None = None
     prompt_variables: dict[str, Any] = Field(default_factory=dict)
     # Shared so a bound copy keeps counting where the original left off (the
     # agent loop binds tools once and then invokes the bound copy every turn,
@@ -210,6 +215,8 @@ class LLMProviderChatModel(BaseChatModel):
             sub_run_id=self.sub_run_id,
             group_key=self.group_key,
             template_source=self.prompt_template_source,
+            template_text=self.prompt_template_text,
+            phase_source_path=self.prompt_source_path,
             variables=self.prompt_variables,
         ) as step:
             # The answer is consumed slice by slice even though the agent loop

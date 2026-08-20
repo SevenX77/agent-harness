@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
 import { nodeCardClass, type NodeCardRing } from './node-card'
+import { NodeRuntimeClock } from './node-runtime'
 import { STATUS_STYLE, StatusCapsule } from './StatusCapsule'
 import {
   SKILL_FLOW_SOURCE_HANDLE_ID,
@@ -32,6 +33,7 @@ function phaseKindIcon(kind: PhaseKind): typeof Bot {
 
 export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const statusLabel = STATUS_STYLE[data.status].label
+  const isRunning = data.status === 'running'
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
   const subagentCount = data.subagents?.length ?? 0
@@ -66,7 +68,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       className={nodeCardClass({
         minWidth: 'min-w-[240px]',
         ring,
-        extra: [isDirtyDownstream && 'opacity-50 grayscale'],
+        extra: [isDirtyDownstream && 'opacity-50 grayscale', isRunning && 'node-running-dash-frame'],
       })}
     >
       <Handle
@@ -127,12 +129,15 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             ) : null}
           </div>
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <StatusCapsule status={data.status} />
-          </TooltipTrigger>
-          <TooltipContent side="top">{statusLabel}</TooltipContent>
-        </Tooltip>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <StatusCapsule status={data.status} />
+            </TooltipTrigger>
+            <TooltipContent side="top">{statusLabel}</TooltipContent>
+          </Tooltip>
+          {data.runtime ? <NodeRuntimeClock runtime={data.runtime} running={isRunning} /> : null}
+        </div>
       </div>
       {inlineErrorMessage ? (
         <div

@@ -429,6 +429,57 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   mask-composite: exclude;
 }
 
+/* Running node card: marching dashes around the border (canvas design F3 ②).
+   Two in-repo idioms combined, on purpose:
+   - the DASH PATTERN and its march are the edge's (`.animated-flow-line`), so a
+     running node and a running edge read as the same event, not two designs;
+   - the CARRIER is the masked-gradient border ring of
+     `provider-card-border-flow` — a CSS border cannot animate its dash offset,
+     and the ring paints on ::after so nothing in the card's own layout moves
+     when the state flips.
+   The dashes come from a repeating-linear-gradient (hard colour stops), where
+   the provider ring used a soft sweep; background-position drives both. One
+   dash cycle is 12px, and the animation travels exactly one cycle, so the
+   march is seamless at any card width. */
+@keyframes node-running-dash-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 12px 0;
+  }
+}
+
+.node-running-dash-frame::after {
+  animation: node-running-dash-flow 0.6s linear infinite;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--primary) 0,
+    var(--primary) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  padding: 1.5px;
+  pointer-events: none;
+  position: absolute;
+  -webkit-mask:
+    linear-gradient(currentColor 0 0) content-box,
+    linear-gradient(currentColor 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+/* The board can hold dozens of nodes; a reader who asked the OS for less motion
+   gets the same information as a steady ring instead of dozens of marches. */
+@media (prefers-reduced-motion: reduce) {
+  .node-running-dash-frame::after {
+    animation: none;
+  }
+}
+
 /* React Flow theme overrides (per tokens.md §1.6) */
 .react-flow .react-flow__controls {
   background: var(--color-card) !important;

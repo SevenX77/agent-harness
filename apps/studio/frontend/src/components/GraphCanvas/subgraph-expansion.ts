@@ -239,7 +239,7 @@ function layoutChild(
 
   const childDetail = detail ? { ...detail, graph_topology: graphTopology } : undefined
   const childNodes = childDetail
-    ? buildNodes(skillId, childDetail, new Set(), () => undefined, {}, {}, {}, {}, {}, workspaceRoot)
+    ? buildNodes(skillId, childDetail, new Set(), () => undefined, {}, {}, {}, {}, workspaceRoot)
     : buildNodesFromTopology(skillId, phases, graphTopology, {}, {}, workspaceRoot)
   const childPhaseNodes = childNodes.filter((node): node is SkillGraphNode => node.type === 'skill')
   const childEdges = buildEdges(childPhaseNodes)

@@ -46,7 +46,7 @@ import {
   projectGateEvent,
   type SkillGateEvent,
 } from "./gate-state"
-import { deriveNodeErrorMessages, deriveNodeStatuses, runningPhaseOf } from "@/utils/run-status-projection"
+import { deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runningPhaseOf } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -864,6 +864,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     () => deriveNodeErrorMessages(runStream.events, runId),
     [runId, runStream.events],
   )
+  const runtimeByNodeId = useMemo(
+    () => deriveNodeRuntimes(runStream.events, runId),
+    [runId, runStream.events],
+  )
   const selectedNodeStatus = useMemo(
     () => selectedNodeId
       ? statusByNodeId[selectedNodeId] ?? selectedNode?.data.status ?? null
@@ -1001,7 +1005,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     if (file.skillId && file.skillId !== currentSkillId) return
     const phaseId = phaseIdFromFilePath(file.path)
     if (!phaseId) return
-    const nodes = buildNodes(currentSkillId, skillDetail, new Set(), () => {}, {}, {}, {}, {}, {}, currentWorkspaceRoot ?? null)
+    const nodes = buildNodes(currentSkillId, skillDetail, new Set(), () => {}, {}, {}, {}, {}, currentWorkspaceRoot ?? null)
     const match = nodes.find(
       (node) => node.type === "skill" && (node.data as SkillGraphNodeData).phaseId === phaseId,
     )
@@ -2912,6 +2916,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       compileErrorsByNodeId={compileErrorsByNodeId}
                       goldenStateByNodeId={goldenStateByNodeId}
                       errorMessageByNodeId={errorMessageByNodeId}
+                      runtimeByNodeId={runtimeByNodeId}
                       dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
                       hideMiniMap={editorOpen || !hasMiniMapSpace}
                       runId={runId}

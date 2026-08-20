@@ -1,5 +1,5 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
-import type { SkillNodeStatus } from "@/components/GraphCanvas"
+import type { NodeRuntime, SkillNodeStatus } from "@/components/GraphCanvas"
 import { ENGINE_EVENT_TYPES } from "./engine-events"
 
 // ————————————————————————————————————————————————————————————————————————————
@@ -192,6 +192,60 @@ export function deriveNodeStatuses(
     }
   }
   return statuses
+}
+
+function eventTimeMs(event: CallbackEvent): number | null {
+  const raw = event.timestamp
+  if (typeof raw !== "string") return null
+  const parsed = Date.parse(raw)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+/**
+ * Derive the per-node run-segment clock from an ordered trace event stream.
+ *
+ * A phase re-entered inside one run (a loop iteration, a retry) restarts its
+ * clock: the reader is watching THIS attempt, not the sum of every attempt, so
+ * `phase_start` always opens a fresh segment and the last attempt is the one
+ * that survives. `phase_end` closes the segment it belongs to; anything still
+ * open when the run itself ends is closed at the run's own end frame, which is
+ * what stops a card ticking forever after the stream died mid-phase.
+ */
+export function deriveNodeRuntimes(
+  events: readonly TraceEventInput[] | null | undefined,
+  runId?: string | null,
+): Record<string, NodeRuntime> {
+  const runtimes: Record<string, NodeRuntime> = {}
+  if (!events) return runtimes
+  let runEndedAtMs: number | null = null
+  for (const traceEvent of events) {
+    const event = callbackPayload(traceEvent)
+    const eventRun = eventRunId(traceEvent, event)
+    if (runId && eventRun && eventRun !== runId) continue
+    const at = eventTimeMs(event)
+    if (at === null) continue
+    const type = event.event_type || ""
+    if (type === "run_ended") {
+      runEndedAtMs = at
+      continue
+    }
+    const phaseName = event.phase_name || event.current_phase
+    if (!phaseName) continue
+    if (type === "phase_start") {
+      runtimes[phaseName] = { startedAtMs: at, endedAtMs: null }
+    } else if (type === "phase_end") {
+      const open = runtimes[phaseName]
+      if (open) runtimes[phaseName] = { startedAtMs: open.startedAtMs, endedAtMs: at }
+    }
+  }
+  if (runEndedAtMs !== null) {
+    for (const [phaseName, runtime] of Object.entries(runtimes)) {
+      if (runtime.endedAtMs === null) {
+        runtimes[phaseName] = { startedAtMs: runtime.startedAtMs, endedAtMs: runEndedAtMs }
+      }
+    }
+  }
+  return runtimes
 }
 
 function reasonList(value: unknown): string[] {

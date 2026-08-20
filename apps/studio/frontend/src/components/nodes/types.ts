@@ -4,6 +4,24 @@ import type { GoldenNodeState } from '@/components/studio/node-golden'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
+/**
+ * The wall clock of one node's run segment, in epoch milliseconds.
+ *
+ * Only the two ENDPOINTS live here, never an elapsed number: a card showing a
+ * still-open segment has to keep counting, and a duration baked into node data
+ * would force every node on the board to be rebuilt once a second to advance
+ * one card's clock. `endedAtMs === null` is the whole signal that the segment
+ * is open; the card ticks locally off `startedAtMs` until it closes.
+ *
+ * Derived by `deriveNodeRuntimes` (run-status-projection) from the same event
+ * stream and the same run filter as the node's status, so the clock and the
+ * light can never describe different runs.
+ */
+export interface NodeRuntime {
+  startedAtMs: number
+  endedAtMs: number | null
+}
+
 export interface SubagentRef {
   name: string
   path: string
@@ -32,6 +50,13 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
    * panel. Only meaningful when `status === 'error'`.
    */
   errorMessage?: string
+  /**
+   * This node's run segment (start / end), when the active run reached it. The
+   * card renders it as an elapsed time beside the status capsule — ticking
+   * while the segment is open, frozen once it closes. Absent for a node the
+   * run never entered, which is why "no duration" and "0s" stay distinct.
+   */
+  runtime?: NodeRuntime
   /** Compile/lint errors attributed to this phase node (separate channel from run status). */
   compileErrors?: CompileError[]
   /**

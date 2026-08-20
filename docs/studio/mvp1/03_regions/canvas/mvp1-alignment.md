@@ -39,13 +39,39 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 
 - 机制: 节点上**三条独立视觉通道 + 一个 debug 悬浮 bar**,互不抢位:
   - ① **编译错** = 节点上一个 warning/error 小标志(badge)。
-  - ② **运行态** = 节点上一个小圆点灯(复用 Settings provider-row 运行灯视觉:绿=通过 / 橙=中间态;位置不照抄)。
-  - ③ **运行错** = 该圆点灯变红。
-  - ④ **debug 控制 = 节点上方悬浮一个小 bar**:运行时 focus 到哪个节点、哪个节点的 bar 显示;可点暂停 / 开始(resume)/ 打开聊天框说话;**聊天框仅当该节点是 agent phase 下的子节点时可用,其余节点 disable**;非运行时鼠标 hover 节点才显示该 bar。
-- 决策: 三态**不叠同一个优先级槽**——badge / 圆点灯 / 悬浮 bar 各占独立视觉位置,无需"谁盖谁"层级(推翻早期 visual-hierarchy gap);debug 干预集中到悬浮 bar,且"对话续跑"能力锁定在 agent phase 子节点(只有 agent 节点能边跑边对话)(PM 2026-06-04)。
-- 原话/来源: `01_workflows/03_compile.md:15`(节点错误标记)、`01_workflows/04_run-and-verify.md:50`(节点运行灯)、`01_workflows/05_debugging.md:14`(失败节点变红);节点 debug 悬浮 bar + agent 子节点对话续跑 = PM 2026-06-04。
-- 测试: 编译错在对应节点出 badge;运行事件驱动圆点灯绿/橙/红;运行中 focus 节点显 debug bar,可暂停/resume;agent phase 子节点的 bar 聊天框可用、其余 disable;非运行态 hover 显 bar。
-- Status: partial/target-design.
+  - ② **运行态 = 节点右上角一枚「状态胶囊」,由三件东西合成,永远同时出现**
+    (PM 2026-08-19 运行时观测裁决):
+    - **状态灯**:一枚小圆点,复用 Settings LLM Roles 的路由运行灯视觉
+      (`settings/llm-roles/role-route-status.tsx` 的 `roleRouteStatusLightClass`
+      ——同尺寸、同 ring、running 时同 `animate-pulse`);位置不照抄。
+    - **状态标签**:紧挨状态灯的一个词,词表固定为
+      `Idle` / `Running` / `Success` / `Failed`(另有 `Paused` / `Breakpoint`
+      两个非常态)。**不用图标代替标签**:一块缩放过的画布上,颜色 + 词读得出,
+      六个字形读不出。
+    - **运行时间**:该节点本次运行段的耗时,挂在状态胶囊正下方。
+      **精度随时长下降**(`4s` → `3m 05s` → `2h 03m`),不显示亚秒——运行段由两条
+      引擎事件时间戳夹出,亚秒精度是它给不出的准头。
+  - ③ **运行错** = 状态灯变红 + 标签变 `Failed`(不是 `Error`:这一列是运行结论的
+    词表,不是异常类名)。
+  - ④ **运行中的节点整块卡片走「虚线流动」边框**(marching dashes):虚线图案与行进
+    方向**与 edge 的运行流动线(`.animated-flow-line`)取同一套**,让"这条边在跑"
+    和"这个节点在跑"读起来是同一件事而不是两套设计;承载方式借
+    `provider-card-border-flow` 的遮罩渐变边环(CSS border 的 dash offset 不可动画,
+    且画在 ::after 上,状态翻转时卡片自身布局零位移)。`prefers-reduced-motion`
+    下退化为静止边环,信息不减。
+  - ⑤ **debug 控制 = 节点上方悬浮一个小 bar**:运行时 focus 到哪个节点、哪个节点的 bar 显示;可点暂停 / 开始(resume)/ 打开聊天框说话;**聊天框仅当该节点是 agent phase 下的子节点时可用,其余节点 disable**;非运行时鼠标 hover 节点才显示该 bar。
+- 决策:
+  - 三态**不叠同一个优先级槽**——badge / 状态胶囊 / 悬浮 bar 各占独立视觉位置,无需"谁盖谁"层级(推翻早期 visual-hierarchy gap);debug 干预集中到悬浮 bar,且"对话续跑"能力锁定在 agent phase 子节点(只有 agent 节点能边跑边对话)(PM 2026-06-04)。
+  - **运行时间只存两个端点(start / end),不存已算好的时长**:一个还在跑的节点必须
+    继续走秒,而把秒数塞进节点数据会逼整块画布每秒重建一次。开着的运行段
+    (`endedAtMs === null`)由该卡片自己本地走表。
+  - **运行段开着、但节点已经不是 running(worker 被杀、流断在半路)⇒ 不显示时间**。
+    封存的 run 记录只给终态、不给结束时刻,所以"跑了多久"的诚实答案是沉默——既不
+    让表继续走,也不拿"读者恰好什么时候看的"编一个数。
+- 原话/来源: `01_workflows/03_compile.md:15`(节点错误标记)、`01_workflows/04_run-and-verify.md:50`(节点运行灯)、`01_workflows/05_debugging.md:14`(失败节点变红);节点 debug 悬浮 bar + agent 子节点对话续跑 = PM 2026-06-04;状态灯闪烁 + 边框虚线流动 + 状态标签(idle/running/success/failed)+ 运行时间 = PM 2026-08-19 原话。
+- 成熟参考: n8n 的节点执行态(marching-ants 边框 + 节点角上的耗时徽标)与 GitHub Actions 步骤计时器(耗时精度随时长下降)。借来的是"边框行进 + 角标耗时 + 精度分档"这三点;**没借**它们把耗时做成 hover tooltip——本仓画布上的节点常年可见,耗时是一眼要看的常驻信息,不是需要悬停去问的细节。
+- 测试: 编译错在对应节点出 badge;运行事件驱动状态灯绿/橙/红且标签同步;running 节点卡片出虚线流动边框、终态即消失;有运行段的节点显示耗时,running 时逐秒推进、终态冻结;运行段开着但节点非 running 时不显示耗时;运行中 focus 节点显 debug bar,可暂停/resume;agent phase 子节点的 bar 聊天框可用、其余 disable;非运行态 hover 显 bar。
+- Status: 状态灯 / 标签 / 虚线流动边框 / 运行时间 = live(2026-08-20);debug 悬浮 bar = target-design。
 - 归属: capabilities `compile-lint`, `run-execution`, `debug-resume`.
 
 ### F4. Subgraph Visual Affordance
@@ -82,7 +108,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 | CANVAS-3 | 子图 inline | 单元 `subgraph-path-inline-drilldown`；**为什么**：主画布 inline 展开子拓扑 + 下钻并存，虚线容器靠父图最右 |
 
 ## 6. 测试关键点
-1. 节点态: baseline 现状为 Workspace 未传真实 `statusByNodeId`，buildNodes 有默认假态 ⚠️；目标为 节点灯来自真实 run/predict/state-engine 投影。
+1. 节点态: 真实投影已 live(2026-08-20)——Workspace 由 `deriveNodeStatuses` / `deriveNodeRuntimes` 喂 `NodeRunProjection`,状态灯 + 标签 + 虚线流动边框 + 运行时间四件同源同 run;剩余 target = F3 ⑤ debug 悬浮 bar。
 2. dot 黑板: baseline 现状为 真实事件派生已 live(GraphCanvas 用 edgeContextFromEvents,mock 已删),但未跑时无内容(空态)⚠️；目标为 edge dot 双态——未跑显示静态字段推断,跑后打开真实 blackboard transition。
 3. 子图 inline: baseline 现状为 `SubgraphInline` 是 mock rows ⚠️；目标为 解析绝对 `path` 后 inline 展开/下钻/面包屑可用。
 
@@ -90,7 +116,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 `graph-authoring` · `run-execution` · `state-engine` · `trace-observability` · `assets` · `engine`
 
 ## 8. gaps / 报警
-- 🚨 节点态: Workspace 未传真实 `statusByNodeId`，buildNodes 有默认假态 ⚠️；目标 节点灯来自真实 run/predict/state-engine 投影。
+- ✅ 节点态: 已闭合(2026-08-20)。真实 run 投影从 `run-status-projection` 一路到卡片,状态灯 / 标签 / 虚线流动边框 / 运行时间同源。仍开着的只有 F3 ⑤ debug 悬浮 bar。
 - 🚨 dot 黑板: 真实事件派生已 live(mock 已删),未跑时仅空态、无静态推断 ⚠️；目标 edge dot 双态(未跑静态字段推断 + 跑后真实 blackboard transition)。
 - 🚨 子图 inline: `SubgraphInline` 是 mock rows ⚠️；目标 解析绝对 `path` 后 inline 展开/下钻/面包屑可用。
 

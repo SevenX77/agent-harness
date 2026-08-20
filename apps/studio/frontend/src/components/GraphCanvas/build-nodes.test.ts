@@ -88,7 +88,7 @@ describe('buildNodes', () => {
         { id: 'first', src: 'phases/first/LOGIC.md', depends_on: [], mode: 'logic' },
         { id: 'second', src: 'phases/second/LOGIC.md', depends_on: ['first'], mode: 'logic' },
       ],
-    }), new Set(), () => {}, statusByNodeId)
+    }), new Set(), () => {}, { statusByNodeId })
 
     expect(phaseNode(nodes, 'first').status).toBe('success')
     expect(phaseNode(nodes, 'second').status).toBe('idle')
@@ -114,7 +114,7 @@ describe('buildNodes', () => {
         { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
         { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
       ],
-    }), new Set(), () => {}, {}, {}, {}, { draft: 'validator: missing field x' })
+    }), new Set(), () => {}, { errorMessageByNodeId: { draft: 'validator: missing field x' } })
 
     expect(phaseNode(nodes, 'draft').errorMessage).toBe('validator: missing field x')
     expect(phaseNode(nodes, 'review').errorMessage).toBeUndefined()
@@ -246,7 +246,7 @@ describe('buildNodes', () => {
         { id: 'trimmed', src: 'phases/trimmed/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: '  /abs/child  ' },
         { id: 'relative', src: 'phases/relative/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: 'subgraph/child' },
       ],
-    }), new Set(), () => {}, {}, {}, {}, {}, {}, '/skills/parent')
+    }), new Set(), () => {}, {}, {}, {}, {}, '/skills/parent')
 
     expect(phaseNode(nodes, 'trimmed').subgraphPath).toBe('/abs/child')
     expect(phaseNode(nodes, 'trimmed').onToggleSubgraph).toBeTypeOf('function')
@@ -272,7 +272,7 @@ describe('buildNodes', () => {
         { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
       ],
       files: { 'phases/draft/SKILL.md': agentBody },
-    }), new Set(), () => {}, {}, {}, {}, {}, {
+    }), new Set(), () => {}, {}, {}, {}, {
       expandedSteps: new Set(['draft']),
       onToggleSteps: (nodeId) => toggles.push(nodeId),
       onStepsSave: (nodeId, filePath, currentBody, nextBody) => saves.push({ nodeId, filePath, currentBody, nextBody }),
@@ -310,7 +310,7 @@ describe('buildNodes', () => {
         { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
         { id: 'sidebar', src: 'phases/sidebar/LOGIC.md', depends_on: [], mode: 'logic' },
       ],
-    }), new Set(), () => {}, {}, {}, {}, {}, {
+    }), new Set(), () => {}, {}, {}, {}, {
       // The resume-validity `affected_downstream` set the backend returned.
       dirtyDownstreamNodeIds: new Set(['review']),
     })
@@ -347,7 +347,7 @@ describe('buildNodes', () => {
         { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
         { id: 'sidebar', src: 'phases/sidebar/LOGIC.md', depends_on: [], mode: 'logic' },
       ],
-    }), new Set(), () => {}, {}, {}, {}, {}, {
+    }), new Set(), () => {}, {}, {}, {}, {
       dirtyDownstreamNodeIds: dirtyDownstreamFromValidity(validity),
     })
 
@@ -422,7 +422,7 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
   })
 
   it('defaults drilled phases to idle and carries through a real status', () => {
-    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, { plan: 'success' })
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, { statusByNodeId: { plan: 'success' } })
     expect(phaseNode(nodes, 'plan').status).toBe('success')
     expect(phaseNode(nodes, 'nested').status).toBe('idle')
   })

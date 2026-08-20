@@ -1,6 +1,6 @@
 import yaml from 'js-yaml'
 import type { CompileError, GraphManifestV030, GraphTopologyItem, IoDeclaration, IoInput, IoOutput, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
-import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
+import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type NodeRuntime, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { normalizeSubgraphPath } from '@/components/studio/subgraph-path'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
@@ -219,15 +219,33 @@ export interface AgentStepsInputs {
   dirtyDownstreamNodeIds?: ReadonlySet<string>
 }
 
+/**
+ * What the ACTIVE RUN says about individual nodes, in one input.
+ *
+ * The three maps are one concept seen from three angles — the same event
+ * stream, filtered to the same run, keyed by the same phase name: how the node
+ * ended (status), why it failed (errorMessage), and when it executed
+ * (runtime). Passing them as three positional arguments let a caller supply
+ * two and forget the third, which is how a card ends up lit green with another
+ * run's clock under it. One object, one thing to pass.
+ *
+ * Every field is optional: a board with no run (authoring, the drilled-child
+ * preview) passes `{}` and every node renders idle.
+ */
+export interface NodeRunProjection {
+  statusByNodeId?: Record<string, SkillNodeStatus>
+  errorMessageByNodeId?: Record<string, string>
+  runtimeByNodeId?: Record<string, NodeRuntime>
+}
+
 export function buildNodes(
   skillId: string,
   detail: SkillDetail | undefined,
   expandedSubgraphs: Set<string>,
   onToggleSubgraph: (nodeId: string) => void,
-  statusByNodeId: Record<string, SkillNodeStatus>,
+  run: NodeRunProjection = {},
   compileErrorsByNodeId: Record<string, CompileError[]> = {},
   goldenStateByNodeId: Record<string, GoldenNodeState> = {},
-  errorMessageByNodeId: Record<string, string> = {},
   agentSteps: AgentStepsInputs = {},
   workspaceRoot: string | null = null,
 ): GraphCanvasNode[] {
@@ -267,8 +285,9 @@ export function buildNodes(
         tools: toolsForPhase(isAgentNode, frontmatter, phase),
         subagents: subagentsForPhase(detail, phase.name),
         filePath,
-        status: statusByNodeId[phase.name] ?? 'idle',
-        errorMessage: errorMessageByNodeId[phase.name],
+        status: run.statusByNodeId?.[phase.name] ?? 'idle',
+        errorMessage: run.errorMessageByNodeId?.[phase.name],
+        runtime: run.runtimeByNodeId?.[phase.name],
         compileErrors: compileErrorsByNodeId[phase.name] ?? [],
         goldenState: goldenStateByNodeId[phase.name],
         // N5 atom #3: gray this node when it is in the resume's affected-downstream set.
@@ -340,7 +359,7 @@ export function buildNodesFromTopology(
   skillId: string,
   phases: string[],
   graphTopology: GraphTopologyItem[],
-  statusByNodeId: Record<string, SkillNodeStatus>,
+  run: NodeRunProjection = {},
   agentSteps: AgentStepsInputs = {},
   workspaceRoot: string | null = null,
 ): GraphCanvasNode[] {
@@ -372,7 +391,8 @@ export function buildNodesFromTopology(
         tools: [],
         subagents: [],
         filePath,
-        status: statusByNodeId[phaseName] ?? 'idle',
+        status: run.statusByNodeId?.[phaseName] ?? 'idle',
+        runtime: run.runtimeByNodeId?.[phaseName],
         dependsOn: topology?.depends_on ?? [],
         isOutput: topology?.output === true,
         subgraphPath,

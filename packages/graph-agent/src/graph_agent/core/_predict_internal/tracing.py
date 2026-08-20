@@ -160,19 +160,22 @@ class PredictTracingCallback(TracingCallback):
             self._phase_stack[-1]["inputs"] = event.context
 
     def _record_phase_end(self, event: PhaseEndEvent) -> None:
-        """Finalize a phase with zeroed metrics and cached mock source metadata."""
+        """Finalize a phase and tag it with the mock source it was served from.
+
+        Nothing zeroes a spend here any more. A predict phase's spend was being
+        expressed twice — once by zeroing a ``metrics`` dict on the way past,
+        once by the phase's own ``input_tokens``/``output_tokens``, which only
+        ever grow from ``LLMCallEvent``s and stay at 0 when the phase is stubbed.
+        The second one is the answer, and it needs no help.
+        """
 
         phase_name = event.phase_name
-        zeroed_metrics = _zero_usage_values(event.metrics or {})
         source = self._source_cache.pop(phase_name)
-        if source is not None:
-            zeroed_metrics["mocked_source"] = source
         phase_count = len(self._phases)
-        super()._record_phase_end(event.model_copy(update={"metrics": zeroed_metrics}))
+        super()._record_phase_end(event)
         if len(self._phases) > phase_count:
             phase = self._phases[-1]
             phase["outputs"] = event.context
-            phase["metrics"] = zeroed_metrics
             if source is not None:
                 phase["mocked_source"] = source
             downgrade = get_validator_downgrade(phase_name)

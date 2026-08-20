@@ -31,7 +31,7 @@ class LoggingCallback(Callback):
         if isinstance(event, PhaseStartEvent):
             logger.info("[Phase Start] %s", event.phase_name)
         elif isinstance(event, PhaseEndEvent):
-            logger.info("[Phase End] %s | metrics=%s", event.phase_name, event.metrics)
+            logger.info("[Phase End] %s | execution=%s", event.phase_name, event.phase_execution_id)
         elif isinstance(event, LLMCallEvent):
             logger.info(
                 "[LLM Call] %s | in=%d out=%d",

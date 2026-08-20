@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -108,6 +108,7 @@ from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
 from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.llm_credentials import (
     EndpointInvariantViolation,
+    EndpointRouteCascade,
     _route_slug,
     credentials_path,
     delete_endpoint,
@@ -502,31 +503,54 @@ async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretRespon
     )
 
 
-@router.put("/registry/endpoints", response_model=RegistryResponse)
-async def put_registry_endpoints(request: EndpointUpsertRequest) -> RegistryResponse:
-    """Upsert endpoints; absent endpoint IDs are retained."""
-    route_ids_before = set(load_credentials().provider_routes)
-    try:
-        data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
-    except EndpointInvariantViolation as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # An endpoint whose Base URL moved takes the models discovered at the old
-    # address with it (see ``upsert_endpoints``). Roles pointing at those routes
-    # get the same cleanup ``delete_registry_endpoint`` performs, so editing a
-    # Base URL cannot leave a role addressing a route nobody can resolve.
-    removed_route_ids = route_ids_before - set(data.provider_routes)
-    if removed_route_ids and roles_path().exists():
-        save_roles_file(
-            roles_path(),
-            _remove_route_references_from_roles(_load_roles_or_empty(), removed_route_ids),
-            known_route_ids=set(data.provider_routes),
-        )
+def _follow_endpoint_rekey_into_roles(cascade: EndpointRouteCascade) -> None:
+    """Carry an endpoint re-key into the roles file, before credentials commit.
+
+    Both halves land in ONE roles write because they are one event: the routes an
+    endpoint that changed address left behind lose their references (the same
+    cleanup ``delete_registry_endpoint`` performs, so editing a Base URL cannot
+    leave a role addressing a route nobody can resolve), while the routes of an
+    endpoint whose id was merely normalized are re-pinned rather than stripped —
+    a rename must not cost the user a role binding.
+
+    ``save_roles_file`` validates against the route ids the credentials file is
+    ABOUT to hold, so a cascade that would strand a reference raises here and the
+    credentials write never happens.
+    """
+    if not roles_path().exists():
+        return
+    roles = _load_roles_or_empty()
+    if cascade.routes_left_behind:
+        roles = _remove_route_references_from_roles(roles, set(cascade.routes_left_behind))
+    if cascade.routes_renamed:
+        roles = _repin_route_references_in_roles(roles, cascade.routes_renamed)
+    save_roles_file(roles_path(), roles, known_route_ids=set(cascade.route_ids_after))
+    if cascade.routes_left_behind:
         record_runtime_activity(
             source_id="llm_roles",
             action="remove_endpoint_route_references",
             message="Removed role references to routes owned by an endpoint that changed address.",
-            changes={"route_ids": sorted(removed_route_ids)},
+            changes={"route_ids": sorted(cascade.routes_left_behind)},
         )
+    if cascade.routes_renamed:
+        record_runtime_activity(
+            source_id="llm_roles",
+            action="repin_endpoint_route_references",
+            message="Re-pinned role references to routes whose endpoint id was normalized.",
+            changes={"route_ids": dict(sorted(cascade.routes_renamed.items()))},
+        )
+
+
+@router.put("/registry/endpoints", response_model=RegistryResponse)
+async def put_registry_endpoints(request: EndpointUpsertRequest) -> RegistryResponse:
+    """Upsert endpoints; absent endpoint IDs are retained."""
+    try:
+        data = upsert_endpoints(
+            {endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()},
+            cascade=_follow_endpoint_rekey_into_roles,
+        )
+    except EndpointInvariantViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     record_runtime_activity(
         source_id="llm_credentials",
         action="upsert_endpoints",
@@ -6057,6 +6081,68 @@ def _remove_route_references_from_roles(
             "roles": roles,
             "model_profiles": model_profiles,
             "model_bundles": model_bundles,
+        }
+    )
+
+
+def _repin_route_references_in_roles(
+    data: RolesData,
+    renamed_route_ids: Mapping[str, str],
+) -> RolesData:
+    """Rewrite every route reference through ``renamed_route_ids``.
+
+    The mirror image of ``_remove_route_references_from_roles``: same five places
+    hold a route id (role fallback chains and model groups, model profiles, bundle
+    fallback chains and bundle model groups), but here a reference survives under
+    its new id instead of being dropped. Ids not in the mapping are untouched.
+    """
+
+    def repin(route_id: str) -> str:
+        renamed = renamed_route_ids.get(route_id)
+        return renamed if renamed is not None else route_id
+
+    def repin_groups(groups: list[RoleModelGroup]) -> list[RoleModelGroup]:
+        return [
+            group.model_copy(
+                update={
+                    "provider_models": [
+                        provider_model.model_copy(update={"route_id": repin(provider_model.route_id)})
+                        for provider_model in group.provider_models
+                    ]
+                }
+            )
+            for group in groups
+        ]
+
+    def repin_chain(chain: list[RoleRouteEntry]) -> list[RoleRouteEntry]:
+        return [entry.model_copy(update={"route_id": repin(entry.route_id)}) for entry in chain]
+
+    return data.model_copy(
+        update={
+            "roles": {
+                role_name: role.model_copy(
+                    update={
+                        "fallback_chain": repin_chain(role.fallback_chain),
+                        "model_groups": repin_groups(role.model_groups),
+                    }
+                )
+                for role_name, role in data.roles.items()
+            },
+            "model_profiles": {
+                profile_id: profile.model_copy(
+                    update={"fallback_chain": repin_chain(profile.fallback_chain)}
+                )
+                for profile_id, profile in data.model_profiles.items()
+            },
+            "model_bundles": {
+                bundle_id: bundle.model_copy(
+                    update={
+                        "fallback_chain": repin_chain(bundle.fallback_chain),
+                        "model_groups": repin_groups(bundle.model_groups),
+                    }
+                )
+                for bundle_id, bundle in data.model_bundles.items()
+            },
         }
     )
 

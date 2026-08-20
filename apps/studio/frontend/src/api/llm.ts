@@ -1717,16 +1717,27 @@ export async function getCredentials({
   return registryToCredentials(registry)
 }
 
+/**
+ * Save the endpoints in `updates`. This is an UPSERT and nothing else: an
+ * endpoint id the payload does not mention is left exactly as it is.
+ *
+ * It used to also delete every cached endpoint whose id was absent, which read
+ * the payload as a full declaration of what should exist. Nothing ever asked for
+ * that reading — the endpoint it posts to documents itself as "Upsert endpoints;
+ * absent endpoint IDs are retained", and the design source says a cell is never
+ * deleted (00_settings-ux-spec.md §1.2 matrix point 3). What the payload contains
+ * is decided by a derivation chain (drafts → rows → protocol candidates), so any
+ * gap in that chain became data loss: an ark_runtime cell and a sibling URL
+ * differing only by a trailing `/v1` were both observed being deleted by an
+ * unrelated keystroke. Deleting an endpoint is a user intent with its own
+ * explicit path — see `deleteEndpoint` and its single caller in SettingsPage.
+ *
+ * Decision: docs/design/2026-08-20-deletion-is-explicit.md.
+ */
 export async function putCredentials(
   updates: ProviderCredentialUpdate[],
 ): Promise<CredentialsState> {
   const existingEndpoints = cachedRegistry?.provider_endpoints ?? {}
-  const updateIds = new Set(updates.map((update) => update.id))
-  const removedEndpointIds = Object.keys(existingEndpoints).filter((endpointId) => !updateIds.has(endpointId))
-  let latestRegistry: RegistryResponse | null = null
-  for (const endpointId of removedEndpointIds) {
-    latestRegistry = await deleteEndpoint(endpointId)
-  }
   const providerEndpoints = Object.fromEntries(
     updates.map((update) => [
       update.id,
@@ -1736,10 +1747,10 @@ export async function putCredentials(
       ),
     ]),
   )
-  if (Object.keys(providerEndpoints).length > 0) {
-    latestRegistry = await putRegistryEndpoints(providerEndpoints)
+  if (Object.keys(providerEndpoints).length === 0) {
+    return registryToCredentials(cachedRegistry ?? await getRegistry({ force: true }))
   }
-  return registryToCredentials(latestRegistry ?? cachedRegistry ?? await getRegistry({ force: true }))
+  return registryToCredentials(await putRegistryEndpoints(providerEndpoints))
 }
 
 export async function testProvider(

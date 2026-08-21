@@ -93,3 +93,61 @@ def test_a_phase_that_completed_is_still_ok(tmp_path: Path) -> None:
     row = _node_row(build_run_report(run_dir))
 
     assert " ok " in row, f"nothing went wrong in this phase; got: {row}"
+
+
+def test_a_rejected_submission_the_model_then_fixed_is_not_a_failed_phase(
+    tmp_path: Path,
+) -> None:
+    """The third rule this file's docstring states, which nothing checked.
+
+    Field evidence (2026-08-20, run ``2026-08-20T19-55-51_722f59b0``): phase
+    ``first`` had one submission rejected by the finish gate, was sent back,
+    corrected it, and ended ``completed`` — ``trace.jsonl`` says so and the
+    canvas drew it as Success. The Nodes table printed it ``failed``, in a row
+    whose own ``corrections`` column said ``1``.
+
+    Two answers to one question, and the report was giving the wrong one: being
+    sent back to fix a submission is what the correction loop is FOR. If that
+    counted as failure, every phase that ever used the loop would be a failed
+    phase, and the word would stop distinguishing anything.
+    """
+    run_dir = tmp_path / "run-corrected"
+    _write_run(
+        run_dir,
+        [
+            _event("phase_start", "2026-08-20T10:00:00+00:00", phase_execution_id="exec-1"),
+            _event(
+                "finish_task_verdict",
+                "2026-08-20T10:00:02+00:00",
+                phase_execution_id="exec-1",
+                verdict="rejected",
+                message="Rejected a finish_task submission in phase 'first': 1 problem(s) found",
+                errors=["business_data_md is empty"],
+            ),
+            _event(
+                "finish_task_verdict",
+                "2026-08-20T10:00:05+00:00",
+                phase_execution_id="exec-1",
+                verdict="accepted",
+            ),
+            _event(
+                "phase_end",
+                "2026-08-20T10:00:06+00:00",
+                phase_execution_id="exec-1",
+                status="completed",
+            ),
+        ],
+        status="success",
+    )
+
+    report = build_run_report(run_dir)
+    row = _node_row(report)
+
+    assert " ok " in row, (
+        f"the phase was sent back once and then finished; it did not fail. Got: {row}"
+    )
+    assert "business_data_md is empty" in report, (
+        "the rejection still belongs in the report — it is a real thing that "
+        "happened inside the phase. What it must not do is decide how the "
+        "phase ENDED"
+    )

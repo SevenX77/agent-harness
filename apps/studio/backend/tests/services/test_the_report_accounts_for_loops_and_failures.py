@@ -39,12 +39,34 @@ def _write_run(run_dir: Path, events: list[dict[str, object]], *, status: str = 
     )
 
 
-def _phase(name: str, execution: str, at: str, *, end: bool = False) -> dict[str, object]:
+def _phase(
+    name: str,
+    execution: str,
+    at: str,
+    *,
+    end: bool = False,
+    outcome: str = "completed",
+) -> dict[str, object]:
+    """One frame of a phase execution.
+
+    ``phase_end`` always carries an ``outcome``: `PhaseEndEvent.status` is a
+    required field precisely so that "a phase ended without saying how" is not
+    representable (ledger E17), so a fixture omitting it would be describing an
+    event the engine cannot emit.
+    """
+    if not end:
+        return {
+            "event_type": "phase_start",
+            "timestamp": at,
+            "phase_name": name,
+            "phase_execution_id": execution,
+        }
     return {
-        "event_type": "phase_end" if end else "phase_start",
+        "event_type": "phase_end",
         "timestamp": at,
         "phase_name": name,
         "phase_execution_id": execution,
+        "status": outcome,
     }
 
 
@@ -78,7 +100,7 @@ def _iterated_run(run_dir: Path) -> None:
                 "phase_name": "summarize",
                 "violations": ["finish_task was never called"],
             },
-            _phase("summarize", "exec-3", "2026-08-20T10:00:32+00:00", end=True),
+            _phase("summarize", "exec-3", "2026-08-20T10:00:32+00:00", end=True, outcome="failed"),
             {"event_type": "run_ended", "timestamp": "2026-08-20T10:00:32+00:00"},
         ],
     )
@@ -258,7 +280,7 @@ def test_every_node_row_says_how_it_ended(tmp_path: Path) -> None:
                 "phase_name": "broke",
                 "message": "no finish_task",
             },
-            _phase("broke", "exec-2", "2026-08-20T10:00:02+00:00", end=True),
+            _phase("broke", "exec-2", "2026-08-20T10:00:02+00:00", end=True, outcome="failed"),
             _phase("never_closed", "exec-3", "2026-08-20T10:00:02+00:00"),
         ],
         status="failed",

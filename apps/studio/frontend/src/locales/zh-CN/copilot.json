@@ -1,0 +1,154 @@
+{
+  "fab": {
+    "open": "打开 MoirAI"
+  },
+  "header": {
+    "collapse": "收起 MoirAI",
+    "collapseTooltip": "收起",
+    "retryIn": " · {{seconds}} 秒后重试",
+    "manageAssistant": "管理代码助手",
+    "cliRunning": "CLI 运行中",
+    "assistantPending": "代码助手准备中",
+    "openAssistant": "打开代码助手",
+    "openInCli": "在 CLI 里打开",
+    "readOnlySuffix": "(只读)",
+    "readOnlyTitle": "工作区自带的配置是只读的",
+    "resume": "继续 {{assistant}}",
+    "attach": "接入 {{assistant}}",
+    "attachExited": "接入 {{assistant}}(已退出)",
+    "detach": "断开",
+    "closeAll": "关闭全部助手",
+    "closeOne": "关闭 {{assistant}}",
+    "starting": "启动中…",
+    "checking": "查看中…"
+  },
+  "assistant": {
+    "claude": "Claude code",
+    "codex": "Codex"
+  },
+  "session": {
+    "fallbackLabel": "对话 {{number}}",
+    "close": "关闭 {{label}}",
+    "actions": "对话操作",
+    "new": "新建对话",
+    "restore": "恢复对话"
+  },
+  "message": {
+    "error": "Copilot 出错",
+    "unknownEvent": "无法识别的 Copilot 事件",
+    "thought": "思考过程",
+    "thinking": "思考中…"
+  },
+  "tool": {
+    "verb": {
+      "explore": {
+        "running": "查看中",
+        "done": "已查看"
+      },
+      "work": {
+        "running": "改动中",
+        "done": "已改动"
+      },
+      "run": {
+        "running": "执行中",
+        "done": "已执行"
+      },
+      "skill": {
+        "running": "调用 skill 中",
+        "done": "已调用 skill"
+      }
+    },
+    "runningOther": "执行 {{tool}} 中",
+    "doneOther": "{{tool}} 已完成",
+    "failed": "{{tool}} 失败"
+  },
+  "approval": {
+    "title": "{{tool}} 等你批准",
+    "configTitle": "LLM 配置:{{tool}} 等你批准",
+    "approve": "批准",
+    "reject": "拒绝",
+    "approveTool": "批准 {{tool}}",
+    "rejectTool": "拒绝 {{tool}}",
+    "waiting": "等待批准。",
+    "approved": "{{tool}} 已批准。",
+    "denied": "{{tool}} 已拒绝。",
+    "rejected": "{{tool}} 已拒绝。",
+    "timedOut": "{{tool}} 等不到回答已超时,这项任务被停下了。再发一条消息就能接着来。",
+    "noLongerHeld": "这次调用已经不在等待中了。",
+    "unresolved": "没能处理这次工具批准。"
+  },
+  "patch": {
+    "edited": "改了 {{path}}",
+    "created": "新建了 {{path}}",
+    "compare": "对比",
+    "openCompare": "打开并排对比",
+    "reject": "撤回",
+    "rejectChange": "撤回这次改动",
+    "accept": "采纳",
+    "accepted": "已采纳",
+    "reverted": "已撤回",
+    "checkpointUnavailable": "没有还原点:这次改动无法安全撤回。{{detail}}",
+    "checkpointPreparing": "还原点还在准备中。",
+    "noWorkspace": "没有可还原的工作区(仅桌面端支持)。",
+    "acceptFailed": "采纳失败:{{detail}}",
+    "revertFailed": "撤回失败:{{detail}}"
+  },
+  "compare": {
+    "title": "对比",
+    "direction": "(改前 → 改后)",
+    "close": "关闭对比",
+    "loading": "对比加载中…"
+  },
+  "route": {
+    "picker": "Copilot 路由选择",
+    "select": "选择 Copilot 路由",
+    "selectOne": "选择路由 {{route}}",
+    "label": "路由",
+    "current": "路由:{{route}}",
+    "none": "选择路由",
+    "off": "未启用"
+  },
+  "role": {
+    "loading": "正在加载 copilot 角色",
+    "loadingTooltip": "正在加载 copilot 角色…",
+    "label": "Copilot 角色",
+    "none": "没有 copilot 角色",
+    "addHint": "到 Settings → Copilot 里加一个 Copilot 角色",
+    "select": "选择 copilot 角色",
+    "loadingList": "正在加载 copilot 角色",
+    "current": "角色:{{role}}",
+    "selectRole": "选择角色 {{role}}"
+  },
+  "analysis": {
+    "prompt": "运行完成 — 用本次输出补上缺 golden 的节点?",
+    "confirm": "确认",
+    "dismiss": "忽略分析",
+    "locked": "Golden 已锁定,未填充",
+    "nothingMissing": "每个节点都已有 golden,未改动",
+    "seeded_other": "已用本次 run 的输出填充 {{count}} 个节点的 golden:{{nodes}}",
+    "nodeSeparator": "、"
+  },
+  "judge": {
+    "ask": "问 Copilot Judge"
+  },
+  "empty": {
+    "judge": "**Copilot Judge**\n\n让我评审当前产物和 golden 差异。我用的是 Eval 上下文接口,不是另一个 judge 后端。",
+    "skill": "问我这个 skill、工作流,或者当前这一屏。一般性问题也可以。",
+    "create": "**用 Copilot 建一个 skill**\n\n拿模板当骨架,或者描述你想让我帮你建的 Skill。",
+    "describeSkill": "描述我的 Skill",
+    "describeSkillDraft": "帮我建一个新的 Skill。先问清楚我的需求,再给出一份最小可用的 skill.md。",
+    "templates": "模板",
+    "templatesLoading": "模板加载中...",
+    "templateDraft": "拿「{{template}}」这个模板当骨架,帮我建一个 Skill。"
+  },
+  "composer": {
+    "placeholder": "用 '@' 提及节点...",
+    "stop": "停止生成",
+    "send": "发送消息"
+  },
+  "toast": {
+    "routeSwitched": "路由已切换,之后的消息会用它。",
+    "noWorkspace": "没有可用的 skill 工作区",
+    "restoreFailed": "没能恢复这个 Copilot 会话"
+  }
+}

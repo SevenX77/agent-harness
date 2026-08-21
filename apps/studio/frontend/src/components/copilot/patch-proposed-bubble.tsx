@@ -12,6 +12,7 @@ import {
 } from '../../lib/tauri'
 import { copilotStore } from '../../store/copilotStore'
 import { resolveWorkspaceIdentity } from '../studio/workspace-identity'
+import { useTranslation } from 'react-i18next'
 import { errorMessage } from '../../utils/errors'
 
 /** F5 DEF-025: tells the workspace a copilot edit hit disk so the editor buffer
@@ -46,7 +47,7 @@ type Review = 'pending' | 'accepted' | 'rejected'
 export type CheckpointStatus =
   | { state: 'seeding' }
   | { state: 'ready' }
-  | { state: 'unsafe'; message: string }
+  | { state: 'unsafe'; detail: string }
 
 export function resolveCopilotCheckpointRoot(
   skillId: string | null,
@@ -90,12 +91,13 @@ export async function seedCopilotRestoreCheckpoint({
   } catch (err: unknown) {
     return {
       state: 'unsafe',
-      message: `Checkpoint unavailable: this change cannot be safely restored. ${errorMessage(err)}`,
+      detail: errorMessage(err),
     }
   }
 }
 
 function PatchProposedBubbleBase({ event, skillId, workspaceRoot, onFileChanged }: PatchProposedBubbleProps) {
+  const { t } = useTranslation('copilot')
   // The verdict is read from the event, which is what gets persisted; a
   // bubble that remembered its own came back unreviewed on every remount
   // (problem ledger CP6).
@@ -148,7 +150,7 @@ function PatchProposedBubbleBase({ event, skillId, workspaceRoot, onFileChanged 
       // Reviewed code is final — recompile so predict/run use it (改后自动 compile).
       onFileChanged?.(event.path, 'accepted')
     } catch (err: unknown) {
-      toast.error(`Couldn't accept change: ${errorMessage(err)}`)
+      toast.error(t('patch.acceptFailed', { detail: errorMessage(err) }))
     } finally {
       setBusy(false)
     }
@@ -158,8 +160,8 @@ function PatchProposedBubbleBase({ event, skillId, workspaceRoot, onFileChanged 
     if (checkpointStatus.state !== 'ready') {
       toast.error(
         checkpointStatus.state === 'unsafe'
-          ? checkpointStatus.message
-          : 'Restore checkpoint is still being prepared.',
+          ? t('patch.checkpointUnavailable', { detail: checkpointStatus.detail })
+          : t('patch.checkpointPreparing'),
       )
       return
     }
@@ -167,7 +169,7 @@ function PatchProposedBubbleBase({ event, skillId, workspaceRoot, onFileChanged 
     try {
       const root = resolveRoot()
       if (!root) {
-        throw new Error('No workspace to restore into (desktop only).')
+        throw new Error(t('patch.noWorkspace'))
       }
       // Rewind through the Rust sole writer from the checkpoint seeded on apply:
       // write-back for an edited file, delete for a copilot-created one. This is
@@ -177,7 +179,7 @@ function PatchProposedBubbleBase({ event, skillId, workspaceRoot, onFileChanged 
       // File rewound on disk — reload the editor buffer + recompile.
       onFileChanged?.(event.path, 'rejected')
     } catch (err: unknown) {
-      toast.error(`Couldn't revert change: ${errorMessage(err)}`)
+      toast.error(t('patch.revertFailed', { detail: errorMessage(err) }))
     } finally {
       setBusy(false)
     }
@@ -219,12 +221,15 @@ export function PatchProposedBubbleView({
   onShowCompare: () => void
   onCloseCompare: () => void
 }) {
+  const { t } = useTranslation('copilot')
   const rows = useMemo(
     () => computeLineDiff(event.beforeContent, event.afterContent),
     [event.beforeContent, event.afterContent],
   )
   const stats = useMemo(() => lineDiffStats(rows), [rows])
-  const verb = event.beforeExisted ? 'Edited' : 'Created'
+  const heading = event.beforeExisted
+    ? t('patch.edited', { path: event.path })
+    : t('patch.created', { path: event.path })
   const Icon = event.beforeExisted ? FilePenLine : FilePlus2
   const rejectDisabled = busy || checkpointStatus.state !== 'ready'
   const acceptDisabled = busy || checkpointStatus.state === 'seeding'
@@ -234,7 +239,7 @@ export function PatchProposedBubbleView({
       <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
           <Icon className="size-3.5 shrink-0" />
-          <span className="truncate">{verb} {event.path}</span>
+          <span className="truncate">{heading}</span>
           <span className="shrink-0 font-normal text-muted-foreground">
             <span className="text-success">+{stats.added}</span>{' '}
             <span className="text-destructive">−{stats.removed}</span>
@@ -243,22 +248,22 @@ export function PatchProposedBubbleView({
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            aria-label="Open side-by-side compare"
+            aria-label={t('patch.openCompare')}
             onClick={onShowCompare}
             className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:bg-background"
           >
-            <Columns2 className="size-3" /> Compare
+            <Columns2 className="size-3" /> {t('patch.compare')}
           </button>
           {review === 'pending' ? (
             <>
               <button
                 type="button"
-                aria-label="Reject change"
+                aria-label={t('patch.rejectChange')}
                 disabled={rejectDisabled}
                 onClick={onReject}
                 className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:bg-background disabled:opacity-50"
               >
-                <RotateCcw className="size-3" /> Reject
+                <RotateCcw className="size-3" /> {t('patch.reject')}
               </button>
               <button
                 type="button"
@@ -266,7 +271,7 @@ export function PatchProposedBubbleView({
                 onClick={onAccept}
                 className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-link hover:bg-primary/20 disabled:opacity-50"
               >
-                <Check className="size-3" /> Accept
+                <Check className="size-3" /> {t('patch.accept')}
               </button>
             </>
           ) : (
@@ -278,7 +283,7 @@ export function PatchProposedBubbleView({
               }`}
             >
               {review === 'accepted' ? <Check className="size-3" /> : <X className="size-3" />}
-              {review === 'accepted' ? 'Accepted' : 'Reverted'}
+              {review === 'accepted' ? t('patch.accepted') : t('patch.reverted')}
             </span>
           )}
         </div>
@@ -289,7 +294,7 @@ export function PatchProposedBubbleView({
           className="flex items-start gap-1.5 border-b border-border bg-destructive/10 px-2.5 py-2 text-destructive"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{checkpointStatus.message}</span>
+          <span>{t('patch.checkpointUnavailable', { detail: checkpointStatus.detail })}</span>
         </div>
       ) : null}
       <pre className="max-h-72 overflow-auto px-2.5 py-2 font-mono leading-relaxed">

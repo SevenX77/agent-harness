@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, Copy, ExternalLink, FolderOpen, RotateCcw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 import { dateAndTime, timeOfDay } from "@/utils/wall-clock"
 import { toast } from "sonner"
 import {
@@ -616,7 +617,11 @@ function truthSourceCategory(sourceId: string): TruthSourceCategory {
   return "runtime"
 }
 
-function formatSourceStatus(source: TruthSource, t: ReturnType<typeof useTranslation>["t"]): string {
+// Typed to the ONE namespace this helper reads. Left untyped
+// (`ReturnType<typeof useTranslation>["t"]`) it spans every namespace at
+// once, and the key union that produces grew past TypeScript's instantiation
+// depth the moment a fourth namespace was registered (TS2589).
+function formatSourceStatus(source: TruthSource, t: TFunction<"settings">): string {
   return t("general.truthSources.statusLine", {
     exists: source.exists ? t("general.truthSources.exists") : t("general.truthSources.missing"),
     kind: source.kind,

@@ -1,0 +1,155 @@
+{
+  "fab": {
+    "open": "Open MoirAI"
+  },
+  "header": {
+    "collapse": "Collapse MoirAI",
+    "collapseTooltip": "Collapse",
+    "retryIn": " · retry {{seconds}}s",
+    "manageAssistant": "Manage code assistant",
+    "cliRunning": "CLI running",
+    "assistantPending": "Code assistant pending",
+    "openAssistant": "Open code assistant",
+    "openInCli": "Open in CLI",
+    "readOnlySuffix": "(read-only)",
+    "readOnlyTitle": "Workspace-owned config is read-only",
+    "resume": "Resume {{assistant}}",
+    "attach": "Attach {{assistant}}",
+    "attachExited": "Attach {{assistant}} (exited)",
+    "detach": "Detach",
+    "closeAll": "Close assistants",
+    "closeOne": "Close {{assistant}}",
+    "starting": "Starting…",
+    "checking": "Checking…"
+  },
+  "assistant": {
+    "claude": "Claude code",
+    "codex": "Codex"
+  },
+  "session": {
+    "fallbackLabel": "Chat {{number}}",
+    "close": "Close {{label}}",
+    "actions": "Chat actions",
+    "new": "New chat",
+    "restore": "Restore chat"
+  },
+  "message": {
+    "error": "Copilot error",
+    "unknownEvent": "Unknown Copilot event",
+    "thought": "Thought",
+    "thinking": "Thinking…"
+  },
+  "tool": {
+    "verb": {
+      "explore": {
+        "running": "Exploring",
+        "done": "Explored"
+      },
+      "work": {
+        "running": "Working",
+        "done": "Worked"
+      },
+      "run": {
+        "running": "Running",
+        "done": "Ran"
+      },
+      "skill": {
+        "running": "Using skill",
+        "done": "Used skill"
+      }
+    },
+    "runningOther": "Running {{tool}}",
+    "doneOther": "{{tool}} completed",
+    "failed": "{{tool}} failed"
+  },
+  "approval": {
+    "title": "{{tool}} held for approval",
+    "configTitle": "LLM configuration: {{tool}} held for approval",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveTool": "Approve {{tool}}",
+    "rejectTool": "Reject {{tool}}",
+    "waiting": "Waiting for approval.",
+    "approved": "{{tool}} approved.",
+    "denied": "{{tool}} denied.",
+    "rejected": "{{tool}} rejected.",
+    "timedOut": "{{tool}} timed out waiting for an answer — the task was stopped. Send a new message to carry on.",
+    "noLongerHeld": "This call is no longer being held.",
+    "unresolved": "Unable to resolve tool approval."
+  },
+  "patch": {
+    "edited": "Edited {{path}}",
+    "created": "Created {{path}}",
+    "compare": "Compare",
+    "openCompare": "Open side-by-side compare",
+    "reject": "Reject",
+    "rejectChange": "Reject change",
+    "accept": "Accept",
+    "accepted": "Accepted",
+    "reverted": "Reverted",
+    "checkpointUnavailable": "Checkpoint unavailable: this change cannot be safely restored. {{detail}}",
+    "checkpointPreparing": "Restore checkpoint is still being prepared.",
+    "noWorkspace": "No workspace to restore into (desktop only).",
+    "acceptFailed": "Couldn't accept change: {{detail}}",
+    "revertFailed": "Couldn't revert change: {{detail}}"
+  },
+  "compare": {
+    "title": "Compare",
+    "direction": "(before → after)",
+    "close": "Close compare",
+    "loading": "Loading compare…"
+  },
+  "route": {
+    "picker": "Copilot route picker",
+    "select": "Select Copilot route",
+    "selectOne": "Select route {{route}}",
+    "label": "Route",
+    "current": "Route: {{route}}",
+    "none": "Select route",
+    "off": "Off"
+  },
+  "role": {
+    "loading": "Loading copilot role",
+    "loadingTooltip": "Loading copilot roles…",
+    "label": "Copilot role",
+    "none": "No copilot role",
+    "addHint": "Add a Copilot role in Settings → Copilot",
+    "select": "Select copilot role",
+    "loadingList": "Loading copilot roles",
+    "current": "Role: {{role}}",
+    "selectRole": "Select role {{role}}"
+  },
+  "analysis": {
+    "prompt": "Run finished — fill in the golden the nodes are missing, from this output?",
+    "confirm": "Confirm",
+    "dismiss": "Dismiss analysis",
+    "locked": "Golden is locked; nothing was filled in.",
+    "nothingMissing": "Every node already has a golden; nothing changed.",
+    "seeded_one": "Filled in the golden of {{count}} node from this run's output: {{nodes}}",
+    "seeded_other": "Filled in the golden of {{count}} nodes from this run's output: {{nodes}}",
+    "nodeSeparator": ", "
+  },
+  "judge": {
+    "ask": "Ask Copilot Judge"
+  },
+  "empty": {
+    "judge": "**Copilot Judge**\n\nAsk me to review the current artifact and golden diff. I use the Eval context endpoint, not a separate judge backend.",
+    "skill": "Ask about this skill, workflow, or current screen. General questions are allowed.",
+    "create": "**Create a skill with Copilot**\n\nUse Templates as a scaffold, or describe the Skill you want me to help create.",
+    "describeSkill": "Describe my Skill",
+    "describeSkillDraft": "Help me create a new Skill. Ask clarifying questions, then propose a minimal skill.md.",
+    "templates": "Templates",
+    "templatesLoading": "Loading templates...",
+    "templateDraft": "Use the \"{{template}}\" template as a scaffold and help me create a Skill."
+  },
+  "composer": {
+    "placeholder": "Use '@' to mention nodes...",
+    "stop": "Stop generating",
+    "send": "Send message"
+  },
+  "toast": {
+    "routeSwitched": "Route switched. Future messages will use it.",
+    "noWorkspace": "No skill workspace available",
+    "restoreFailed": "Copilot session could not be restored"
+  }
+}

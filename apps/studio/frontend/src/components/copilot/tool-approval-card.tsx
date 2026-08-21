@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Check, FileSearch, Settings, TerminalSquare, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -7,6 +8,25 @@ import type { CopilotToolApprovalRequiredEvent } from '../../types/copilot'
 import { copilotStore } from '../../store/copilotStore'
 import { Button } from '../ui/button'
 import { errorMessage } from '../../utils/errors'
+import type { TFunction } from 'i18next'
+
+/**
+ * The hold this card was waiting on is no longer open.
+ *
+ * A class rather than a worded Error because the sentence depends on the
+ * reader's language and this function runs outside React. `backendMessage` is
+ * the developer-facing detail when the backend sent one — it says WHICH of the
+ * three endings happened, which no generic sentence can.
+ */
+export class ToolApprovalNotHeldError extends Error {
+  readonly backendMessage: string | null
+
+  constructor(backendMessage: string | null) {
+    super(backendMessage ?? 'tool approval no longer held')
+    this.name = 'ToolApprovalNotHeldError'
+    this.backendMessage = backendMessage
+  }
+}
 
 interface ResolveToolApprovalDecisionInput {
   skillId: string
@@ -15,7 +35,8 @@ interface ResolveToolApprovalDecisionInput {
 }
 
 interface ResolveToolApprovalDecisionResult {
-  label: string
+  /** Which way it went. The sentence is the card's to write, not this function's. */
+  outcome: 'approved' | 'rejected'
   response: CopilotToolApprovalResponse
 }
 
@@ -33,15 +54,15 @@ export async function resolveToolApprovalDecision({
     // The hold is gone. WHICH way it went is the backend's to say — this used to
     // prefix "Approval expired:", asserting the timeout case whichever of the
     // three had actually happened (problem ledger CP6).
-    throw new Error(response.message ?? 'This call is no longer being held.')
+    throw new ToolApprovalNotHeldError(response.message ?? null)
   }
 
   if (!approve) {
-    return { label: `${event.toolName} rejected.`, response }
+    return { outcome: 'rejected', response }
   }
   // Approved -> the CLI executes the tool itself; its result streams back into
   // the conversation (no backend re-execution).
-  return { label: `${event.toolName} approved.`, response }
+  return { outcome: 'approved', response }
 }
 
 /**
@@ -52,14 +73,17 @@ export async function resolveToolApprovalDecision({
  * card was stopped, not merely refused, and the session is still there to
  * carry on from (problem ledger CP7).
  */
-function describeDecision(event: CopilotToolApprovalRequiredEvent): string | null {
+function describeDecision(
+  event: CopilotToolApprovalRequiredEvent,
+  t: TFunction<'copilot'>,
+): string | null {
   switch (event.decision) {
     case 'pending':
       return null
     case 'timed_out':
-      return `${event.toolName} timed out waiting for an answer — the task was stopped. Send a new message to carry on.`
+      return t('approval.timedOut', { tool: event.toolName })
     default:
-      return `${event.toolName} ${event.decision}.`
+      return t(`approval.${event.decision}`, { tool: event.toolName })
   }
 }
 
@@ -72,11 +96,12 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
   // Only the in-flight moment is local. The DECISION is read from the event,
   // which is what gets persisted — a card that remembered its own verdict came
   // back undecided every time it remounted (problem ledger CP6).
+  const { t } = useTranslation('copilot')
   const [errorLabel, setErrorLabel] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const settled = event.decision !== 'pending'
   const expired = event.decision === 'timed_out'
-  const decisionLabel = describeDecision(event)
+  const decisionLabel = describeDecision(event, t)
 
   async function decide(approve: boolean) {
     if (!skillId || isResolving || settled) {
@@ -88,9 +113,11 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
       const result = await resolveToolApprovalDecision({ skillId, event, approve })
       setErrorLabel(null)
       copilotStore.decideToolApproval(event.id, approve ? 'approved' : 'denied')
-      toast.success(result.label)
+      toast.success(t(`approval.${result.outcome}`, { tool: event.toolName }))
     } catch (error) {
-      const message = errorMessage(error, 'Unable to resolve tool approval.')
+      const message = error instanceof ToolApprovalNotHeldError
+        ? error.backendMessage ?? t('approval.noLongerHeld')
+        : errorMessage(error, t('approval.unresolved'))
       setErrorLabel(message)
       toast.error(message)
     } finally {
@@ -108,11 +135,9 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
   // not-yet-classified tool held by the default-approval tier.
   const isMcpConfigWrite = event.toolName.startsWith('mcp__studio__')
   const Icon = isExecution ? TerminalSquare : isMcpConfigWrite ? Settings : FileSearch
-  const title = isExecution
-    ? `${event.toolName} held for approval`
-    : isMcpConfigWrite
-      ? `LLM configuration: ${event.toolName.slice('mcp__studio__'.length)} held for approval`
-      : `${event.toolName} held for approval`
+  const title = isMcpConfigWrite
+    ? t('approval.configTitle', { tool: event.toolName.slice('mcp__studio__'.length) })
+    : t('approval.title', { tool: event.toolName })
 
   return (
     <div className="mt-2 rounded-md border border-border bg-card p-2 text-xs ring-1 ring-foreground/10 ring-inset">
@@ -128,10 +153,10 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
               size="sm"
               onClick={() => void decide(true)}
               disabled={disabled}
-              aria-label={`Approve ${event.toolName}`}
+              aria-label={t('approval.approveTool', { tool: event.toolName })}
             >
               <Check data-icon="inline-start" />
-              Approve
+              {t('approval.approve')}
             </Button>
             <Button
               type="button"
@@ -139,10 +164,10 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
               size="sm"
               onClick={() => void decide(false)}
               disabled={disabled}
-              aria-label={`Reject ${event.toolName}`}
+              aria-label={t('approval.rejectTool', { tool: event.toolName })}
             >
               <X data-icon="inline-start" />
-              Reject
+              {t('approval.reject')}
             </Button>
           </div>
         )}
@@ -155,7 +180,7 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
           errorLabel ? 'text-destructive' : expired ? 'text-warning' : 'text-muted-foreground'
         }`}
       >
-        {errorLabel ?? decisionLabel ?? 'Waiting for approval.'}
+        {errorLabel ?? decisionLabel ?? t('approval.waiting')}
       </p>
     </div>
   )

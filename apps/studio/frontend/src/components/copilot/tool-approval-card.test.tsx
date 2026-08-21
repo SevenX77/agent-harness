@@ -104,7 +104,7 @@ describe('ToolApprovalCard', () => {
       toolUseId: 'tu-tool',
       approve: true,
     })
-    expect(result.label).toBe('Bash approved.')
+    expect(result.outcome).toBe('approved')
   })
 
   it('surfaces whatever account the backend gives of where the hold went', async () => {
@@ -144,6 +144,6 @@ describe('ToolApprovalCard', () => {
       toolUseId: 'tu-tool',
       approve: false,
     })
-    expect(result.label).toBe('Bash rejected.')
+    expect(result.outcome).toBe('rejected')
   })
 })

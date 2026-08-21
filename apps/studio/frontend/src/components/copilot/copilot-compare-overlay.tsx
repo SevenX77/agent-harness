@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 
 // F5/DEF-026: side-by-side Monaco diff ("Open Compare 并排 Monaco"). Lazy-loaded
@@ -23,17 +24,18 @@ export function CopilotCompareOverlay({
   language = 'markdown',
   onClose,
 }: CopilotCompareOverlayProps) {
+  const { t } = useTranslation('copilot')
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <span className="text-muted-foreground">Compare</span>
+          <span className="text-muted-foreground">{t('compare.title')}</span>
           <span className="font-mono">{path}</span>
-          <span className="text-xs text-muted-foreground">(before → after)</span>
+          <span className="text-xs text-muted-foreground">{t('compare.direction')}</span>
         </div>
         <button
           type="button"
-          aria-label="Close compare"
+          aria-label={t('compare.close')}
           onClick={onClose}
           className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
@@ -44,7 +46,7 @@ export function CopilotCompareOverlay({
         <Suspense
           fallback={
             <div className="grid h-full place-items-center text-sm text-muted-foreground">
-              Loading compare…
+              {t('compare.loading')}
             </div>
           }
         >

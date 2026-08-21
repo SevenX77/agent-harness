@@ -7,7 +7,9 @@ describe('CopilotFab', () => {
     const html = renderToStaticMarkup(
       <CopilotFab position={null} onPositionChange={vi.fn()} onOpen={vi.fn()} />,
     )
-    expect(html).toContain('aria-label="打开 MoirAI"')
+    // The label comes from the `copilot` namespace, so it reads in whatever
+    // language the reader picked; tests run in English (no stored preference).
+    expect(html).toContain('aria-label="Open MoirAI"')
     expect(html).toContain('rounded-full')
     // MoirAI constellation mark, themed on the canvas accent (no hardcoded hex).
     expect(html).toContain('<svg')

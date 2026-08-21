@@ -65,10 +65,7 @@ describe('PatchProposedBubble', () => {
         event={patchEvent()}
         review="pending"
         busy={false}
-        checkpointStatus={{
-          state: 'unsafe',
-          message: 'Checkpoint unavailable: this change cannot be safely restored.',
-        }}
+        checkpointStatus={{ state: 'unsafe', detail: 'the file moved' }}
         showCompare={false}
         onAccept={vi.fn()}
         onReject={vi.fn()}
@@ -107,8 +104,10 @@ describe('seedCopilotRestoreCheckpoint', () => {
     if (result.state !== 'unsafe') {
       throw new Error(`Expected unsafe checkpoint state, got ${result.state}`)
     }
-    expect(result.message).toMatch(/checkpoint/i)
-    expect(result.message).toMatch(/safely restore/i)
+    // The status carries the DETAIL of what went wrong; the sentence around
+    // it ("Checkpoint unavailable: …") belongs to the view, in the reader's
+    // language, so it is not this object's to hold.
+    expect(result.detail).toMatch(/checkpoint seed failed/i)
   })
 })
 

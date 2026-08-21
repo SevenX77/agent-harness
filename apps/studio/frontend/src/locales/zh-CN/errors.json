@@ -61,5 +61,8 @@
     "httpStatus": "HTTP {{status}} 请求失败。",
     "notConfigured": "未配置",
     "requestFailed": "请求失败"
+  },
+  "native": {
+    "hashConflict": "文件在磁盘上被改过了。重新加载这个文件再试一次。"
   }
 }

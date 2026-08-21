@@ -61,5 +61,8 @@
     "httpStatus": "HTTP {{status}} request failed.",
     "notConfigured": "Not configured",
     "requestFailed": "Request failed"
+  },
+  "native": {
+    "hashConflict": "File changed on disk. Reload the file and try again."
   }
 }

@@ -2,7 +2,7 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
-/vendor/downloads/
+/.cache/
 /vendor/python/
 /vendor/python_runtime/
 /vendor/site-packages/
@@ -10,6 +10,4 @@
 /vendor/resources/
 /vendor/requirements.lock.txt
 /vendor/requirements.thirdparty.txt
-/python_runtime/*
-!/python_runtime/.keep
 /vendor/ah/

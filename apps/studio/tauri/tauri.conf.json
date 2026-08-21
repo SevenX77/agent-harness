@@ -28,7 +28,6 @@
     "targets": "all",
     "resources": [
       "vendor/**/*",
-      "python_runtime/**/*",
       "../../../config/**/*"
     ],
     "icon": [

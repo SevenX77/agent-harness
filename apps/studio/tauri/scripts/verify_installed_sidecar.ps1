@@ -129,6 +129,21 @@ if (-not $resolvedEngine.StartsWith($installDir, [System.StringComparison]::Ordi
 }
 Write-Host "  OK   installed interpreter imports graph_agent from $resolvedEngine"
 
+# Nothing a user downloads should be an archive the BUILD needed. `vendor/` is
+# shipped whole (`bundle.resources: vendor/**/*`), so anything left in it rides
+# along: the download cache used to sit at `vendor/downloads/` and put 48.9 MB
+# of .tar.gz/.tar.xz into a 154.7 MB installer — a third of it, for files
+# nothing opens after the build (ledger D4). The cache now lives outside the
+# payload; this makes that stay true.
+$archives = Get-ChildItem $installDir -Recurse -File -Include '*.tar.gz', '*.tar.xz', '*.tar.bz2' -ErrorAction SilentlyContinue
+if ($archives) {
+    foreach ($a in $archives) {
+        Write-Host ("  SHIPPED {0} ({1:N1} MB)" -f $a.FullName.Substring($installDir.Length), ($a.Length / 1MB)) -ForegroundColor Red
+    }
+    Fail "the installer carries build-cache archives. They are inputs the build already consumed; shipping them makes every user download them again for nothing."
+}
+Write-Host "  OK   no build-cache archives shipped"
+
 Write-Host ""
 Write-Host "PASS: the installed app resolves its sidecar inside $installDir" -ForegroundColor Green
 

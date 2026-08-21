@@ -11,6 +11,16 @@ const { spawnSync } = require('node:child_process')
 const TAURI_DIR = path.resolve(__dirname, '..')
 const DEFAULT_LOCK_PATH = path.join(TAURI_DIR, 'python-runtime.lock.json')
 const DEFAULT_VENDOR_DIR = path.join(TAURI_DIR, 'vendor')
+// Deliberately NOT under `vendor/`. `tauri.conf.json` ships `vendor/**/*`, so
+// that directory is the payload — anything left in it is handed to every user.
+// The cache holding the archives the payload was extracted FROM used to live at
+// `vendor/downloads/`, and rode along: 48.9 MB of .tar.gz/.tar.xz inside a
+// 154.7 MB installer, a third of the download, for files nothing opens after
+// the build (ledger D4). Keeping the cache next to the payload rather than
+// inside it is what lets `vendor/**/*` stay a correct, complete description of
+// what ships. Shared by every vendoring script here, so there is one cache and
+// one definition of where it is.
+const DEFAULT_DOWNLOADS_DIR = path.join(TAURI_DIR, '.cache', 'downloads')
 const REQUIRED_TARGETS = [
   'x86_64-apple-darwin',
   'aarch64-apple-darwin',
@@ -185,11 +195,18 @@ async function ensureArchive(artifact, downloadsDir) {
 // pick a winner between the two tars; this removes the disagreement instead.
 // `-xf` rather than `-xzf` so the same command serves .tar.gz and .tar.xz
 // alike; both programs sniff the compression.
+// Separators are normalised to `/` for the same reason the paths are relative:
+// it is the one spelling both programs read the same way. GNU tar treats `\` as
+// an escape character, so a Windows relative path survives one level and then
+// stops: `-C ..\dest` works, while `-C ..\..\vendor\python\.python-runtime-XXX`
+// comes back "Cannot open: No such file or directory" for a directory that is
+// sitting right there. Both tars accept `/` on Windows, so `/` is what they get.
 function tarExtractCommand(archivePath, intoDir) {
   const cwd = path.dirname(archivePath)
+  const into = path.relative(cwd, intoDir) || '.'
   return {
     cwd,
-    args: ['-xf', path.basename(archivePath), '-C', path.relative(cwd, intoDir) || '.'],
+    args: ['-xf', path.basename(archivePath), '-C', into.split(path.sep).join('/')],
   }
 }
 
@@ -234,7 +251,7 @@ async function main(argv = process.argv.slice(2)) {
   const lock = loadLock(args.lockPath)
   const artifact = artifactFor(lock, args.target)
   const runtimeDir = path.join(args.vendorDir, 'python', args.target)
-  const downloadsDir = path.join(args.vendorDir, 'downloads')
+  const downloadsDir = DEFAULT_DOWNLOADS_DIR
 
   if (!args.force && isRuntimeInstalled(runtimeDir, args.target, artifact)) {
     console.log(`[python-runtime] runtime already installed ${args.target}`)
@@ -262,6 +279,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_DOWNLOADS_DIR,
+  DEFAULT_VENDOR_DIR,
   REQUIRED_TARGETS,
   artifactFor,
   download,

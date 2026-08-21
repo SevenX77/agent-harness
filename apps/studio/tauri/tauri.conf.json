@@ -27,8 +27,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "vendor/**/*",
-      "../../../config/**/*"
+      "vendor/**/*"
     ],
     "icon": [
       "icons/32x32.png",

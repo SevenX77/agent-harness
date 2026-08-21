@@ -150,8 +150,6 @@ def resource_dir(tmp_path: Path) -> Path:
     root = tmp_path / "resources"
     (root / "skills" / "pm-smoke").mkdir(parents=True)
     (root / "workspaces").mkdir()
-    (root / "config").mkdir()
-    (root / "config" / "llm_roles.yaml").write_text("roles: []\n", encoding="utf-8")
     (root / "skills" / "pm-smoke" / "SKILL.md").write_text(
         """---
 schema_version: "2.0"

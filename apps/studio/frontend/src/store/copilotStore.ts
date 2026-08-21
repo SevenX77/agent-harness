@@ -4,6 +4,7 @@ import {
   ensureWorkspaceSupportDirs,
   readWorkspaceFile,
 } from '../lib/tauri'
+import { errorMessage } from '../utils/errors'
 
 type Listener = () => void
 
@@ -137,7 +138,7 @@ async function loadSessionById(
   } catch (err: unknown) {
     console.warn(
       `copilot: skipping unreadable session file ${sessionId}.json: ${
-        err instanceof Error ? err.message : String(err)
+        errorMessage(err)
       }`,
     )
   }
@@ -191,7 +192,7 @@ function persistWindowState(
 ): void {
   const sessionsSnapshot = sessions.map((session) => ({ ...session, messages: session.messages }))
   void writeWindowState(workspaceId, skillId, sessionsSnapshot, activeSessionId).catch((err: unknown) => {
-    state.persistenceError = err instanceof Error ? err.message : String(err)
+    state.persistenceError = errorMessage(err)
     emit()
   })
 }
@@ -242,7 +243,7 @@ async function persistSessionToDisk(
     await writeWorkspaceFile(workspaceId, sessionPath(skillId, session.id), JSON.stringify(session, null, 2))
     state.persistenceError = null
   } catch (err: unknown) {
-    state.persistenceError = err instanceof Error ? err.message : String(err)
+    state.persistenceError = errorMessage(err)
   }
   emit()
 }
@@ -428,7 +429,7 @@ export const copilotStore = {
       emit()
       return true
     } catch (err: unknown) {
-      state.persistenceError = err instanceof Error ? err.message : String(err)
+      state.persistenceError = errorMessage(err)
       emit()
       return false
     }

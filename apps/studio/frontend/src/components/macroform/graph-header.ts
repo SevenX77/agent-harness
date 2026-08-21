@@ -1,6 +1,6 @@
 import yaml from 'js-yaml'
 import type { JsonValue } from '@/api/types'
-import { isRecord } from '@/utils/errors'
+import { errorMessage, isRecord } from '@/utils/errors'
 
 /**
  * GRAPH.md macro-contract header (n2 atom #22).
@@ -72,7 +72,7 @@ export function parseGraphHeader(markdown: string): ParseGraphHeaderResult {
     return {
       ok: false,
       reason: 'invalid-yaml',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     }
   }
 }

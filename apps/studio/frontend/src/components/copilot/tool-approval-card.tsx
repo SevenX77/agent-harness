@@ -6,6 +6,7 @@ import { resolveCopilotToolApproval, type CopilotToolApprovalResponse } from '..
 import type { CopilotToolApprovalRequiredEvent } from '../../types/copilot'
 import { copilotStore } from '../../store/copilotStore'
 import { Button } from '../ui/button'
+import { errorMessage } from '../../utils/errors'
 
 interface ResolveToolApprovalDecisionInput {
   skillId: string
@@ -89,7 +90,7 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
       copilotStore.decideToolApproval(event.id, approve ? 'approved' : 'denied')
       toast.success(result.label)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to resolve tool approval.'
+      const message = errorMessage(error, 'Unable to resolve tool approval.')
       setErrorLabel(message)
       toast.error(message)
     } finally {

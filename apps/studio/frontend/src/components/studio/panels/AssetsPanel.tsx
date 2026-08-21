@@ -781,7 +781,7 @@ export function AssetsPanel({
         return
       } catch (error) {
         if (!file.content) {
-          toast.error(error instanceof Error ? error.message : "Could not open file")
+          toast.error(errorMessage(error, "Could not open file"))
           return
         }
       }

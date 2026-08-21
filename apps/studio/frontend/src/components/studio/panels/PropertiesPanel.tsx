@@ -484,7 +484,7 @@ export function PropertiesPanel({
         }
       }
       setGraphSaveFailedKey(graphFormState.key)
-      toast.error(errorToReport instanceof Error ? errorToReport.message : "Could not save graph properties")
+      toast.error(errorMessage(errorToReport, "Could not save graph properties"))
     } finally {
       setGraphSaving(false)
     }
@@ -649,7 +649,7 @@ export function PropertiesPanel({
         }
       }
       setPhaseSaveFailedKey(phaseFormState.key)
-      toast.error(errorToReport instanceof Error ? errorToReport.message : "Could not save phase properties")
+      toast.error(errorMessage(errorToReport, "Could not save phase properties"))
     } finally {
       setSaving(false)
     }
@@ -688,7 +688,7 @@ export function PropertiesPanel({
         details: roleTestDetailsFromResult(result),
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Role test failed"
+      const message = errorMessage(error, "Role test failed")
       setState({ running: false, status: null, error: message, details: [message] })
       toast.error(message)
     }
@@ -2885,7 +2885,7 @@ function LlmNodeParamsField({
         } catch (error) {
           if (!queuedSaveRef.current) {
             setNodeParamsSaveStatus("error")
-            toast.error(error instanceof Error ? error.message : "Could not save model params")
+            toast.error(errorMessage(error, "Could not save model params"))
           }
         } finally {
           inflightSaveRef.current = null
@@ -3299,7 +3299,7 @@ function LlmNodeCompareField({
       if (!skillId || !nodeId) return
       void putNodeCompareCandidates(skillId, nodeId, next.map(draftToApiCandidate)).catch((error) => {
         toast.error(
-          error instanceof Error ? error.message : "Could not save compare candidates",
+          errorMessage(error, "Could not save compare candidates"),
         )
       })
     },
@@ -3435,7 +3435,7 @@ function LlmNodeCompareField({
       const result = await runCompareCandidateTest(draftGroup.canonical_id, draftRoute)
       setDraftTestState({ running: false, result })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Compare LLM test failed"
+      const message = errorMessage(error, "Compare LLM test failed")
       setDraftTestState({ running: false, error: message })
       toast.error(message)
     }
@@ -3448,7 +3448,7 @@ function LlmNodeCompareField({
       const result = await runCompareCandidateTest(editGroup.canonical_id, editRoute)
       setEditTestState({ running: false, result })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Compare LLM test failed"
+      const message = errorMessage(error, "Compare LLM test failed")
       setEditTestState({ running: false, error: message })
       toast.error(message)
     }
@@ -3460,7 +3460,7 @@ function LlmNodeCompareField({
       const result = await runCompareCandidateTest(candidate.modelGroupId, candidate.route)
       setCompareTests((current) => ({ ...current, [candidate.id]: { running: false, result } }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Compare LLM test failed"
+      const message = errorMessage(error, "Compare LLM test failed")
       setCompareTests((current) => ({ ...current, [candidate.id]: { running: false, error: message } }))
       toast.error(message)
     }

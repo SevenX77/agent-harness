@@ -243,7 +243,21 @@ function translatedErrorCode(payload: Partial<ErrorResponse> | undefined): strin
   return translated || null
 }
 
-export function errorMessage(error: unknown): string {
+/**
+ * What the reader is told about a failure — the ONE place that decides it.
+ *
+ * Every surface that reports a caught error goes through here. That is not
+ * tidiness: a backend refusal only reads in the reader's language if this
+ * function sees it, and a caller that writes `error instanceof Error ?
+ * error.message : '…'` instead silently opts out. On 2026-08-21 the Save-to-Team
+ * path did exactly that, so a correctly-typed `APP_SETTINGS_INCOMPLETE` surfaced
+ * as "Request failed with status code 400" (ledger K4a).
+ *
+ * `fallback` is what the caller was DOING, used only when the rejection carries
+ * nothing readable — "Sync failed" beats a JSON dump of an unrecognized object.
+ * It never overrides a message the error actually carries.
+ */
+export function errorMessage(error: unknown, fallback?: string): string {
   if (isBackendUnavailableError(error)) {
     return BACKEND_UNAVAILABLE_MESSAGE
   }
@@ -269,11 +283,14 @@ export function errorMessage(error: unknown): string {
     if (error.type === 'HashConflict') {
       return 'File changed on disk. Reload the file and try again.'
     }
+    if (fallback) {
+      return fallback
+    }
     try {
       return JSON.stringify(error)
     } catch {
       return String(error)
     }
   }
-  return String(error)
+  return fallback ?? String(error)
 }

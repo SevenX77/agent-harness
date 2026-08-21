@@ -1,6 +1,6 @@
 import yaml from 'js-yaml'
 import type { JsonValue } from '@/api/types'
-import { isRecord } from '@/utils/errors'
+import { errorMessage, isRecord } from '@/utils/errors'
 
 export type PhaseFrontmatterKind = 'logic' | 'agent' | 'subgraph'
 export type PhaseFrontmatterErrorReason = 'missing-frontmatter' | 'unterminated-frontmatter' | 'invalid-yaml' | 'non-object-frontmatter'
@@ -119,7 +119,7 @@ export function parsePhaseFrontmatter(markdown: string): ParsePhaseFrontmatterRe
     return {
       ok: false,
       reason: 'invalid-yaml',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     }
   }
 }

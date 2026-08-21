@@ -64,6 +64,7 @@ import { getFixedRoleNames, getFixedRoleStatus } from "@/api/llm"
 import type { CredentialsState, FixedRoleRecommendedModel, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
 import type { CliSessionSettings } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
+import { errorMessage } from "@/utils/errors"
 
 /**
  * R-F5: resolve the persisted yaml key for a UI role id. Floated built-in
@@ -651,7 +652,7 @@ export function CopilotTab({
             err,
           )
           toast.error(
-            `Delete ${role.title} failed: ${err instanceof Error ? err.message : String(err)}`,
+            `Delete ${role.title} failed: ${errorMessage(err)}`,
           )
         }
       },

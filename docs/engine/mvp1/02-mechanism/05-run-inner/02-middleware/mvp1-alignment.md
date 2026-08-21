@@ -28,6 +28,7 @@ middleware = 内层 agent loop 的 **6 槽 hook 链**(经 `create_agent(middlewa
 |---|---|---|
 | MW1 | 本域 own 链基础设施 + 纯卫生槽;域专槽逻辑归各域 | 职责归属(机制相同≠同模块);双向引用防 drift |
 | MW2 | LoopDetection 实现前先复核 ExecutionControl 已有轻量 loop | 避免重复注入 |
+| MW3 | 两个卫生槽的"连续"一律**按工具结果计数,不按消息相邻计数**;窗口只被工具结果的事实打断(成功的结果、换了别的工具) | 真实 agent loop 是「一轮一次调用」,每两次失败之间必然夹着提出下一次调用的那条 AIMessage;以消息相邻为准的窗口只能看见**同一轮里并发发出的多次调用**,而那是另一种情形。实证:一个 validator 必拒的 fixture 连续七次 `finish_task` 被拒,`DeadEndPrunedEvent` 一次未发(台账 E5,2026-08-21 真跑)。ExecutionControl 与 LoopDetection 共用这条窗口口径,区别只在判据:前者是**同一个工具一直失败**(不看错误措辞),后者是**同一个工具回同一个结果**(无进展) |
 
 ## 6. 测试关键点
 1. live `assemble_graph` AGENT phase 传 6 槽 middleware(与 `01-agent-loop` 联动)。

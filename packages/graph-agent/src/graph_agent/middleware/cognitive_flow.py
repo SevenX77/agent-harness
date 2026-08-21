@@ -49,7 +49,7 @@ from graph_agent.callbacks.events import (
     FinishTaskVerdictEvent,
     WorkingMemoryUpdateEvent,
 )
-from graph_agent.core.exceptions import ErrorPayload, GraphAgentError, make_error_payload
+from graph_agent.core.exceptions import GraphAgentError
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.schema_engine import (
     SchemaEngine,
@@ -187,180 +187,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 item_count=item_count,
                 details=list(details or []),
             ),
-        )
-
-    @staticmethod
-    def validate_finish_task_with_schema_gate(
-        *,
-        business_data_md: str | None = None,
-        output: dict[str, Any] | None = None,
-        output_schema: dict[str, Any] | SchemaObject | None,
-        state: dict[str, Any] | None = None,
-        phase_name: str = "unknown",
-        schema_engine: SchemaEngine | None = None,
-    ) -> FinishTaskSchemaGateResult:
-        """Validate finish_task output against compiled ``io.outputs`` before any write.
-
-        A schema gate and only that: it guarantees a schema failure exposes no
-        final write candidate. Business rules belong to the phase's sibling
-        ``validator.py``, which runs elsewhere and fatally — see ``__init__``.
-        """
-        del state
-        engine = schema_engine or SchemaEngine()
-
-        if output_schema is None:
-            return _schema_gate_reject(
-                phase_name=phase_name,
-                code="[F-v3-agent-output-schema-missing]",
-                errors=("finish_task reached schema gate without compiled io.outputs.",),
-            )
-
-        if output is None:
-            parsed = _parse_finish_task_output_payload(business_data_md)
-            if not isinstance(parsed, dict):
-                return _schema_gate_reject(
-                    phase_name=phase_name,
-                    code="[F-v3-agent-output-schema-invalid]",
-                    errors=(
-                        "business_data_md must decode to a JSON object for schema validation.",
-                    ),
-                )
-            output = parsed
-
-        try:
-            schema = _coerce_output_schema(output_schema, engine)
-            validation = engine.validate(output, schema)
-        except Exception as exc:  # noqa: BLE001 - schema issues become tool feedback
-            logger.warning(
-                "schema gate failed before validation: phase=%s exc=%s",
-                phase_name,
-                exc,
-            )
-            return _schema_gate_reject(
-                phase_name=phase_name,
-                code="[F-v3-agent-output-schema-invalid]",
-                errors=(f"invalid compiled io.outputs schema: {exc}",),
-            )
-        if not validation.ok:
-            return _schema_gate_reject(
-                phase_name=phase_name,
-                code="[F-v3-agent-output-schema-invalid]",
-                errors=validation.errors,
-            )
-
-        parsed_output = validation.parsed or dict(output)
-        return FinishTaskSchemaGateResult(
-            True,
-            None,
-            None,
-            None,
-            parsed_output,
-            parsed_output,
-            (),
-        )
-
-    @staticmethod
-    def invoke_validator_with_contract(
-        *,
-        validator: Callable[..., dict[str, Any] | None] | None,
-        output: dict[str, Any],
-        state_slice: dict[str, Any],
-        phase_name: str = "unknown",
-        **kwargs: Any,
-    ) -> ValidatorRuntimeResult:
-        """Run the PR β validator contract after schema validation passes."""
-        if validator is None:
-            return ValidatorRuntimeResult(True, None, None, None, output=output)
-
-        try:
-            result = validator(output, state_slice, phase_name=phase_name, **kwargs)
-        except Exception as exc:  # noqa: BLE001 - converted to LLM-visible feedback
-            logger.warning("validator exception: phase=%s exc=%s", phase_name, exc)
-            return _validator_runtime_reject(
-                phase_name=phase_name,
-                feedback=f"{type(exc).__name__}: {exc}",
-            )
-
-        if result is None:
-            return ValidatorRuntimeResult(True, None, None, None, output=output)
-
-        if isinstance(result, dict):
-            return ValidatorRuntimeResult(True, None, None, None, output=result)
-
-        feedback = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
-        logger.warning("validator rejected: phase=%s feedback=%s", phase_name, feedback)
-        return _validator_runtime_reject(phase_name=phase_name, feedback=feedback)
-
-    def handle_finish_task_tool_result(
-        self,
-        *,
-        tool_name: str,
-        tool_result: Any,
-        output_schema: dict[str, Any] | SchemaObject | None,
-        flow: dict[str, Any],
-        messages: list[Any],
-        critic_metrics: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Handle a finish_task tool result for graph assembly callers."""
-        if tool_name != self._FINISH_TOOL:
-            return None
-
-        result_payload = tool_result if isinstance(tool_result, dict) else {}
-        next_flow = dict(flow)
-        next_flow["finish_task_result"] = result_payload
-        next_flow.setdefault("critic_metrics", {}).update(
-            {
-                key: {
-                    "invocations": value.invocations,
-                    "passed": value.passed,
-                    "rejected": value.rejected,
-                }
-                for key, value in critic_metrics.items()
-            }
-        )
-
-        if not result_payload.get("ok"):
-            return {"flow": next_flow, "messages": messages}
-
-        output = result_payload.get("data", {})
-        if not isinstance(output, dict):
-            output = {}
-
-        if not _has_strict_output_schema(output_schema):
-            return _finish_task_accept_response(
-                phase_name=self._phase_name,
-                flow=next_flow,
-                messages=messages,
-                final_write=output,
-            )
-
-        schema_gate = self.validate_finish_task_with_schema_gate(
-            output=output,
-            output_schema=output_schema,
-            state={"flow": next_flow},
-            phase_name=self._phase_name,
-        )
-        if not schema_gate.accepted:
-            if schema_gate.tool_message is not None:
-                messages.append(schema_gate.tool_message)
-            return {"flow": next_flow, "messages": messages}
-
-        validator_result = self.invoke_validator_with_contract(
-            validator=None,
-            output=schema_gate.output or output,
-            state_slice={"flow": next_flow},
-            phase_name=self._phase_name,
-        )
-        if not validator_result.accepted:
-            if validator_result.tool_message is not None:
-                messages.append(validator_result.tool_message)
-            return {"flow": next_flow, "messages": messages}
-
-        return _finish_task_accept_response(
-            phase_name=self._phase_name,
-            flow=next_flow,
-            messages=messages,
-            final_write=schema_gate.final_write or {},
         )
 
     @staticmethod
@@ -1107,47 +933,11 @@ class _FinishValidation:
 
 
 @dataclass(frozen=True)
-class FinishTaskSchemaGateResult:
-    """Result returned by the PR β strict io.outputs schema gate."""
-
-    accepted: bool
-    error_code: str | None
-    payload: ErrorPayload | None
-    tool_message: ToolMessage | None
-    final_write: dict[str, Any] | None
-    output: dict[str, Any] | None = None
-    errors: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ValidatorRuntimeResult:
-    """Result returned by the PR β validator runtime adapter."""
-
-    accepted: bool
-    error_code: str | None
-    payload: ErrorPayload | None
-    feedback: str | None
-    tool_message: ToolMessage | None = None
-    output: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
 class ClarificationResult:
     """Small return value for PR β ask_clarification interception tests."""
 
     answer: str
     source: str
-
-
-def _parse_finish_task_output_payload(business_data_md: str | None) -> dict[str, Any] | None:
-    text = str(business_data_md or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _unattended_clarification_answer(question: str) -> str:
@@ -1219,15 +1009,6 @@ def _parse_gap_validation(blocks: list[Any], story: list[str]) -> _FinishValidat
     )
 
 
-def _has_strict_output_schema(output_schema: dict[str, Any] | SchemaObject | None) -> bool:
-    if output_schema is None:
-        return False
-    if isinstance(output_schema, SchemaObject):
-        return bool(output_schema.fields)
-    properties = output_schema.get("properties")
-    return isinstance(properties, dict) and bool(properties)
-
-
 def _finish_turn_key(state: Any) -> str | None:
     """Identity of the model turn whose tool_calls are being executed: the
     last AI message's id (parallel duplicates share it; a new turn mints a
@@ -1239,77 +1020,6 @@ def _finish_turn_key(state: Any) -> str | None:
     last = messages[-1]
     identity = getattr(last, "id", None)
     return str(identity) if identity else f"len:{len(messages)}"
-
-
-def _finish_task_accept_response(
-    *,
-    phase_name: str,
-    flow: dict[str, Any],
-    messages: list[Any],
-    final_write: dict[str, Any],
-) -> dict[str, Any]:
-    response_state: dict[str, Any] = {"flow": flow, "messages": messages}
-    response_state["data"] = {
-        "inputs": {},
-        "phase_outputs": {phase_name: final_write},
-        "scratch": {},
-    }
-    return response_state
-
-
-def _coerce_output_schema(
-    output_schema: dict[str, Any] | SchemaObject,
-    schema_engine: SchemaEngine,
-) -> SchemaObject:
-    if isinstance(output_schema, SchemaObject):
-        return output_schema
-    return schema_engine.parse_from_md(json.dumps(output_schema, ensure_ascii=False))
-
-
-def _schema_gate_reject(
-    *,
-    phase_name: str,
-    code: str,
-    errors: tuple[str, ...],
-) -> FinishTaskSchemaGateResult:
-    content = "\n".join((code, f"phase={phase_name}", *errors))
-    payload = make_error_payload(code, content, phase_id=phase_name)
-    return FinishTaskSchemaGateResult(
-        False,
-        code,
-        payload,
-        ToolMessage(
-            content=content,
-            name=CognitiveFlowMiddleware._FINISH_TOOL,
-            tool_call_id="schema-gate",
-            status="error",
-        ),
-        None,
-        None,
-        errors,
-    )
-
-
-def _validator_runtime_reject(
-    *,
-    phase_name: str,
-    feedback: str,
-) -> ValidatorRuntimeResult:
-    error_code = "[F-v3-agent-validator-failed]"
-    content = "\n".join((error_code, f"phase={phase_name}", feedback))
-    payload = make_error_payload(error_code, content, phase_id=phase_name)
-    return ValidatorRuntimeResult(
-        False,
-        error_code,
-        payload,
-        content,
-        ToolMessage(
-            content=content,
-            name=CognitiveFlowMiddleware._FINISH_TOOL,
-            tool_call_id="validator-runtime",
-            status="error",
-        ),
-    )
 
 
 def _workflow_state_or_none(value: object) -> WorkflowState | None:

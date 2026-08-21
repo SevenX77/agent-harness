@@ -96,20 +96,13 @@ def test_gamma2_phase_wrapper_rejects_writes_to_read_only_inputs() -> None:
     assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
 
 
-def test_gamma2_finish_task_acceptance_writes_phase_outputs_not_flat_data() -> None:
-    middleware = CognitiveFlowMiddleware(IOManager([]), phase_name="segment")
-
-    result = middleware.handle_finish_task_tool_result(
-        tool_name="finish_task",
-        tool_result={"ok": True, "data": {"items": [{"title": "Scene plan"}]}},
-        output_schema=None,
-        flow=FrameworkState(),
-        messages=[],
-        critic_metrics={},
-    )
-
-    assert result is not None
-    assert result["data"]["phase_outputs"]["segment"] == {"items": [{"title": "Scene plan"}]}
+# The finish_task acceptance case that used to sit here drove
+# `handle_finish_task_tool_result`, a second finish pipeline that nothing in
+# `src/` called (ledger E19) — so it was asserting the shape of a code path no
+# run ever took. It is deleted with that pipeline. What it meant to pin,
+# "an accepted phase output lands in phase_outputs[phase] rather than flat on
+# the blackboard", belongs to `wrap_phase_output` and is pinned on the live path
+# by `tests/core/test_gamma2_phase_outputs_flow.py`.
 
 
 def test_gamma2_grep_guard_rejects_flat_state_and_parent_merge_residue() -> None:

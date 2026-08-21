@@ -69,7 +69,15 @@ export interface CopilotPatchProposedEvent extends CopilotEventBase {
 /** A copilot tool call held for human approval (Bash / out-of-fence read).
  * Approving lets the CLI execute the tool itself; `detail` is the Bash
  * command text or the out-of-fence path being read. */
-export type ToolApprovalDecision = 'pending' | 'approved' | 'denied'
+/**
+ * How a held tool call ended.
+ *
+ * `timed_out` is here rather than in a field of its own because this one field
+ * already answers "how did this hold end", and a second field answering the
+ * same question is a second thing that can disagree with the first. Nobody
+ * decided in that case — which is exactly why it is worth recording.
+ */
+export type ToolApprovalDecision = 'pending' | 'approved' | 'denied' | 'timed_out'
 
 export interface CopilotToolApprovalRequiredEvent extends CopilotEventBase {
   type: 'tool_approval_required'
@@ -108,6 +116,26 @@ export interface CopilotMessage {
   events: CopilotEvent[]
   status: CopilotEventStatus
   createdAt: number
+}
+
+/**
+ * The `tool_use_id` of a hold the server just expired, or null for any other
+ * record.
+ *
+ * This one stream record does not become an event of its own: it settles a
+ * card that is already on screen. It is read here, beside the decoder, because
+ * both answer the same question — what does this raw record mean — and reading
+ * a wire shape in two places is how the two readings drift apart.
+ */
+export function readToolApprovalExpiry(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const record = raw as Record<string, unknown>
+  if (record.type !== 'tool_approval_timed_out' || typeof record.tool_use_id !== 'string') {
+    return null
+  }
+  return record.tool_use_id || null
 }
 
 export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {

@@ -19,7 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from app.models.copilot import CopilotEventError, CopilotEventToolApprovalRequired
+from app.models.copilot import (
+    CopilotEventError,
+    CopilotEventToolApprovalRequired,
+    CopilotEventToolApprovalTimedOut,
+)
 from app.services import copilot
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from claude_agent_sdk.types import ToolPermissionContext
@@ -191,8 +195,18 @@ def test_approval_timeout_stops_task_but_preserves_session(
     while not queue.empty():
         events.append(queue.get_nowait())
     assert any(isinstance(e, CopilotEventToolApprovalRequired) for e in events)
-    timeout_events = [e for e in events if isinstance(e, CopilotEventError)]
-    assert timeout_events and timeout_events[0].error_code == "tool_approval_timeout"
+    # The expiry must NAME the hold it killed. It used to go out as a generic
+    # `error`, which let the frontend know something expired but not which card
+    # — so no card could recognise itself and every one of them stayed on
+    # "Waiting for approval." with live buttons (problem ledger CP7).
+    timeout_events = [e for e in events if isinstance(e, CopilotEventToolApprovalTimedOut)]
+    assert len(timeout_events) == 1
+    assert timeout_events[0].tool_use_id == "tu-t"
+    assert timeout_events[0].tool_name == "Bash"
+    assert "timed out" in timeout_events[0].message
+    # And it goes out as exactly one answer: no parallel generic error saying
+    # the same thing in a shape nothing can act on.
+    assert not [e for e in events if isinstance(e, CopilotEventError)]
     # ...but the session itself is preserved (registry keeps the sink)
     assert "s-timeout" in copilot._safe_write_sinks
 

@@ -437,3 +437,38 @@ describe('a prompt says where each part of it came from', () => {
     expect(promptMessages(ev({ event_type: 'prompt_captured' }))).toEqual([])
   })
 })
+
+// The engine states a phase execution's outcome on `phase_end` (engine
+// observability OB13). The canvas believes it and the run report believes it;
+// this panel was the third reader, and it printed "Phase finished: impossible"
+// under a run that died in that very phase (real machine, run
+// 2026-08-20T17-13-16_4e586d15, ledger E17).
+describe('a phase_end row says how the phase ended', () => {
+  it('names the outcome in the sentence, not just that it stopped', () => {
+    expect(eventMessage(event({ event_type: 'phase_end', phase_name: 'impossible', status: 'failed' })))
+      .toBe('Phase failed: impossible')
+    expect(eventMessage(event({ event_type: 'phase_end', phase_name: 'draft', status: 'completed' })))
+      .toBe('Phase finished: draft')
+  })
+
+  it('mirrors the outcome in the fact table, the way run_ended does', () => {
+    expect(eventFacts(event({
+      event_type: 'phase_end', phase_name: 'impossible', phase_execution_id: 'b29e2df598cf', status: 'failed',
+    }))).toEqual([
+      { label: 'outcome', value: 'failed' },
+      { label: 'execution', value: 'b29e2df598cf' },
+    ])
+  })
+
+  // Severity reads the event, not its type — the same rule the canvas applies
+  // in `run-status-projection`: an event that reports its own outcome is
+  // believed. One rule, so a failed phase and a crashed run both earn the dot
+  // without either being special-cased by type.
+  it('earns the one coloured dot on the rail', () => {
+    expect(eventSeverity(event({ event_type: 'phase_end', phase_name: 'impossible', status: 'failed' }))).toBe('error')
+    expect(eventColor(event({ event_type: 'phase_end', phase_name: 'impossible', status: 'failed' }))).toBe('bg-destructive')
+    expect(eventSeverity(event({ event_type: 'run_ended', status: 'crashed' }))).toBe('error')
+    expect(eventSeverity(event({ event_type: 'phase_end', phase_name: 'draft', status: 'completed' }))).toBe('normal')
+    expect(eventSeverity(event({ event_type: 'run_ended', status: 'completed' }))).toBe('normal')
+  })
+})

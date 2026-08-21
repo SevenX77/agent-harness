@@ -130,6 +130,46 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: live(2026-08-09)。
 - 归属: capability `trace-observability`; region `timeline`; platform `engine`(`tool_call_started` 半边)。
 
+### F13. 取景是一个动作,它的单位是步骤(2026-08-21,问题台账 T8)
+
+- 机制: 读者手上有三样收窄这份列表的东西——搜索框、类型/节点标签、路由降级 chip。
+  它们是**同一个动作**(本文档开头即写明「搜索与筛选是用户主动的取景」),所以它们共用
+  一个形状 `TraceNarrowing`(`utils/trace-narrowing.ts`)、一个谓词 `narrowTraceSteps`,
+  和一个「此刻是否在取景」的答案 `isNarrowingActive`。
+- 决策(取景作用在**步骤**上,不作用在事件上): 收窄先 `buildTraceSteps` 再筛步骤,
+  **一条步骤只要有任何一个事件命中就整条留下**。反过来先筛事件再合成步骤,会在只有闭合半边
+  命中时把开场半边丢掉,读者拿到一个没有问题的答案。这与 F9 末句不矛盾:F9 说的是
+  `buildTraceSteps` 面对**只有半边**的输入要显示手上那半边——那是直播流从中途接上时的
+  真实处境;本条要求的是**取景不再制造**这种半边。稳健仍然稳健,只是不再有人靠它兜底。
+- 决策(搜索匹配**值**,不匹配结构): 匹配面 = 事件类型 + 渲染后的标题 + 载荷里**所有字符串与
+  数字值**(递归,深度上限 6 只为防病态记录)。此前把整个事件 `JSON.stringify` 进去,于是字段
+  **名**也可搜:输入 `phase_name` 命中全 run 每一条,而命中的行上找不到任何理由。判据同 F3——
+  **一个看不出理由的命中,比没有命中更坏**。标题由调用方渲染后传入,所以搜的是读者眼前那句话
+  (含译文,问题台账 K4b),投影本身仍是纯的、与语言无关。
+- 决策(路由降级 chip 有自己的条件,不写搜索框): chip 从前是把 `llm_route_decision` **写进
+  搜索框**来收窄的——它因此销毁读者刚敲进去的字,再按一次又把框清空,而读者从没要求清空。
+  现在它是 `routeIssuesOnly` 一个独立条件。同时它**只显示自己数过的那些**:计数按
+  `decision !== 'answered'` 数降级,展开就必须是这些降级,而不是全部路由判定——两个集合不同,
+  就又成了一句做不到的承诺(F3 2026-08-20 修订)。
+- 决策(取景时不出结局行): 结局行说的是**这次 run** 怎么结束的。取景之后的列表不是这次 run,
+  一句整体判词坐在几条步骤末尾会被读成对这几步的判决——与 F3 对**范围**的处置同一条理由,
+  而搜索/标签/chip 按本文档开头的定义同样是取景。结局本身仍从**完整**事件列表读出
+  (D8「run 的结局不是搜索命中」不变),变的只是**要不要显示**。
+- 明确不做,且理由写在这里: **正则与字段限定搜索**(YAGNI,当前没有一次被需要的现场,来了再设计);
+  **跳到下一个命中**(取景之后列表本身就只剩命中,再加一套上下跳是第二种做同一件事的方式);
+  **输入防抖**(收窄是 `useMemo` 包着的纯函数,一次 run 的量级下先测量再优化,不先加延迟);
+  **零事件时不挂搜索框**(那时确实没有可收窄的东西);**筛选行跟随聚焦开合**(D11 的既有裁决,
+  收窄状态由框内计数常驻汇报,不是静默)。
+- 原话/来源: 问题台账 T8 列出的 11 条行为;本文档 `:41`「搜索与筛选是用户主动的取景」;
+  F3 2026-08-20 修订(列表区的派生跟随取景 / 可操作计数必须兑现)。
+- 测试: `utils/trace-narrowing.test.ts` 七条(整步命中、值而非键、类型与标题、只留真降级、
+  多条件 AND、活跃判定);`components/TracePanel.narrowing.test.tsx` 四条**客户端真渲染**——
+  按 chip 不动搜索框、chip 展开数等于它数过的、取景时结局行消失且清空后回来、闭合半边命中带回
+  开场半边。后两条在改前实测为红。**用真渲染而不是静态渲染**,因为这些行为讲的是读者把面板
+  **切换到**的状态,而静态渲染只看得见初始状态——这正是这批缺陷活下来的方式。
+- Status: live(2026-08-21)。
+- 归属: capability `trace-observability`; region `timeline`.
+
 ### F4. 边点 = 边的步骤(2026-08-13 决议 D5,改组 2026-07-02 双态方案)
 
 - 机制: 点边 dot = 选中这条边 = trace 范围收窄到这条边(F3 的 edge 范围),此时列表里的
@@ -395,6 +435,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 | TRACE_OBSERVABILITY-1 | trace 挂载 | 单元 `trace-dot-blackboard`；**为什么**：TracePanel/useRunStream 已建但零挂载(zombie)，要接线成 live trace |
 | TRACE_OBSERVABILITY-2 | dot 黑板 | 单元 `trace-dot-blackboard`；**为什么**：边 dot 现假黑板，要换真实黑板 state card + 只读编辑器查看 |
 | TRACE_OBSERVABILITY-3 | 节点态 | 单元 `run-execution-node-status`；**为什么**：事件→节点态投影的实现归共享 state(state-engine)，trace 只拥有语义 |
+| TRACE_OBSERVABILITY-4 | 取景是一个动作,单位是步骤 | F13；**为什么**：搜索/标签/路由 chip 三样都是「让我少看点」,分开实现就会各自长出一套条件与一套「现在算不算在筛」的答案;而按事件筛会在只命中闭合半边时丢掉开场半边,把一条步骤劈成没有问题的答案 |
+| TRACE_OBSERVABILITY-5 | 搜索匹配值,不匹配结构;取景时不出结局行 | F13；**为什么**：序列化整个事件让字段名也可搜,`phase_name` 命中全 run 而行上看不出理由;结局行是对整次 run 的判词,坐在一段被收窄的列表末尾会被读成对这几步的判决 |
 
 ## 6. 测试关键点
 1. trace 挂载: TracePanel 已挂 timeline 主路径(active run 流式,结束回 TimelinePanel 历史);agent 分类折叠摘要已实现(ToolCallSubtree verb 分类 + ~2KB 折叠,TraceEventRow.tsx:220-280);PromptInspector 三视图已挂 live+历史两路径(F1/F5 旧 orphan 标注已过时,2026-07 对账)。

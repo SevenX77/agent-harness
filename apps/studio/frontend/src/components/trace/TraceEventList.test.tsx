@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CallbackEvent } from '../../api/types'
-import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
+import { buildTraceSteps, type IndexedTraceEvent } from '../../utils/trace-steps'
 import { TraceEventList } from './TraceEventList'
 
 function indexedEvents(count: number): IndexedTraceEvent[] {
@@ -19,7 +19,7 @@ function indexedEvents(count: number): IndexedTraceEvent[] {
 function markup(count: number): string {
   return renderToStaticMarkup(
     <TraceEventList
-      events={indexedEvents(count)}
+      steps={buildTraceSteps(indexedEvents(count))}
       selectedEventId={null}
     />,
   )
@@ -57,7 +57,7 @@ describe('TraceEventList step expansion (decision 2026-08-09 D4)', () => {
     // Two steps: draft answered, review still waiting. The unfinished one is
     // where the reader's attention belongs, so it is the one left open.
     const html = renderToStaticMarkup(
-      <TraceEventList events={stepEvents()} selectedEventId={null} />,
+      <TraceEventList steps={buildTraceSteps(stepEvents())} selectedEventId={null} />,
     )
 
     expect(html).toContain('data-trace-step-count="2"')
@@ -83,7 +83,7 @@ describe('TraceEventList terminal entry', () => {
     entry: (Omit<typeof outcome, 'reportPath'> & { reportPath: string | null }) | null,
   ): string {
     return renderToStaticMarkup(
-      <TraceEventList events={indexedEvents(2)} selectedEventId={null} outcome={entry} />,
+      <TraceEventList steps={buildTraceSteps(indexedEvents(2))} selectedEventId={null} outcome={entry} />,
     )
   }
 
@@ -122,10 +122,10 @@ describe('a resume is a seam in the run, not a step', () => {
   function listOf(events: Partial<CallbackEvent>[]): string {
     return renderToStaticMarkup(
       <TraceEventList
-        events={events.map((event, index) => ({
+        steps={buildTraceSteps(events.map((event, index) => ({
           index,
           event: { schema_version: '1.0', timestamp: '2026-08-08T00:00:00Z', ...event } as CallbackEvent,
-        }))}
+        })))}
         selectedEventId={null}
       />,
     )

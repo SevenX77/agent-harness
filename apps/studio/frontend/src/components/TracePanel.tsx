@@ -1,9 +1,10 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
-import { useTraceFilter } from '../hooks/useTraceFilter'
+import { useTraceNarrowing } from '../hooks/useTraceNarrowing'
 import { countRouteDegradations, isPredictTrace } from '../utils/trace'
 import { runVerdict, type RunVerdict } from '../utils/run-status-projection'
 import { eventInScope, scopeLabel, type TraceScope } from '../utils/trace-scope'
+import { buildTraceSteps } from '../utils/trace-steps'
 import { EdgeTamperSection } from './trace/EdgeTamperSection'
 import type { SelectedEdge } from './studio/WorkspaceContext'
 import type { ResumeRunOptions } from '../api/client'
@@ -45,7 +46,6 @@ export type { TraceHitlResumeRequest }
 
 // The fallback shortcut narrows through the filter's own search, rather than
 // owning a fifth kind of filter state that only one badge can set.
-const ROUTE_DECISION_SEARCH_TERM = 'llm_route_decision'
 
 interface TracePanelProps {
   traceLogs: EventEnvelope[]
@@ -286,16 +286,6 @@ export function TracePanel({
   // list SCROLLS, never what it contains.
   const focusPhase = selectedNode?.id ?? activePhase
   const scopedEvents = scope ? traceEvents.filter((event) => eventInScope(event, scope)) : traceEvents
-  const filter = useTraceFilter(scopedEvents)
-  const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
-  // trace-observability F7: a run that silently fell back to another provider
-  // announces it up front; clicking the chip narrows the trace to the fallback
-  // events via the existing type filter.
-  // Scoped, because the chip is ACTIONABLE: clicking it searches THIS list. A
-  // count that does not match what clicking reveals is a promise the panel
-  // cannot keep (2026-08-20 revision of F3).
-  const degradedRouteCount = countRouteDegradations(scopedEvents)
-  const activeFilterCount = filter.selectedCategories.length + filter.selectedPhases.length
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
@@ -303,14 +293,35 @@ export function TracePanel({
   // run-status-projection — feeds the strip badge, the outcome entry, and the
   // step list's severing.
   const verdict = runVerdict(traceEvents, metadata, undefined, gateVerdict)
-  // D8: the run's conclusion is the last thing in its own trace. Fed the full
-  // event list, not the filtered one — the ending of a run is not a search hit.
-  // The outcome row sits at the END of the step list and says how the RUN
-  // ended. Under a scope that list is one node's few events, so the verdict
-  // reads as a judgement about them — a statement about the run pasted onto
-  // something that is not the run (PM 08-19 Q5). The run's verdict stays
-  // visible where it belongs: the top bar, which names the run itself (F8).
-  const outcome = scope ? null : traceOutcomeEntry(traceEvents, metadata)
+  // Built once, here, and handed down already built: the panel and the list
+  // used to each answer "what are the steps" for themselves, and the list's
+  // answer was drawn from an event list the search had already torn in half.
+  const steps = useMemo(
+    () => buildTraceSteps(scopedEvents.map((event, index) => ({ event, index })), verdict),
+    [scopedEvents, verdict],
+  )
+  const narrowing = useTraceNarrowing(steps)
+  const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
+  // trace-observability F7: a run that silently fell back to another provider
+  // announces it up front; clicking the chip narrows the trace to the steps
+  // whose route actually degraded.
+  // Scoped, because the chip is ACTIONABLE: clicking it narrows THIS list. A
+  // count that does not match what clicking reveals is a promise the panel
+  // cannot keep (2026-08-20 revision of F3).
+  const degradedRouteCount = countRouteDegradations(scopedEvents)
+  const activeFilterCount = narrowing.selectedCategories.length
+    + narrowing.selectedPhases.length
+    + (narrowing.routeIssuesOnly ? 1 : 0)
+  // D8: the run's conclusion is the last thing in its own trace, and it is read
+  // off the FULL event list — the ending of a run is never itself a search hit.
+  // Whether it is SHOWN is a different question: the outcome row sits at the end
+  // of the step list and says how the RUN ended, so a list that is not the whole
+  // run must not carry it — the verdict would read as a judgement about the few
+  // steps above it (PM 08-19 Q5). A scope narrows the list, and so does the
+  // reader's own 取景 — search, tags, the route chip are all「用户主动的取景」
+  // (trace-observability:41), so the same rule covers them. The run's verdict
+  // stays visible where it belongs: the top bar, which names the run (F8).
+  const outcome = scope || narrowing.isNarrowed ? null : traceOutcomeEntry(traceEvents, metadata)
 
   const runActions = traceRunActions({
     canResume,
@@ -448,10 +459,8 @@ export function TracePanel({
             <button
               type="button"
               aria-label={t('routeIssues.show', { count: degradedRouteCount })}
-              aria-pressed={filter.searchTerm === ROUTE_DECISION_SEARCH_TERM}
-              onClick={() => filter.setSearchTerm(
-                filter.searchTerm === ROUTE_DECISION_SEARCH_TERM ? '' : ROUTE_DECISION_SEARCH_TERM,
-              )}
+              aria-pressed={narrowing.routeIssuesOnly}
+              onClick={() => narrowing.setRouteIssuesOnly(!narrowing.routeIssuesOnly)}
               className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
             >
               <AlertTriangle className="size-3" />
@@ -492,16 +501,16 @@ export function TracePanel({
             be what closes the tags (decision 2026-08-09 D11). */}
         <div className="group/trace-search">
           <TraceSearchBar
-            value={filter.searchTerm}
-            onChange={filter.setSearchTerm}
+            value={narrowing.searchTerm}
+            onChange={narrowing.setSearchTerm}
             activeFilterCount={activeFilterCount}
           />
           <TraceFilterRow
-            phases={filter.phases}
-            selectedCategories={filter.selectedCategories}
-            selectedPhases={filter.selectedPhases}
-            onSelectCategories={filter.setSelectedCategories}
-            onSelectPhases={filter.setSelectedPhases}
+            phases={narrowing.phases}
+            selectedCategories={narrowing.selectedCategories}
+            selectedPhases={narrowing.selectedPhases}
+            onSelectCategories={narrowing.setSelectedCategories}
+            onSelectPhases={narrowing.setSelectedPhases}
           />
         </div>
         {routeIssuesRow}
@@ -515,13 +524,12 @@ export function TracePanel({
       </div>
       <div className="min-h-0 flex-1 p-4 pb-0">
         <TraceEventList
-          events={filter.filteredEvents}
+          steps={narrowing.narrowedSteps}
           selectedEventId={selectedEventId}
           followStream={live}
           streamKey={runId}
           focusPhase={focusPhase}
           outcome={outcome}
-          verdict={verdict}
           onSelectEvent={onSelectEvent}
           deltas={deltas}
         />

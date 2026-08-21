@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { RunDeltas } from '../../hooks/useRunDeltas'
-import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
+import type { TraceStep } from '../../utils/trace-steps'
 import { RUN_SCOPE, isPredictTrace } from '../../utils/trace'
 import {
   MessageScroller,
@@ -12,8 +12,7 @@ import {
   MessageScrollerViewport,
 } from '../ui/message-scroller'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
-import { buildTraceSteps, type TraceStepStatus } from '../../utils/trace-steps'
-import type { RunVerdict } from '../../utils/run-status-projection'
+import { type TraceStepStatus } from '../../utils/trace-steps'
 import { initialTracePosition } from './trace-initial-scroll'
 import { TraceOutcomeRow } from './TraceOutcomeRow'
 import { TraceResumeSeam } from './TraceResumeSeam'
@@ -21,7 +20,13 @@ import { TraceStepRow } from './TraceStepRow'
 import { useTraceCopy } from './trace-copy'
 
 interface TraceEventListProps {
-  events: IndexedTraceEvent[]
+  /**
+   * The steps to render, already built and already narrowed. Building them
+   * here would give the panel and this list two answers to "what are the
+   * steps", and the narrowing has to happen on the built list — a step is
+   * kept or dropped whole (trace-observability F9).
+   */
+  steps: TraceStep[]
   selectedEventId: string | null
   /**
    * True while the list renders a LIVE stream: the message-scroller sticks to
@@ -48,12 +53,6 @@ interface TraceEventListProps {
    */
   outcome?: TraceOutcomeEntry | null
   /**
-   * The run's verdict from run-status-projection (decision 2026-08-13 D7).
-   * It severs steps the run ended out from under — without it a killed run's
-   * open steps would spin forever.
-   */
-  verdict?: RunVerdict
-  /**
    * Live output keyed by step id. A row takes only its own step's entry — the
    * whole map would make every row re-render on every token of every step.
    */
@@ -71,13 +70,12 @@ interface TraceEventListProps {
  * run's last events were unreachable (decision 2026-08-08 D3).
  */
 export function TraceEventList({
-  events,
+  steps,
   selectedEventId,
   followStream = false,
   streamKey = null,
   focusPhase = null,
   outcome = null,
-  verdict = 'running',
   onSelectEvent,
   deltas,
 }: TraceEventListProps) {
@@ -115,12 +113,9 @@ export function TraceEventList({
       `[data-trace-group-header="${CSS.escape(focusPhase)}"]`,
     )
     header?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  }, [focusPhase, events.length])
+  }, [focusPhase, steps.length])
 
-  const predictTrace = isPredictTrace(events.map(({ event }) => event))
-  // Rebuilt only when the events actually change: this runs on every render of
-  // a panel that re-renders per streamed token, and grouping is O(run length).
-  const steps = useMemo(() => buildTraceSteps(events, verdict), [events, verdict])
+  const predictTrace = isPredictTrace(steps.map((step) => step.start.event))
   const selectedPosition = selectedEventId
     ? steps.findIndex((step) => step.key === selectedEventId)
     : -1

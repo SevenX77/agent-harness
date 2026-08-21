@@ -236,6 +236,41 @@ def test_a_refusal_does_not_rewrite_the_modality_list_it_cannot_settle() -> None
     assert "input_modalities" not in measured_image_input(accepted=False)
 
 
+def test_one_observed_tool_call_verifies_the_tool_protocol() -> None:
+    """The capability the engine's agent loop actually depends on.
+
+    `tool_protocol` was until now only ever set from what a catalog or a
+    protocol's documentation claims (`capabilities.py` reads `tool_use` /
+    `tool_calling` / `tools` out of the provider record). A route that has been
+    watched calling a tool has settled the same question by measurement, and
+    `probed_verified` is where a measurement outranks a document.
+    """
+    from graph_agent_gateway.registry import measured_tool_calling
+
+    measured = measured_tool_calling(closed_the_loop=False)
+
+    assert measured["tool_protocol"].value is True
+    assert measured["tool_protocol"].source == "probed_verified"
+
+
+def test_a_closed_loop_says_so_in_the_message_it_leaves_behind() -> None:
+    """Both rungs verify the protocol; only one of them saw the route come back.
+
+    The value cannot carry the difference — the capability is a yes/no about the
+    protocol — so the message is the only place the stronger observation can be
+    recorded, and a reader deciding whether to trust this route with an agent
+    phase is exactly who needs it.
+    """
+    from graph_agent_gateway.registry import measured_tool_calling
+
+    called = measured_tool_calling(closed_the_loop=False)["tool_protocol"].message
+    closed = measured_tool_calling(closed_the_loop=True)["tool_protocol"].message
+
+    assert called != closed
+    assert called is not None
+    assert closed is not None
+
+
 def _profile(**overrides: object) -> object:
     from graph_agent_gateway.registry import VerifiedProfile
 

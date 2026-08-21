@@ -65,7 +65,7 @@ async def probe_provider_endpoint(
     backend = provider_backend_for_endpoint(endpoint)
     wire = provider_backend_for_protocol(endpoint.protocol)
     base_url = endpoint_probe_base_url(endpoint)
-    secret = _endpoint_secret(endpoint, api_key)
+    secret = route_probe_secret(endpoint, api_key)
     if not base_url:
         return EndpointProbeResult(
             endpoint_id=endpoint.endpoint_id,
@@ -102,7 +102,7 @@ async def probe_provider_endpoint(
         backend=backend,
         base_url=base_url,
         status=status,
-        latency_ms=_elapsed_ms(started),
+        latency_ms=probe_elapsed_ms(started),
         model_ids=model_ids(answer) if status == "ok" else (),
         model_capabilities=model_capabilities(answer) if status == "ok" else {},
         message=None if status == "ok" else provider_response_message(answer),
@@ -137,37 +137,23 @@ async def probe_provider_route(
     replay the wire without this function knowing which client it is talking to.
     """
 
-    backend = provider_backend_for_endpoint(endpoint)
     wire = provider_backend_for_protocol(endpoint.protocol)
+    identity = route_probe_identity(endpoint, route)
     base_url = endpoint_probe_base_url(endpoint)
-    secret = _endpoint_secret(endpoint, api_key)
+    backend = identity["backend"]
     if not base_url:
-        return RouteProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            route_id=route.route_id,
-            provider_kind=endpoint.provider_kind,
-            backend=backend,
-            base_url=base_url,
-            model_id=route.provider_model_id,
-            status="error",
-            message="Base URL is empty.",
-        )
-    if not secret:
-        return RouteProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            route_id=route.route_id,
-            provider_kind=endpoint.provider_kind,
-            backend=backend,
-            base_url=base_url,
-            model_id=route.provider_model_id,
-            status="invalid_key",
-            message="API key is empty.",
-        )
+        return RouteProbeResult(**identity, status="error", message="Base URL is empty.")
+    if not route_probe_secret(endpoint, api_key):
+        return RouteProbeResult(**identity, status="invalid_key", message="API key is empty.")
 
     started = time.perf_counter()
-    model = (factory or _production_factory(secret)).build(
-        _route_as_a_run_would_resolve_it(endpoint, route, runtime_settings),
-        timeout_seconds=timeout,
+    model = route_probe_model(
+        endpoint,
+        route,
+        api_key=api_key,
+        runtime_settings=runtime_settings,
+        factory=factory,
+        timeout=timeout,
         max_tokens=1,
     )
     try:
@@ -189,14 +175,9 @@ async def probe_provider_route(
 
     status = probe_status(answer, model_not_found_status="invalid_model", probed_backend=wire)
     return RouteProbeResult(
-        endpoint_id=endpoint.endpoint_id,
-        route_id=route.route_id,
-        provider_kind=endpoint.provider_kind,
-        backend=backend,
-        base_url=base_url,
-        model_id=route.provider_model_id,
+        **identity,
         status=status,
-        latency_ms=_elapsed_ms(started),
+        latency_ms=probe_elapsed_ms(started),
         message=None if status == "ok" else provider_response_message(answer),
     )
 
@@ -247,11 +228,11 @@ async def probe_official_call_method(
     except httpx.HTTPError as exc:
         status = "network_error"
         message = str(exc)
-        latency_ms = _elapsed_ms(started)
+        latency_ms = probe_elapsed_ms(started)
     else:
         status = probe_status(answer, model_not_found_status="invalid_model")
         message = None if status == "ok" else provider_response_message(answer)
-        latency_ms = _elapsed_ms(started)
+        latency_ms = probe_elapsed_ms(started)
 
     return RouteProbeResult(
         endpoint_id="",
@@ -497,12 +478,63 @@ def _probe_prompt(multimodal: bool) -> Prompt:
     )
 
 
-def _endpoint_secret(endpoint: ProviderEndpoint, api_key: str | None) -> str:
+def route_probe_secret(endpoint: ProviderEndpoint, api_key: str | None) -> str:
+    """The key this probe will send: the one handed in, else the endpoint's own.
+
+    A probe is as often testing a key the user just typed as one already stored,
+    so a key given directly outranks the stored one — including an explicit
+    empty string, which is a user saying "try it with nothing" and must be
+    refused rather than silently swapped for the saved key.
+    """
     if api_key is not None:
         return api_key
     if endpoint.api_key is None:
         return ""
     return endpoint.api_key.get_secret_value()
+
+
+def route_probe_identity(endpoint: ProviderEndpoint, route: ProviderRoute) -> dict[str, Any]:
+    """Which route a result is about, in the fields every route result carries.
+
+    Assembled in one place because a probe result whose identity fields are
+    filled in per call site can drift — and a measurement recorded against the
+    wrong route is worse than no measurement, since nothing about it looks wrong
+    later.
+    """
+    return {
+        "endpoint_id": endpoint.endpoint_id,
+        "route_id": route.route_id,
+        "provider_kind": endpoint.provider_kind,
+        "backend": provider_backend_for_endpoint(endpoint),
+        "base_url": endpoint_probe_base_url(endpoint),
+        "model_id": route.provider_model_id,
+    }
+
+
+def route_probe_model(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    *,
+    api_key: str | None,
+    runtime_settings: Mapping[str, Any] | None,
+    factory: Any | None,
+    timeout: float,
+    max_tokens: int,
+) -> Any:
+    """The chat model a probe asks, built the way a run builds one.
+
+    One home for the whole seam — which factory, which resolved route, which
+    limits — so that every probe asking a route something is asking the same
+    route object through the same builder. Two probes assembling it separately
+    would be free to disagree about what "this route" means, and then their
+    answers would not be about the same thing.
+    """
+    builder = factory or _production_factory(route_probe_secret(endpoint, api_key))
+    return builder.build(
+        _route_as_a_run_would_resolve_it(endpoint, route, runtime_settings),
+        timeout_seconds=timeout,
+        max_tokens=max_tokens,
+    )
 
 
 def _endpoint_result(
@@ -520,7 +552,7 @@ def _endpoint_result(
         backend=backend,
         base_url=base_url,
         status=status,
-        latency_ms=_elapsed_ms(started),
+        latency_ms=probe_elapsed_ms(started),
         message=message,
     )
 
@@ -543,12 +575,13 @@ def _route_result(
         base_url=base_url,
         model_id=route.provider_model_id,
         status=status,
-        latency_ms=_elapsed_ms(started),
+        latency_ms=probe_elapsed_ms(started),
         message=message,
     )
 
 
-def _elapsed_ms(started: float) -> int:
+def probe_elapsed_ms(started: float) -> int:
+    """How long an attempt took, floored at zero so a clock hiccup is not evidence."""
     return max(0, round((time.perf_counter() - started) * 1000))
 
 

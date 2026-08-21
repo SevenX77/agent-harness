@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import type { CallbackEvent, EventEnvelope } from '../api/types'
-import { TracePanel, isGoldenlessAgentNode, traceRunActions } from './TracePanel'
+import { TracePanel, traceRunActions } from './TracePanel'
 
 const events = [
   {
@@ -400,84 +400,6 @@ describe('TracePanel run actions (⋮ menu)', () => {
   })
 })
 
-describe('isGoldenlessAgentNode (atom #32 entry① eligibility)', () => {
-  it('is true for an agent node without golden', () => {
-    expect(isGoldenlessAgentNode({ data: { mode: 'agent' } })).toBe(true)
-    expect(isGoldenlessAgentNode({ data: { mode: 'llm', goldenState: 'logic-ok' } })).toBe(true)
-    expect(isGoldenlessAgentNode({ data: { mode: 'skill' } })).toBe(true)
-  })
-
-  it('is false once the agent node already has golden', () => {
-    expect(isGoldenlessAgentNode({ data: { mode: 'agent', goldenState: 'has-golden' } })).toBe(false)
-  })
-
-  it('is false for non-agent nodes (logic/subgraph never get golden)', () => {
-    expect(isGoldenlessAgentNode({ data: { mode: 'logic' } })).toBe(false)
-    expect(isGoldenlessAgentNode({ data: { mode: 'subgraph' } })).toBe(false)
-  })
-
-  it('is false when there is no focused node', () => {
-    expect(isGoldenlessAgentNode(null)).toBe(false)
-    expect(isGoldenlessAgentNode(undefined)).toBe(false)
-  })
-})
-
-describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
-  const goldenlessAgentNode = { id: 'nodeA', data: { label: 'Node A', mode: 'agent' as const } }
-
-  it('renders a per-node promote button beside the focused golden-less agent node', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        selectedNode={goldenlessAgentNode}
-        canCompare
-        onPromoteNode={() => undefined}
-      />,
-    )
-    expect(html).toContain('Promote node to golden')
-    // The aria-label is node-anchored; the focused node label appears in it
-    // (double quotes around the label are HTML-escaped by the static renderer).
-    expect(html).toContain('aria-label="Promote node ')
-    expect(html).toContain('Node A')
-    expect(html).toContain(' to golden"')
-  })
-
-  it('omits the per-node button when the focused agent node already has golden', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        selectedNode={{ id: 'nodeA', data: { label: 'Node A', mode: 'agent', goldenState: 'has-golden' } }}
-        canCompare
-        onPromoteNode={() => undefined}
-      />,
-    )
-    expect(html).not.toContain('Promote node to golden')
-  })
-
-  it('omits the per-node button with no run to promote from (canCompare false)', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        selectedNode={goldenlessAgentNode}
-        canCompare={false}
-        onPromoteNode={() => undefined}
-      />,
-    )
-    expect(html).not.toContain('Promote node to golden')
-  })
-
-  it('omits the per-node button when no per-node promote handler is wired', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        selectedNode={goldenlessAgentNode}
-        canCompare
-      />,
-    )
-    expect(html).not.toContain('Promote node to golden')
-  })
-})
-
 // trace-observability F7: a run that silently skipped, retried or fell back
 // between providers must announce it at the run level, not only as one row lost
 // in the stream.
@@ -765,66 +687,5 @@ describe('a narrowed trace does not end with a verdict about the whole run (PM 0
     const scoped = render({ traceLogs: degraded, scope: { kind: 'node', phase: 'draft' } })
     expect(scoped).toContain('1 route issue')
     expect(scoped).not.toContain('2 route issues')
-  })
-})
-
-describe('TracePanel design-golden entry (E3 entry①)', () => {
-  const goldenlessAgentNode = { id: 'nodeA', data: { label: 'Node A', mode: 'agent' as const } }
-
-  it('offers to design this node’s golden when the skill has never run', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={[]}
-        selectedNode={goldenlessAgentNode}
-        canCompare={false}
-        onDesignGolden={() => undefined}
-      />,
-    )
-    expect(html).toContain('Design golden')
-    expect(html).toContain('aria-label="Design golden for node ')
-    expect(html).toContain('Node A')
-  })
-
-  it('offers it during a run too, beside the promote button', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={twoPhaseEvents}
-        selectedNode={goldenlessAgentNode}
-        canCompare
-        onDesignGolden={() => undefined}
-        onPromoteNode={() => undefined}
-      />,
-    )
-    expect(html).toContain('Design golden')
-    expect(html).toContain('Promote node to golden')
-  })
-
-  it('omits it once the focused agent node already has golden', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={[]}
-        selectedNode={{ id: 'nodeA', data: { label: 'Node A', mode: 'agent', goldenState: 'has-golden' } }}
-        onDesignGolden={() => undefined}
-      />,
-    )
-    expect(html).not.toContain('Design golden')
-  })
-
-  it('omits it for a node that never gets golden', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel
-        traceLogs={[]}
-        selectedNode={{ id: 'gate', data: { label: 'Gate', mode: 'logic' } }}
-        onDesignGolden={() => undefined}
-      />,
-    )
-    expect(html).not.toContain('Design golden')
-  })
-
-  it('omits it when no handler is wired', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} selectedNode={goldenlessAgentNode} />,
-    )
-    expect(html).not.toContain('Design golden')
   })
 })

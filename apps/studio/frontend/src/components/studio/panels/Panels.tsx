@@ -4,6 +4,7 @@ import type { RunVerdict } from "@/utils/run-status-projection"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
+import { FocusedNodeActions } from "@/components/trace/FocusedNodeActions"
 import type { CompareTab } from "../run-compare"
 import { useSkills } from "@/hooks/useSkills"
 import type { PanelKind } from "../Toolbar"
@@ -265,8 +266,24 @@ export function Panels({
     // viewed-run model (decision 2026-08-07): the region shows the run the user
     // is LOOKING AT, not whichever run last streamed. Live view keeps every run
     // action; a historical view is a read-only replay of the same TracePanel.
+    // What you can do to the focused NODE is a fact about the selection, not
+    // about whether a run exists, so it is rendered by the REGION — above the
+    // run list just as much as above a trace. Putting it inside TracePanel made
+    // it unreachable on a skill that had never run, which is exactly the skill
+    // whose nodes still need a golden written down (ledger CP4).
+    const focusedNodeActions = (
+      <FocusedNodeActions
+        node={selectedNode}
+        canPromote={traceCanCompare}
+        onPromoteNode={onPromoteNode}
+        onDesignGolden={onDesignGolden}
+      />
+    )
     if (traceView?.source === "live" && runId) {
       return (
+        <div className="flex h-full min-h-0 flex-col">
+          {focusedNodeActions}
+          <div className="min-h-0 flex-1">
         <TracePanel
           traceLogs={traceEvents ?? []}
           activePhase={activeTracePhase ?? null}
@@ -281,8 +298,6 @@ export function Panels({
           compareLoading={traceCompareLoading}
           onCompareToGolden={onCompareToGolden}
           onPromoteToGolden={onPromoteToGolden}
-          onPromoteNode={onPromoteNode}
-          onDesignGolden={onDesignGolden}
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
           metadata={traceLiveMetadata}
@@ -299,10 +314,15 @@ export function Panels({
           onResumeEdgeDownstream={onResumeEdgeDownstream}
           edgeResumeLoading={traceResumeLoading}
         />
+          </div>
+        </div>
       )
     }
     if (traceView?.source === "history") {
       return (
+        <div className="flex h-full min-h-0 flex-col">
+          {focusedNodeActions}
+          <div className="min-h-0 flex-1">
         <TracePanel
           traceLogs={traceEvents ?? []}
           activePhase={null}
@@ -318,9 +338,18 @@ export function Panels({
           onResumeEdgeDownstream={onResumeEdgeDownstream}
           edgeResumeLoading={traceResumeLoading}
         />
+          </div>
+        </div>
       )
     }
-    return <TimelinePanel onSelectRun={onSelectRun} loadingRunId={historyLoadingRunId} />
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {focusedNodeActions}
+        <div className="min-h-0 flex-1">
+          <TimelinePanel onSelectRun={onSelectRun} loadingRunId={historyLoadingRunId} />
+        </div>
+      </div>
+    )
   }
   if (activePanel === "local-history") {
     return <HistoryPanel skillId={skillId} />

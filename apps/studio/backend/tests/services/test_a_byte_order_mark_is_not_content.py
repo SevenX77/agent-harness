@@ -76,6 +76,12 @@ def test_a_signed_runtime_config_reads_the_same_as_an_unsigned_one(tmp_path: Pat
     Asserted as "the signature changes nothing" rather than against one field,
     because what the config merge does with any given key is that function's
     business; the signature must not be able to alter the answer either way.
+
+    ``updated_at`` is the exception, and it is not content: ``_with_fingerprint``
+    stamps it with the clock on every read, which is why the module leaves it out
+    of its own fingerprint. Two reads of the SAME file disagree there too. The
+    ``fingerprint`` that stays in the comparison is the module's own answer to
+    "is this the same config", so nothing is being waved through.
     """
     payload = json.dumps({"import_inputs": {"version": 2, "files": []}})
     signed_dir = tmp_path / "signed"
@@ -85,7 +91,11 @@ def test_a_signed_runtime_config_reads_the_same_as_an_unsigned_one(tmp_path: Pat
     plain.parent.mkdir(parents=True)
     plain.write_text(payload, encoding="utf-8")
 
-    assert read_runtime_config(signed_dir) == read_runtime_config(plain_dir)
+    from_signed = read_runtime_config(signed_dir)
+    from_plain = read_runtime_config(plain_dir)
+    del from_signed["updated_at"], from_plain["updated_at"]
+
+    assert from_signed == from_plain
 
 
 def test_a_signed_file_hashes_like_the_writer_reads_it(tmp_path: Path) -> None:

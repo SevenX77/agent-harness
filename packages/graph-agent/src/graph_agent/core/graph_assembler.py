@@ -848,7 +848,10 @@ def _emit_input_dispatch(
     mapper: StateMapper,
     state: WorkflowState,
 ) -> None:
-    raw_data = phase_inputs_from_state(mapper.build_phase_input(state))
+    # The projection alone. Reporting what a phase was handed must not also
+    # decide whether it is allowed to run on it — that check belongs to the
+    # execution, which has not been announced yet at this point (ledger E18).
+    raw_data = phase_inputs_from_state(mapper.select_declared_inputs(state))
     keys = schema_properties(mapper.input_schema)
     dispatched_keys = [key for key in keys if key in raw_data] if keys else list(raw_data.keys())
     transition_id, from_phases, _ = transition_identity()

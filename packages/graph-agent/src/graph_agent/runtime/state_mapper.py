@@ -135,8 +135,18 @@ class StateMapper:
     #: which is the real-run contract.
     validator_downgrade_hook: Callable[[str, str], bool] | None = None
 
-    def build_phase_input(self, state: WorkflowState) -> WorkflowState:
-        """Filter global business data to only what is declared in the input schema."""
+    def select_declared_inputs(self, state: WorkflowState) -> WorkflowState:
+        """Project the blackboard down to what this phase declares it consumes.
+
+        A projection and nothing else — it never judges whether what came out is
+        enough to run on. That judgement is :meth:`require_declared_inputs`, and
+        the two are apart because their callers want different things: reporting
+        what was handed over (``InputDispatchEvent``) wants the projection
+        alone. While the two were fused, that reporting path carried the
+        contract check with it, so a phase missing a required input killed the
+        run from there — before the execution had been announced, and therefore
+        with no event naming the phase at all (ledger E18).
+        """
         data_obj = coerce_business_data(state.get("data"))
             
         flow_obj = state.get("flow")
@@ -152,18 +162,6 @@ class StateMapper:
         # schema may be empty/open) and corrupt the child's own accumulation.
         raw_data.pop("phase_outputs", None)
         filtered = filter_runtime_inputs(raw_data, self.input_schema)
-
-        # MVP1 contract (compile-rules §2.3): a declared-required input field
-        # missing from the blackboard is a mapping failure, not a silent drop —
-        # running the phase on partial input would produce an untraceable state.
-        missing = _missing_required_inputs(filtered, self.input_schema)
-        if missing:
-            _phase_mapping_fatal(
-                "phase required input fields missing from blackboard: " + ", ".join(missing),
-                code="[F-v3-runtime-state-mapping-failed]",
-                phase_id=self.phase_id,
-                field_path=missing[0],
-            )
 
         return WorkflowState(
             data=BusinessData.model_validate(filtered),
@@ -208,6 +206,22 @@ class StateMapper:
             # run-level transcript, the checkpoint and HITL resume are unchanged.
             messages=[],
         )
+
+    def require_declared_inputs(self, phase_input: WorkflowState) -> None:
+        """Hold an already-projected phase input to the phase's input contract.
+
+        MVP1 contract (compile-rules §2.3): a declared-required input field
+        missing from the blackboard is a mapping failure, not a silent drop —
+        running the phase on partial input would produce an untraceable state.
+        """
+        missing = _missing_required_inputs(phase_input["data"].model_dump(), self.input_schema)
+        if missing:
+            _phase_mapping_fatal(
+                "phase required input fields missing from blackboard: " + ", ".join(missing),
+                code="[F-v3-runtime-state-mapping-failed]",
+                phase_id=self.phase_id,
+                field_path=missing[0],
+            )
 
     def wrap_phase_output(
         self,
@@ -577,9 +591,17 @@ class PhaseWrapper:
             status: PhaseOutcome = "failed"
             try:
                 # Prepare filtered type-safe inputs
-                phase_input = self.mapper.build_phase_input(state)
+                phase_input = self.mapper.select_declared_inputs(state)
                 if lifecycle is not None:
                     execution_id = lifecycle.opened(phase_input)
+                # Inside the announced execution on purpose. Taking the declared
+                # inputs off the blackboard is the phase's first step, the
+                # mirror of its output validator being its last (OB13): a phase
+                # that cannot get the input it declared has failed at what it
+                # was asked to do, rather than failed to exist. Checking it out
+                # here is what left the node that killed the run drawn as idle,
+                # with no row in the report's Nodes table (E18).
+                self.mapper.require_declared_inputs(phase_input)
                 # Execute the phase node
                 result = node(phase_input)
                 # Map outputs type-safely back to WorkflowState
@@ -603,8 +625,8 @@ class PhaseWrapper:
             finally:
                 # An execution that opened always closes, however it went: a
                 # phase whose end frame never arrives leaves its node running
-                # forever on the canvas. An input that never built opened
-                # nothing, so there is nothing to close.
+                # forever on the canvas. A projection that never produced an
+                # input opened nothing, so there is nothing to close.
                 if lifecycle is not None and execution_id is not None and phase_input is not None:
                     lifecycle.ended(execution_id, phase_input, result, status=status)
 

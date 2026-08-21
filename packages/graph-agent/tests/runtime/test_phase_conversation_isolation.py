@@ -12,7 +12,7 @@ and the current migration decision re-states it as binding
 `_cognitive_framework_tools` in `core/graph_assembler.py` says "the context-access
 readers stay opt-in behind the phase's ``context_access`` declaration (Round 8:
 strong isolation by default)" — and implements only the opt-in half. The default
-half was never wired: `StateMapper.build_phase_input` handed every phase the
+half was never wired: `StateMapper.select_declared_inputs` handed every phase the
 global `WorkflowState.messages` list.
 
 That is not merely wasteful. Measured on run `2026-08-15T12-40-22_bb6e358a` of

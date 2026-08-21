@@ -26,18 +26,20 @@ from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
 logger = logging.getLogger(__name__)
 
-MAX_PHASE_REVISITS = 10
-
-
 class PredictDeadlockError(RuntimeError):
-    """Raised when P2 heuristic stubs appear to trap routing in a loop."""
+    """Predict gave up on a phase that kept coming back.
 
-    def __init__(self, phase_name: str, actual_path: list[str]) -> None:
+    The sentence carries through from the engine rather than being composed
+    again here. The engine is the party that enforces the limit and knows what
+    tripping it means, and every other engine diagnostic already reaches the UI
+    that way. Writing a second version of one message here left two of them in
+    the tree, drifting apart, with the engine's the one nobody ever saw.
+    """
+
+    def __init__(self, phase_name: str, actual_path: list[str], message: str) -> None:
         self.phase_name = phase_name
         self.actual_path = actual_path
-        super().__init__(
-            f"Predict P2 deadlock guard tripped for phase '{phase_name}' after {actual_path.count(phase_name)} visits"
-        )
+        super().__init__(message)
 
 
 class PredictArtifactError(RuntimeError):
@@ -128,7 +130,11 @@ class PredictorService:
             result = adapter.predict_artifact(payload)
         except StudioAdapterError as exc:
             if exc.error_code == "engine.predict_deadlock":
-                raise PredictDeadlockError(exc.error_payload["phase_name"], exc.error_payload["actual_path"]) from exc
+                raise PredictDeadlockError(
+                    exc.error_payload["phase_name"],
+                    exc.error_payload["actual_path"],
+                    exc.error_payload["message"],
+                ) from exc
             raise exc
         else:
             if isinstance(result, dict) and "error_code" in result and "success" not in result:
@@ -331,7 +337,6 @@ def _current_event_loop() -> asyncio.AbstractEventLoop | None:
         return None
 
 __all__ = [
-    "MAX_PHASE_REVISITS",
     "PredictArtifactError",
     "PredictDeadlockError",
     "PredictorService",

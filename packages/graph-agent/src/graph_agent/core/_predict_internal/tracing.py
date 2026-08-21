@@ -176,6 +176,13 @@ class PredictTracingCallback(TracingCallback):
         if len(self._phases) > phase_count:
             phase = self._phases[-1]
             phase["outputs"] = event.context
+            # Which iteration this execution belongs to, so a reader can tell a
+            # phase the PLAN repeats from a phase that came back. Imported here
+            # rather than at module scope because graph_assembler imports the
+            # runner, which imports this module. Empty outside any iterate.
+            from graph_agent.core.graph_assembler import active_outer_ns
+
+            phase["iteration_ns"] = active_outer_ns.get()
             if source is not None:
                 phase["mocked_source"] = source
             downgrade = get_validator_downgrade(phase_name)

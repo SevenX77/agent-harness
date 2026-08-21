@@ -1071,7 +1071,12 @@ class EngineAdapter:
                 return _jsonable(result)
             except SDKPredictDeadlockError as exc:
                 raise StudioAdapterError(
-                    "engine.predict_deadlock", {"phase_name": exc.phase_name, "actual_path": exc.actual_path}
+                    "engine.predict_deadlock",
+                    {
+                        "phase_name": exc.phase_name,
+                        "actual_path": exc.actual_path,
+                        "message": str(exc),
+                    },
                 ) from exc
         except Exception as exc:
             if isinstance(exc, StudioAdapterError):

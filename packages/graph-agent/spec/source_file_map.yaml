@@ -117,6 +117,9 @@ files:
   classification: feature
   feature_ids:
   - F-logic-action-execution
+- path: packages/graph-agent/src/graph_agent/core/authored_text.py
+  classification: detail
+  feature_id: F-md-frontmatter-parsing
 - path: packages/graph-agent/src/graph_agent/core/builtin_subagents/__init__.py
   classification: detail
   feature_id: F-subgraph-delegation

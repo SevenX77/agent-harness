@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePath
 from typing import Any, NoReturn, Protocol
 
+from app.core.authored_text import read_authored_text
 from app.core.exceptions import error_response, raise_error_response
 from app.models.compare import CompareResult
 from app.models.golden import (
@@ -241,7 +242,7 @@ def _with_expected_hash(baseline_dir: Path, baseline_id: str, file: GoldenBaseli
     """
     target = baseline_dir / _relative_workspace_golden_path(baseline_id, file.path)
     try:
-        current = target.read_text(encoding="utf-8")
+        current = read_authored_text(target)
     except (FileNotFoundError, NotADirectoryError, OSError):
         return file
     return file.model_copy(update={"expected_hash": workspace_text_hash(current)})
@@ -875,4 +876,4 @@ def _latest_golden_run_id(skill_id: str) -> str | None:
 
 
 def _read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(read_authored_text(path))

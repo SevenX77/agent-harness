@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from app.core.authored_text import read_authored_text
+
 _SCHEMA_VERSION = "studio.runtime_config.v2"
 _ARCHIVE_DIR_NAMES = {"history", ".history"}
 _STRUCTURED_SUFFIXES = {".json", ".jsonl", ".ndjson", ".csv", ".tsv"}
@@ -55,7 +57,7 @@ def read_runtime_config(skill_dir: Path) -> dict[str, Any]:
     path = runtime_config_path_for(skill_dir)
     if not path.exists():
         return _with_fingerprint(default_runtime_config())
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = json.loads(read_authored_text(path))
     config = default_runtime_config()
     if isinstance(raw, dict):
         if _has_v2_import_inputs(raw):
@@ -343,7 +345,7 @@ def _phase_input_fields(skill_dir: Path, phase_ids: list[str]) -> dict[str, set[
 
 def _input_fields_from_markdown(path: Path) -> set[str]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read_authored_text(path)
     except OSError:
         return set()
     frontmatter = _frontmatter_block(text)
@@ -591,7 +593,7 @@ def _fields_for_file(path: Path) -> list[dict[str, Any]]:
     suffix = path.suffix.lower()
     if suffix == ".json":
         try:
-            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            data = json.loads(read_authored_text(path))
         except (OSError, ValueError, UnicodeDecodeError):
             return []
         if isinstance(data, dict):
@@ -625,7 +627,7 @@ def _fields_for_file(path: Path) -> list[dict[str, Any]]:
 
 def _jsonl_item_fields(path: Path) -> list[dict[str, Any]]:
     try:
-        for line in path.read_text(encoding="utf-8-sig").splitlines():
+        for line in read_authored_text(path).splitlines():
             if not line.strip():
                 continue
             data = json.loads(line)

@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from graph_agent.core.authored_text import read_authored_text
+
 
 @dataclass(frozen=True)
 class PurityViolation:
@@ -135,7 +137,7 @@ _READ_MODES = {"r", "rb", "rt"}
 def scan_python_purity(path: Path) -> list[PurityViolation]:
     """Return purity hard-ban API violations found in a Python source file."""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(read_authored_text(path), filename=str(path))
     except SyntaxError as exc:
         return [
             PurityViolation(
@@ -166,7 +168,7 @@ def scan_python_purity(path: Path) -> list[PurityViolation]:
 def scan_tool_imports_context(path: Path) -> list[PurityViolation]:
     """Return context-facade imports that are forbidden in Tool files."""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(read_authored_text(path), filename=str(path))
     except SyntaxError as exc:
         return [
             PurityViolation(path, exc.lineno or 1, "python", f"invalid Python syntax: {exc.msg}")

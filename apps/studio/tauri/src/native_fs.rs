@@ -101,6 +101,35 @@ fn workspace_text_hash(content: &str) -> String {
     sha256_hex(normalize_text_newlines(content).as_ref())
 }
 
+/// The one place workspace bytes become text.
+///
+/// A skill is authored outside this app as often as inside it, and a Windows
+/// editor routinely puts a UTF-8 byte-order mark (`EF BB BF`) in front of what
+/// the author typed — Notepad does it by default, so does PowerShell
+/// redirection. That mark is part of the ENCODING, not of the content, and
+/// `read_to_string` keeps it: the frontend then parses the text with anchored
+/// frontmatter regexes and reads a whole graph as having none (ledger K7).
+///
+/// It is dropped HERE, where bytes become text, rather than at each parser that
+/// trips over it — otherwise every reader has to remember, and the ones that
+/// forget disagree with the ones that don't. Two readers in particular must
+/// never disagree: the read command reports a hash the frontend later sends
+/// back as `expected_hash`, and the write path re-reads the file to check it.
+///
+/// Only a LEADING mark goes. The same character further in is a zero-width
+/// no-break space the author typed, and there it really is content.
+///
+/// Twin of `graph_agent.core.authored_text.read_authored_text` (engine) and
+/// `app.core.authored_text.read_authored_text` (studio backend); all three name
+/// the same rule for the module they serve.
+fn read_workspace_text(path: &Path) -> std::io::Result<String> {
+    let mut text = std::fs::read_to_string(path)?;
+    if text.starts_with('\u{feff}') {
+        text.drain(..'\u{feff}'.len_utf8());
+    }
+    Ok(text)
+}
+
 fn normalize_text_newlines(content: &str) -> Cow<'_, str> {
     if !content.contains('\r') {
         return Cow::Borrowed(content);
@@ -306,7 +335,7 @@ fn write_workspace_file_impl_inner(
             return Err(write_failed(format!("file already exists: {path}")));
         }
     } else {
-        let current = match std::fs::read_to_string(&target) {
+        let current = match read_workspace_text(&target) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(write_failed(format!("cannot read current file: {error}"))),
@@ -616,7 +645,7 @@ pub fn checkpoint_workspace_file_impl(
         });
     }
 
-    let (existed, content) = match std::fs::read_to_string(&target) {
+    let (existed, content) = match read_workspace_text(&target) {
         Ok(text) => (true, text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (false, String::new()),
         Err(error) => return Err(format!("cannot read file to checkpoint: {error}")),
@@ -740,7 +769,7 @@ pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<Read
     let root = PathBuf::from(workspace_root.trim());
     let target = safe_join(&root, path)?;
     ensure_existing_path_components_inside_workspace(&root, path)?;
-    let content = std::fs::read_to_string(&target).map_err(|error| {
+    let content = read_workspace_text(&target).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("file not found: {path}")
         } else {
@@ -2268,6 +2297,69 @@ mod tests {
         // straight into `expected_hash` for a follow-up write without
         // re-hashing.
         assert_eq!(outcome.hash, sha256_hex("hello world"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_drops_the_byte_order_mark() {
+        // A file a person authored in Notepad or produced with PowerShell
+        // redirection starts with EF BB BF. That is encoding, not content: the
+        // frontend parses this text with anchored frontmatter regexes, and a
+        // `\u{feff}` sitting in front of `---` makes a whole graph read as
+        // having no frontmatter at all (ledger K7).
+        let root = temp_root("read-bom");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"---\nname: signed\n---\n");
+        std::fs::write(root.join("GRAPH.md"), bytes).unwrap();
+
+        let outcome =
+            read_workspace_file_impl(root.to_str().unwrap(), "GRAPH.md").expect("read signed file");
+
+        assert_eq!(outcome.content, "---\nname: signed\n---\n");
+        // Same file, same hash, signature or not — otherwise the same content
+        // authored on Windows and on macOS would look like an edit to the
+        // optimistic lock, and every save on a signed file would report a
+        // conflict that never happened.
+        assert_eq!(outcome.hash, sha256_hex("---\nname: signed\n---\n"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_keeps_a_mark_that_is_not_the_signature() {
+        // Only the leading one is encoding. The same character inside the text
+        // is a zero-width no-break space the author typed, and eating it would
+        // change what they wrote.
+        let root = temp_root("read-inner-bom");
+        std::fs::write(root.join("note.md"), "plain\u{feff}text").unwrap();
+
+        let outcome =
+            read_workspace_file_impl(root.to_str().unwrap(), "note.md").expect("read note");
+
+        assert_eq!(outcome.content, "plain\u{feff}text");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn writing_a_signed_file_sees_the_hash_the_reader_reported() {
+        // The two sides of the optimistic lock must answer the same question.
+        // The reader hands the frontend a hash; the write path re-reads the
+        // file on disk to check it. If only one of them drops the signature,
+        // a signed file can never be saved.
+        let root = temp_root("write-bom-hash");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"first\n");
+        std::fs::write(root.join("GRAPH.md"), bytes).unwrap();
+        let seen = read_workspace_file_impl(root.to_str().unwrap(), "GRAPH.md").expect("read");
+
+        let written = write_workspace_file_impl(
+            root.to_str().unwrap(),
+            "GRAPH.md",
+            "second\n",
+            Some(&seen.hash),
+        )
+        .expect("a file we just read is not a conflict");
+
+        assert_eq!(written.hash, sha256_hex("second\n"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

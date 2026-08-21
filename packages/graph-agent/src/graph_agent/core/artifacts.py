@@ -12,6 +12,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from graph_agent.core.authored_text import read_authored_text
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
@@ -109,7 +110,7 @@ def _phase_line(graph_lines: list[str], phase_id: str) -> int:
 
 def _build_source_map(source_path: Path) -> dict[str, Any]:
     graph_path = _graph_file(source_path)
-    graph_text = graph_path.read_text(encoding="utf-8")
+    graph_text = read_authored_text(graph_path)
     graph_lines = graph_text.splitlines()
     graph_rel = graph_path.relative_to(source_path).as_posix()
     nodes: dict[str, Any] = {}

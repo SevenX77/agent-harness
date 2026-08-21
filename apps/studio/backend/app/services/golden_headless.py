@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.adapters.engine import GoldenInputRef, RunResultSnapshot, calculate_score, diff_outputs
+from app.core.authored_text import read_authored_text
 from app.core.exceptions import error_response
 from app.models.compare import FieldDifference, NodeGoldenGroup
 
@@ -494,7 +495,7 @@ def _read_baseline_json_ref(ref: str) -> Any:
             {"ref": ref, "resolved_path": str(path)},
         )
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_authored_text(path))
     except json.JSONDecodeError as exc:
         _raise_golden_error(
             "golden.baseline_invalid",

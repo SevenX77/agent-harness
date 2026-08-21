@@ -70,6 +70,7 @@ from app.core.adapters.gateway import (
     call_method_ids_for_endpoint,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
+from app.core.authored_text import read_authored_text
 from app.models.copilot import (
     CopilotEvent,
     CopilotEventContextResolved,
@@ -642,7 +643,7 @@ def _build_patch_proposed_event(
     abs_path, path = safe_target
     existed = abs_path.is_file()
     try:
-        before = abs_path.read_text(encoding="utf-8") if existed else ""
+        before = read_authored_text(abs_path) if existed else ""
     except OSError as exc:
         logger.warning("phase=copilot_safe_write cannot read pre-edit bytes %s: %s", abs_path, exc)
         before = ""

@@ -21,6 +21,7 @@ from jsonschema.validators import Draft202012Validator
 from pydantic import BaseModel, ValidationError
 
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
+from graph_agent.core.authored_text import read_authored_text
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.local_workspace_resolver import default_local_resolver_for_skill
 from graph_agent.core.manifest import (
@@ -331,7 +332,7 @@ class SkillLoader:
                         )
                     else:
                         try:
-                            content = validator_file.read_text(encoding="utf-8")
+                            content = read_authored_text(validator_file)
                             tree = ast.parse(content, filename=str(validator_file))
                             has_validate = False
                             for node in tree.body:
@@ -2720,7 +2721,7 @@ def _validate_action_return_keys(
     output_schema_keys: set[str] | None,
 ) -> None:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(read_authored_text(path), filename=str(path))
     except SyntaxError as exc:
         _actions_keys_fatal(path, exc.lineno or 1, f"could not parse action source: {exc.msg}")
     except OSError as exc:
@@ -3054,7 +3055,7 @@ def _body_file_line(path: Path, body: str, offset: int) -> int:
     ``_strip_frontmatter`` removes the frontmatter), so its start anchors exactly.
     """
     try:
-        content = path.read_text(encoding="utf-8")
+        content = read_authored_text(path)
     except OSError:
         return _xml_line(body, offset)
     if body:
@@ -3213,7 +3214,7 @@ def _validate_sequential_overwrites(
 
 def _frontmatter_key_line(path: Path, key: str) -> int:
     try:
-        for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        for index, line in enumerate(read_authored_text(path).splitlines(), start=1):
             if re.match(rf"\s*{re.escape(key)}\s*:", line):
                 return index
     except OSError:

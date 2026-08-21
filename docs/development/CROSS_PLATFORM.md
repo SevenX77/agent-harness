@@ -28,6 +28,37 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
 
 - 文本 I/O 一律 `encoding="utf-8"`；这不是风格偏好，Windows 上默认是本地
   代码页（中文机是 GBK/cp936），不写就等着乱码。
+- **读别人写的文件用 `encoding="utf-8-sig"`，读我们自己写的文件用 `"utf-8"`。**
+  上一条铁律管的是**我们往外写**什么（UTF-8，不带签名，LF），它管不了外面的
+  编辑器往我们手里塞什么：Windows 记事本和 PowerShell 重定向默认在文件开头写
+  一个 UTF-8 字节序标记（BOM，字节 `EF BB BF`）。那三个字节属于**编码**，不是
+  正文的第一个字符；用 `"utf-8"` 读进来，它会变成一个 `\ufeff` 字符卡在最前面。
+  实测踩坑（2026-08-21，问题台账 K7）：一个外部编写的 `GRAPH.md` 因此以
+  `\ufeff---` 开头，引擎的 frontmatter 匹配是行首锚定的 `^---`，于是整份
+  frontmatter 判定为不存在——Studio 画出一个零相位的空技能，**没有任何报错**。
+  所以**每个模块给"人手写、我们读回"的文件留一个解码出口，全模块只此一个**，
+  三个模块各自命名同一条规则：
+
+  | 模块 | 解码出口 | 管辖范围 |
+  | --- | --- | --- |
+  | engine | `graph_agent.core.authored_text.read_authored_text` | 技能 markdown、validator 源码、声明的运行时输入文件 |
+  | studio backend | `app.core.authored_text.read_authored_text` | skill 工作区里的一切：相位 markdown、golden case、test input、`.workspace/` 配置 |
+  | Rust native-fs | `native_fs.rs::read_workspace_text` | 前端拿到的一切工作区文本（它是前端唯一的文件读取方） |
+
+  三处都只是给标准库的 `utf-8-sig` 起了个模块内的名字（Rust 侧手写等价逻辑，
+  因为 `read_to_string` 不剥签名）——**规则只有一条，出口按模块各有一个**。
+  我们自己写出的文件（缓存、trace、metrics、`%APPDATA%` 下的设置与索引）没有
+  签名可剥，继续用 `"utf-8"` 读；这个区别本身就说明了这份文件是谁写的。
+
+  **Rust 与 Python 必须一起剥，不能只剥一边**：`workspace_text_hash`
+  （LF 归一化后的 sha256）是乐观锁的判据，Rust 读一份、Python 读同一份，
+  只要有一边把签名算进哈希，同一个文件的两个哈希就对不上——带签名的文件
+  从此**永远保存不了**，而且报的是一个根本没发生过的冲突。
+  **不要在踩到的地方逐个 `.lstrip("\ufeff")`**：那是调用点补丁，得在每一个
+  读取方记得做一遍——K7 就是这么来的（引擎侧 `graph_assembler` 补了、`parser`
+  没补，后端侧 `runtime_config` 相隔十二行给出两种答案），同一个文件于是有了
+  两种读法；而且它剥的是一**串**标记而不是签名那一个，正文里合法出现的零宽
+  不换行空格会被它吃掉。
 - `subprocess.run(..., text=True)` 必须加 `encoding="utf-8", errors="replace"`。
   全仓范本：`apps/studio/backend/app/services/git_local.py` 的 `_run_git`。
 - 子进程是 Python 时，父进程环境里的 `PYTHONUTF8=1` 会让子进程也用 UTF-8 写

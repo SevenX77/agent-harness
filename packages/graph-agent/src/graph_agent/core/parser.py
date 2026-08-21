@@ -45,6 +45,7 @@ except ModuleNotFoundError:  # pragma: no cover
     RuamelYAML = None
     YAMLError = yaml.YAMLError
 
+from graph_agent.core.authored_text import read_authored_text
 from graph_agent.core.exceptions import SkillLoadError, make_error_payload
 
 # 方针 3.2: lines reported by ruamel are 0-indexed *within* the
@@ -270,7 +271,7 @@ def _parse_error_code(path: Path) -> str:
 def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:
     """Read a V2.1 markdown document into YAML frontmatter and raw body."""
     p = Path(path)
-    content = p.read_text(encoding="utf-8")
+    content = read_authored_text(p)
 
     try:
         frontmatter = _parse_frontmatter(content, p)
@@ -322,7 +323,7 @@ def parse_markdown_parts_best_effort(path: Path | str) -> tuple[dict[str, Any], 
     successful parse here as validating the document.
     """
     p = Path(path)
-    content = p.read_text(encoding="utf-8")
+    content = read_authored_text(p)
 
     if not content.startswith("---"):
         raise SkillLoadError("No YAML frontmatter found (file must start with ---)")
@@ -390,7 +391,7 @@ def _body_offset_to_file_line(path: Path, body: str, offset: int) -> int:
     when the file cannot be read.
     """
     try:
-        content = path.read_text(encoding="utf-8")
+        content = read_authored_text(path)
     except OSError:
         return body[: max(0, offset)].count("\n") + 1
     if body:

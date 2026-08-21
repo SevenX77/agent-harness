@@ -22,6 +22,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core.authored_text import read_authored_text
+
 router = APIRouter(prefix="/api/io", tags=["io"])
 
 _TEXT_SUFFIXES = {".md", ".txt"}
@@ -88,7 +90,7 @@ def _batch_key(stem: str) -> tuple[str, int] | None:
 
 def _scan_json_file(path: Path) -> list[dict[str, Any]]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        data = json.loads(read_authored_text(path))
     except (OSError, ValueError):
         return []
     if isinstance(data, list):
@@ -106,7 +108,7 @@ def _scan_json_file(path: Path) -> list[dict[str, Any]]:
 
 def _scan_jsonl_file(path: Path) -> list[dict[str, Any]]:
     try:
-        for line in path.read_text(encoding="utf-8-sig").splitlines():
+        for line in read_authored_text(path).splitlines():
             if not line.strip():
                 continue
             inner = _fields_of_mapping(json.loads(line))
@@ -118,7 +120,7 @@ def _scan_jsonl_file(path: Path) -> list[dict[str, Any]]:
 
 def _scan_tabular_file(path: Path, *, delimiter: str) -> list[dict[str, Any]]:
     try:
-        with path.open(encoding="utf-8-sig", newline="") as fh:
+        with path.open(encoding="utf-8-sig", newline="") as fh:  # see app.core.authored_text
             reader = csv.reader(fh, delimiter=delimiter)
             header = next(reader, [])
     except (OSError, UnicodeDecodeError, csv.Error):

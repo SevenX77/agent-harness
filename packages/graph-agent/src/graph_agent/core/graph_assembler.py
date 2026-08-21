@@ -1599,7 +1599,7 @@ def _read_single_runtime_input_value(
             "size": stat.st_size,
         }
 
-    text = read_workspace_text_file(path, workspace_dir).lstrip("\ufeff")
+    text = read_workspace_text_file(path, workspace_dir)
     if spec.value_type == "json":
         try:
             value = json.loads(text)

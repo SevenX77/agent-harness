@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from app.core.authored_text import read_authored_text
 from app.models.copilot import CopilotMention
 
 # F4 ①'s injection budget for one turn, across every mention in it. A budget
@@ -141,7 +142,7 @@ def _read_mentioned_file(
         return _failed(mention, located)
 
     try:
-        text = located.read_text(encoding="utf-8")
+        text = read_authored_text(located)
     except OSError as exc:
         return _failed(mention, f"could not be read ({exc.strerror or exc})")
     except UnicodeDecodeError:

@@ -14,6 +14,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from graph_agent.core.authored_text import read_authored_text
+
 logger = logging.getLogger(__name__)
 
 _MAX_FILE_SIZE_BYTES = 200_000
@@ -125,7 +127,9 @@ def _read_utf8_text_target(target: Path, raw_path: str) -> str:
     except OSError as exc:
         raise RuntimeInputFileError(f"file input {raw_path!r} could not be read") from exc
     try:
-        text = data.decode("utf-8")
+        # utf-8-sig, not utf-8: the leading byte-order mark a Windows editor
+        # writes is encoding, not the first character of the user's data.
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise RuntimeInputFileError(
             f"file input {raw_path!r} is binary or non-text"
@@ -178,7 +182,7 @@ def _read_file_impl(
         if error is not None:
             return error
         file_size = target.stat().st_size
-        content = target.read_text(encoding="utf-8")
+        content = read_authored_text(target)
         logger.info("read_file: %s (%d bytes)", target, file_size)
         return content
     except Exception as exc:  # noqa: BLE001

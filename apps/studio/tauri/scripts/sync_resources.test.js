@@ -11,15 +11,49 @@ const {
   skillsSourceDir,
 } = require('./sync_resources')
 
-test('skillsSourceDir prefers the sibling skills directory when present', () => {
+// What ships is either named explicitly or lives in the repo. The fallback in
+// between used to be `<repo>/../skills` — whatever directory happened to carry
+// that name next to the checkout. On the primary dev machine that is
+// `D:\coding\skills`, 39 private skill sources, and `bundle.resources` ships
+// `vendor/**/*` wholesale, so every installer built there would have carried
+// them (ledger D3).
+test('skillsSourceDir never reaches outside the repo for a sibling directory', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
   const repoRoot = path.join(tempRoot, 'agent-harness')
   const repoSkills = path.join(repoRoot, 'skills')
   const siblingSkills = path.join(tempRoot, 'skills')
   fs.mkdirSync(repoSkills, { recursive: true })
   fs.mkdirSync(siblingSkills, { recursive: true })
+  fs.writeFileSync(path.join(siblingSkills, 'private.md'), 'not ours\n', 'utf8')
 
-  assert.equal(skillsSourceDir({ repoRoot, env: {} }), siblingSkills)
+  assert.equal(skillsSourceDir({ repoRoot, env: {} }), repoSkills)
+})
+
+test('skillsSourceDir reports nothing to bundle rather than guessing a directory', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
+  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const siblingSkills = path.join(tempRoot, 'skills')
+  fs.mkdirSync(repoRoot, { recursive: true })
+  fs.mkdirSync(siblingSkills, { recursive: true })
+
+  assert.equal(skillsSourceDir({ repoRoot, env: {} }), null)
+})
+
+test('copyRuntimeResources ships an empty skills directory when there is nothing to bundle', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
+  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const vendorDir = path.join(tempRoot, 'vendor')
+  fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true })
+  fs.writeFileSync(path.join(repoRoot, 'config', 'settings.json'), '{}\n', 'utf8')
+  // The sibling exists and must still be ignored — this is the shape the dev
+  // machine is actually in.
+  fs.mkdirSync(path.join(tempRoot, 'skills', 'someones-private-skill'), { recursive: true })
+
+  copyRuntimeResources({ repoRoot, vendorDir, env: {} })
+
+  const shipped = path.join(vendorDir, 'resources', 'skills')
+  assert.equal(fs.existsSync(shipped), true, 'the directory must exist so the app finds a shape it knows')
+  assert.deepEqual(fs.readdirSync(shipped), [], 'and it must be empty')
 })
 
 test('skillsSourceDir honors an explicit STUDIO_SKILLS_SOURCE_DIR override', () => {

@@ -32,18 +32,30 @@ function copyDir(source, destination) {
   })
 }
 
+/**
+ * Where the skills that ship inside the installer come from, or `null` when
+ * there are none.
+ *
+ * Two sources, both of them things someone chose: the environment variable a
+ * packager sets, and the repo's own `skills/`. There used to be a third between
+ * them — `<repo>/../skills`, whatever directory happens to carry that name next
+ * to the checkout. On the primary dev machine that is `D:\coding\skills` with 39
+ * private skill sources, and `bundle.resources` ships `vendor/**` wholesale, so
+ * an installer built there would have carried every one of them (ledger D3).
+ * A path nobody named is not a decision, and shipping is not the place to guess.
+ *
+ * Nothing to bundle is a legitimate answer — Home does not auto-scan a bundled
+ * registry anyway (backend `test_api.py`, 01_init.md D11) — so it returns null
+ * instead of throwing, and the caller ships an empty directory.
+ */
 function skillsSourceDir({ repoRoot = REPO_ROOT, env = process.env } = {}) {
   const explicitSource = env.STUDIO_SKILLS_SOURCE_DIR?.trim()
   if (explicitSource) {
     return path.resolve(explicitSource)
   }
 
-  const siblingSkills = path.join(path.dirname(repoRoot), 'skills')
-  if (fs.existsSync(siblingSkills)) {
-    return siblingSkills
-  }
-
-  return path.join(repoRoot, 'skills')
+  const repoSkills = path.join(repoRoot, 'skills')
+  return fs.existsSync(repoSkills) ? repoSkills : null
 }
 
 function copyBackend({ repoRoot = REPO_ROOT, vendorDir = VENDOR_DIR } = {}) {
@@ -65,7 +77,14 @@ function copyRuntimeResources({
   const resourcesTarget = path.join(vendorDir, 'resources')
   fs.rmSync(resourcesTarget, { recursive: true, force: true })
   fs.mkdirSync(resourcesTarget, { recursive: true })
-  copyDir(skillsSourceDir({ repoRoot, env }), path.join(resourcesTarget, 'skills'))
+  const skillsSource = skillsSourceDir({ repoRoot, env })
+  const skillsTarget = path.join(resourcesTarget, 'skills')
+  if (skillsSource) {
+    copyDir(skillsSource, skillsTarget)
+  } else {
+    fs.mkdirSync(skillsTarget, { recursive: true })
+    console.log('[resources] no skills to bundle: set STUDIO_SKILLS_SOURCE_DIR to ship some')
+  }
   copyDir(path.join(repoRoot, 'config'), path.join(resourcesTarget, 'config'))
   fs.mkdirSync(path.join(resourcesTarget, 'workspaces'), { recursive: true })
 }

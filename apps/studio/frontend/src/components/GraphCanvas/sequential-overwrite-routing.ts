@@ -6,13 +6,6 @@ import { joinWorkspacePath, resolveSubgraphPath } from '@/components/studio/subg
 const SEQUENTIAL_OVERWRITE_CODE = 'F-v3-sequential-overwrite-unauthorized'
 const OUTPUT_FIELD_PREFIX = 'io.outputs.properties.'
 const PHASE_FILE_RE = /^(?:(?<prefix>.*)\/)?phases\/(?<phaseId>[A-Za-z0-9_-]+)\/(?:LOGIC|SUBGRAPH|SKILL)\.md$/
-// The one thing still read out of the message, and only as a fallback: a
-// diagnostic raised inside a nested child skill carries a `file` relative to
-// the CHILD root, so the parent's subgraph prefix survives only in the
-// location the engine prints. That is a separate defect in how child
-// diagnostics are addressed (ledger K6) — not something the conflict UI can
-// fix from here.
-const MESSAGE_LOCATION_RE = /(?<path>(?:[A-Za-z]:[\\/]|\/)[^\n]*?(?:GRAPH|LOGIC|SUBGRAPH|SKILL)\.md):\d+|(?<relative>(?:subgraph\/[^\n]*?\/)?phases\/[A-Za-z0-9_-]+\/(?:LOGIC|SUBGRAPH|SKILL)\.md):\d+/
 
 export interface SequentialOverwriteRoute {
   phaseId: string
@@ -54,36 +47,6 @@ function resolveRoutePath(workspaceRoot: string | null | undefined, relativePath
   return normalizeComparablePath(resolved) ?? relativePath
 }
 
-function relativePathFromMessageLocation(message: string, workspaceRoot: string | null | undefined): string | null {
-  const match = MESSAGE_LOCATION_RE.exec(message.replace(/\\/g, '/'))
-  const path = match?.groups?.path ?? match?.groups?.relative
-  const normalized = normalizeComparablePath(path)
-  if (!normalized) return null
-
-  const root = normalizeComparablePath(workspaceRoot)
-  if (root && normalized.startsWith(`${root}/`)) {
-    return normalized.slice(root.length + 1)
-  }
-  const subgraphIndex = normalized.indexOf('subgraph/')
-  if (subgraphIndex >= 0) {
-    return normalized.slice(subgraphIndex)
-  }
-  const phasesIndex = normalized.indexOf('phases/')
-  if (phasesIndex >= 0) {
-    return normalized.slice(phasesIndex)
-  }
-  return normalized
-}
-
-function filePathForRoute(error: CompileError, workspaceRoot: string | null | undefined): string | null {
-  const fromMessage = relativePathFromMessageLocation(error.message, workspaceRoot)
-  const fromFile = normalizeComparablePath(error.file)
-  if (fromMessage && (!fromFile || (!fromFile.includes('subgraph/') && fromMessage.includes('subgraph/')))) {
-    return fromMessage
-  }
-  return fromFile ?? fromMessage
-}
-
 function subgraphPathChain(prefix: string | undefined, workspaceRoot: string | null | undefined): string[] {
   if (!prefix) return []
   const parts = prefix.split('/').filter(Boolean)
@@ -106,7 +69,12 @@ export function sequentialOverwriteRouteFromCompileError(
   workspaceRoot: string | null | undefined,
 ): SequentialOverwriteRoute | null {
   if (!isSequentialOverwriteCompileError(error)) return null
-  const file = filePathForRoute(error, workspaceRoot)
+  // `file` alone: the engine renders every diagnostic's path against the root
+  // it was asked to compile, nested children included, so a conflict two
+  // subgraphs deep already arrives as `subgraph/a/subgraph/b/phases/p/...`.
+  // This used to fall back to a regex over the message because the engine
+  // truncated that path; it stopped doing so, and the fallback with it.
+  const file = normalizeComparablePath(error.file)
   if (!file) return null
   const match = PHASE_FILE_RE.exec(file)
   const phaseId = match?.groups?.phaseId

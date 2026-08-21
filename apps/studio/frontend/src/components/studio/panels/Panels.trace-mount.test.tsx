@@ -41,6 +41,8 @@ function renderTimelinePanel(
     onDesignGolden?: PanelsProps['onDesignGolden']
     onPromoteNode?: PanelsProps['onPromoteNode']
     traceCanCompare?: boolean
+    compareTabs?: PanelsProps['compareTabs']
+    activeCandidateId?: PanelsProps['activeCandidateId']
   },
   context: WorkspaceContextValue = workspaceContextStub,
 ): string {
@@ -58,6 +60,9 @@ function renderTimelinePanel(
         onDesignGolden={props.onDesignGolden}
         onPromoteNode={props.onPromoteNode}
         traceCanCompare={props.traceCanCompare}
+        compareTabs={props.compareTabs}
+        activeCandidateId={props.activeCandidateId}
+        onSelectCandidate={() => undefined}
       />
     </WorkspaceProvider>,
   )
@@ -198,5 +203,76 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     expect(html).toContain('aria-label="Clear trace scope"')
     expect(html).toContain('Tamper downstream resume context')
     expect(html).toContain('data-trace-step-count=')
+  })
+})
+
+// A compare group exists or it does not. That sentence never mentions the live
+// run, so the tab strip that lets the reader move between candidates cannot
+// live inside the live branch — which is where it used to live, making the
+// group unreachable for exactly the case node-compare was reopened to support:
+// starting a compare off a run you opened from history (ledger L2 ③, caught on
+// the real app after the side run finished `success` and no tab appeared).
+describe('Panels trace region — compare candidate tabs belong to the group', () => {
+  const compareTabs = [
+    { candidateId: 'fast', label: 'deepseek-v4', runId: 'run-f', failed: false, running: false },
+    { candidateId: 'slow', label: 'claude-opus', runId: 'run-s', failed: true, running: false },
+  ]
+
+  const historyView: TraceView = {
+    source: 'history',
+    runId: 'hist-1',
+    metadata: {
+      run_id: 'hist-1',
+      status: 'success',
+      started_at: '2026-08-21T00:00:00Z',
+      kind: 'run',
+      metrics: null,
+      input_summary: null,
+    },
+  }
+
+  it('offers the candidate tabs while the trace is replaying a historical run', () => {
+    const html = renderTimelinePanel({
+      runId: null,
+      traceEvents: oneEvent,
+      traceView: historyView,
+      compareTabs,
+      activeCandidateId: 'fast',
+    })
+
+    expect(html).toContain('aria-label="Model compare candidates"')
+    expect(html).toContain('aria-label="Candidate deepseek-v4"')
+    expect(html).toContain('aria-label="Candidate claude-opus (failed)"')
+  })
+
+  it('offers the candidate tabs over the run list, with no trace open at all', () => {
+    const html = renderTimelinePanel({
+      runId: null,
+      traceEvents: [],
+      compareTabs,
+      activeCandidateId: 'fast',
+    })
+
+    expect(html).toContain('No runs recorded yet')
+    expect(html).toContain('aria-label="Model compare candidates"')
+  })
+
+  it('still offers them over the live trace', () => {
+    const html = renderTimelinePanel({
+      runId: 'run-1',
+      traceEvents: oneEvent,
+      traceView: { source: 'live' },
+      compareTabs,
+      activeCandidateId: 'fast',
+    })
+
+    expect(html).toContain('aria-label="Model compare candidates"')
+    expect(html).toContain('data-trace-step-count="1"')
+  })
+
+  it('shows no strip when no compare group exists', () => {
+    const html = renderTimelinePanel({ runId: null, traceEvents: oneEvent, traceView: historyView })
+
+    expect(html).not.toContain('aria-label="Model compare candidates"')
   })
 })

@@ -1,6 +1,5 @@
 import type { CallbackEvent, EventEnvelope, RunMetadata } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
-import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { countRouteDegradations, isPredictTrace } from '../utils/trace'
 import { runVerdict, type RunVerdict } from '../utils/run-status-projection'
@@ -101,16 +100,6 @@ interface TracePanelProps {
   onResume?: () => void
   hitlSubmitting?: boolean
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
-  /**
-   * n4-trace#23 (P8 model-compare): when a compare run is active, the per-candidate
-   * tabs (one per candidate_id) the user switches between. Each tab carries the
-   * candidate's spawned run id + a `failed` flag (read from the run's
-   * metadata.status) so a failed candidate's tab is marked. Absent on ordinary
-   * (non-compare) runs, where the panel renders without the tab strip.
-   */
-  compareTabs?: CompareTab[]
-  activeCandidateId?: string | null
-  onSelectCandidate?: (candidateId: string) => void
   /**
    * 选中即范围 (decision 2026-08-13 D6): the canvas selection this trace is
    * narrowed to. Null = the whole run. The chip in the header announces it and
@@ -279,9 +268,6 @@ export function TracePanel({
   onResume,
   hitlSubmitting = false,
   onSubmitHitlResponse,
-  compareTabs,
-  activeCandidateId = null,
-  onSelectCandidate,
   skillId = null,
   scope = null,
   onClearScope,
@@ -325,48 +311,6 @@ export function TracePanel({
   // something that is not the run (PM 08-19 Q5). The run's verdict stays
   // visible where it belongs: the top bar, which names the run itself (F8).
   const outcome = scope ? null : traceOutcomeEntry(traceEvents, metadata)
-
-  // n4-trace#23: the per-candidate tab strip. Rendered whenever a compare run is
-  // active (even before its events stream in) so the user can switch candidates
-  // while a tab is still empty. Each tab shows the candidate's role and marks a
-  // failed candidate (metadata.status === 'failed') so the failure is visible.
-  const hasCompareTabs = Array.isArray(compareTabs) && compareTabs.length > 0
-  const compareTabStrip = hasCompareTabs ? (
-    <div
-      role="tablist"
-      aria-label={t('panel.candidates')}
-      className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5"
-    >
-      {compareTabs!.map((tab) => {
-        const isActive = tab.candidateId === activeCandidateId
-        return (
-          <button
-            key={tab.candidateId}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            aria-label={tab.failed
-              ? t('panel.candidateFailed', { name: tab.label })
-              : t('panel.candidate', { name: tab.label })}
-            onClick={() => onSelectCandidate?.(tab.candidateId)}
-            className={[
-              'flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs font-semibold transition-colors',
-              isActive
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border bg-card text-muted-foreground hover:bg-accent',
-              tab.failed ? 'text-destructive' : '',
-            ].join(' ')}
-          >
-            {tab.failed ? <AlertTriangle className="size-3" /> : null}
-            {tab.running ? (
-              <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-primary" />
-            ) : null}
-            <span className="max-w-[140px] truncate">{tab.label}</span>
-          </button>
-        )
-      })}
-    </div>
-  ) : null
 
   const runActions = traceRunActions({
     canResume,
@@ -525,7 +469,6 @@ export function TracePanel({
   if (traceEvents.length === 0) {
     return (
       <div role="log" aria-live="polite" aria-label={t('panel.region')} className="flex h-full min-h-0 flex-col">
-        {compareTabStrip}
         {identityStrip}
         {failureBanner}
         {scopeStrip}
@@ -541,7 +484,6 @@ export function TracePanel({
 
   return (
     <div role="log" aria-live="polite" aria-label={t('panel.region')} className="flex h-full min-h-0 flex-col">
-      {compareTabStrip}
       {identityStrip}
       {failureBanner}
       {scopeStrip}

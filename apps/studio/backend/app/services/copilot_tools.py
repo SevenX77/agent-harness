@@ -31,6 +31,7 @@ from typing import Any
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpServerConfig
 
+from app.core.authored_text import read_authored_text
 from app.services import web_access
 from app.services.copilot_skill_binding import CopilotSkillBinding, bind_tools_to_open_skill
 
@@ -105,7 +106,7 @@ async def read_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
     if not candidate.is_file():
         return _text_result(f"文件不存在: {rel_path}", is_error=True)
     try:
-        lines = candidate.read_text(encoding="utf-8").splitlines()
+        lines = read_authored_text(candidate).splitlines()
     except UnicodeDecodeError:
         return _text_result(f"不是 UTF-8 文本文件: {rel_path}", is_error=True)
 

@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, Response, status
 
+from app.core.authored_text import read_authored_text
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.models.errors import ErrorResponse
 from app.models.test_inputs import (
@@ -55,7 +56,7 @@ async def list_test_inputs(skill_id: str) -> list[TestInputMetadata]:
                 name=path.stem,
                 created_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                 size_bytes=stat.st_size,
-                content_preview=_preview_json(path.read_text(encoding="utf-8")),
+                content_preview=_preview_json(read_authored_text(path)),
             ),
         )
     return items
@@ -80,7 +81,7 @@ async def get_test_input(skill_id: str, input_id: str) -> TestInputDetail:
             f"Test input not found: {name}",
             {"name": name},
         )
-    raw = path.read_text(encoding="utf-8")
+    raw = read_authored_text(path)
     try:
         content = json.loads(raw)
     except json.JSONDecodeError as exc:

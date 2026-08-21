@@ -201,3 +201,46 @@ def test_seed_with_nothing_to_fill_writes_no_files(
     assert result.seeded == []
     assert result.files == []
     assert (_golden_dir(SKILL, "seed-full") / "cases" / "setup.json").read_bytes() == before
+
+
+def test_a_plan_file_carries_the_hash_it_was_computed_from(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """A plan file says what it expects to find, so the writer can refuse a surprise.
+
+    The desktop writer is the Rust native-fs layer, and "create only if absent" was the
+    only mode it was ever asked for — which silently made refilling a broken case
+    impossible, because that file exists (ledger K1). A plan file that already has
+    content on disk must therefore carry that content's hash; one that has none carries
+    null, which is the writer's create-if-absent case.
+    """
+    del studio_roots
+    _seal_run_snapshot(SKILL, "seed-hash-base", {"setup": {"answer": "alpha"}, "review": {"score": 7}})
+    set_golden_baseline_for_run(SKILL, "seed-hash-base", lock=False, node_id="setup")
+    broken = _golden_dir(SKILL, "seed-hash-base") / "cases" / "setup.json"
+    broken.write_text(json.dumps({"case_id": "setup", "expected_output": "not an object"}), encoding="utf-8")
+
+    _seal_run_snapshot(SKILL, "seed-hash-later", {"setup": {"answer": "beta"}, "review": {"score": 9}})
+    plan = plan_golden_seed_for_run(SKILL, "seed-hash-later")
+
+    by_path = {file.path: file for file in plan.files}
+    setup_case = by_path[".workspace/golden/seed-hash-base/cases/setup.json"]
+    review_case = by_path[".workspace/golden/seed-hash-base/cases/review.json"]
+    baseline_file = by_path[".workspace/golden/seed-hash-base/baseline.json"]
+
+    # setup.json is on disk (broken) → the plan reports the hash it read.
+    assert setup_case.expected_hash == _workspace_text_hash(broken.read_text(encoding="utf-8"))
+    # review.json has never existed → nothing to expect.
+    assert review_case.expected_hash is None
+    # baseline.json always exists once a baseline does — the case the old mode could
+    # never write.
+    baseline_path = _golden_dir(SKILL, "seed-hash-base") / "baseline.json"
+    assert baseline_file.expected_hash == _workspace_text_hash(baseline_path.read_text(encoding="utf-8"))
+
+
+def _workspace_text_hash(text: str) -> str:
+    """The hash the Rust writer computes: sha256 over LF-normalized text."""
+    import hashlib
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

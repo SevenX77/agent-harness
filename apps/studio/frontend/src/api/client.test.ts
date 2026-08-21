@@ -28,6 +28,7 @@ import {
   resolveCopilotToolApproval,
   resumeRun,
   saveGoldenBaseline,
+  seedGoldenFromRun,
   serializeSkillGraph,
   startRun,
   writeSkillFile,
@@ -822,6 +823,59 @@ describe('api client auth token', () => {
       content_preview: '{"x":1}',
     })
     expect(new Date(metadata.created_at).toString()).not.toBe('Invalid Date')
+  })
+
+  // A plan file that already exists on disk is being REPLACED, and the native writer
+  // has to be told so: "create only if absent" refuses an existing path, which is how
+  // refilling a broken golden silently did nothing in the desktop app (ledger K1).
+  it('replaces an existing plan file under its hash and creates a new one', async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(true)
+    tauriMocks.writeWorkspaceFile.mockResolvedValue({ path: 'x', hash: 'h' })
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => ({
+      data: {
+        baseline_id: 'base-1',
+        baseline_ref: '.workspace/golden/base-1/baseline.json',
+        baseline_locked: false,
+        seeded: [{ node_id: 'setup', reason: 'expected_output_invalid' }],
+        files: [
+          {
+            path: '.workspace/golden/base-1/baseline.json',
+            content: '{"baseline_id":"base-1"}',
+            expected_hash: 'hash-of-the-baseline-on-disk',
+          },
+          {
+            path: '.workspace/golden/base-1/cases/review.json',
+            content: '{"expected_output":{"score":7}}',
+            expected_hash: null,
+          },
+        ],
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+
+    await seedGoldenFromRun('skill-a', 'run-9')
+
+    // Existing file: replaced, guarded by the hash the plan read.
+    expect(tauriMocks.writeWorkspaceFile).toHaveBeenNthCalledWith(
+      1,
+      'skill-a',
+      '.workspace/golden/base-1/baseline.json',
+      '{"baseline_id":"base-1"}',
+      'hash-of-the-baseline-on-disk',
+      {},
+    )
+    // Never existed: created, and creation must fail if something appeared meanwhile.
+    expect(tauriMocks.writeWorkspaceFile).toHaveBeenNthCalledWith(
+      2,
+      'skill-a',
+      '.workspace/golden/base-1/cases/review.json',
+      '{"expected_output":{"score":7}}',
+      null,
+      { createIfAbsent: true },
+    )
   })
 
   it('writes golden result refs through native fs in Tauri after backend planning', async () => {

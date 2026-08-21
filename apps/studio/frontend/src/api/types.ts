@@ -571,6 +571,13 @@ export interface GoldenBaselineContent {
 export interface GoldenBaselineFile {
   path: string
   content: string
+  /**
+   * The content this file is replacing, as the plan read it — or null when the plan
+   * saw nothing there. It decides which write the native layer performs: create (and
+   * fail if something appeared) versus replace-if-unchanged. Mirrors backend
+   * models/golden.py GoldenBaselineFile.expected_hash.
+   */
+  expected_hash?: string | null
 }
 
 export interface GoldenBaselinePlan {

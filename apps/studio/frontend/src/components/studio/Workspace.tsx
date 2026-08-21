@@ -2761,8 +2761,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     return mergeNodeErrors(compileByNode, lintAsCompileByNode)
   }, [activeLint, compileErrors, currentSkillId])
-  const manualCompileErrorsByNodeId = useMemo(
-    () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
+  // The canvas routes overwrite conflicts from the diagnostics themselves, not
+  // from the node projection: a conflict inside a child skill belongs to no root
+  // node, so projecting first drops exactly the case the routing exists for
+  // (ledger N6). Manual Compile only — first-screen/realtime lint must not open
+  // authoring popovers.
+  const manualCompileErrors = useMemo(
+    () => (currentSkillId ? compileErrors[currentSkillId] : undefined) ?? [],
     [compileErrors, currentSkillId],
   )
   const goldenStateByNodeId = useMemo(
@@ -2983,7 +2988,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       onPhaseFileSave={handlePhaseFileSave}
                       onPhaseFileRead={handlePhaseFileRead}
                       statusByNodeId={statusByNodeId}
-                      sequentialOverwriteErrorsByNodeId={manualCompileErrorsByNodeId}
+                      manualCompileErrors={manualCompileErrors}
                       compileErrorsByNodeId={compileErrorsByNodeId}
                       goldenStateByNodeId={goldenStateByNodeId}
                       errorMessageByNodeId={errorMessageByNodeId}

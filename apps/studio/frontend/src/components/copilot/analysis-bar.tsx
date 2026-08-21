@@ -2,23 +2,16 @@ import { useState } from 'react'
 import { Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  listGoldenBaselines,
   prepareCopilotJudgeContext,
-  saveGoldenBaseline,
+  seedGoldenFromRun,
   type CopilotJudgeResponse,
 } from '@/api/client'
-import type { GoldenBaseline } from '@/api/types'
+import type { GoldenSeedPlan } from '@/api/types'
 import { errorMessage } from '@/utils/errors'
 import { Button } from '../ui/button'
 
-interface AutoGoldenDeps {
-  list?: (skillId: string) => Promise<GoldenBaseline[]>
-  save?: (
-    skillId: string,
-    runId: string,
-    lock?: boolean,
-    workspaceRoot?: string | null,
-  ) => Promise<GoldenBaseline>
+interface SeedGoldenDeps {
+  seed?: (skillId: string, runId: string, workspaceRoot?: string | null) => Promise<GoldenSeedPlan>
   judge?: (
     skillId: string,
     request: { runResultsRef: string; baselineRef: string },
@@ -45,43 +38,45 @@ function assertCopilotJudgeContextForRun(
 }
 
 /**
- * F7 "无 golden 节点自动写 golden(有的不动)": with a run-level golden model,
- * this means — if the skill has no golden baseline yet, promote this run as the
- * baseline; if one already exists, leave it untouched. Pure + injectable so the
- * decision is unit-testable without the live API.
+ * F7 "无 golden 节点自动写 golden(有的不动)", asked per agent node.
+ *
+ * Which nodes lack a usable golden is a fact about files on disk, so the backend
+ * answers it (`POST /golden/seed`) and this only relays the verdict: an absent
+ * record, a missing case file and an empty/schema-mismatched one are the same
+ * "no golden here" and all three seed from this run. Asking it here as
+ * "does the skill have any baseline at all" was a run-level question the golden
+ * model does not have (GOLDEN_EVAL-1: golden = one agent node's expected output).
  */
-export async function autoWriteGoldenIfAbsent(
+export async function seedGoldenForRun(
   skillId: string,
   runId: string,
-  deps: AutoGoldenDeps = {},
-): Promise<{ written: boolean; judge?: CopilotJudgeResponse }> {
-  const list = deps.list ?? listGoldenBaselines
-  const save = deps.save ?? saveGoldenBaseline
+  deps: SeedGoldenDeps = {},
+): Promise<{ plan: GoldenSeedPlan; judge?: CopilotJudgeResponse }> {
+  const seed = deps.seed ?? seedGoldenFromRun
   const judge = deps.judge ?? prepareCopilotJudgeContext
-  const existing = await list(skillId)
-  let baseline = existing[0] ?? null
-  const written = existing.length === 0
-  if (written) {
-    if (deps.workspaceRoot?.trim()) {
-      baseline = await save(skillId, runId, false, deps.workspaceRoot)
-    } else {
-      baseline = await save(skillId, runId, false)
-    }
-  }
+  const plan = await seed(skillId, runId, deps.workspaceRoot)
 
-  const baselineRef = baseline?.baseline_ref
-  if (deps.runResultsRef && baselineRef) {
+  if (deps.runResultsRef && plan.baseline_ref) {
     const judgeResult = await judge(skillId, {
       runResultsRef: deps.runResultsRef,
-      baselineRef,
+      baselineRef: plan.baseline_ref,
     })
     assertCopilotJudgeContextForRun(skillId, deps.runResultsRef, judgeResult)
-    return {
-      written,
-      judge: judgeResult,
-    }
+    return { plan, judge: judgeResult }
   }
-  return { written }
+  return { plan }
+}
+
+/** What the bar says it did, in the user's terms rather than the plan's. */
+export function seedOutcomeMessage(plan: GoldenSeedPlan): string {
+  if (plan.baseline_locked) {
+    return 'Golden 已锁定,未填充'
+  }
+  if (plan.seeded.length === 0) {
+    return '每个节点都已有 golden,未改动'
+  }
+  const names = plan.seeded.map((target) => target.node_id).join('、')
+  return `已用本次 run 的输出填充 ${plan.seeded.length} 个节点的 golden:${names}`
 }
 
 interface AnalysisBarProps {
@@ -102,16 +97,14 @@ export function AnalysisBar({ skillId, runId, workspaceRoot, onJudgePrepared, on
   const handleConfirm = async () => {
     setBusy(true)
     try {
-      const result = await autoWriteGoldenIfAbsent(skillId, runId, {
+      const result = await seedGoldenForRun(skillId, runId, {
         workspaceRoot,
         runResultsRef: `${skillId}/runs/${runId}/result.json`,
       })
       if (result.judge) {
         onJudgePrepared?.(result.judge)
       }
-      toast.success(
-        result.written ? 'Wrote golden baseline and prepared judge context' : 'Prepared judge context',
-      )
+      toast.success(seedOutcomeMessage(result.plan))
     } catch (error) {
       toast.error(errorMessage(error))
     } finally {
@@ -123,7 +116,7 @@ export function AnalysisBar({ skillId, runId, workspaceRoot, onJudgePrepared, on
   return (
     <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-accent/50 px-3 py-1.5 text-xs">
       <Sparkles className="size-3.5 text-foreground" />
-      <span className="min-w-0 flex-1 text-foreground">运行完成 — 自动写 golden(仅在尚无 golden 时)?</span>
+      <span className="min-w-0 flex-1 text-foreground">运行完成 — 用本次输出补上缺 golden 的节点?</span>
       <Button
         type="button"
         onClick={() => void handleConfirm()}

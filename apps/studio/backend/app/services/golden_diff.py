@@ -17,6 +17,9 @@ from app.models.golden import (
     GoldenBaselineFile,
     GoldenBaselinePlan,
     GoldenCaseContent,
+    GoldenSeedPlan,
+    GoldenSeedReason,
+    GoldenSeedTarget,
 )
 from app.services.diagnostic_export import assert_trace_can_be_promoted_to_golden
 from app.services.golden_headless import (  # noqa: F401
@@ -99,7 +102,10 @@ def plan_golden_baseline_for_run(
     )
 
     target_node_ids = _select_target_node_ids(snapshot, node_outputs, node_id=node_id)
-    case_files = [_build_case_file(run_id, target_id, node_outputs[target_id]) for target_id in target_node_ids]
+    case_files = [
+        _build_case_file(run_id, target_id, node_outputs[target_id], source_run_id=run_id)
+        for target_id in target_node_ids
+    ]
     case_records = _merge_case_records(skill_id, run_id, target_node_ids)
 
     baseline_dir = _golden_dir_for(skill_id, run_id)
@@ -143,6 +149,109 @@ def plan_golden_baseline_for_run(
             *case_files,
         ],
     )
+
+
+def seed_golden_baseline_for_run(skill_id: str, run_id: str) -> GoldenSeedPlan:
+    """Fill the goldens this skill has no usable version of, from a finished run.
+
+    F6: absent / empty template / schema-mismatched golden takes the node's Run output
+    as its default starting point; a usable golden is never auto-overwritten. Writing
+    is the browser fallback of the same plan native-fs applies.
+    """
+    plan = plan_golden_seed_for_run(skill_id, run_id)
+    if not plan.files:
+        return plan
+    baseline_dir = _golden_dir_for(skill_id, plan.baseline_id)
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    for file in plan.files:
+        target = baseline_dir / _relative_workspace_golden_path(plan.baseline_id, file.path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(file.content, encoding="utf-8")
+    return plan
+
+
+def plan_golden_seed_for_run(skill_id: str, run_id: str) -> GoldenSeedPlan:
+    """Decide which agent nodes this run should seed a golden for, and write nothing.
+
+    The seed lands in the baseline the skill already lives on, not in a new one named
+    after this run: a rival baseline would win ``_latest_golden_run_id`` and silently
+    retire every golden it did not carry, which is the auto-overwrite F6 forbids.
+    """
+    source_run_results_ref, snapshot, node_outputs = read_run_result_snapshot_for_golden(skill_id, run_id)
+    assert_trace_can_be_promoted_to_golden(
+        snapshot.model_dump(mode="json"),
+        skill_id=skill_id,
+        run_id=run_id,
+    )
+
+    live_baseline = _live_baseline_for_skill(skill_id)
+    baseline_id = live_baseline.id if live_baseline is not None else run_id
+    baseline_ref = live_baseline.baseline_ref if live_baseline is not None else None
+    if live_baseline is not None and live_baseline.locked:
+        return GoldenSeedPlan(baseline_id=baseline_id, baseline_ref=baseline_ref, baseline_locked=True)
+
+    persisted = _read_persisted_case_records(skill_id, baseline_id)
+    baseline_dir = _golden_dir_for(skill_id, baseline_id)
+    unusable_reasons = _unusable_case_reasons(baseline_dir, persisted)
+
+    targets = [
+        GoldenSeedTarget(node_id=node_id, reason=reason)
+        for node_id in _select_target_node_ids(snapshot, node_outputs, node_id=None)
+        if (reason := unusable_reasons.get(node_id, "absent")) is not None
+    ]
+    if not targets:
+        return GoldenSeedPlan(baseline_id=baseline_id, baseline_ref=baseline_ref)
+
+    target_node_ids = [target.node_id for target in targets]
+    case_records = _merge_case_records(skill_id, baseline_id, target_node_ids)
+    baseline_payload = {
+        "baseline_id": baseline_id,
+        "source_run_id": live_baseline.source_run_id if live_baseline is not None else run_id,
+        "source_run_results_ref": (
+            live_baseline.source_run_results_ref if live_baseline is not None else source_run_results_ref
+        ),
+        "locked": False,
+        "cases": case_records,
+    }
+    return GoldenSeedPlan(
+        baseline_id=baseline_id,
+        baseline_ref=_workspace_golden_path(baseline_id, BASELINE_FILENAME),
+        seeded=targets,
+        files=[
+            GoldenBaselineFile(
+                path=_workspace_golden_path(baseline_id, BASELINE_FILENAME),
+                content=json.dumps(baseline_payload, ensure_ascii=False, sort_keys=True),
+            ),
+            *(
+                _build_case_file(baseline_id, target.node_id, node_outputs[target.node_id], source_run_id=run_id)
+                for target in targets
+            ),
+        ],
+    )
+
+
+def _live_baseline_for_skill(skill_id: str) -> GoldenBaseline | None:
+    """The baseline a compare would use — the same one seeding must fill."""
+    baselines = list_golden_baselines_for_skill(skill_id)
+    return baselines[0] if baselines else None
+
+
+def _unusable_case_reasons(
+    baseline_dir: Path,
+    records: list[dict[str, Any]],
+) -> dict[str, GoldenSeedReason | None]:
+    """Verdict per node listed in a baseline; ``None`` means the golden is usable."""
+    verdicts: dict[str, GoldenSeedReason | None] = {}
+    for record in records:
+        node_id = record.get("node_id")
+        if not isinstance(node_id, str) or not node_id or node_id in verdicts:
+            continue
+        case_id = record.get("case_id") if isinstance(record.get("case_id"), str) else node_id
+        expected_output_ref = record.get("expected_output_ref")
+        if not isinstance(expected_output_ref, str) or not expected_output_ref:
+            expected_output_ref = f"{CASES_DIRNAME}/{case_id}.json"
+        verdicts[node_id] = _classify_case(baseline_dir, expected_output_ref)[0]
+    return verdicts
 
 
 class _NodeResultRow(Protocol):
@@ -198,16 +307,29 @@ def _select_target_node_ids(
     return [node_id]
 
 
-def _build_case_file(run_id: str, node_id: str, expected_output: Any) -> GoldenBaselineFile:
+def _build_case_file(
+    baseline_id: str,
+    node_id: str,
+    expected_output: Any,
+    *,
+    source_run_id: str,
+) -> GoldenBaselineFile:
+    """Render one case file for ``baseline_id``, naming the run its output came from.
+
+    ``source_run_id`` is per case rather than per baseline because seeding fills gaps
+    in a baseline a different run created: the baseline names the run that started it,
+    and only the case can say where its own expected output was measured.
+    """
     case_id = validate_run_id_segment(node_id)
     case_relative_ref = f"{CASES_DIRNAME}/{case_id}.json"
     return GoldenBaselineFile(
-        path=_workspace_golden_path(run_id, case_relative_ref),
+        path=_workspace_golden_path(baseline_id, case_relative_ref),
         content=json.dumps(
             {
                 "case_id": case_id,
                 "node_id": node_id,
                 "phase_id": node_id,
+                "source_run_id": source_run_id,
                 "expected_output": expected_output,
             },
             ensure_ascii=False,
@@ -528,27 +650,38 @@ def _try_read_case_expected_output(
     expected_output_ref = record.get("expected_output_ref")
     if not isinstance(expected_output_ref, str) or not expected_output_ref:
         expected_output_ref = f"{CASES_DIRNAME}/{case_id}.json"
-    case_path = _resolve_case_path(baseline_dir, expected_output_ref)
-    # codeql[py/path-injection] case_path is confined to baseline_dir by _resolve_case_path.
-    if case_path is None or not case_path.exists():
+    unusable, expected_output = _classify_case(baseline_dir, expected_output_ref)
+    if expected_output is None:
         logger.warning(
-            "golden_cases decision=skip skill_id=%s golden_id=%s node_id=%s reason=case_file_missing",
+            "golden_cases decision=skip skill_id=%s golden_id=%s node_id=%s reason=%s",
             skill_id,
             golden_id,
             node_id,
-        )
-        return None
-    case_payload = _read_json(case_path)
-    expected_output = case_payload.get("expected_output") if isinstance(case_payload, dict) else None
-    if not isinstance(expected_output, dict):
-        logger.warning(
-            "golden_cases decision=skip skill_id=%s golden_id=%s node_id=%s reason=expected_output_invalid",
-            skill_id,
-            golden_id,
-            node_id,
+            unusable,
         )
         return None
     return node_id, expected_output
+
+
+def _classify_case(
+    baseline_dir: Path,
+    expected_output_ref: str,
+) -> tuple[GoldenSeedReason | None, dict[str, Any] | None]:
+    """Say whether one stored case is usable, and why not when it is not.
+
+    The single answer to "does this node have a golden": the diff skips what this
+    call rejects and the seeder refills exactly the same set, so the two can never
+    disagree about which nodes are covered. Exactly one half of the pair is None.
+    """
+    case_path = _resolve_case_path(baseline_dir, expected_output_ref)
+    # codeql[py/path-injection] case_path is confined to baseline_dir by _resolve_case_path.
+    if case_path is None or not case_path.exists():
+        return "case_file_missing", None
+    case_payload = _read_json(case_path)
+    expected_output = case_payload.get("expected_output") if isinstance(case_payload, dict) else None
+    if not isinstance(expected_output, dict):
+        return "expected_output_invalid", None
+    return None, expected_output
 
 
 def _read_golden_case_content(
@@ -568,14 +701,9 @@ def _read_golden_case_content(
     expected_output_ref = record.get("expected_output_ref")
     if not isinstance(expected_output_ref, str) or not expected_output_ref:
         expected_output_ref = f"{CASES_DIRNAME}/{case_id}.json"
-    case_path = _resolve_case_path(baseline_dir, expected_output_ref)
-    # codeql[py/path-injection] case_path is confined to baseline_dir by _resolve_case_path.
-    if case_path is None or not case_path.exists():
-        _raise_golden_case_not_found(skill_id, golden_id, node_id, "case_file_missing")
-    case_payload = _read_json(case_path)
-    expected_output = case_payload.get("expected_output") if isinstance(case_payload, dict) else None
-    if not isinstance(expected_output, dict):
-        _raise_golden_case_not_found(skill_id, golden_id, node_id, "expected_output_invalid")
+    unusable, expected_output = _classify_case(baseline_dir, expected_output_ref)
+    if expected_output is None:
+        _raise_golden_case_not_found(skill_id, golden_id, node_id, unusable or "expected_output_invalid")
     return GoldenCaseContent(
         case_id=case_id,
         node_id=node_id,

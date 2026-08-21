@@ -16,6 +16,7 @@ import type {
   GoldenBaseline,
   GoldenBaselineContent,
   GoldenBaselinePlan,
+  GoldenSeedPlan,
   JsonObject,
   NodeLlmParams,
   NodeLlmParamsMap,
@@ -421,6 +422,35 @@ export async function saveGoldenBaseline(
   const response = await api.post<GoldenBaseline>(
     `/skills/${apiSkillId}/golden`,
     goldenRequest,
+    BROWSER_WRITE_FALLBACK_CONFIG,
+  )
+  return response.data
+}
+
+/**
+ * F6 seeding: fill the goldens this skill has no usable version of from a finished run,
+ * leaving every usable one alone. Same native-fs-or-fallback split as
+ * {@link saveGoldenBaseline} — the backend decides WHAT to write, the writer only writes.
+ */
+export async function seedGoldenFromRun(
+  skillId: string,
+  runId: string,
+  workspaceRoot?: string | null,
+): Promise<GoldenSeedPlan> {
+  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  const seedRequest = { run_id: runId }
+  if (isTauriRuntime()) {
+    const response = await api.post<GoldenSeedPlan>(`/skills/${apiSkillId}/golden/seed/plan`, seedRequest)
+    const plan = response.data
+    const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
+    for (const file of plan.files) {
+      await writeWorkspaceFile(targetRoot, file.path, file.content, null, { createIfAbsent: true })
+    }
+    return plan
+  }
+  const response = await api.post<GoldenSeedPlan>(
+    `/skills/${apiSkillId}/golden/seed`,
+    seedRequest,
     BROWSER_WRITE_FALLBACK_CONFIG,
   )
   return response.data

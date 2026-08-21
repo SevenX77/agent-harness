@@ -41,7 +41,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - 决策: contextual trace 按钮 + Copilot 分析 bar(batch);**旧 sonner 批量入口已被分析 bar 取代**。**PM 2026-07-15 裁决:i/o 空 JSON 模板手填链(create-path B:`GET /golden/template` + `POST /golden/manual/plan` + 前端 fetchGoldenTemplate/saveManualGolden)整链删除**——从未有 UI caller,manual golden 的价值场景已被 run-seed(F6)+ copilot 覆盖;golden 手填/编辑入口归 I/O 数据流设计方向(golden json 同构实例,2026-07-02 锁定、已搁置),`GET /golden/{id}/content` read path 保留为该方向脚手架。
 - 原话/来源: `01_workflows/04_run-and-verify.md:124` and `01_workflows/04_run-and-verify.md:125` list the two creation paths; `01_workflows/04_run-and-verify.md:137` records "两者都要";手动模板链删除 = PM 2026-07-15 裁决("golden①② 删代码")。
 - 测试: trace button opens one chat for one node; batch entry opens chats for all missing-golden agent nodes; 已删的 `GET /golden/template` 与 `POST /golden/manual/plan` 保持 404/405(tests/routers/test_golden_dead_entry_removal.py)。
-- Status: live(editor diff `DiffView` "Promote to Golden"(Workspace.tsx→handlePromoteToGolden)+ Copilot analysis bar auto-write(`AnalysisBar`→`autoWriteGoldenIfAbsent`)+ TracePanel run/per-node promote 均接 `saveGoldenBaseline`;手动模板链已删)。
+- Status: live(editor diff `DiffView` "Promote to Golden"(Workspace.tsx→handlePromoteToGolden)+ Copilot analysis bar 按节点种子化(`AnalysisBar`→`seedGoldenForRun`→`POST /golden/seed`)+ TracePanel run/per-node promote 均接 `saveGoldenBaseline`;手动模板链已删)。
 - 归属: capability `golden-eval`; capability `copilot-assist`; regions `input`, `timeline`, `copilot`.
 
 ### F4. Output Schema Invalidation
@@ -67,8 +67,10 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - 机制: **golden 本身随时可写**(从 schema 模板 / copilot 设计 / 手填,**predict 之前也行**)。guard 很窄——**只挡"把 predict 的 mock 输出值直接提升成 golden"**(假数据无参考价值,409),**不限制 golden 的创建时机**。**Run 的真实输出可作 golden 默认种子**:agent 节点**无 golden / 空模板 / 坏文件(schema 完全不符)**时,默认用该节点 Run 输出填充、在其上编辑;**已有有效 golden 不被 Run 自动覆盖**。
 - 决策: 区分 predict 与 run——predict=假数据不可入 golden;run=真实输出可做起点。UX 心智:用户先 Run、觉得某节点结果"还行"就跳过,挑不行的去做 golden,所以拿 run 输出当默认基底最省力(PM 2026-06-04)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:129`(predict 409 guard);run 输出 seed golden = PM 2026-06-04 UX 心智澄清。
-- 测试: predict 提升返回 409;无/空/坏 golden 节点 Run 后 golden 默认以 run 输出填充且可编辑;有效 golden 不被自动覆盖。
-- Status: predict-guard backend live;run-seed-golden target-design。
+- 机制补充(种子落在哪个 baseline): 种子化写进**这个 skill 当前活着的那个 baseline**(compare 用 `_latest_golden_run_id` 选它,即 `created_at` 最新的那一个),**不**另起一个以本次 run 命名的 baseline——新 baseline 会赢过旧的,于是它没带上的每个 golden 都被静默退役,那正是本条要禁止的自动覆盖。因此每个 case 文件各记一个 `source_run_id`:baseline 说的是「是哪次 run 起的头」,只有 case 说得出「我这份期望输出是在哪次 run 上量的」。**locked 的 baseline 不种子化**,原样返回 `baseline_locked` 由界面说明,不当错误报——锁定是用户的意思,不是失败。
+- 决策(一个问题一个答案): 「这个节点有没有 golden」只有一个判定——case 记录能解析出 dict `expected_output`。缺记录 / 记录在而文件不在 / 文件在而 `expected_output` 不是对象,是同一个否定答案的三种成因(`GoldenSeedReason` 的 `absent` / `case_file_missing` / `expected_output_invalid`),分开命名只为界面能说清补了什么。diff 跳过的那一组与种子化补的那一组因此必然相同(共用 `_classify_case`)。
+- 测试: predict 提升返回 409;无/空/坏 golden 节点 Run 后 golden 默认以 run 输出填充且可编辑;有效 golden 不被自动覆盖(`tests/services/test_golden_seed_refills_unusable_cases.py` 八条:三种成因各一条、逐字节不动一条、写进现有 baseline 一条、case 记来源 run 一条、plan 不落盘一条、无事可做不写文件一条)。
+- Status: live(predict-guard backend + `POST /golden/seed` 与 `/golden/seed/plan` + 分析 bar 按节点种子化)。
 - 归属: capability `golden-eval`; capability `run-execution`; platform `engine`。
 
 ## 3. 接口契约

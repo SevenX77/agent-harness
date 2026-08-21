@@ -167,6 +167,8 @@ BACKEND POST /api/skills/{skill_id}/files/{file_path:path}
 BACKEND POST /api/skills/{skill_id}/fork
 BACKEND POST /api/skills/{skill_id}/golden
 BACKEND POST /api/skills/{skill_id}/golden/plan
+BACKEND POST /api/skills/{skill_id}/golden/seed
+BACKEND POST /api/skills/{skill_id}/golden/seed/plan
 BACKEND POST /api/skills/{skill_id}/graph/serialize
 BACKEND POST /api/skills/{skill_id}/io/import
 BACKEND POST /api/skills/{skill_id}/lint
@@ -271,6 +273,8 @@ FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval
 FRONTEND POST /api/skills/{skill_id}/files/{file_path:path}
 FRONTEND POST /api/skills/{skill_id}/golden
 FRONTEND POST /api/skills/{skill_id}/golden/plan
+FRONTEND POST /api/skills/{skill_id}/golden/seed
+FRONTEND POST /api/skills/{skill_id}/golden/seed/plan
 FRONTEND POST /api/skills/{skill_id}/graph/serialize
 FRONTEND POST /api/skills/{skill_id}/io/import
 FRONTEND POST /api/skills/{skill_id}/lint
@@ -397,6 +401,8 @@ BACKEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Bro
 BACKEND POST /api/skills/{skill_id}/fork | ok | specific | Explicit fork command; returns the new SkillSummary and does not re-read all skills as a side effect.
 BACKEND POST /api/skills/{skill_id}/golden | ok | specific | Browser fallback for explicit Promote to Golden; native-fs plan path is preferred in desktop and tests guard fallback header use.
 BACKEND POST /api/skills/{skill_id}/golden/plan | ok | specific | Explicit promote-to-golden planner for native-fs; backend returns planned files plus baseline projection.
+BACKEND POST /api/skills/{skill_id}/golden/seed | ok | specific | Browser fallback for the post-run golden seed; writes only the nodes with no usable golden and leaves every usable one alone.
+BACKEND POST /api/skills/{skill_id}/golden/seed/plan | ok | specific | Explicit post-run seed planner for native-fs; decides which nodes lack a usable golden and returns the files that fill them.
 BACKEND POST /api/skills/{skill_id}/graph/serialize | ok | specific | Explicit canvas topology save; response is canonical hash/update metadata for the edited GRAPH.md.
 BACKEND POST /api/skills/{skill_id}/io/import | ok | specific | Explicit import command for selected I/O material; not run from panel visibility or focus.
 BACKEND POST /api/skills/{skill_id}/lint | ok | specific | Explicit/debounced diagnostics SSOT endpoint; caller chooses disk or changed-markdown body and receives the full lint result.
@@ -501,6 +507,8 @@ FRONTEND POST /api/skills/{skill_id}/copilot/tool-approval | ok | specific | Exp
 FRONTEND POST /api/skills/{skill_id}/files/{file_path:path} | ok | specific | Browser-only explicit file-save fallback; Tauri uses native-fs as sole writer, and editor/panel saves are user edits with expected-hash conflict handling.
 FRONTEND POST /api/skills/{skill_id}/golden | ok | specific | Browser-only explicit Promote to Golden fallback; Tauri uses the plan endpoint plus native-fs writes, and callers project the returned baseline.
 FRONTEND POST /api/skills/{skill_id}/golden/plan | ok | specific | Explicit promote-to-golden in Tauri asks for a write plan and projects the returned baseline after native-fs writes.
+FRONTEND POST /api/skills/{skill_id}/golden/seed | ok | specific | Browser-only fallback for the analysis bar's confirmed seed; one user command, no broad truth refresh.
+FRONTEND POST /api/skills/{skill_id}/golden/seed/plan | ok | specific | The analysis bar's confirmed seed in Tauri asks for a write plan and reports which nodes it filled.
 FRONTEND POST /api/skills/{skill_id}/graph/serialize | ok | specific | Explicit canvas topology mutation persists GRAPH.md with expected_hash and returns the canonical hash/update metadata; selection alone never serializes.
 FRONTEND POST /api/skills/{skill_id}/io/import | ok | specific | Explicit I/O import command writes the chosen import mapping/runtime files; create/delete projections or precise runtime events handle follow-up state.
 FRONTEND POST /api/skills/{skill_id}/lint | ok | specific | Explicit/debounced lint after user source edits or settled file writes; it is the diagnostics SSOT path and not a focus, reconnect, or selection refresh.

@@ -381,7 +381,7 @@ if [ -s "$cred" ] && grep -q '"accessToken"' "$cred" 2>/dev/null; then
   now_ms=$(( $(date +%s) * 1000 ))
   acct=$(grep -o '"emailAddress": *"[^"]*"' "$host_home/.claude.json" 2>/dev/null | head -1 | cut -d'"' -f4)
   if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\t%s\n' "$acct"
-  else printf 'claude_auth\tbroken\t\ttoken expired\n'; fi
+  else printf 'claude_auth\tbroken\t\ttoken expired\t%s\n' "$acct"; fi
 else printf 'claude_auth\tmissing\t\t\n'; fi
 if [ -s "$host_home/.codex/auth.json" ]; then
   idt=$(grep -o '"id_token": *"[^"]*"' "$host_home/.codex/auth.json" 2>/dev/null | head -1 | cut -d'"' -f4)
@@ -6141,8 +6141,28 @@ mod tests {
             "{\n  \"tokens\": {\n    \"id_token\": \"eyJh.eyJlbWFpbCI6ImNvZGV4LXByb2JlQGV4YW1wbGUuY29tIn0.sig\"\n  }\n}\n",
         )
         .unwrap();
-        // getent 压空让 host_home 落到 $HOME;command 压败让 curl 分支(联网查最新版)
-        // 与 PATH 探测全部短路;tmux 压败求确定性。其余(grep/cut/base64/date)走真实现。
+        let Some(stdout) = run_probe_script_against_home(&home) else {
+            return; // 没有 POSIX sh 的机器上跳过(同门禁测试)。
+        };
+        assert!(
+            stdout.contains("claude_auth\tok\t\t\tprobe-test@example.com"),
+            "claude 登录行第 5 列必须是邮箱;实际输出: {stdout}"
+        );
+        assert!(
+            stdout.contains("codex_auth\tok\t\t\tcodex-probe@example.com"),
+            "codex 登录行第 5 列必须是 id_token payload 里的邮箱;实际输出: {stdout}"
+        );
+    }
+
+    /// 把整份探测脚本喂给真 sh,拿 `home` 当 `$HOME`,回收 fixture 后交出 stdout;
+    /// 没有 POSIX sh 的机器上回 `None`,由调用方跳过。
+    ///
+    /// 压制的三个外部依赖:getent 压空让 host_home 落到 `$HOME`;command 压败让
+    /// curl 分支(联网查最新版)与 PATH 探测全部短路;tmux 压败求确定性。其余
+    /// (grep/cut/base64/date)一律走真实现——**这正是这类用例的全部价值**:
+    /// 文本断言看不见 shell 语义,只有真跑才看得见。之所以抽成一处而不是各写一份,
+    /// 是因为漂掉的那一份不会报错,它只会安静地变成一个更弱的测试。
+    fn run_probe_script_against_home(home: &std::path::Path) -> Option<String> {
         let harness = format!(
             "getent() {{ :; }}\ncommand() {{ return 1; }}\ntmux() {{ return 1; }}\n{}",
             CLI_DEPENDENCY_PROBE_SCRIPT
@@ -6152,18 +6172,37 @@ mod tests {
             .arg(&harness)
             .env("HOME", home.to_string_lossy().replace('\\', "/"))
             .output();
+        let _ = std::fs::remove_dir_all(home);
+        Some(String::from_utf8_lossy(&output.ok()?.stdout).into_owned())
+    }
+
+    /// 台账 P4 的判据:token 过期时仍要说出挂着的是哪个账号——换账号排障最需要
+    /// 知道这件事的,恰恰就是这一刻。
+    ///
+    /// 字段丢在探测这一端,所以也只能修在这一端:渲染层是「给了就画」
+    /// (`CliSection.tsx:279-282` 的 `row.account ? … : null`),它对 state 一无所知。
+    #[test]
+    fn test_an_expired_claude_token_still_names_its_account() {
+        let home = std::env::temp_dir().join(format!("studio-probe-expired-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        let Ok(output) = output else {
-            return; // 没有 POSIX sh 的机器上跳过(同门禁测试)。
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".claude.json"),
+            "{\n  \"oauthAccount\": {\n    \"emailAddress\": \"expired-probe@example.com\"\n  }\n}\n",
+        )
+        .unwrap();
+        // expiresAt 落在 2001 年,远早于任何真机时钟,claude_auth 必走 broken 分支。
+        std::fs::write(
+            home.join(".claude/.credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"test-not-a-real-token","expiresAt":1000000000000}}"#,
+        )
+        .unwrap();
+        let Some(stdout) = run_probe_script_against_home(&home) else {
+            return;
         };
-        let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
-            stdout.contains("claude_auth\tok\t\t\tprobe-test@example.com"),
-            "claude 登录行第 5 列必须是邮箱;实际输出: {stdout}"
-        );
-        assert!(
-            stdout.contains("codex_auth\tok\t\t\tcodex-probe@example.com"),
-            "codex 登录行第 5 列必须是 id_token payload 里的邮箱;实际输出: {stdout}"
+            stdout.contains("claude_auth\tbroken\t\ttoken expired\texpired-probe@example.com"),
+            "过期的 claude 登录行必须仍在第 5 列给出账号;实际输出: {stdout}"
         );
     }
 

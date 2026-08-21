@@ -128,9 +128,21 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
 
   // 修订 2026-08-12(用户裁决):登录钮常驻——已登录也可能要换账号;登录行显示
   // 账号身份(探测第 5 列)。
+  //
+  // 2026-08-20 改写(台账 P4):这条用例原本给 `broken` 行喂 `account: null`,
+  // 于是它钉住的是缺陷而不是判据——探测脚本当时在 `broken` 分支丢掉了账号,
+  // 用例照抄那个形状,看起来一直是绿的。现在两行都带账号:**过期恰恰是最需要
+  // 知道当前挂着谁的时刻**,渲染层对 state 一无所知(`row.account ? … : null`),
+  // 所以这里断言的是「给了就画」这条契约本身。
   it("keeps the sign-in button on every auth row and shows the signed-in account", async () => {
     mocks.cliDependencyStatus.mockResolvedValue([
-      { id: "claude_auth", state: "broken", version: null, detail: "token expired", account: null },
+      {
+        id: "claude_auth",
+        state: "broken",
+        version: null,
+        detail: "token expired",
+        account: "expired@example.com",
+      },
       { id: "codex_auth", state: "ok", version: null, detail: null, account: "me@example.com" },
     ])
     mocks.launchCliLogin.mockResolvedValue(null)
@@ -143,6 +155,10 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
     // 登录身份显式可见。
     expect(container.querySelector('[data-cli-account="codex_auth"]')?.textContent).toBe(
       "me@example.com",
+    )
+    // token 过期的那一行同样要说出账号。
+    expect(container.querySelector('[data-cli-account="claude_auth"]')?.textContent).toBe(
+      "expired@example.com",
     )
     const loginButton = container.querySelector<HTMLButtonElement>(
       '[data-cli-dependency="claude_auth"] [data-cli-row-action="login"]',

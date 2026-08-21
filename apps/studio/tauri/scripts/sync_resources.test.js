@@ -43,8 +43,6 @@ test('copyRuntimeResources ships an empty skills directory when there is nothing
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
   const repoRoot = path.join(tempRoot, 'agent-harness')
   const vendorDir = path.join(tempRoot, 'vendor')
-  fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true })
-  fs.writeFileSync(path.join(repoRoot, 'config', 'settings.json'), '{}\n', 'utf8')
   // The sibling exists and must still be ignored — this is the shape the dev
   // machine is actually in.
   fs.mkdirSync(path.join(tempRoot, 'skills', 'someones-private-skill'), { recursive: true })
@@ -54,6 +52,31 @@ test('copyRuntimeResources ships an empty skills directory when there is nothing
   const shipped = path.join(vendorDir, 'resources', 'skills')
   assert.equal(fs.existsSync(shipped), true, 'the directory must exist so the app finds a shape it knows')
   assert.deepEqual(fs.readdirSync(shipped), [], 'and it must be empty')
+})
+
+// The repo's `config/` used to be shipped TWICE — copied here into
+// `vendor/resources/config`, and listed again in tauri.conf.json's
+// bundle.resources, from the same source directory. Neither copy was ever read:
+// the backend resolves llm_roles.yaml / llm_canonical_rules.yaml under
+// `<app settings dir>/llm/`, and even the STUDIO_RESOURCE_DIR fallback looks in
+// `<resource>/config/llm/`, one level deeper than the bundle put them. A fresh
+// install seeds both files from code (`runtime_truth_init`), never from disk.
+// The files stay in the repo because the engine's smoke tests read them from
+// the source tree; they just have no business inside an installer (ledger D5).
+test('copyRuntimeResources does not ship the repo config directory', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
+  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const vendorDir = path.join(tempRoot, 'vendor')
+  fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true })
+  fs.writeFileSync(path.join(repoRoot, 'config', 'llm_roles.yaml'), 'roles: []\n', 'utf8')
+
+  copyRuntimeResources({ repoRoot, vendorDir, env: {} })
+
+  assert.equal(
+    fs.existsSync(path.join(vendorDir, 'resources', 'config')),
+    false,
+    'a config directory nobody reads is dead weight in the installer',
+  )
 })
 
 test('skillsSourceDir honors an explicit STUDIO_SKILLS_SOURCE_DIR override', () => {
@@ -77,8 +100,6 @@ test('copyRuntimeResources copies external skills without tool metadata director
   const vendorDir = path.join(tempRoot, 'vendor')
   const externalSkills = path.join(tempRoot, 'skills')
   const skillDir = path.join(externalSkills, 'demo-skill')
-  fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true })
-  fs.writeFileSync(path.join(repoRoot, 'config', 'settings.json'), '{}\n', 'utf8')
   fs.mkdirSync(path.join(skillDir, '.git', 'objects'), { recursive: true })
   fs.mkdirSync(path.join(skillDir, '.gemini'), { recursive: true })
   fs.mkdirSync(path.join(skillDir, '.workspace'), { recursive: true })

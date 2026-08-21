@@ -85,7 +85,6 @@ function copyRuntimeResources({
     fs.mkdirSync(skillsTarget, { recursive: true })
     console.log('[resources] no skills to bundle: set STUDIO_SKILLS_SOURCE_DIR to ship some')
   }
-  copyDir(path.join(repoRoot, 'config'), path.join(resourcesTarget, 'config'))
   fs.mkdirSync(path.join(resourcesTarget, 'workspaces'), { recursive: true })
 }
 

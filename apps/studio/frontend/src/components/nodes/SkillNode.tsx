@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Bot, Briefcase, Code, ListTree, Minus, Network, Pause, Plus, ShieldCheck, ShieldHalf } from 'lucide-react'
 import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
+import { CONFLICT_ICON_CLASS, CONFLICT_TITLE, CONFLICT_VERB } from '@/components/studio/conflict-vocabulary'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -269,11 +270,11 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         </PopoverAnchor>
         <PopoverContent portalled={false} side="top" align="center" avoidCollisions={false} className="w-[280px] p-3 bg-popover border border-border rounded-md text-foreground shadow-xl z-50">
           <div className="flex items-start gap-2.5">
-            <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
+            <AlertTriangle className={`${CONFLICT_ICON_CLASS} mt-0.5`} aria-hidden />
             <div className="flex-1 min-w-0">
-              <h4 className="text-xs font-semibold text-foreground">Sequential Overwrite Detected</h4>
+              <h4 className="text-xs font-semibold text-foreground">{CONFLICT_TITLE.sequentialOverwrite}</h4>
               <p className="mt-1 text-[11px] text-muted-foreground leading-normal">
-                Field <code className="text-warning font-mono text-[10px] px-1 py-0.5 bg-muted/60 rounded">{data.activeConflict.fieldName}</code> is also output by upstream node <span className="font-semibold">{data.activeConflict.ancestorNodeId}</span> and will be overwritten.
+                Field <code className="text-warning font-mono text-[10px] px-1 py-0.5 bg-muted/60 rounded">{data.activeConflict.fieldName}</code> is also output by upstream node <span className="font-semibold">{data.activeConflict.ancestorNodeId}</span>. Running this phase replaces that value.
               </p>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <Button
@@ -286,19 +287,19 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                     data.activeConflict!.ancestorNodeId,
                   )}
                 >
-                  Cancel
+                  {CONFLICT_VERB.cancel}
                 </Button>
                   <Button
                     size="sm"
-                    variant="default"
-                    className="h-7 text-[11px] px-2.5 bg-warning hover:bg-warning/85 text-warning-foreground font-medium rounded-md"
+                    variant="warning"
+                    className="h-7 text-[11px] px-2.5 font-medium"
                     onClick={() => data.onAllowSequentialOverwrite?.(
                       data.activeConflict!.nodeId,
                       data.activeConflict!.fieldName,
                       data.activeConflict!.ancestorNodeId,
                     )}
                   >
-                    Allow Overwrite
+                    {CONFLICT_VERB.overwrite}
                   </Button>
               </div>
             </div>

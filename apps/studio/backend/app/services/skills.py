@@ -2397,6 +2397,7 @@ def _compile_error_from_issue(issue: object, skill_dir: Path) -> CompileError:
     file_path = _relative_compile_path(source_path, skill_dir) if isinstance(source_path, str) else None
     line = getattr(issue, "line", None)
     field = getattr(issue, "field_path", None)
+    conflicting_phase = getattr(issue, "conflicting_phase", None)
     severity = str(getattr(issue, "severity", "fatal")).lower()
     return CompileError(
         file=file_path,
@@ -2405,6 +2406,7 @@ def _compile_error_from_issue(issue: object, skill_dir: Path) -> CompileError:
         severity="warning" if severity == "warning" else "fatal",
         message=str(getattr(issue, "message", "Skill compilation failed")),
         error_code=_normalize_error_code(getattr(issue, "rule_id", None)),
+        conflicting_phase=conflicting_phase if isinstance(conflicting_phase, str) else None,
     )
 
 

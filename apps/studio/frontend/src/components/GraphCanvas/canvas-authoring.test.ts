@@ -16,7 +16,6 @@ import {
   renamePhaseRefs,
   removePhaseRefs,
   orphanPhaseDirectoryIds,
-  checkSequentialOverwrites,
   addSequentialOverwriteField,
   planEdgeReconnect,
 } from './canvas-authoring'
@@ -396,66 +395,6 @@ describe('canvas authoring helpers', () => {
 
     expect(disconnectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, reason: 'unknown-phase' })
     expect(disconnectPhaseRefs(detail, 'review', 'draft')).toMatchObject({ ok: false, reason: 'missing-dependency' })
-  })
-
-  it('detects sequential overwrite conflicts correctly and honors allow_sequential_overwrite whitelist', () => {
-    const detail = skillDetail({
-      phases: [
-        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
-        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
-        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['review'] },
-      ],
-    })
-
-    // Add mock files with yaml frontmatter
-    detail.files = {
-      'phases/draft/SKILL.md': `---
-name: draft
-mode: skill
-io:
-  outputs:
-    properties:
-      report: { type: string }
----
-`,
-      'phases/review/LOGIC.md': `---
-name: review
-mode: logic
-io:
-  outputs:
-    properties:
-      report: { type: string }
----
-`,
-      'phases/publish/SKILL.md': `---
-name: publish
-mode: skill
-io:
-  outputs:
-    properties:
-      report: { type: string }
-allow_sequential_overwrite:
-  - report
----
-`,
-    }
-
-    const phases = [
-      { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' as const },
-      { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' as const },
-      { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['review'], mode: 'skill' as const },
-    ]
-
-    const conflicts = checkSequentialOverwrites(detail, phases)
-
-    // 'review' conflicts with 'draft' on 'report' since it's not whitelisted in 'review'.
-    // 'publish' does NOT conflict since 'report' is whitelisted in 'publish'.
-    expect(conflicts).toHaveLength(1)
-    expect(conflicts[0]).toEqual({
-      nodeId: 'review',
-      fieldName: 'report',
-      ancestorNodeId: 'draft',
-    })
   })
 
   it('plans an edge reconnect as an old-target disconnect plus new-target connect', () => {

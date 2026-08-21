@@ -20,6 +20,12 @@ class CompileIssue:
     1-based line inside that file, ``field_path`` is the engine's nearest-field
     locator (e.g. ``"<phase>.depends_on"``) — consumers project these axes
     directly instead of parsing a location string.
+
+    ``conflicting_phase`` names the OTHER phase, for the rules whose whole
+    subject is a relationship between two of them: the field at ``field_path``
+    in the phase at ``source_path`` collides with a declaration in this one.
+    Most rules are about a single phase and leave it ``None``; a rule that has
+    a second participant must not leave it findable only inside ``message``.
     """
 
     rule_id: str
@@ -28,6 +34,7 @@ class CompileIssue:
     line: int | None
     field_path: str | None
     message: str
+    conflicting_phase: str | None = None
 
 
 @dataclass

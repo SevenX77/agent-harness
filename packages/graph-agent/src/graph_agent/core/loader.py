@@ -610,6 +610,7 @@ class _Diag:
     code: str
     message: str
     field_path: str | None = None
+    conflicting_phase: str | None = None
 
 
 def _make_diag(path: Path, line: int, raw_message: str, *, field_path: str | None = None) -> _Diag:
@@ -634,6 +635,7 @@ def _compile_result(diags: list[_Diag]) -> Any:
                 line=d.line,
                 field_path=d.field_path,
                 message=d.message,
+                conflicting_phase=d.conflicting_phase,
             )
             for d in diags
         ]
@@ -3170,7 +3172,12 @@ def _validate_sequential_overwrites(
                                 line=1,
                                 code="[F-v3-sequential-overwrite-unauthorized]",
                                 message=detail,
-                                field_path="allow_sequential_overwrite",
+                                # The subject is the colliding field, not the key that
+                                # authorizes it — same locator its sibling rule
+                                # [F-v3-parallel-write-conflict] uses for the same
+                                # "one field, two writers" family.
+                                field_path=f"io.outputs.properties.{key}",
+                                conflicting_phase=ancestor_name,
                             )
                         )
 

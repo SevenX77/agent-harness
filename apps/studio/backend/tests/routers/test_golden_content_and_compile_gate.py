@@ -329,6 +329,9 @@ def test_compile_fails_when_required_runtime_input_is_missing(
                 ".workspace/import_files before predict/run."
             ),
             "error_code": "STUDIO_RUNTIME_INPUT_MISSING",
+            # A Studio-owned runtime-input check is about one field in one file,
+            # not about two phases colliding.
+            "conflicting_phase": None,
         }
     ]
 

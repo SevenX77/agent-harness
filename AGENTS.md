@@ -115,6 +115,16 @@ had ever ruled on. Making it required in that state would turn every PR red on
 arrival, and a gate that is always red is a gate nobody reads. Triage first,
 then promote it — see `docs/development/DELIVERY_LEDGER.md`.
 
+**打包链(`.github/workflows/package.yml`,2026-08-20 新增)**:在
+`windows-latest` 上跑完整 `cargo tauri build`,产出 NSIS 安装包,**再把它装上**,
+断言装出来的 app 的 Python sidecar 三件套(解释器 / `site-packages` / `backend`)
+都落在安装目录内。它**不是必过门禁**,理由是**代价**:一次冷跑要编译整个 Rust
+release 栈 + 下载可移植 CPython + 装完整依赖闭包,数十分钟起;绝大多数 PR 碰不到
+打包链,让每个 PR 都等它是拿全员时间换一个用不上的信号。取而代之的是**按路径
+触发**——只有改到 `apps/studio/tauri/**`、`build_vendor.py`、依赖清单或这个
+workflow 本身时才跑,PR 与 `main` 推送都算。这样它**不靠人记得手动点**也会在
+唯一可能弄坏它的那类改动上自己跑起来,同时不拖慢其他改动。
+
 ## CI Gates — run locally BEFORE pushing
 
 `main` runs CI on every push (`.github/workflows/ci.yml`), and the gates are

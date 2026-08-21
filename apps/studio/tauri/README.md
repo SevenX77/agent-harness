@@ -95,13 +95,29 @@ cargo tauri dev      # 或 ~/.npm-global/bin/tauri dev
 
 ## Build (生产)
 
+**一条命令**。准备步骤不需要手敲——`tauri.conf.json` 的 `beforeBuildCommand`
+就是它们的唯一定义:前端 `npm run build` → `download_runtime.js` 取可移植
+CPython → `ensure_ah_vendor.js --strict` 取 ah/ahd → `build_vendor.py` 装后端
+依赖闭包 → `sync_resources.js` 同步 resources。
+
 ```bash
-cd apps/studio/tauri && node scripts/download_runtime.js  # T2: 下载并校验 portable Python
-cd ../backend && python scripts/build_vendor.py            # T2: pip install --target ../tauri/vendor/site-packages
-cd ../tauri && node scripts/sync_resources.js              # T2: 同步 backend/skills/config resources
-cd ../frontend && npm run build  # 先生成 dist/
-cd ../tauri && cargo tauri build      # 输出到 target/release/bundle/
+cd apps/studio/tauri && cargo tauri build --bundles nsis   # 输出到 target/release/bundle/
 ```
+
+**装出来再验一次**,因为「打出了包」证明不了「包能用」:release 构建找不到自己的
+resources 时**不会报错**——`src/sidecar.rs` 的 `resource_root_for_runtime_mode`
+会回落到 `default_tauri_dir()`,也就是 `env!("CARGO_MANIFEST_DIR")`,**编译那台
+机器的源码路径**。这条路径在打包者自己机器上是存在的,所以一个缺了 sidecar 的包
+在他本机照样启动、看着一切正常,只有换台机器的用户才会撞上。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\apps\studio\tauri\scripts\verify_installed_sidecar.ps1
+```
+
+它静默装包(NSIS `/S`,按用户安装,不需要提权),然后断言解释器、
+`vendor/site-packages`、`vendor/backend` 三者都落在安装目录内,并用装出来的
+解释器真的 `import graph_agent` 一次。CI 的 `.github/workflows/package.yml`
+跑的就是这两步。
 
 Tauri sidecar 启动 backend 时使用 bundled Python 与 vendored dependencies:
 

@@ -1,4 +1,5 @@
 import type { ComponentProps } from 'react'
+import i18n from '@/i18n'
 import { NODE_CAPSULE_BASE } from './node-card'
 import type { SkillNodeStatus } from './types'
 
@@ -14,40 +15,44 @@ import type { SkillNodeStatus } from './types'
 // two states a reader most needs to tell apart at a glance (running vs
 // success) differed by icon SHAPE, which is the slowest difference to read on
 // a zoomed-out board.
-export const STATUS_STYLE: Record<SkillNodeStatus, { label: string; className: string; lampClassName: string }> = {
+//
+// The capsule's WORDING is not here. A status is a fact about the run; the
+// noun a reader sees for it belongs to whichever language they picked, so it
+// comes from `nodeStatusLabel` below and this table holds only clothes.
+export const STATUS_STYLE: Record<SkillNodeStatus, { className: string; lampClassName: string }> = {
   idle: {
-    label: 'Idle',
     className: 'border-border bg-card text-muted-foreground',
     lampClassName: 'bg-muted-foreground/50 ring-border',
   },
   running: {
-    label: 'Running',
     className: 'border-primary bg-primary/10 text-link',
     lampClassName: 'animate-pulse bg-primary ring-primary/30',
   },
   success: {
-    label: 'Success',
     className: 'border-success-border/60 bg-success/10 text-success',
     lampClassName: 'bg-success ring-success-border',
   },
-  // "Failed", not "Error": the label sits in the same row as the run's own
-  // vocabulary (idle / running / success / failed), and a node that failed is
-  // reporting its outcome, not naming an exception class.
   error: {
-    label: 'Failed',
     className: 'border-destructive/50 bg-destructive/10 text-destructive',
     lampClassName: 'bg-destructive ring-destructive-border',
   },
   paused: {
-    label: 'Paused',
     className: 'border-warning-border/60 bg-warning/10 text-warning',
     lampClassName: 'bg-warning ring-warning-border',
   },
   breakpoint: {
-    label: 'Breakpoint',
     className: 'border-primary/45 bg-primary/10 text-link',
     lampClassName: 'bg-primary ring-primary/30',
   },
+}
+
+// The word for a node's run status, in the reader's language.
+//
+// English says "Failed", not "Error": the label sits in the same row as the
+// run's own vocabulary (idle / running / success / failed), and a node that
+// failed is reporting its outcome, not naming an exception class.
+export function nodeStatusLabel(status: SkillNodeStatus): string {
+  return i18n.t(`status.${status}`, { ns: 'canvas' })
 }
 
 // Extra props (ref included — React 19 passes it as a prop) spread onto the
@@ -63,7 +68,7 @@ export function StatusCapsule({
         aria-hidden
         className={['inline-flex size-1.5 shrink-0 rounded-full ring-1', style.lampClassName].join(' ')}
       />
-      {style.label}
+      {nodeStatusLabel(status)}
     </span>
   )
 }

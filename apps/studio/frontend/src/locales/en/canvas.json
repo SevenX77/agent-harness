@@ -1,0 +1,99 @@
+{
+  "menu": {
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fitView": "Fit view",
+    "lockCanvas": "Lock canvas",
+    "unlockCanvas": "Unlock canvas",
+    "disconnect": "Disconnect",
+    "deleteNode": "Delete node",
+    "deleteShortcut": "Del",
+    "addNode": "Add node"
+  },
+  "phaseKind": {
+    "skill": "Agent Phase",
+    "logic": "Logic Phase",
+    "subgraph": "Subgraph Phase"
+  },
+  "nameDialog": {
+    "titleForKind": "Add {{kind}}",
+    "titleGeneric": "Add phase node",
+    "nodeName": "Node name",
+    "cancel": "Cancel",
+    "create": "Create"
+  },
+  "problem": {
+    "name_required": "Phase name is required.",
+    "name_shape_invalid": "Phase names must start with a letter or underscore and contain only letters, numbers, underscores, or hyphens.",
+    "name_taken": "A phase named {{phaseId}} already exists.",
+    "name_unchanged": "Phase name is unchanged.",
+    "connect_endpoints_must_be_phases": "Both connection endpoints must be phase nodes.",
+    "self_dependency": "A phase cannot depend on itself.",
+    "input_target_must_be_phase": "Graph input must connect to a phase node.",
+    "dependency_exists": "This dependency already exists.",
+    "output_source_must_be_phase": "Graph output must be connected from a phase node.",
+    "output_marker_exists": "This output marker already exists.",
+    "connect_boundary_direction": "Graph boundaries must connect as Input -> phase or phase -> Output.",
+    "disconnect_endpoints_must_be_phases": "Both edge endpoints must be phase nodes.",
+    "input_source_must_be_phase": "Graph input must disconnect from a phase node.",
+    "input_dependency_missing": "This edge is not backed by a graph input dependency.",
+    "output_disconnect_source_must_be_phase": "Graph output must disconnect from a phase node.",
+    "output_marker_missing": "This edge is not backed by an output marker.",
+    "disconnect_boundary_direction": "Graph boundaries must disconnect as Input -> phase or phase -> Output.",
+    "phase_dependency_missing": "This edge is not backed by a phase dependency.",
+    "phase_id_required": "Phase id is required.",
+    "phase_not_found": "Phase not found.",
+    "select_phase_to_rename": "Select a phase node to rename.",
+    "phase_not_in_graph": "The selected phase is not in GRAPH.md.",
+    "reconnect_endpoints_must_be_phases": "Edge endpoints must be phase nodes to reconnect.",
+    "reconnect_no_op": "Edge was reconnected to the same endpoints."
+  },
+  "status": {
+    "idle": "Idle",
+    "running": "Running",
+    "success": "Success",
+    "error": "Failed",
+    "paused": "Paused",
+    "breakpoint": "Breakpoint"
+  },
+  "boundary": {
+    "input": "Input",
+    "output": "Output",
+    "inputTooltip": "Run input dispatch",
+    "outputTooltip": "Run output collection"
+  },
+  "node": {
+    "goldenCaptured": "Golden captured",
+    "logicOk": "Logic OK (predict ran, no golden yet)",
+    "activity": "Node activity",
+    "subgraphProgress": "Subgraph progress",
+    "errorSummary": "Node error summary",
+    "resumeUnavailable": "Resume unavailable: upstream changed",
+    "collapseSteps": "Collapse steps",
+    "editSteps": "Edit steps",
+    "hideSteps": "Hide steps",
+    "collapseSubgraph": "Collapse subgraph",
+    "expandSubgraph": "Expand subgraph",
+    "openSubgraphCanvas": "Open subgraph canvas"
+  },
+  "edge": {
+    "viewTraceData": "View edge trace data",
+    "runToInspect": "Run the skill to inspect transferred data",
+    "inspectFlowing": "Click to inspect flowing context",
+    "viewInferred": "Click to view inferred fields on this path"
+  },
+  "toast": {
+    "sequentialOverwriteUnresolved": "Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.",
+    "childSubgraphNotReady": "Could not save steps: child subgraph is not ready",
+    "subgraphReadOnly": "This subgraph is read-only. Fork it into your workspace to edit.",
+    "subgraphLoading": "Loading subgraph. Try again in a moment.",
+    "connectSameGraph": "Connect nodes within the same graph.",
+    "reconnectSameGraph": "Reconnect nodes within the same graph.",
+    "disconnectSameGraph": "Disconnect nodes within the same graph.",
+    "persistDependencyFailed": "Could not persist dependency",
+    "reconnectDependencyFailed": "Could not reconnect dependency",
+    "disconnectDependencyFailed": "Could not disconnect dependency",
+    "deleteNodeFailed": "Could not delete node",
+    "createPhaseFailed": "Could not create phase"
+  }
+}

@@ -12,7 +12,7 @@ import {
   phaseDirectoryIdsFromSkillDetail,
   reconnectPhaseRefs,
   phaseRefsFromSkillDetail,
-  phaseNameError,
+  phaseNameProblem,
   renamePhaseRefs,
   removePhaseRefs,
   orphanPhaseDirectoryIds,
@@ -212,11 +212,11 @@ describe('canvas authoring helpers', () => {
       },
     })
 
-    expect(phaseNameError('', detail)).toBe('Phase name is required.')
-    expect(phaseNameError('bad name', detail)).toContain('Phase names must start')
-    expect(phaseNameError('draft', detail)).toBe('A phase named draft already exists.')
-    expect(phaseNameError('stale', detail)).toBe('A phase named stale already exists.')
-    expect(phaseNameError('next_phase', detail)).toBeNull()
+    expect(phaseNameProblem('', detail)).toEqual({ code: 'name_required' })
+    expect(phaseNameProblem('bad name', detail)).toEqual({ code: 'name_shape_invalid' })
+    expect(phaseNameProblem('draft', detail)).toEqual({ code: 'name_taken', phaseId: 'draft' })
+    expect(phaseNameProblem('stale', detail)).toEqual({ code: 'name_taken', phaseId: 'stale' })
+    expect(phaseNameProblem('next_phase', detail)).toBeNull()
   })
 
   it('finds root phase directories that are absent from the next GRAPH.md phase list', () => {
@@ -292,10 +292,10 @@ describe('canvas authoring helpers', () => {
       ],
     })
 
-    expect(connectPhaseRefs(detail, 'draft', 'draft')).toMatchObject({ ok: false, reason: 'self-dependency' })
-    expect(connectPhaseRefs(detail, 'draft', 'review')).toMatchObject({ ok: false, reason: 'duplicate-dependency' })
-    expect(connectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, reason: 'unknown-phase' })
-    expect(connectPhaseRefs(detail, 'draft', 'missing_phase')).toMatchObject({ ok: false, reason: 'unknown-phase' })
+    expect(connectPhaseRefs(detail, 'draft', 'draft')).toMatchObject({ ok: false, problem: { code: 'self_dependency' } })
+    expect(connectPhaseRefs(detail, 'draft', 'review')).toMatchObject({ ok: false, problem: { code: 'dependency_exists' } })
+    expect(connectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, problem: { code: 'connect_endpoints_must_be_phases' } })
+    expect(connectPhaseRefs(detail, 'draft', 'missing_phase')).toMatchObject({ ok: false, problem: { code: 'connect_endpoints_must_be_phases' } })
   })
 
   it('removes source from the target dependency list when disconnecting phase refs', () => {
@@ -381,8 +381,8 @@ describe('canvas authoring helpers', () => {
 
     expect(isSafePhaseId('event_extraction')).toBe(true)
     expect(isSafePhaseId('event extraction')).toBe(false)
-    expect(renamePhaseRefs(detail, 'extract', 'review')).toMatchObject({ ok: false, reason: 'duplicate-phase' })
-    expect(renamePhaseRefs(detail, 'extract', '../escape')).toMatchObject({ ok: false, reason: 'invalid-phase' })
+    expect(renamePhaseRefs(detail, 'extract', 'review')).toMatchObject({ ok: false, problem: { code: 'name_taken', phaseId: 'review' } })
+    expect(renamePhaseRefs(detail, 'extract', '../escape')).toMatchObject({ ok: false, problem: { code: 'name_shape_invalid' } })
   })
 
   it('rejects disconnecting unknown phase ids and missing dependencies', () => {
@@ -393,8 +393,8 @@ describe('canvas authoring helpers', () => {
       ],
     })
 
-    expect(disconnectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, reason: 'unknown-phase' })
-    expect(disconnectPhaseRefs(detail, 'review', 'draft')).toMatchObject({ ok: false, reason: 'missing-dependency' })
+    expect(disconnectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, problem: { code: 'disconnect_endpoints_must_be_phases' } })
+    expect(disconnectPhaseRefs(detail, 'review', 'draft')).toMatchObject({ ok: false, problem: { code: 'phase_dependency_missing' } })
   })
 
   it('plans an edge reconnect as an old-target disconnect plus new-target connect', () => {
@@ -431,17 +431,17 @@ describe('canvas authoring helpers', () => {
     expect(planEdgeReconnect(
       { source: null, target: 'review' },
       { source: 'draft', target: 'review' },
-    )).toMatchObject({ ok: false, reason: 'invalid-endpoint' })
+    )).toMatchObject({ ok: false, problem: { code: 'reconnect_endpoints_must_be_phases' } })
 
     expect(planEdgeReconnect(
       { source: 'draft', target: 'review' },
       { source: 'review', target: 'review' },
-    )).toMatchObject({ ok: false, reason: 'self-dependency' })
+    )).toMatchObject({ ok: false, problem: { code: 'self_dependency' } })
 
     expect(planEdgeReconnect(
       { source: 'draft', target: 'review' },
       { source: 'draft', target: 'review' },
-    )).toMatchObject({ ok: false, reason: 'no-op' })
+    )).toMatchObject({ ok: false, problem: { code: 'reconnect_no_op' } })
   })
 
   it('reconnects an edge as one combined phases list: old dependency removed and new one added', () => {
@@ -501,17 +501,17 @@ describe('canvas authoring helpers', () => {
     })
 
     expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'missing_phase' }))
-      .toMatchObject({ ok: false, reason: 'unknown-phase' })
+      .toMatchObject({ ok: false, problem: { code: 'connect_endpoints_must_be_phases' } })
     expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'review', target: 'review' }))
-      .toMatchObject({ ok: false, reason: 'self-dependency' })
+      .toMatchObject({ ok: false, problem: { code: 'self_dependency' } })
     expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'review' }))
-      .toMatchObject({ ok: false, reason: 'no-op' })
+      .toMatchObject({ ok: false, problem: { code: 'reconnect_no_op' } })
     // The old edge is not backed by a real dependency (review→draft does not exist).
     expect(reconnectPhaseRefs(detail, { source: 'review', target: 'draft' }, { source: 'draft', target: 'publish' }))
-      .toMatchObject({ ok: false, reason: 'missing-dependency' })
+      .toMatchObject({ ok: false, problem: { code: 'phase_dependency_missing' } })
     // Moving draft→review's target onto publish, which already depends on draft.
     expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' }))
-      .toMatchObject({ ok: false, reason: 'duplicate-dependency' })
+      .toMatchObject({ ok: false, problem: { code: 'dependency_exists' } })
   })
 
   it('updates markdown frontmatter correctly via addSequentialOverwriteField', () => {

@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type FormEvent } from "react"
+import { useTranslation } from "react-i18next"
 import type { SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,7 +12,8 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldError, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { phaseNameError, type NewPhaseKind } from "./canvas-authoring"
+import { phaseNameProblem, type NewPhaseKind, type PhaseNameProblem } from "./canvas-authoring"
+import { graphEditProblemMessage } from "./graph-edit-problem-message"
 
 interface PhaseNameDialogProps {
   open: boolean
@@ -30,22 +32,23 @@ export function PhaseNameDialog({
   onOpenChange,
   onSubmit,
 }: PhaseNameDialogProps) {
+  const { t } = useTranslation("canvas")
   const inputId = useId()
   const [nameDraft, setNameDraft] = useState(initialName)
-  const [submittedError, setSubmittedError] = useState<string | null>(null)
+  const [submittedProblem, setSubmittedProblem] = useState<PhaseNameProblem | null>(null)
 
   useEffect(() => {
     if (open) {
       setNameDraft(initialName)
-      setSubmittedError(null)
+      setSubmittedProblem(null)
     }
   }, [initialName, open])
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const error = phaseNameError(nameDraft, skillDetail)
-    if (error) {
-      setSubmittedError(error)
+    const problem = phaseNameProblem(nameDraft, skillDetail)
+    if (problem) {
+      setSubmittedProblem(problem)
       return
     }
     onSubmit(nameDraft.trim())
@@ -56,50 +59,44 @@ export function PhaseNameDialog({
       <DialogContent aria-describedby={undefined} className="sm:max-w-sm">
         <form className="grid gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{kind ? `Add ${phaseKindLabel(kind)}` : "Add phase node"}</DialogTitle>
+            <DialogTitle>
+              {kind
+                ? t("nameDialog.titleForKind", { kind: t(`phaseKind.${kind}`) })
+                : t("nameDialog.titleGeneric")}
+            </DialogTitle>
           </DialogHeader>
           <FieldSet>
             <FieldGroup>
-              <Field data-invalid={Boolean(submittedError)}>
-                <FieldLabel htmlFor={inputId}>Node name</FieldLabel>
+              <Field data-invalid={Boolean(submittedProblem)}>
+                <FieldLabel htmlFor={inputId}>{t("nameDialog.nodeName")}</FieldLabel>
                 <Input
                   id={inputId}
                   value={nameDraft}
                   onChange={(event) => {
-                    setSubmittedError(null)
+                    setSubmittedProblem(null)
                     setNameDraft(event.target.value)
                   }}
-                  aria-invalid={Boolean(submittedError)}
+                  aria-invalid={Boolean(submittedProblem)}
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck={false}
                   autoFocus
                 />
-                <FieldError>{submittedError}</FieldError>
+                <FieldError>{submittedProblem ? graphEditProblemMessage(submittedProblem) : null}</FieldError>
               </Field>
             </FieldGroup>
           </FieldSet>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("nameDialog.cancel")}
               </Button>
             </DialogClose>
-            <Button type="submit">Create</Button>
+            <Button type="submit">{t("nameDialog.create")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   )
-}
-
-function phaseKindLabel(kind: NewPhaseKind): string {
-  if (kind === "skill") {
-    return "Agent Phase"
-  }
-  if (kind === "subgraph") {
-    return "Subgraph Phase"
-  }
-  return "Logic Phase"
 }

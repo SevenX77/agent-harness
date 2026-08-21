@@ -1,0 +1,99 @@
+{
+  "menu": {
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "fitView": "适应视图",
+    "lockCanvas": "锁定画布",
+    "unlockCanvas": "解锁画布",
+    "disconnect": "断开连接",
+    "deleteNode": "删除节点",
+    "deleteShortcut": "Del",
+    "addNode": "添加节点"
+  },
+  "phaseKind": {
+    "skill": "Agent 相位",
+    "logic": "Logic 相位",
+    "subgraph": "子图相位"
+  },
+  "nameDialog": {
+    "titleForKind": "添加{{kind}}",
+    "titleGeneric": "添加相位节点",
+    "nodeName": "节点名",
+    "cancel": "取消",
+    "create": "创建"
+  },
+  "problem": {
+    "name_required": "相位名不能为空。",
+    "name_shape_invalid": "相位名必须以字母或下划线开头，且只能包含字母、数字、下划线或连字符。",
+    "name_taken": "已经有一个叫 {{phaseId}} 的相位了。",
+    "name_unchanged": "相位名没有变化。",
+    "connect_endpoints_must_be_phases": "连线的两端都必须是相位节点。",
+    "self_dependency": "一个相位不能依赖它自己。",
+    "input_target_must_be_phase": "Input 只能连到相位节点。",
+    "dependency_exists": "这条依赖已经存在。",
+    "output_source_must_be_phase": "Output 只能由相位节点连过来。",
+    "output_marker_exists": "这个 output 标记已经存在。",
+    "connect_boundary_direction": "边界只能这样连：Input → 相位，或相位 → Output。",
+    "disconnect_endpoints_must_be_phases": "这条边的两端都必须是相位节点。",
+    "input_source_must_be_phase": "Input 只能与相位节点断开。",
+    "input_dependency_missing": "这条边背后没有对应的 input 依赖。",
+    "output_disconnect_source_must_be_phase": "Output 只能与相位节点断开。",
+    "output_marker_missing": "这条边背后没有对应的 output 标记。",
+    "disconnect_boundary_direction": "边界只能这样断开：Input → 相位，或相位 → Output。",
+    "phase_dependency_missing": "这条边背后没有对应的相位依赖。",
+    "phase_id_required": "缺少相位 id。",
+    "phase_not_found": "找不到这个相位。",
+    "select_phase_to_rename": "先选中一个相位节点再重命名。",
+    "phase_not_in_graph": "选中的相位不在 GRAPH.md 里。",
+    "reconnect_endpoints_must_be_phases": "只有相位节点之间的边才能重连。",
+    "reconnect_no_op": "这条边重连回了原来的两端。"
+  },
+  "status": {
+    "idle": "空闲",
+    "running": "运行中",
+    "success": "成功",
+    "error": "失败",
+    "paused": "已暂停",
+    "breakpoint": "断点"
+  },
+  "boundary": {
+    "input": "Input",
+    "output": "Output",
+    "inputTooltip": "运行输入分发",
+    "outputTooltip": "运行输出收集"
+  },
+  "node": {
+    "goldenCaptured": "已录 golden",
+    "logicOk": "Logic 正常（predict 跑过，还没有 golden）",
+    "activity": "节点动态",
+    "subgraphProgress": "子图进度",
+    "errorSummary": "节点错误概要",
+    "resumeUnavailable": "无法续跑：上游已改动",
+    "collapseSteps": "收起步骤",
+    "editSteps": "编辑步骤",
+    "hideSteps": "隐藏步骤",
+    "collapseSubgraph": "收起子图",
+    "expandSubgraph": "展开子图",
+    "openSubgraphCanvas": "打开子图画布"
+  },
+  "edge": {
+    "viewTraceData": "查看这条边的 trace 数据",
+    "runToInspect": "先跑一次 skill，才能看到传过去的数据",
+    "inspectFlowing": "点开看流过这条边的上下文",
+    "viewInferred": "点开看这条路径上推断出的字段"
+  },
+  "toast": {
+    "sequentialOverwriteUnresolved": "顺序覆盖还没解决。编译前先调整这个节点，或者允许覆盖。",
+    "childSubgraphNotReady": "步骤没能保存：子图还没准备好",
+    "subgraphReadOnly": "这个子图是只读的。先 fork 到你的工作区再编辑。",
+    "subgraphLoading": "正在加载子图，稍后再试。",
+    "connectSameGraph": "只能在同一张图内连线。",
+    "reconnectSameGraph": "只能在同一张图内重连。",
+    "disconnectSameGraph": "只能在同一张图内断开连接。",
+    "persistDependencyFailed": "依赖没能保存",
+    "reconnectDependencyFailed": "依赖没能重连",
+    "disconnectDependencyFailed": "依赖没能断开",
+    "deleteNodeFailed": "节点没能删除",
+    "createPhaseFailed": "相位没能创建"
+  }
+}

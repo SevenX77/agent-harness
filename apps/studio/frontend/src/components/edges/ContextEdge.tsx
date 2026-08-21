@@ -1,6 +1,7 @@
 import * as ReactFlow from '@xyflow/react'
 import type { Edge, EdgeProps } from '@xyflow/react'
 import type { KeyboardEvent, MouseEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { EdgeRunStatus } from '@/utils/edge-status-projection'
 import {
   EDGE_DOT_RADIUS,
@@ -61,6 +62,7 @@ export function EdgeContextDot({
   x,
   y,
   hasTraceData,
+  inspectLabel,
   tooltipCopy,
   data,
 }: {
@@ -68,6 +70,8 @@ export function EdgeContextDot({
   x: number
   y: number
   hasTraceData: boolean
+  /** Copy comes from the edge, which holds the translation hook — same as `tooltipCopy`. */
+  inspectLabel: string
   tooltipCopy: string
   data: ContextEdgeData | undefined
 }) {
@@ -98,7 +102,7 @@ export function EdgeContextDot({
       data-edge-context-target="true"
       data-edge-source={source}
       data-edge-target={target}
-      aria-label="View edge trace data"
+      aria-label={inspectLabel}
       transform={`translate(${x} ${y})`}
       style={{ cursor: 'pointer', pointerEvents: 'all' }}
       onClick={(event) => {
@@ -140,6 +144,7 @@ export function ContextEdge({
   style,
   data,
 }: EdgeProps<ContextEdgeModel>) {
+  const { t } = useTranslation('canvas')
   const isHorizontalStraight =
     Math.abs(sourceY - targetY) <= STRAIGHT_EDGE_EPSILON
     && isHorizontalHandlePosition(sourcePosition)
@@ -177,8 +182,8 @@ export function ContextEdge({
   const isTestEnv = globalProcess?.env?.NODE_ENV === 'test'
 
   const tooltipCopy = isTestEnv
-    ? 'Run the skill to inspect transferred data'
-    : (hasTraceData ? 'Click to inspect flowing context' : 'Click to view inferred fields on this path')
+    ? t('edge.runToInspect')
+    : (hasTraceData ? t('edge.inspectFlowing') : t('edge.viewInferred'))
 
   return (
     <>
@@ -258,6 +263,7 @@ export function ContextEdge({
           x={labelX}
           y={labelY}
           hasTraceData={hasTraceData}
+          inspectLabel={t('edge.viewTraceData')}
           tooltipCopy={tooltipCopy}
           data={data}
         />

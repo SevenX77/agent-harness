@@ -34,7 +34,8 @@ import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspaceFile, writeWorkspaceFile } from "@/lib/tauri"
 import { errorDiagnosticDetails, errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
-import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, GraphEditError, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { graphEditProblemMessage } from "@/components/GraphCanvas/graph-edit-problem-message"
 import { autoCreatedSubgraphChildDir, defaultSubgraphChildDir, subgraphChildScaffoldFiles } from "@/components/studio/subgraph-scaffold"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { actionFilePath, actionStubContent, applyActionsList, isValidActionName, readActionsList } from "@/components/studio/panels/phase-actions"
@@ -1766,7 +1767,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     const result = removePhaseRefs(editDetail, phaseId)
     if (!result.ok) {
-      toast.error(result.message)
+      toast.error(graphEditProblemMessage(result.problem))
       return
     }
 
@@ -1860,7 +1861,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     const result = renamePhaseRefs(editDetail, phaseId, nextPhaseId)
     if (!result.ok) {
-      toast.error(result.message)
+      toast.error(graphEditProblemMessage(result.problem))
       return
     }
 
@@ -2044,7 +2045,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     const result = connectPhaseRefs(editDetail, connection.source, connection.target)
     if (!result.ok) {
-      throw new Error(result.message)
+      throw new GraphEditError(result.problem)
     }
     await writeGraphEdit(currentSkillId, editDetail, result.phases, target)
   }, [currentSkillId, skillDetail, writeGraphEdit])
@@ -2056,7 +2057,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     const result = disconnectPhaseRefs(editDetail, connection.source, connection.target)
     if (!result.ok) {
-      throw new Error(result.message)
+      throw new GraphEditError(result.problem)
     }
     await writeGraphEdit(currentSkillId, editDetail, result.phases, target)
   }, [currentSkillId, skillDetail, writeGraphEdit])
@@ -2082,7 +2083,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     const result = reconnectPhaseRefs(editDetail, disconnect, connect)
     if (!result.ok) {
-      throw new Error(result.message)
+      throw new GraphEditError(result.problem)
     }
     await writeGraphEdit(currentSkillId, editDetail, result.phases, target)
   }, [currentSkillId, skillDetail, writeGraphEdit])

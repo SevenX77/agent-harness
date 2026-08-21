@@ -320,6 +320,37 @@ def measured_image_input(*, accepted: bool) -> dict[str, CapabilityValue]:
     return measured
 
 
+def measured_tool_calling(*, closed_the_loop: bool) -> dict[str, CapabilityValue]:
+    """What watching a route call a tool settles.
+
+    It lands on `tool_protocol`, the capability that until now could only ever
+    be set from what a provider record claims (`tool_use` / `tool_calling` /
+    `tools`, read above). A route that has been watched emitting a tool call has
+    answered the same question by measurement, and `probed_verified` is where a
+    measurement outranks a document.
+
+    **This never records `False`, and that asymmetry is deliberate** — unlike
+    `measured_image_input`, whose refusal is a provider saying in words that it
+    takes text only. Here a failure to see a tool call has two indistinguishable
+    causes: a protocol with no tools, and a model that simply answered in prose.
+    Writing `False` would delete a capability the route may well have, and a
+    capability that quietly shrinks is worse than one left unmeasured — the same
+    rule `accepted_effort_levels` follows when it returns `None`.
+
+    Closing the loop cannot change the value, because the capability is a yes/no
+    about the protocol. It changes the message, which is the only place the
+    stronger observation fits and exactly what a reader deciding whether to hand
+    this route an agent phase needs to see.
+    """
+    message = (
+        "Measured by giving this route a tool it needed: it called the tool and came "
+        "back out of the loop carrying the result."
+        if closed_the_loop
+        else "Measured by giving this route a tool it needed: it called the tool."
+    )
+    return {"tool_protocol": CapabilityValue(value=True, source="probed_verified", message=message)}
+
+
 def build_runtime_setting_descriptors(
     route: ProviderRoute,
 ) -> dict[str, RuntimeSettingDescriptor]:
@@ -487,6 +518,7 @@ __all__ = [
     "route_effective_capabilities",
     "measured_effort_capability",
     "measured_image_input",
+    "measured_tool_calling",
     "normalize_route_capabilities",
     "verified_profile_capabilities",
 ]

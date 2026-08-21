@@ -41,9 +41,14 @@ __all__ = [
 class Question:
     """One request worth spending, and the value it would settle.
 
-    `value` is the candidate being tried — the effort level, and later the tool
-    shape. It is carried alongside the settings rather than dug back out of them
-    so that reading a batch of answers never has to re-parse what was asked.
+    `value` is the candidate being tried — today, an effort level. It is carried
+    alongside the settings rather than dug back out of them so that reading a
+    batch of answers never has to re-parse what was asked.
+
+    This shape once said tools would arrive here too. They did not: a tool loop
+    is one question asked over two turns with a control value, not a batch of
+    candidate values asked once each, so it lives in `tool_loop` with its own
+    shape (decision doc, D7's P5 note).
     """
 
     value: str

@@ -30,6 +30,7 @@ import { copyCredentialValue } from "@/components/studio/api-keys/ProviderCard"
 import { IconTooltip } from "./IconTooltip"
 import { ThinkingBadge } from "./RoleBadges"
 import { useLazyRenderCount } from "./useLazyRenderCount"
+import { errorMessage } from '@/utils/errors'
 
 export interface AvailableModelProvider {
   id: string
@@ -155,7 +156,7 @@ export function AvailableModelsSidebar({
       console.warn(
         "phase=available-models action=reprobe-failed route=%s reason=%s",
         routeId,
-        error instanceof Error ? error.message : String(error),
+        errorMessage(error),
       )
     }
   }, [onReprobed])

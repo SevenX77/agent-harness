@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AxiosError, AxiosHeaders, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { toast } from 'sonner'
+import i18n from '../i18n'
 import { syncSkill } from '../api/client'
 import type { CollaborateResult, SyncSkillReq } from '../api/types'
 import { executeSkillSync, type SkillSyncStatus } from './useSkillSync'
@@ -52,6 +54,10 @@ function setupExecute(request: SyncSkillReq, pendingStatus: SkillSyncStatus) {
 describe('executeSkillSync', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  afterEach(async () => {
+    await i18n.changeLanguage('en')
   })
 
   it('save calls save_to_team, marks success, and shows success toast', async () => {
@@ -128,5 +134,55 @@ describe('executeSkillSync', () => {
       'Main branch protected. Opened PR for review: https://gitea.local/pr/2',
     )
     expect(scheduleReset).not.toHaveBeenCalled()
+  })
+  it('reads a typed backend refusal in the reader language, not the server one', async () => {
+    // The server states the fact (a code plus the field it is about); which
+    // language that becomes belongs to whoever is reading. Going through the one
+    // exit is what makes that true here — a hand-rolled `error.message` on this
+    // path showed the raw axios line instead (ledger K4a, overturned on the real
+    // app 2026-08-21).
+    const config: InternalAxiosRequestConfig = {
+      baseURL: 'http://127.0.0.1:8787/api',
+      url: '/skills/skill-1/sync',
+      method: 'post',
+      headers: new AxiosHeaders(),
+    }
+    const response: AxiosResponse = {
+      config,
+      data: {
+        error_code: 'APP_SETTINGS_INCOMPLETE',
+        http_status: 400,
+        message: 'app settings incomplete: gitea_host is not set',
+        details: { field: 'gitea_host' },
+      },
+      headers: {},
+      status: 400,
+      statusText: 'Bad Request',
+    }
+    mockSyncSkill.mockRejectedValue(
+      new AxiosError('Request failed with status code 400', 'ERR_BAD_REQUEST', config, {}, response),
+    )
+
+    await i18n.changeLanguage('en')
+    const english = setupExecute({ action: 'save_to_team' }, 'saving')
+    await english.execute()
+    expect(mockToast.error).toHaveBeenLastCalledWith(
+      'Settings are incomplete: gitea_host is not set. Open Settings to set it.',
+    )
+
+    await i18n.changeLanguage('zh-CN')
+    const chinese = setupExecute({ action: 'save_to_team' }, 'saving')
+    await chinese.execute()
+    expect(mockToast.error).toHaveBeenLastCalledWith('设置没填完:gitea_host 还没配。到 Settings 里填上。')
+  })
+
+  it('still says what it was doing when the rejection carries nothing readable', async () => {
+    mockSyncSkill.mockRejectedValue({ unexpected: true })
+    const { execute, setError } = setupExecute({ action: 'save_to_team' }, 'saving')
+
+    await execute()
+
+    expect(setError).toHaveBeenCalledWith('Sync failed')
+    expect(mockToast.error).toHaveBeenCalledWith('Sync failed')
   })
 })

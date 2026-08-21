@@ -1,6 +1,7 @@
 import { toast } from 'sonner'
 import { getRuntimeStatus, isTauriRuntime } from '../config/runtime'
 import type { ReleaseArtifactRef } from '../api/types'
+import { errorMessage } from '../utils/errors'
 
 export interface RecentWorkspaceEntry {
   absolutePath: string
@@ -85,7 +86,7 @@ export async function openLocalPath(path: string): Promise<boolean> {
       await invoke('open_path', { path: targetPath })
       return true
     } catch (error) {
-      const description = error instanceof Error ? error.message : String(error)
+      const description = errorMessage(error)
       toast.error('Failed to open path', { description })
       return false
     }
@@ -141,7 +142,7 @@ async function openCodeAssistant(
       onEvent: await cliTerminalChannel(handlers),
     })
   } catch (error) {
-    const description = error instanceof Error ? error.message : String(error)
+    const description = errorMessage(error)
     toast.error(`Failed to open ${label}`, { description })
     return null
   }
@@ -202,7 +203,7 @@ export async function launchCliInstaller(): Promise<string | null> {
     await invoke('launch_cli_installer')
     return null
   } catch (error) {
-    return error instanceof Error ? error.message : String(error)
+    return errorMessage(error)
   }
 }
 
@@ -229,7 +230,7 @@ async function invokeCliConsoleAction(
     await invoke(command, { provider })
     return null
   } catch (error) {
-    return error instanceof Error ? error.message : String(error)
+    return errorMessage(error)
   }
 }
 
@@ -252,7 +253,7 @@ export async function deployVendoredAh(): Promise<{ row: CliDependencyRow } | { 
     const { invoke } = await import('@tauri-apps/api/core')
     return { row: await invoke<CliDependencyRow>('deploy_vendored_ah') }
   } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) }
+    return { error: errorMessage(error) }
   }
 }
 
@@ -465,7 +466,7 @@ export async function closeCodeAssistant(
     toast.success(stopped ? `Closed ${assistant === 'claude' ? 'Claude Code' : 'Codex'}` : 'Code assistant is not running')
     return stopped
   } catch (error) {
-    const description = error instanceof Error ? error.message : String(error)
+    const description = errorMessage(error)
     toast.error(`Failed to close ${assistant === 'claude' ? 'Claude Code' : 'Codex'}`, { description })
     return false
   }
@@ -503,7 +504,7 @@ export async function attachCodeAssistant(
       onEvent: await cliTerminalChannel(handlers),
     })
   } catch (error) {
-    const description = error instanceof Error ? error.message : String(error)
+    const description = errorMessage(error)
     toast.error(`Failed to attach ${label}`, { description })
     return null
   }
@@ -526,7 +527,7 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
     })
     return typeof selected === 'string' ? selected : null
   } catch (error) {
-    const description = error instanceof Error ? error.message : String(error)
+    const description = errorMessage(error)
     toast.error('Failed to open directory picker', { description })
     return null
   }
@@ -549,7 +550,7 @@ export async function selectFile(defaultDirectory?: string | null): Promise<stri
     })
     return typeof selected === 'string' ? selected : null
   } catch (error) {
-    const description = error instanceof Error ? error.message : String(error)
+    const description = errorMessage(error)
     toast.error('Failed to open file picker', { description })
     return null
   }

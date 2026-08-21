@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { LintError, LintResult } from '../api/types'
 import type { LintStatus } from '../types/studio'
+import { errorMessage } from '../utils/errors'
 
 export const lintStatusEvent = 'studio-lint-status-changed'
 
@@ -162,7 +163,7 @@ export function useDebouncedLint(skillId: string, markdown: string, target: Debo
         .catch((error: unknown) => {
           setResult(null)
           setStatus('failed')
-          setMessage(error instanceof Error ? error.message : 'Lint request failed')
+          setMessage(errorMessage(error, 'Lint request failed'))
           publishLintStatus(skillId, 'failed')
           // A failed REQUEST (network/engine down) carries no compile errors — don't project
           // stale errors onto the nodes; the status gate already flags the failure.

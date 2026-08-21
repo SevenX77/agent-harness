@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import { initializeRuntimeConfig, restartSidecar, subscribeToSidecarRestart } from '../config/runtime'
+import { errorMessage } from '../utils/errors'
 
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 
@@ -73,7 +74,7 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : String(error))
+          setMessage(errorMessage(error))
           setStatus('error')
         }
       })

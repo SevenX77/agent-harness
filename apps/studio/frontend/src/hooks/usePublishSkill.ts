@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { publishSkill } from '../api/client'
 import type { PublishResult } from '../api/types'
+import { errorMessage } from '../utils/errors'
 
 export type PublishSkillStatus = 'idle' | 'publishing' | 'success' | 'error'
 
@@ -37,10 +38,6 @@ const SETTINGS_FIXABLE_SKIP_REASON = 'app_settings_incomplete'
 
 const DEFAULT_RESET_DELAY_MS = 200
 export const ERROR_TOAST_MESSAGE = 'Release validation failed or the network is unavailable. The draft version is unchanged.'
-
-function messageFromError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Publish failed'
-}
 
 function stringField(value: unknown, key: string): string | null {
   if (typeof value !== 'object' || value === null || !(key in value)) {
@@ -164,7 +161,7 @@ export async function executePublishSkill({
   } catch (error) {
     const backendMessage = backendErrorMessage(error)
     setStatus('error')
-    setError(backendMessage ?? messageFromError(error))
+    setError(backendMessage ?? errorMessage(error, 'Publish failed'))
     toast.error(backendMessage ?? ERROR_TOAST_MESSAGE)
     return null
   }

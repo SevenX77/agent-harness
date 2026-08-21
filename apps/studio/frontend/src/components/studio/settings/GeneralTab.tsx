@@ -47,6 +47,7 @@ import { effectiveDefaultSkillsDirectory } from "@/utils/skill-paths"
 import { applyLanguageChange } from "./language-switch"
 import { SectionTitle } from "./shared"
 import type { SettingsPageContentProps } from "./types"
+import { errorMessage } from "@/utils/errors"
 
 const truthSourceFieldRowClassName = "grid w-full grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-2"
 const truthSourceFieldActionClassName = "flex min-w-0 items-center justify-center gap-2"
@@ -86,7 +87,7 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
       })
       .catch((error: unknown) => {
         if (!active) return
-        setTruthSourcesError(error instanceof Error ? error.message : String(error))
+        setTruthSourcesError(errorMessage(error))
       })
       .finally(() => {
         if (active) setTruthSourcesLoading(false)
@@ -128,7 +129,7 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
       const content = await getTruthSourceContent(source.id)
       setPreview(content)
     } catch (error) {
-      const description = error instanceof Error ? error.message : String(error)
+      const description = errorMessage(error)
       toast.error(t("general.truthSources.previewFailed"), { description })
     }
   }

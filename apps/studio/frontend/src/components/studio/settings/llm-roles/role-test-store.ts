@@ -14,6 +14,7 @@ import {
   type RoleTestResponse,
 } from "@/api/llm"
 import { getRoleTestResults, invalidateRoleTestResultsCache, type RoleTestResultsResponse } from "@/api/client"
+import { errorMessage } from "@/utils/errors"
 
 /**
  * #46/#47 测试态 SSOT (spec §2.4 / 实施页 #46 落地细节):
@@ -172,7 +173,7 @@ export async function seedPersistedRoleTestResults(
   } catch (error) {
     console.warn(
       "phase=role-test-seed action=persisted-fetch-failed reason=%s",
-      error instanceof Error ? error.message : String(error),
+      errorMessage(error),
     )
   }
 }
@@ -242,7 +243,7 @@ export async function runRoleTest(
     patchRole(roleName, {
       running: false,
       result: store[roleName]?.result,
-      error: error instanceof Error ? error.message : "Role test failed",
+      error: errorMessage(error, "Role test failed"),
       activeStatuses: undefined,
     })
   }

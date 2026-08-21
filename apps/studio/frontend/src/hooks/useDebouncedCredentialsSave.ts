@@ -7,6 +7,7 @@ import {
 } from "@/api/llm"
 import { endpointIdForBaseUrlProtocol, inferProviderKind, providerEndpointDraftsForAction, thirdPartyProtocolCandidates } from "@/components/studio/settings/provider-utils"
 import type { ProviderDraft } from "@/components/studio/settings/types"
+import { errorMessage } from "@/utils/errors"
 
 /** Status of the most recent (or in-flight) auto-save call. */
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error"
@@ -78,7 +79,7 @@ export function useDebouncedCredentialsSave(
         if (!pendingSnapshotRef.current) {
           setStatus("error")
           setLastError(error)
-          const message = error instanceof Error ? error.message : "Save failed"
+          const message = errorMessage(error, "Save failed")
           toast.error(`API Keys save failed: ${message}`)
           onError?.(error)
         }

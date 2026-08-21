@@ -5,6 +5,7 @@ import { apiClientConfigChangedEvent, authenticatedApiReady, getAppSettings, upd
 import type { AppLanguage, AppSettings, CliSessionSettings } from '../api/types'
 import type { SaveStatus } from './useDebouncedCredentialsSave'
 import { runtimeDefaultSkillsDirectory } from '../utils/skill-paths'
+import { errorMessage } from '../utils/errors'
 
 /**
  * N0 i18n (#15.1): the persisted `app_settings.language` is the durable source
@@ -175,7 +176,7 @@ export function useAppSettings() {
       if (!pendingSettingsRef.current) {
         setSaveStatus('error')
         setLastSaveError(saveError)
-        const message = saveError instanceof Error ? saveError.message : 'Save failed'
+        const message = errorMessage(saveError, 'Save failed')
         toast.error(`Settings save failed: ${message}`)
       }
       return null

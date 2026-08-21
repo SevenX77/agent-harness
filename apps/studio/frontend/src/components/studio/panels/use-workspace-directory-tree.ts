@@ -5,6 +5,7 @@ import { listWorkspaceDir, type WorkspaceDirEntry } from "@/lib/tauri"
 import type { FileMeta } from "../file-types"
 import { fileFromDetail, languageForPath } from "./panel-files"
 import { isRunListing, orderRunDirectories } from "./run-directory-order"
+import { errorMessage } from "@/utils/errors"
 
 export interface AssetTreeEntry {
   name: string
@@ -284,7 +285,7 @@ export function useWorkspaceDirectoryTree({
           [path]: {
             status: "error",
             entries: existing[path]?.entries ?? [],
-            message: error instanceof Error ? error.message : String(error || "Could not read folder"),
+            message: errorMessage(error, String(error || "Could not read folder")),
           },
         }))
       })

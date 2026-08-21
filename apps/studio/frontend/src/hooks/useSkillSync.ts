@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { syncSkill } from '../api/client'
 import type { CollaborateResult, SyncSkillReq } from '../api/types'
+import { errorMessage } from '../utils/errors'
 
 export type SkillSyncStatus =
   | 'idle'
@@ -39,10 +40,6 @@ interface ExecuteSkillSyncOptions {
 }
 
 const DEFAULT_RESET_DELAY_MS = 200
-
-function messageFromError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Sync failed'
-}
 
 export async function executeSkillSync({
   skillId,
@@ -87,7 +84,7 @@ export async function executeSkillSync({
     toast.error(result.message)
     return result
   } catch (error) {
-    const message = messageFromError(error)
+    const message = errorMessage(error, 'Sync failed')
     setStatus('error')
     setError(message)
     toast.error(message)

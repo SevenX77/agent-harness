@@ -1,4 +1,5 @@
 import { configureApiBaseURL, configureApiToken, currentApiTokenIsSet } from '../api/client'
+import { errorMessage } from '../utils/errors'
 
 export interface SidecarConfig {
   port: number
@@ -85,7 +86,7 @@ export async function initializeRuntimeConfig(options: RuntimeOptions = {}): Pro
   } catch (error) {
     runtimeConfig = null
     runtimeSidecarStatus = 'degraded'
-    runtimeStatusMessage = error instanceof Error ? error.message : String(error)
+    runtimeStatusMessage = errorMessage(error)
     throw error
   }
 }
@@ -116,7 +117,7 @@ export async function restartSidecar(options: RuntimeOptions = {}): Promise<Side
   } catch (error) {
     runtimeConfig = null
     runtimeSidecarStatus = 'degraded'
-    runtimeStatusMessage = error instanceof Error ? error.message : String(error)
+    runtimeStatusMessage = errorMessage(error)
     throw error
   }
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { putRoles, type RolesData } from "@/api/llm"
 import type { SaveStatus } from "./useDebouncedCredentialsSave"
+import { errorMessage } from "@/utils/errors"
 
 export interface UseDebouncedRolesSaveOptions {
   delayMs?: number
@@ -98,7 +99,7 @@ export function useDebouncedRolesSave(
         } else if (disposition === "fatal") {
           setStatus("error")
           setLastError(error)
-          const message = error instanceof Error ? error.message : "Save failed"
+          const message = errorMessage(error, "Save failed")
           toast.error(`LLM Roles save failed: ${message}`)
           onError?.(error)
         }

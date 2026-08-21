@@ -15,6 +15,7 @@ import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProvid
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController, SettingsPageProps, SettingsPageViewProps, SettingsTab } from "./types"
 import { syncLlmRolesCache } from "../llm-roles-cache"
+import { errorMessage } from "@/utils/errors"
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
@@ -690,7 +691,7 @@ export function useSettingsPageController(): SettingsPageController {
       })
       .catch((error) => {
         if (cancelled) return
-        const message = error instanceof Error ? error.message : "Load failed"
+        const message = errorMessage(error, "Load failed")
         setCredentialsError(message)
         toast.error(`API Keys load failed: ${message}`)
         setCredentialsLoading(false)

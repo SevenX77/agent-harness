@@ -893,6 +893,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [viewedTrace, runId, liveRunMetadata, runStream.events, liveGateVerdict],
   )
   const viewedTraceEvents = viewedRun.events
+  // Which run the trace is SHOWING — and so the run every action beside it acts
+  // on. `runId` answers a different question, "which run is live". Asking that
+  // one here is how Resume came to continue the live run while the user was
+  // reading an older one, and how Compare to golden measured a run that was not
+  // the one on screen. Pause and Stop keep asking `runId`: they act on a running
+  // worker, which only the live run has.
+  const viewedRunId = viewedRun.runId
   const edgeStatusByEdgeId = useMemo(
     () => deriveEdgeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata, viewedRun.gateVerdict),
     [viewedRun],
@@ -956,7 +963,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [ranAgentNodesBySkill, setRanAgentNodesBySkill] = useState<Record<string, Set<string>>>({})
 
   // Golden compare/promote for the active run (per-node diff surfaced as an overlay).
-  const goldenDiff = useGoldenDiff(currentSkillId, runId, currentWorkspaceRoot)
+  const goldenDiff = useGoldenDiff(currentSkillId, viewedRunId, currentWorkspaceRoot)
   const [copilotJudgeResult, setCopilotJudgeResult] = useState<CopilotJudgeResponse | null>(null)
   const clearCopilotJudgeResult = useCallback(() => {
     setCopilotJudgeResult(null)
@@ -2523,12 +2530,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const handleStartNodeCompare = useCallback(
     async (nodeId: string) => {
       if (!currentSkillId) return
-      if (!runId) {
+      if (!viewedRunId) {
         toast.error("Run the skill first, then compare this node's models.")
         return
       }
       try {
-        const group = await startNodeCompareRun(currentSkillId, runId, nodeId)
+        const group = await startNodeCompareRun(currentSkillId, viewedRunId, nodeId)
         setCompareGroupId(group.compare_group_id)
         setCompareRuns(group.runs)
         setCompareCandidateId(group.runs[0]?.candidate_id ?? null)
@@ -2536,7 +2543,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         toast.error(`Could not start model compare: ${errorMessage(error)}`)
       }
     },
-    [currentSkillId, runId],
+    [currentSkillId, viewedRunId],
   )
 
   // Poll the compare group while any candidate is still running so the tabs reflect
@@ -2665,10 +2672,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [currentSkillId, runId])
 
   const handleResume = useCallback(async () => {
-    if (!currentSkillId || !runId) return
+    if (!currentSkillId || !viewedRunId) return
     setResumeLoading(true)
     try {
-      const result = await resumeRun(currentSkillId, runId)
+      const result = await resumeRun(currentSkillId, viewedRunId)
       setActivePanel("trace")
       // Re-subscribe the trace stream to the resumed run (new id, or re-attach).
       clearCopilotJudgeResult()
@@ -2684,13 +2691,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
+  }, [clearCopilotJudgeResult, currentSkillId, viewedRunId, setRunId, projectRun])
 
   const handleSubmitHitlResponse = useCallback(async (request: TraceHitlResumeRequest) => {
-    if (!currentSkillId || !runId) return
+    if (!currentSkillId || !viewedRunId) return
     setResumeLoading(true)
     try {
-      const result = await resumeRun(currentSkillId, runId, hitlResumeOptionsFromRequest(request))
+      const result = await resumeRun(currentSkillId, viewedRunId, hitlResumeOptionsFromRequest(request))
       setActivePanel("trace")
       clearCopilotJudgeResult()
       await projectRun(result)
@@ -2703,13 +2710,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
+  }, [clearCopilotJudgeResult, currentSkillId, viewedRunId, setRunId, projectRun])
 
   const handleResumeEdgeDownstream = useCallback(async (options: ResumeRunOptions) => {
-    if (!currentSkillId || !runId) return
+    if (!currentSkillId || !viewedRunId) return
     setResumeLoading(true)
     try {
-      const result = await resumeRun(currentSkillId, runId, options)
+      const result = await resumeRun(currentSkillId, viewedRunId, options)
       setActivePanel("trace")
       clearCopilotJudgeResult()
       await projectRun(result)
@@ -2722,13 +2729,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
+  }, [clearCopilotJudgeResult, currentSkillId, viewedRunId, setRunId, projectRun])
 
   const handleResumeNode = useCallback(async (options: ResumeRunOptions) => {
-    if (!currentSkillId || !runId) return
+    if (!currentSkillId || !viewedRunId) return
     setResumeLoading(true)
     try {
-      const result = await resumeRun(currentSkillId, runId, options)
+      const result = await resumeRun(currentSkillId, viewedRunId, options)
       setActivePanel("trace")
       clearCopilotJudgeResult()
       await projectRun(result)
@@ -2741,7 +2748,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId, projectRun])
+  }, [clearCopilotJudgeResult, currentSkillId, viewedRunId, setRunId, projectRun])
 
   const handleHome = useCallback(() => {
     setSettingsOpen(false)
@@ -2832,19 +2839,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         resumeValidityError={resumeValidityError}
         traceEvents={viewedTraceEvents}
         activeTracePhase={activeTracePhase}
-        traceCanCompare={Boolean(runId)}
+        traceCanCompare={Boolean(viewedRunId)}
         traceCompareLoading={goldenDiff.loading}
         onCompareToGolden={handleCompareToGolden}
         onPromoteToGolden={handlePromoteToGolden}
         onPromoteNode={handlePromoteNode}
         traceSelectedEventId={traceSelection.selectedEventId}
         onSelectTraceEvent={(index, event) => traceSelection.selectEvent(event, index)}
-        traceCanResume={Boolean(runId)}
+        traceCanResume={Boolean(viewedRunId)}
         traceResumeLoading={resumeLoading}
         traceLiveMetadata={liveRunRecord?.runId === runId ? liveRunRecord.metadata : null}
         traceGateVerdict={liveGateVerdict}
         onResumeRun={handleResume}
-        onResumeNode={runId ? handleResumeNode : undefined}
+        onResumeNode={viewedRunId ? handleResumeNode : undefined}
         onSubmitHitlResponse={handleSubmitHitlResponse}
         onResumeEdgeDownstream={runId ? handleResumeEdgeDownstream : undefined}
         onClearTraceScope={handleNodeDeselect}
@@ -3004,7 +3011,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       resumeValidityLoading={resumeValidityLoading}
                       resumeValidityError={resumeValidityError}
                       resumeLoading={resumeLoading}
-                      onResumeNode={runId ? handleResumeNode : undefined}
+                      onResumeNode={viewedRunId ? handleResumeNode : undefined}
                       onSubmitHitlResponse={handleSubmitHitlResponse}
                       hitlSubmitting={resumeLoading}
                     />
@@ -3063,11 +3070,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     <DiffView
                       result={goldenDiff.result}
                       skillId={currentSkillId}
-                      runId={runId}
+                      runId={viewedRunId}
                       loading={goldenDiff.loading}
                       error={goldenDiff.error}
-                      canCompare={Boolean(runId)}
-                      canPromote={Boolean(runId)}
+                      canCompare={Boolean(viewedRunId)}
+                      canPromote={Boolean(viewedRunId)}
                       onCompare={handleCompareToGolden}
                       onPromote={handlePromoteToGolden}
                     />

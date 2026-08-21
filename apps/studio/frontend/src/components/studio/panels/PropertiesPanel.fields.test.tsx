@@ -735,7 +735,13 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     expect(html).not.toContain('data-llm-role-compare-trigger="true"')
   })
 
-  it('subgraph node has no role Test control', () => {
+  it('subgraph node has no role Test control, but does offer compare candidates', () => {
+    // A subgraph node has no `llm_role` of its own to test — its phases each
+    // declare one. Comparing models IS defined for it (the side-run swaps every
+    // role in the truth, precisely because a subgraph's role names are not
+    // knowable from the node), so the compare block belongs here even though the
+    // role Test control does not. The two used to be absent together only because
+    // the compare block lived inside the role field.
     const html = renderPanel({
       id: 'child',
       data: baseData({ mode: 'subgraph', subgraphPath: '/abs/child', filePath: 'phases/child/SUBGRAPH.md' }),
@@ -744,7 +750,7 @@ describe('PropertiesPanel - node role Test control (R23)', () => {
     })
 
     expect(html).not.toContain('>Test<')
-    expect(html).not.toContain('data-llm-role-compare-trigger="true"')
+    expect(html).toContain('data-llm-role-compare-trigger="true"')
   })
 })
 

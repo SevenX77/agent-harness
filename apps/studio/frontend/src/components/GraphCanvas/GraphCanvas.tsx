@@ -17,8 +17,10 @@ import {
 } from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
+import i18n from '@/i18n'
 import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, RuntimeConfig, SkillDetail } from '@/api/types'
 import { getChildGraphTopology, getSkillDetail, type ResumeRunOptions } from '@/api/client'
 import { isTauriRuntime } from '@/config/runtime'
@@ -64,6 +66,7 @@ import {
   phaseFilePath,
   planEdgeReconnect,
 } from './canvas-authoring'
+import { graphEditErrorMessage, graphEditProblemMessage } from './graph-edit-problem-message'
 import { DrillBreadcrumb } from './DrillBreadcrumb'
 import { drillStackReducer, type DrillStack } from './drill-stack'
 import { isDrilledChildEditable, type ChildSaveTarget } from './drill-edit'
@@ -1011,7 +1014,7 @@ export function GraphCanvas({
     })
     setWarningQueue([])
     setActiveWarningIndex(-1)
-    toast.error('Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.')
+    toast.error(i18n.t('toast.sequentialOverwriteUnresolved', { ns: 'canvas' }))
   }, [])
   const fitViewRef = useRef<(() => Promise<boolean> | boolean | void) | null>(null)
   const reactFlowInstanceRef = useRef<ReactFlowInstance<GraphCanvasNode, Edge<ContextEdgeData>> | null>(null)
@@ -1167,7 +1170,7 @@ export function GraphCanvas({
       if (!onPhaseFileSave) return
       const target = expandedChildSaveTarget(parentNodeId)
       if (!target) {
-        toast.error('Could not save steps: child subgraph is not ready')
+        toast.error(i18n.t('toast.childSubgraphNotReady', { ns: 'canvas' }))
         return
       }
       try {
@@ -2129,9 +2132,9 @@ export function GraphCanvas({
     if (!isDrilled) return false
     if (drilledChildTarget) return false
     if (isDrilledChildReadOnly) {
-      toast.error('This subgraph is read-only. Fork it into your workspace to edit.')
+      toast.error(i18n.t('toast.subgraphReadOnly', { ns: 'canvas' }))
     } else {
-      toast.error('Loading subgraph. Try again in a moment.')
+      toast.error(i18n.t('toast.subgraphLoading', { ns: 'canvas' }))
     }
     return true
   }, [isDrilled, drilledChildTarget, isDrilledChildReadOnly])
@@ -2140,17 +2143,17 @@ export function GraphCanvas({
     const source = connection.source
     const target = connection.target
     if (!source || !target) {
-      toast.error('Connection endpoints are required')
+      toast.error(graphEditProblemMessage({ code: 'connect_endpoints_must_be_phases' }))
       return
     }
     const scope = canvasScopeForEndpoints(source, target)
     if (!scope) {
-      toast.error('Connect nodes within the same graph.')
+      toast.error(i18n.t('toast.connectSameGraph', { ns: 'canvas' }))
       return
     }
     const localConnection = localConnectionEndpoints({ source, target })
     if (localConnection.source === localConnection.target) {
-      toast.error('A phase cannot depend on itself')
+      toast.error(graphEditProblemMessage({ code: 'self_dependency' }))
       return
     }
     const visibleNodes = nodesRef.current
@@ -2160,23 +2163,23 @@ export function GraphCanvas({
     const isGraphOutputConnection = Boolean(sourceNode) && localConnection.target === OUTPUT_ID
     const isPhaseDependencyConnection = Boolean(sourceNode) && Boolean(targetNode)
     if (!isGraphInputConnection && !isGraphOutputConnection && !isPhaseDependencyConnection) {
-      toast.error('Connect Input to a phase, phase to phase, or phase to Output')
+      toast.error(graphEditProblemMessage({ code: 'connect_boundary_direction' }))
       return
     }
     const dependencySource = localConnection.source === INPUT_ID ? 'input' : localConnection.source
     if (targetNode && targetNode.data.dependsOn.includes(dependencySource)) {
-      toast.error('This dependency already exists')
+      toast.error(graphEditProblemMessage({ code: 'dependency_exists' }))
       return
     }
     if (sourceNode && localConnection.target === OUTPUT_ID && sourceNode.data.isOutput === true) {
-      toast.error('This output marker already exists')
+      toast.error(graphEditProblemMessage({ code: 'output_marker_exists' }))
       return
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
       const childTarget = expandedChildSaveTarget(scope.parentNodeId)
       if (!childTarget) {
-        toast.error('Loading subgraph. Try again in a moment.')
+        toast.error(i18n.t('toast.subgraphLoading', { ns: 'canvas' }))
         return
       }
       childArgs = [childTarget]
@@ -2196,7 +2199,7 @@ export function GraphCanvas({
       beginGraphEdit()
       Promise.resolve(onPersistConnection({ ...connection, ...localConnection }, ...childArgs))
         .catch((persistError: unknown) => {
-          toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
+          toast.error(graphEditErrorMessage(persistError, i18n.t('toast.persistDependencyFailed', { ns: 'canvas' })))
           setEdges(decoratedComposedEdges)
           setNodes(composedLayout.nodes)
         })
@@ -2225,7 +2228,7 @@ export function GraphCanvas({
 
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
     if (!newConnection.source || !newConnection.target) {
-      toast.error('Edge endpoints must be phase nodes to reconnect.')
+      toast.error(graphEditProblemMessage({ code: 'reconnect_endpoints_must_be_phases' }))
       reconnectLandedRef.current = true
       restoreReconnectingEdge(oldEdge)
       return
@@ -2233,7 +2236,7 @@ export function GraphCanvas({
     const oldScope = canvasScopeForEndpoints(oldEdge.source, oldEdge.target)
     const newScope = canvasScopeForEndpoints(newConnection.source, newConnection.target)
     if (!oldScope || !newScope || oldScope.parentNodeId !== newScope.parentNodeId) {
-      toast.error('Reconnect nodes within the same graph.')
+      toast.error(i18n.t('toast.reconnectSameGraph', { ns: 'canvas' }))
       reconnectLandedRef.current = true
       restoreReconnectingEdge(oldEdge)
       return
@@ -2245,8 +2248,10 @@ export function GraphCanvas({
       localNewConnection,
     )
     if (!plan.ok) {
-      if (plan.reason !== 'no-op') {
-        toast.error(plan.message)
+      // Dragging an endpoint back where it started is not a mistake worth a
+      // toast; the edge just snaps back.
+      if (plan.problem.code !== 'reconnect_no_op') {
+        toast.error(graphEditProblemMessage(plan.problem))
       }
       reconnectLandedRef.current = true
       restoreReconnectingEdge(oldEdge)
@@ -2256,7 +2261,7 @@ export function GraphCanvas({
       node.id === newConnection.target && node.type === 'skill'
     ))
     if (targetNode && targetNode.data.dependsOn.includes(plan.connect.source)) {
-      toast.error('This dependency already exists')
+      toast.error(graphEditProblemMessage({ code: 'dependency_exists' }))
       reconnectLandedRef.current = true
       restoreReconnectingEdge(oldEdge)
       return
@@ -2265,7 +2270,7 @@ export function GraphCanvas({
     if (newScope.parentNodeId) {
       const childTarget = expandedChildSaveTarget(newScope.parentNodeId)
       if (!childTarget) {
-        toast.error('Loading subgraph. Try again in a moment.')
+        toast.error(i18n.t('toast.subgraphLoading', { ns: 'canvas' }))
         reconnectLandedRef.current = true
         restoreReconnectingEdge(oldEdge)
         return
@@ -2297,7 +2302,7 @@ export function GraphCanvas({
       plan.connect,
     ))
     const rollback = (reconnectError: unknown) => {
-      toast.error(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect dependency')
+      toast.error(graphEditErrorMessage(reconnectError, i18n.t('toast.reconnectDependencyFailed', { ns: 'canvas' })))
       setEdges(decoratedComposedEdges)
       setNodes(composedLayout.nodes)
     }
@@ -2337,14 +2342,14 @@ export function GraphCanvas({
     if (!onDisconnectConnection) return
     const scope = canvasScopeForEndpoints(connection.source, connection.target)
     if (!scope) {
-      toast.error('Disconnect nodes within the same graph.')
+      toast.error(i18n.t('toast.disconnectSameGraph', { ns: 'canvas' }))
       return
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
       const childTarget = expandedChildSaveTarget(scope.parentNodeId)
       if (!childTarget) {
-        toast.error('Loading subgraph. Try again in a moment.')
+        toast.error(i18n.t('toast.subgraphLoading', { ns: 'canvas' }))
         return
       }
       childArgs = [childTarget]
@@ -2360,7 +2365,7 @@ export function GraphCanvas({
     beginGraphEdit()
     void Promise.resolve(onDisconnectConnection(localConnection, ...childArgs))
       .catch((disconnectError: unknown) => {
-        toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
+        toast.error(graphEditErrorMessage(disconnectError, i18n.t('toast.disconnectDependencyFailed', { ns: 'canvas' })))
         setEdges(decoratedComposedEdges)
         setNodes(composedLayout.nodes)
       })
@@ -2375,7 +2380,7 @@ export function GraphCanvas({
     if (parentNodeId) {
       const childTarget = expandedChildSaveTarget(parentNodeId)
       if (!childTarget) {
-        toast.error('Loading subgraph. Try again in a moment.')
+        toast.error(i18n.t('toast.subgraphLoading', { ns: 'canvas' }))
         return
       }
       childArgs = [childTarget]
@@ -2385,7 +2390,7 @@ export function GraphCanvas({
     }
     void Promise.resolve(onDeletePhase(phaseId, ...childArgs))
       .catch((deleteError: unknown) => {
-        toast.error(deleteError instanceof Error ? deleteError.message : 'Could not delete node')
+        toast.error(graphEditErrorMessage(deleteError, i18n.t('toast.deleteNodeFailed', { ns: 'canvas' })))
       })
   }, [blockDrilledEditIfUnwritable, drilledChildTarget, expandedChildSaveTarget, onDeletePhase])
 
@@ -2422,7 +2427,7 @@ export function GraphCanvas({
     }
     const scope = canvasScopeForEndpoints(edge.source, edge.target)
     if (!scope) {
-      toast.error('Disconnect nodes within the same graph.')
+      toast.error(i18n.t('toast.disconnectSameGraph', { ns: 'canvas' }))
       restoreReconnectingEdge(edge)
       return
     }
@@ -2430,7 +2435,7 @@ export function GraphCanvas({
     if (scope.parentNodeId) {
       const childTarget = expandedChildSaveTarget(scope.parentNodeId)
       if (!childTarget) {
-        toast.error('Loading subgraph. Try again in a moment.')
+        toast.error(i18n.t('toast.subgraphLoading', { ns: 'canvas' }))
         restoreReconnectingEdge(edge)
         return
       }
@@ -2448,7 +2453,7 @@ export function GraphCanvas({
     beginGraphEdit()
     Promise.resolve(onDisconnectConnection(localConnection, ...childArgs))
       .catch((disconnectError: unknown) => {
-        toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
+        toast.error(graphEditErrorMessage(disconnectError, i18n.t('toast.disconnectDependencyFailed', { ns: 'canvas' })))
         setEdges(decoratedComposedEdges)
         setNodes(composedLayout.nodes)
       })
@@ -2703,7 +2708,7 @@ export function GraphCanvas({
           }
           void Promise.resolve(onCreatePhase(kind, phaseId, drilledChildTarget ?? undefined))
             .catch((createError: unknown) => {
-              toast.error(createError instanceof Error ? createError.message : 'Could not create phase')
+              toast.error(graphEditErrorMessage(createError, i18n.t('toast.createPhaseFailed', { ns: 'canvas' })))
             })
         }}
       />
@@ -2711,11 +2716,10 @@ export function GraphCanvas({
   )
 }
 
-const ADD_PHASE_OPTIONS: ReadonlyArray<{ kind: NewPhaseKind; label: string }> = [
-  { kind: 'skill', label: 'Agent Phase' },
-  { kind: 'logic', label: 'Logic Phase' },
-  { kind: 'subgraph', label: 'Subgraph Phase' },
-]
+// Order the add-node menu offers them in. The label for each kind lives in the
+// `canvas` namespace under `phaseKind.<kind>`, so the menu and the name dialog
+// read one definition instead of each carrying its own copy.
+const ADD_PHASE_KINDS: readonly NewPhaseKind[] = ['skill', 'logic', 'subgraph']
 
 // Display label for the canvas shortcut modifier: ⌘ on macOS, Ctrl+ elsewhere.
 const SHORTCUT_MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
@@ -2747,6 +2751,7 @@ export function CanvasContextMenuContent({
   onCloseEdgeMenu?: () => void
   readOnly?: boolean
 }) {
+  const { t } = useTranslation('canvas')
   // Explicit read-only projection: no edit affordances at all, so right-click
   // offers neither Disconnect nor Add Phase Node.
   if (readOnly) {
@@ -2759,19 +2764,19 @@ export function CanvasContextMenuContent({
       {/* Zoom / Fit are no-ops while the canvas is locked. Shortcuts mirror the
           window-level keydown handler in GraphCanvas (#3.2). */}
       <ContextMenuItem onSelect={onZoomIn} disabled={canvasLocked}>
-        Zoom in
+        {t('menu.zoomIn')}
         <ContextMenuShortcut>{SHORTCUT_MOD}=</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={onZoomOut} disabled={canvasLocked}>
-        Zoom out
+        {t('menu.zoomOut')}
         <ContextMenuShortcut>{SHORTCUT_MOD}−</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={onFitView} disabled={canvasLocked}>
-        Fit view
+        {t('menu.fitView')}
         <ContextMenuShortcut>{SHORTCUT_MOD}0</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={onToggleCanvasLock}>
-        {canvasLocked ? 'Unlock canvas' : 'Lock canvas'}
+        {canvasLocked ? t('menu.unlockCanvas') : t('menu.lockCanvas')}
         <ContextMenuShortcut>{SHORTCUT_MOD}L</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuSeparator />
@@ -2782,21 +2787,21 @@ export function CanvasContextMenuContent({
             onCloseEdgeMenu?.()
           }}
         >
-          Disconnect
+          {t('menu.disconnect')}
         </ContextMenuItem>
       ) : nodeMenuPhaseId && onDeletePhase ? (
         <ContextMenuItem variant="destructive" onSelect={() => { void onDeletePhase(nodeMenuPhaseId) }}>
           <Trash2 className="size-3.5" />
-          Delete node
-          <ContextMenuShortcut>Del</ContextMenuShortcut>
+          {t('menu.deleteNode')}
+          <ContextMenuShortcut>{t('menu.deleteShortcut')}</ContextMenuShortcut>
         </ContextMenuItem>
       ) : onCreatePhase ? (
         // Add-node options flattened directly into the menu (no nested submenu).
         <>
-          <ContextMenuLabel>Add node</ContextMenuLabel>
-          {ADD_PHASE_OPTIONS.map((option) => (
-            <ContextMenuItem key={option.kind} onSelect={() => { void onCreatePhase?.(option.kind) }}>
-              {option.label}
+          <ContextMenuLabel>{t('menu.addNode')}</ContextMenuLabel>
+          {ADD_PHASE_KINDS.map((kind) => (
+            <ContextMenuItem key={kind} onSelect={() => { void onCreatePhase?.(kind) }}>
+              {t(`phaseKind.${kind}`)}
             </ContextMenuItem>
           ))}
         </>

@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Bot, Briefcase, Code, ListTree, Minus, Network, Pause, Plus, ShieldCheck, ShieldHalf } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
 import { CONFLICT_ICON_CLASS, CONFLICT_TITLE, CONFLICT_VERB } from '@/components/studio/conflict-vocabulary'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -9,7 +10,7 @@ import { NodeCompileErrorBadge } from './NodeCompileErrorBadge'
 import { nodeCardClass, type NodeCardRing } from './node-card'
 import { subgraphProgressLabel } from '@/components/GraphCanvas/subgraph-run'
 import { NodeRuntimeClock, nodeActivityText } from './node-runtime'
-import { STATUS_STYLE, StatusCapsule } from './StatusCapsule'
+import { nodeStatusLabel, StatusCapsule } from './StatusCapsule'
 import {
   SKILL_FLOW_SOURCE_HANDLE_ID,
   SKILL_FLOW_TARGET_HANDLE_ID,
@@ -34,7 +35,8 @@ function phaseKindIcon(kind: PhaseKind): typeof Bot {
 }
 
 export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
-  const statusLabel = STATUS_STYLE[data.status].label
+  const { t } = useTranslation('canvas')
+  const statusLabel = nodeStatusLabel(data.status)
   const isRunning = data.status === 'running'
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
@@ -113,7 +115,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    aria-label="Golden captured"
+                    aria-label={t('node.goldenCaptured')}
                     className="inline-flex size-5 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
                   >
                     <ShieldCheck className="size-3" />
@@ -125,7 +127,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    aria-label="Logic OK (predict ran, no golden yet)"
+                    aria-label={t('node.logicOk')}
                     className="inline-flex size-5 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
                   >
                     <ShieldHalf className="size-3" />
@@ -149,7 +151,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
               <TooltipTrigger asChild>
                 <span
                   data-node-activity={isRunning ? 'running' : 'settled'}
-                  aria-label="Node activity"
+                  aria-label={t('node.activity')}
                   className="text-[10px] tabular-nums leading-none text-muted-foreground"
                 >
                   {activityText.short}
@@ -162,7 +164,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span
-                  aria-label="Subgraph progress"
+                  aria-label={t('node.subgraphProgress')}
                   className="text-[10px] tabular-nums leading-none text-muted-foreground"
                 >
                   {subgraphProgressText.short}
@@ -176,7 +178,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {inlineErrorMessage ? (
         <div
           role="alert"
-          aria-label="Node error summary"
+          aria-label={t('node.errorSummary')}
           className="mt-2 flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
         >
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
@@ -186,7 +188,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {isDirtyDownstream ? (
         <div
           role="note"
-          aria-label="Resume unavailable: upstream changed"
+          aria-label={t('node.resumeUnavailable')}
           className="mt-2 flex items-start gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
         >
           <Pause className="mt-0.5 size-3 shrink-0" />
@@ -197,7 +199,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         <div className="mt-2">
           <button
             type="button"
-            aria-label={data.isStepsExpanded ? 'Collapse steps' : 'Edit steps'}
+            aria-label={data.isStepsExpanded ? t('node.collapseSteps') : t('node.editSteps')}
             onClick={(event) => {
               event.stopPropagation()
               data.onToggleSteps?.()
@@ -205,7 +207,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
           >
             <ListTree className="size-3" />
-            {data.isStepsExpanded ? 'Hide steps' : 'Edit steps'}
+            {data.isStepsExpanded ? t('node.hideSteps') : t('node.editSteps')}
           </button>
           {data.isStepsExpanded ? (
             <div
@@ -238,7 +240,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           ) : null}
           <button
             type="button"
-            aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
+            aria-label={data.isExpanded ? t('node.collapseSubgraph') : t('node.expandSubgraph')}
             onClick={(event) => {
               event.stopPropagation()
               data.onToggleSubgraph?.()

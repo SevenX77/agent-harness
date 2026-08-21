@@ -1,8 +1,10 @@
 import i18n from "i18next"
 import LanguageDetector from "i18next-browser-languagedetector"
 import { initReactI18next } from "react-i18next"
+import enCanvas from "./locales/en/canvas.json"
 import enErrors from "./locales/en/errors.json"
 import enSettings from "./locales/en/settings.json"
+import zhCnCanvas from "./locales/zh-CN/canvas.json"
 import zhCnErrors from "./locales/zh-CN/errors.json"
 import zhCnSettings from "./locales/zh-CN/settings.json"
 
@@ -12,10 +14,12 @@ export const resources = {
   en: {
     settings: enSettings,
     errors: enErrors,
+    canvas: enCanvas,
   },
   "zh-CN": {
     settings: zhCnSettings,
     errors: zhCnErrors,
+    canvas: zhCnCanvas,
   },
 } as const
 
@@ -33,7 +37,7 @@ export const i18nReady = i18n.isInitialized
         fallbackLng: "en",
         supportedLngs,
         load: "currentOnly",
-        ns: ["settings", "errors"],
+        ns: ["settings", "errors", "canvas"],
         detection: {
           order: ["localStorage"],
           caches: ["localStorage"],

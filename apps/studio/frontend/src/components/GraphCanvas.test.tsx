@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { act, type ReactElement, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -163,42 +163,48 @@ function skillNodeHtml(overrides: Partial<SkillGraphNode['data']> = {}): string 
   return renderToStaticMarkup(<SkillNode {...skillNodeProps(overrides)} />)
 }
 
-function renderSkillNodeRoot(overrides: Partial<SkillGraphNode['data']> = {}) {
-  const node = SkillNode(skillNodeProps(overrides))
-  if (!isValidElement(node)) {
-    throw new Error('SkillNode did not return an element')
+// Mount a real SkillNode into the DOM. It cannot be called as a plain function
+// any more: it uses hooks (`useTranslation`), so only a renderer can run it.
+function mountSkillNode(overrides: Partial<SkillGraphNode['data']> = {}): {
+  card: HTMLElement
+  parentDoubleClick: ReturnType<typeof vi.fn>
+  cleanup: () => void
+} {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const parentDoubleClick = vi.fn()
+  container.addEventListener('dblclick', parentDoubleClick)
+  const root = createRoot(container)
+  act(() => {
+    root.render(<SkillNode {...skillNodeProps(overrides)} />)
+  })
+  const card = container.firstElementChild
+  if (!(card instanceof HTMLElement)) {
+    throw new Error('SkillNode did not render an element')
   }
-  return node as ReactElement<{
-    onDoubleClick?: (event: { stopPropagation: () => void }) => void
-  }>
+  return {
+    card,
+    parentDoubleClick,
+    cleanup: () => {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    },
+  }
 }
 
-function textContent(node: ReactNode): string {
-  if (Array.isArray(node)) return node.map(textContent).join('')
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (isValidElement(node)) {
-    const props = node.props as { children?: ReactNode }
-    return textContent(props.children)
+function clickButtonByText(card: HTMLElement, text: string): void {
+  const button = [...card.querySelectorAll('button')].find((candidate) => (candidate.textContent ?? '').includes(text))
+  if (!button) {
+    throw new Error(`no button reading ${text}`)
   }
-  return ''
+  act(() => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
 }
 
-function findClickableByText(node: ReactNode, text: string): ReactElement<{ onClick?: () => void }> | null {
-  if (!isValidElement(node)) return null
-  const props = node.props as { children?: ReactNode; onClick?: () => void }
-  if (typeof props.onClick === 'function' && textContent(props.children).includes(text)) {
-    return node as ReactElement<{ onClick?: () => void }>
-  }
-  const children = props.children
-  if (Array.isArray(children)) {
-    for (const child of children) {
-      const match = findClickableByText(child, text)
-      if (match) return match
-    }
-    return null
-  }
-  return findClickableByText(children, text)
-}
+
 
 function edgeIds(nodes: SkillGraphNode[]): string[] {
   return buildEdges(nodes).map((edge) => `${edge.source}->${edge.target}`)
@@ -1439,7 +1445,7 @@ describe('GraphCanvas', () => {
 
   it('passes the full conflict identity when allowing a sequential overwrite', () => {
     const onAllowSequentialOverwrite = vi.fn()
-    const node = renderSkillNodeRoot({
+    const { card, cleanup } = mountSkillNode({
       activeConflict: {
         nodeId: 'review',
         fieldName: 'events_raw',
@@ -1449,9 +1455,10 @@ describe('GraphCanvas', () => {
       onCancelSequentialOverwrite: () => undefined,
     })
 
-    findClickableByText(node, CONFLICT_VERB.overwrite)?.props.onClick?.()
+    clickButtonByText(card, CONFLICT_VERB.overwrite)
 
     expect(onAllowSequentialOverwrite).toHaveBeenCalledWith('review', 'events_raw', 'aggregate')
+    cleanup()
   })
 
   it('builds only declared branching dependency edges', () => {
@@ -1554,17 +1561,20 @@ describe('GraphCanvas', () => {
     // double-clicking a subgraph node silently fails to open the editor. Inline
     // expand is a separate affordance (the explicit Expand-subgraph button), and
     // drilling into the child canvas now lives on the expanded board's button.
-    const stopPropagation = vi.fn()
     const onToggleSubgraph = vi.fn()
-    const node = renderSkillNodeRoot({
+    const { card, parentDoubleClick, cleanup } = mountSkillNode({
       subgraphPath: '/abs/subgraph',
       onToggleSubgraph,
     })
 
-    // Either there is no root onDoubleClick at all, or it does not stop the event.
-    node.props.onDoubleClick?.({ stopPropagation })
+    act(() => {
+      card.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    })
 
-    expect(stopPropagation).not.toHaveBeenCalled()
+    // The event has to REACH the canvas above the card, which is where
+    // ReactFlow's onNodeDoubleClick lives.
+    expect(parentDoubleClick).toHaveBeenCalledTimes(1)
     expect(onToggleSubgraph).not.toHaveBeenCalled()
+    cleanup()
   })
 })

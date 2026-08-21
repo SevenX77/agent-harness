@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { FileCode2, GripHorizontal, Maximize2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { SUBGRAPH_BRIDGE_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { SubgraphGroupNodeData } from './types'
 import { Spinner } from '../ui/spinner'
@@ -16,6 +17,7 @@ export function subgraphGroupTitle(data: SubgraphGroupNodeData): string {
 }
 
 export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
+  const { t } = useTranslation('canvas')
   const title = subgraphGroupTitle(data)
 
   return (
@@ -54,7 +56,7 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label="Open subgraph canvas"
+                  aria-label={t('node.openSubgraphCanvas')}
                   onClick={(event) => {
                     event.stopPropagation()
                     data.onOpenCanvas?.(data.path, title)

@@ -140,6 +140,7 @@ describe('ContextEdge', () => {
       x: 50,
       y: 50,
       hasTraceData: false,
+      inspectLabel: 'View edge trace data',
       tooltipCopy: 'Run the skill to inspect transferred data',
       data: baseProps.data,
     }))
@@ -155,6 +156,7 @@ describe('ContextEdge', () => {
       x: 50,
       y: 50,
       hasTraceData: false,
+      inspectLabel: 'View edge trace data',
       tooltipCopy: 'Run the skill to inspect transferred data',
       data: {
         hasTraceData: false,
@@ -199,6 +201,7 @@ describe('ContextEdge', () => {
       x: 50,
       y: 50,
       hasTraceData: false,
+      inspectLabel: 'View edge trace data',
       tooltipCopy: 'Run the skill to inspect transferred data',
       data: {
         hasTraceData: false,

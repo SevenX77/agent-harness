@@ -4,6 +4,7 @@ import type { SkillGraphNode } from '@/components/nodes'
 import { subgraphPreviewChildNodeId } from './subgraph-expansion'
 import {
   currentFileAllowsSequentialOverwrite,
+  isSequentialOverwriteCompileError,
   sequentialOverwriteConflictForVisibleNode,
   findNextSubgraphExpansionNode,
   sequentialOverwriteRouteFromCompileError,
@@ -13,9 +14,10 @@ function sequentialError(file: string | null, message?: string): CompileError {
   return {
     file,
     line: 1,
-    field: null,
+    field: 'io.outputs.properties.events_raw',
     severity: 'fatal',
     error_code: 'F-v3-sequential-overwrite-unauthorized',
+    conflicting_phase: 'aggregate',
     message: message ?? "Phase 'review' sequentially overwrites field 'events_raw' outputted by upstream phase 'aggregate'.",
   }
 }
@@ -40,6 +42,75 @@ function subgraphNode(id: string, subgraphPath: string, workspaceRoot: string): 
 }
 
 describe('sequential overwrite routing', () => {
+  it('recognizes the conflict by its error code alone', () => {
+    const coded = sequentialError('phases/review/LOGIC.md')
+    expect(isSequentialOverwriteCompileError(coded)).toBe(true)
+    expect(isSequentialOverwriteCompileError({ ...coded, error_code: '[F-v3-sequential-overwrite-unauthorized]' })).toBe(true)
+  })
+
+  it('does not recognize a conflict from wording alone', () => {
+    // Prose is not a contract: an unrelated diagnostic that happens to describe
+    // an overwrite must not open the canvas popover, and a reworded conflict
+    // must not stop opening it. Only the code decides.
+    const uncoded: CompileError = {
+      ...sequentialError('phases/review/LOGIC.md'),
+      error_code: null,
+    }
+
+    expect(isSequentialOverwriteCompileError(uncoded)).toBe(false)
+  })
+
+  it('reads the conflicting field and upstream phase from the fields, not the sentence', () => {
+    const route = sequentialOverwriteRouteFromCompileError(
+      {
+        ...sequentialError('phases/review/LOGIC.md'),
+        field: 'io.outputs.properties.events_raw',
+        conflicting_phase: 'aggregate',
+        // A message that disagrees with the structured axes: whatever the
+        // sentence says, the fields are the answer.
+        message: 'Phase reworded this diagnostic entirely.',
+      },
+      '/repo/skills/story-deconstruction-v3',
+    )
+    expect(route).not.toBeNull()
+    if (!route) return
+
+    const reviewNode: SkillGraphNode = {
+      ...subgraphNode('review', '', '/repo/skills/story-deconstruction-v3'),
+      data: {
+        ...subgraphNode('review', '', '/repo/skills/story-deconstruction-v3').data,
+        phaseId: 'review',
+        mode: 'agent',
+      },
+    }
+
+    expect(sequentialOverwriteConflictForVisibleNode([reviewNode], route)).toEqual({
+      nodeId: 'review',
+      fieldName: 'events_raw',
+      ancestorNodeId: 'aggregate',
+    })
+  })
+
+  it('raises no conflict when the engine named no upstream phase', () => {
+    const route = sequentialOverwriteRouteFromCompileError(
+      { ...sequentialError('phases/review/LOGIC.md'), conflicting_phase: null },
+      '/repo/skills/story-deconstruction-v3',
+    )
+    expect(route).not.toBeNull()
+    if (!route) return
+
+    const reviewNode: SkillGraphNode = {
+      ...subgraphNode('review', '', '/repo/skills/story-deconstruction-v3'),
+      data: {
+        ...subgraphNode('review', '', '/repo/skills/story-deconstruction-v3').data,
+        phaseId: 'review',
+        mode: 'agent',
+      },
+    }
+
+    expect(sequentialOverwriteConflictForVisibleNode([reviewNode], route)).toBeNull()
+  })
+
   it('derives the full subgraph path chain and target phase from a nested compile error file', () => {
     const route = sequentialOverwriteRouteFromCompileError(
       sequentialError('subgraph/event-timeline/subgraph/event-extraction/phases/review/SKILL.md'),

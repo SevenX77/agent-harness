@@ -113,6 +113,10 @@ class CompileError(BaseModel):
     severity: Literal["fatal", "warning"] = "fatal"
     message: str
     error_code: str | None = None
+    # The other phase, for diagnostics whose subject is a relationship between
+    # two of them (engine ``CompileIssue.conflicting_phase``). The canvas needs
+    # to name it without re-reading the message.
+    conflicting_phase: str | None = None
 
 
 class CompileSuccess(BaseModel):

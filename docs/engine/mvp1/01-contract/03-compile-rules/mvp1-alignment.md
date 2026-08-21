@@ -193,6 +193,8 @@ StateMapper 目标规则:
 
 错误 payload 必须至少包含 `code`, `level`, `stage`, `message`, `doc_link`；推荐包含 `skill_id`, `phase_id`, `field_path`, `source_path`。各字段 spec 的 FATAL / WARN 判断最终收敛到本节命名规则。
 
+**两个 phase 之间的冲突要报出两个 phase。** 有一类规则的主语本身就是两个 phase 的关系——同一个输出字段被串联覆盖（`[F-v3-sequential-overwrite-unauthorized]`）或被并行写入（`[F-v3-parallel-write-conflict]`）。这类诊断在常规轴之外还带 `conflicting_phase`：`source_path` 处那个 phase 的 `field_path` 字段，与 `conflicting_phase` 那个 phase 的声明相撞。`field_path` 指向**冲突的那个字段**（`io.outputs.properties.<key>`），不是解决冲突要改的那个 frontmatter 键。理由是消费方需要这两个事实（Studio 画布要把冲突画在节点上、并让作者就地授权），而校验器求值时它们本来就在手里；只写进 `message` 等于逼消费方正则解析英文句子，措辞一改就散架。单 phase 规则保持 `conflicting_phase = None`——没有第二个参与者就不许声称有。
+
 TraceEventKind(例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`)不是错误码，不进入本速查表；事件协议由 observability / API 契约维护。
 
 ### 3.1 错误契约 V2(通用消费者增强，目标归 kiro)

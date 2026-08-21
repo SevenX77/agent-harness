@@ -9,6 +9,7 @@ import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import { addEdge, type Edge, type Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
+import { CONFLICT_TITLE, CONFLICT_VERB } from '@/components/studio/conflict-vocabulary'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData } from './nodes'
 
 const { reactFlowPropsRef, contextMenuItems, setEdgesMock, setNodesMock } = vi.hoisted(() => ({
@@ -1420,7 +1421,7 @@ describe('GraphCanvas', () => {
     expectContextEdges(nodes)
   })
 
-  it('uses Cancel/Allow actions for sequential overwrite warnings', () => {
+  it('spells its actions with the shared conflict vocabulary', () => {
     const html = skillNodeHtml({
       activeConflict: {
         nodeId: 'review',
@@ -1431,9 +1432,9 @@ describe('GraphCanvas', () => {
       onCancelSequentialOverwrite: () => undefined,
     })
 
-    expect(html).toContain('Cancel')
-    expect(html).toContain('Allow Overwrite')
-    expect(html).not.toContain('Deny')
+    expect(html).toContain(CONFLICT_VERB.cancel)
+    expect(html).toContain(CONFLICT_VERB.overwrite)
+    expect(html).toContain(CONFLICT_TITLE.sequentialOverwrite)
   })
 
   it('passes the full conflict identity when allowing a sequential overwrite', () => {
@@ -1448,7 +1449,7 @@ describe('GraphCanvas', () => {
       onCancelSequentialOverwrite: () => undefined,
     })
 
-    findClickableByText(node, 'Allow Overwrite')?.props.onClick?.()
+    findClickableByText(node, CONFLICT_VERB.overwrite)?.props.onClick?.()
 
     expect(onAllowSequentialOverwrite).toHaveBeenCalledWith('review', 'events_raw', 'aggregate')
   })

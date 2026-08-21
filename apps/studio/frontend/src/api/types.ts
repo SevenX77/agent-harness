@@ -41,6 +41,9 @@ export interface CompileError {
   severity: 'fatal' | 'warning'
   message: string
   error_code?: string | null
+  // The other phase, for diagnostics about a relationship between two of them
+  // (engine `CompileIssue.conflicting_phase`).
+  conflicting_phase?: string | null
   details?: string[]
 }
 

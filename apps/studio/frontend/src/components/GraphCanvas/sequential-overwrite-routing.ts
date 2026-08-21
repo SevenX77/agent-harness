@@ -4,14 +4,32 @@ import { parsePhaseFrontmatter } from '@/components/studio/panels/phase-frontmat
 import { joinWorkspacePath, resolveSubgraphPath } from '@/components/studio/subgraph-path'
 
 const SEQUENTIAL_OVERWRITE_CODE = 'F-v3-sequential-overwrite-unauthorized'
+const OUTPUT_FIELD_PREFIX = 'io.outputs.properties.'
 const PHASE_FILE_RE = /^(?:(?<prefix>.*)\/)?phases\/(?<phaseId>[A-Za-z0-9_-]+)\/(?:LOGIC|SUBGRAPH|SKILL)\.md$/
+// The one thing still read out of the message, and only as a fallback: a
+// diagnostic raised inside a nested child skill carries a `file` relative to
+// the CHILD root, so the parent's subgraph prefix survives only in the
+// location the engine prints. That is a separate defect in how child
+// diagnostics are addressed (ledger K6) — not something the conflict UI can
+// fix from here.
 const MESSAGE_LOCATION_RE = /(?<path>(?:[A-Za-z]:[\\/]|\/)[^\n]*?(?:GRAPH|LOGIC|SUBGRAPH|SKILL)\.md):\d+|(?<relative>(?:subgraph\/[^\n]*?\/)?phases\/[A-Za-z0-9_-]+\/(?:LOGIC|SUBGRAPH|SKILL)\.md):\d+/
-const SEQUENTIAL_OVERWRITE_DETAIL_RE = /sequentially overwrites field '([^']+)' outputted by upstream phase '([^']+)'/
 
 export interface SequentialOverwriteRoute {
   phaseId: string
   subgraphPaths: string[]
   error: CompileError
+}
+
+/**
+ * One overwrite conflict as the canvas addresses it: the visible node that
+ * would do the overwriting, the field, and the upstream phase that wrote it
+ * first. All three come from the engine diagnostic — the canvas decides where
+ * to draw the conflict, never whether there is one.
+ */
+export interface OverwriteConflict {
+  nodeId: string
+  fieldName: string
+  ancestorNodeId: string
 }
 
 function normalizeComparablePath(value: string | null | undefined): string | null {
@@ -28,14 +46,7 @@ function normalizeErrorCode(value: string | null | undefined): string | null {
 }
 
 export function isSequentialOverwriteCompileError(error: CompileError): boolean {
-  if (normalizeErrorCode(error.error_code) === SEQUENTIAL_OVERWRITE_CODE) {
-    return true
-  }
-  return error.message.includes(SEQUENTIAL_OVERWRITE_CODE)
-    || (
-      error.message.includes('sequentially overwrites field')
-      && error.message.includes('allow_sequential_overwrite')
-    )
+  return normalizeErrorCode(error.error_code) === SEQUENTIAL_OVERWRITE_CODE
 }
 
 function resolveRoutePath(workspaceRoot: string | null | undefined, relativePath: string): string {
@@ -190,12 +201,11 @@ function findRoutePhaseNode(
 }
 
 function conflictDetailsFromError(error: CompileError): { fieldName: string; ancestorNodeId: string } | null {
-  const match = SEQUENTIAL_OVERWRITE_DETAIL_RE.exec(error.message)
-  const fieldName = typeof error.field === 'string' && error.field.trim()
-    ? error.field.trim()
-    : match?.[1]
-  const ancestorNodeId = match?.[2]
-  if (!fieldName || !ancestorNodeId) return null
+  const fieldPath = typeof error.field === 'string' ? error.field.trim() : ''
+  const ancestorNodeId = typeof error.conflicting_phase === 'string' ? error.conflicting_phase.trim() : ''
+  if (!fieldPath.startsWith(OUTPUT_FIELD_PREFIX) || !ancestorNodeId) return null
+  const fieldName = fieldPath.slice(OUTPUT_FIELD_PREFIX.length)
+  if (!fieldName) return null
   return { fieldName, ancestorNodeId }
 }
 

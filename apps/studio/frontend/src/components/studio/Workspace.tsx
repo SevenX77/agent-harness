@@ -3076,7 +3076,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       </div>
       <ConflictDialog
         conflict={conflict}
-        onKeepLocal={() => setConflict(null)}
+        onCancel={() => setConflict(null)}
         onUseRemote={handleUseRemote}
         onViewDiff={handleViewDiff}
         onOverwriteRetry={handleOverwriteRetry}

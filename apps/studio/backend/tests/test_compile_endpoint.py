@@ -55,7 +55,15 @@ def test_compile_failure_returns_structured_errors(
     assert body["detail"].startswith("Skill compilation failed with 2 errors")
     assert body["errors"]
     error = next(error for error in body["errors"] if "mode" in error["message"])
-    assert set(error) == {"file", "line", "field", "severity", "message", "error_code"}
+    assert set(error) == {
+        "file",
+        "line",
+        "field",
+        "severity",
+        "message",
+        "error_code",
+        "conflicting_phase",
+    }
     assert error["file"] in {"phases/setup/LOGIC.md", None}
     assert error["line"] is None or isinstance(error["line"], int)
     assert error["field"] is None or isinstance(error["field"], str)

@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -7,38 +8,42 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { CONFLICT_ICON_CLASS, CONFLICT_TITLE, CONFLICT_VERB } from './conflict-vocabulary'
 import type { SaveConflict } from './WorkspaceContext'
 
 interface ConflictDialogProps {
   conflict: SaveConflict | null
-  onKeepLocal: () => void
+  onCancel: () => void
   onUseRemote: () => void
   onViewDiff: () => void
   onOverwriteRetry: () => void
 }
 
-export function ConflictDialog({ conflict, onKeepLocal, onUseRemote, onViewDiff, onOverwriteRetry }: ConflictDialogProps) {
+export function ConflictDialog({ conflict, onCancel, onUseRemote, onViewDiff, onOverwriteRetry }: ConflictDialogProps) {
   return (
     <Dialog open={Boolean(conflict)}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>File changed remotely</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className={CONFLICT_ICON_CLASS} aria-hidden />
+            {CONFLICT_TITLE.fileSave}
+          </DialogTitle>
           <DialogDescription>
-            {conflict?.path ?? 'Open file'} changed outside this editor.
+            {conflict?.path ?? 'Open file'} changed outside this editor. Saving now replaces those changes.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            {CONFLICT_VERB.cancel}
+          </Button>
           <Button type="button" variant="outline" onClick={onViewDiff}>
-            View Diff
+            {CONFLICT_VERB.viewDiff}
           </Button>
           <Button type="button" variant="outline" onClick={onUseRemote}>
-            Use Remote
+            {CONFLICT_VERB.useRemote}
           </Button>
-          <Button type="button" variant="outline" onClick={onOverwriteRetry}>
-            Overwrite/Retry Save
-          </Button>
-          <Button type="button" onClick={onKeepLocal}>
-            Keep Local
+          <Button type="button" variant="warning" onClick={onOverwriteRetry}>
+            {CONFLICT_VERB.overwrite}
           </Button>
         </DialogFooter>
       </DialogContent>

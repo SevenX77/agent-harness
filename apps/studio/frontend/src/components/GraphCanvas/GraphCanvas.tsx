@@ -63,7 +63,6 @@ import {
   phaseRefsFromSkillDetail,
   phaseFilePath,
   planEdgeReconnect,
-  type OverwriteConflict,
 } from './canvas-authoring'
 import { DrillBreadcrumb } from './DrillBreadcrumb'
 import { drillStackReducer, type DrillStack } from './drill-stack'
@@ -74,6 +73,7 @@ import {
   findNextSubgraphExpansionNode,
   sequentialOverwriteConflictForVisibleNode,
   sequentialOverwriteRoutesFromNodeErrors,
+  type OverwriteConflict,
 } from './sequential-overwrite-routing'
 import {
   canvasLayoutSignature,

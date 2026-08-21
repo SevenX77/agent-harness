@@ -1,73 +1,57 @@
 import { describe, expect, it, vi } from 'vitest'
-import { autoWriteGoldenIfAbsent } from './analysis-bar'
-import type { GoldenBaseline } from '@/api/types'
+import { seedGoldenForRun, seedOutcomeMessage } from './analysis-bar'
+import type { GoldenSeedPlan, GoldenSeedTarget } from '@/api/types'
 
-const baseline = (id: string): GoldenBaseline =>
-  ({
-    id,
-    source_run_id: 'run-1',
-    source_run_results_ref: 'skill-1/runs/run-1/result.json',
-    baseline_ref: `.workspace/golden/${id}/baseline.json`,
-    linked_input_id: 'run-1',
-    created_at: '2026-06-16T00:00:00Z',
-    locked: false,
-    content_path: `/workspace/.workspace/golden/${id}/baseline.json`,
-  }) as GoldenBaseline
+const plan = (seeded: GoldenSeedTarget[], overrides: Partial<GoldenSeedPlan> = {}): GoldenSeedPlan => ({
+  baseline_id: 'run-1',
+  baseline_ref: '.workspace/golden/run-1/baseline.json',
+  baseline_locked: false,
+  seeded,
+  files: [],
+  ...overrides,
+})
 
-describe('autoWriteGoldenIfAbsent (F7)', () => {
-  it('writes a golden baseline when the skill has none', async () => {
-    const list = vi.fn().mockResolvedValue([])
-    const save = vi.fn().mockResolvedValue(baseline('g1'))
+const judgeContext = {
+  compare_result_ref: 'skill-1/golden/run-9/compare/run-9/compare_result.json',
+  judge_context_ref: 'skill-1/runs/run-9/copilot_judge/run-9/judge_context.json',
+  baseline_ref: '.workspace/golden/run-9/baseline.json',
+  diff_summary: {
+    baseline_id: 'run-9',
+    run_results_ref: 'skill-1/runs/run-9/result.json',
+    total_score: 100,
+    node_group_count: 1,
+    failed_node_count: 0,
+  },
+}
 
-    const result = await autoWriteGoldenIfAbsent('skill-1', 'run-9', { list, save })
+describe('seedGoldenForRun (F7)', () => {
+  it('asks the backend to seed this run and hands back its verdict', async () => {
+    const seed = vi.fn().mockResolvedValue(plan([{ node_id: 'review', reason: 'absent' }]))
 
-    expect(result).toEqual({ written: true })
-    expect(save).toHaveBeenCalledWith('skill-1', 'run-9', false)
+    const result = await seedGoldenForRun('skill-1', 'run-9', { seed })
+
+    expect(seed).toHaveBeenCalledWith('skill-1', 'run-9', undefined)
+    expect(result.plan.seeded).toEqual([{ node_id: 'review', reason: 'absent' }])
   })
 
-  it('writes an absent golden baseline to the imported workspace root', async () => {
-    const list = vi.fn().mockResolvedValue([])
-    const save = vi.fn().mockResolvedValue(baseline('g1'))
+  it('seeds into the imported workspace root when the skill has one', async () => {
+    const seed = vi.fn().mockResolvedValue(plan([]))
 
-    const result = await autoWriteGoldenIfAbsent('skill-1', 'run-9', {
-      list,
-      save,
-      workspaceRoot: '/abs/path',
-    })
+    await seedGoldenForRun('skill-1', 'run-9', { seed, workspaceRoot: '/abs/path' })
 
-    expect(result).toEqual({ written: true })
-    expect(save).toHaveBeenCalledWith('skill-1', 'run-9', false, '/abs/path')
+    expect(seed).toHaveBeenCalledWith('skill-1', 'run-9', '/abs/path')
   })
 
-  it('leaves existing golden untouched (有的不动)', async () => {
-    const list = vi.fn().mockResolvedValue([baseline('g1')])
-    const save = vi.fn()
+  it('prepares Copilot Judge context against the baseline the seed landed in', async () => {
+    const seed = vi.fn().mockResolvedValue(
+      plan([{ node_id: 'review', reason: 'expected_output_invalid' }], {
+        baseline_ref: '.workspace/golden/run-9/baseline.json',
+      }),
+    )
+    const judge = vi.fn().mockResolvedValue(judgeContext)
 
-    const result = await autoWriteGoldenIfAbsent('skill-1', 'run-9', { list, save })
-
-    expect(result).toEqual({ written: false })
-    expect(save).not.toHaveBeenCalled()
-  })
-
-  it('prepares Copilot Judge context through the adapter after creating a missing golden baseline', async () => {
-    const list = vi.fn().mockResolvedValue([])
-    const save = vi.fn().mockResolvedValue(baseline('run-9'))
-    const judge = vi.fn().mockResolvedValue({
-      compare_result_ref: 'skill-1/golden/run-9/compare/run-9/compare_result.json',
-      judge_context_ref: 'skill-1/runs/run-9/copilot_judge/run-9/judge_context.json',
-      baseline_ref: '.workspace/golden/run-9/baseline.json',
-      diff_summary: {
-        baseline_id: 'run-9',
-        run_results_ref: 'skill-1/runs/run-9/result.json',
-        total_score: 100,
-        node_group_count: 1,
-        failed_node_count: 0,
-      },
-    })
-
-    const result = await autoWriteGoldenIfAbsent('skill-1', 'run-9', {
-      list,
-      save,
+    const result = await seedGoldenForRun('skill-1', 'run-9', {
+      seed,
       judge,
       runResultsRef: 'skill-1/runs/run-9/result.json',
     })
@@ -76,45 +60,57 @@ describe('autoWriteGoldenIfAbsent (F7)', () => {
       runResultsRef: 'skill-1/runs/run-9/result.json',
       baselineRef: '.workspace/golden/run-9/baseline.json',
     })
-    expect(result).toEqual({
-      written: true,
-      judge: {
-        compare_result_ref: 'skill-1/golden/run-9/compare/run-9/compare_result.json',
-        judge_context_ref: 'skill-1/runs/run-9/copilot_judge/run-9/judge_context.json',
-        baseline_ref: '.workspace/golden/run-9/baseline.json',
-        diff_summary: {
-          baseline_id: 'run-9',
-          run_results_ref: 'skill-1/runs/run-9/result.json',
-          total_score: 100,
-          node_group_count: 1,
-          failed_node_count: 0,
-        },
-      },
+    expect(result.judge).toEqual(judgeContext)
+  })
+
+  it('skips judge context when there is no baseline to compare against', async () => {
+    const seed = vi.fn().mockResolvedValue(plan([], { baseline_ref: null }))
+    const judge = vi.fn()
+
+    const result = await seedGoldenForRun('skill-1', 'run-9', {
+      seed,
+      judge,
+      runResultsRef: 'skill-1/runs/run-9/result.json',
     })
+
+    expect(judge).not.toHaveBeenCalled()
+    expect(result.judge).toBeUndefined()
   })
 
   it('rejects Copilot Judge context for a different run before it reaches chat', async () => {
-    const list = vi.fn().mockResolvedValue([baseline('run-9')])
-    const save = vi.fn()
+    const seed = vi.fn().mockResolvedValue(plan([]))
     const judge = vi.fn().mockResolvedValue({
-      compare_result_ref: 'skill-1/golden/run-9/compare/other-run/compare_result.json',
-      judge_context_ref: 'skill-1/runs/other-run/copilot_judge/run-9/judge_context.json',
-      baseline_ref: '.workspace/golden/run-9/baseline.json',
-      diff_summary: {
-        baseline_id: 'run-9',
-        run_results_ref: 'skill-1/runs/other-run/result.json',
-        total_score: 100,
-        node_group_count: 1,
-        failed_node_count: 0,
-      },
+      ...judgeContext,
+      diff_summary: { ...judgeContext.diff_summary, run_results_ref: 'skill-1/runs/other-run/result.json' },
     })
 
-    await expect(autoWriteGoldenIfAbsent('skill-1', 'run-9', {
-      list,
-      save,
-      judge,
-      runResultsRef: 'skill-1/runs/run-9/result.json',
-    })).rejects.toThrow('Copilot Judge run_results_ref mismatch')
-    expect(save).not.toHaveBeenCalled()
+    await expect(
+      seedGoldenForRun('skill-1', 'run-9', {
+        seed,
+        judge,
+        runResultsRef: 'skill-1/runs/run-9/result.json',
+      }),
+    ).rejects.toThrow('Copilot Judge run_results_ref mismatch')
+  })
+})
+
+describe('seedOutcomeMessage', () => {
+  it('names the nodes it filled', () => {
+    expect(
+      seedOutcomeMessage(
+        plan([
+          { node_id: 'setup', reason: 'absent' },
+          { node_id: 'review', reason: 'case_file_missing' },
+        ]),
+      ),
+    ).toBe('已用本次 run 的输出填充 2 个节点的 golden:setup、review')
+  })
+
+  it('says nothing changed when every node already had one', () => {
+    expect(seedOutcomeMessage(plan([]))).toBe('每个节点都已有 golden,未改动')
+  })
+
+  it('says a locked golden was left alone', () => {
+    expect(seedOutcomeMessage(plan([], { baseline_locked: true }))).toBe('Golden 已锁定,未填充')
   })
 })

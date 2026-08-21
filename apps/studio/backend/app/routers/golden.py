@@ -10,13 +10,17 @@ from app.models.golden import (
     GoldenBaseline,
     GoldenBaselineContent,
     GoldenBaselinePlan,
+    GoldenSeedPlan,
+    SeedGoldenReq,
     SetGoldenReq,
 )
 from app.services.golden_diff import (
     delete_golden_baseline_for_skill,
     list_golden_baselines_for_skill,
     plan_golden_baseline_for_run,
+    plan_golden_seed_for_run,
     read_golden_baseline_content,
+    seed_golden_baseline_for_run,
     set_golden_baseline_for_run,
 )
 
@@ -65,6 +69,29 @@ async def set_golden_baseline(
         lock=request.lock,
         node_id=request.node_id,
     )
+
+
+@router.post(
+    "/seed",
+    response_model=GoldenSeedPlan,
+    responses={409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def seed_golden_baseline(
+    skill_id: str,
+    request: SeedGoldenReq,
+    write_fallback: str | None = Header(default=None, alias="X-Studio-Write-Fallback"),
+) -> GoldenSeedPlan:
+    _require_browser_write_fallback(write_fallback)
+    return seed_golden_baseline_for_run(skill_id, request.run_id)
+
+
+@router.post(
+    "/seed/plan",
+    response_model=GoldenSeedPlan,
+    responses={422: {"model": ErrorResponse}},
+)
+async def plan_golden_seed(skill_id: str, request: SeedGoldenReq) -> GoldenSeedPlan:
+    return plan_golden_seed_for_run(skill_id, request.run_id)
 
 
 @router.post(

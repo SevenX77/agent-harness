@@ -578,6 +578,31 @@ export interface GoldenBaselinePlan {
   files: GoldenBaselineFile[]
 }
 
+/**
+ * Why a node had no usable golden. Mirrors backend models/golden.py GoldenSeedReason:
+ * `absent` = the baseline never listed the node; `case_file_missing` = it listed one and
+ * the file is gone; `expected_output_invalid` = the file is there and its expected_output
+ * is not an object (an empty template, or a shape the schema no longer matches).
+ */
+export type GoldenSeedReason = 'absent' | 'case_file_missing' | 'expected_output_invalid'
+
+export interface GoldenSeedTarget {
+  node_id: string
+  reason: GoldenSeedReason
+}
+
+/**
+ * What seeding a run into a skill's golden writes (F6). `files` is empty when every
+ * agent node already has a usable golden — seeding fills gaps, it does not re-promote.
+ */
+export interface GoldenSeedPlan {
+  baseline_id: string
+  baseline_ref: string | null
+  baseline_locked: boolean
+  seeded: GoldenSeedTarget[]
+  files: GoldenBaselineFile[]
+}
+
 export interface SetGoldenReq {
   run_id: string
   lock: boolean

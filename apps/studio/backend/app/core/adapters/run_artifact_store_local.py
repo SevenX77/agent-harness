@@ -99,6 +99,17 @@ class LocalRunArtifactStore:
         self._write_manifest(manifest_file, manifest)
         return None if legacy_objects else refs
 
+    def is_sealed(self, run_id: str) -> bool:
+        """Whether this run has already been closed to further writes.
+
+        Asked by the one caller allowed to close a run, so that closing an
+        already-closed run is a no-op rather than an error: "nothing more will be
+        written" is not a claim that gets less true the second time it is made.
+        `begin_run` and `put_batch` still refuse — for them the seal is somebody
+        else's decision being violated, not repeated.
+        """
+        return (self._run_dir(run_id) / "sealed").exists()
+
     def seal_run(self, run_id: str) -> RunArtifactIndex:
         run_dir = self._run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)

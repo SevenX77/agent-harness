@@ -141,6 +141,9 @@ def test_run_worker_treats_artifact_error_result_as_failed_and_preserves_payload
     }
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    # The worker writes the run's objects; closing the run to further writes
+    # is the finalizer's call, and no finalizer runs in a bare worker test.
+    store.seal_run("run-error-result")
     final_state = json.loads(store.get_run_object("run-error-result", "final_state.json").decode("utf-8"))
     assert final_state == {
         "error_code": "llm.provider_not_configured",
@@ -150,7 +153,7 @@ def test_run_worker_treats_artifact_error_result_as_failed_and_preserves_payload
     }
 
 
-def test_run_worker_persists_sealed_result_snapshot_and_per_node_outputs(
+def test_run_worker_persists_the_result_snapshot_and_per_node_outputs(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
@@ -201,6 +204,9 @@ def test_run_worker_persists_sealed_result_snapshot_and_per_node_outputs(
     )
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    # The worker writes the run's objects; closing the run to further writes
+    # is the finalizer's call, and no finalizer runs in a bare worker test.
+    store.seal_run("run-result-snapshot")
     snapshot_payload = json.loads(store.get_run_object("run-result-snapshot", "result.json").decode("utf-8"))
     snapshot = RunResultSnapshot.model_validate(snapshot_payload)
 

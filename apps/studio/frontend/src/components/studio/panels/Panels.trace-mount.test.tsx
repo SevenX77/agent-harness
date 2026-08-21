@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventEnvelope } from '@/api/types'
@@ -29,8 +30,18 @@ const workspaceContextStub: WorkspaceContextValue = {
   popNavTo: () => undefined,
 }
 
+type PanelsProps = ComponentProps<typeof Panels>
+
 function renderTimelinePanel(
-  props: { runId: string | null; traceEvents: EventEnvelope[]; traceView?: TraceView | null },
+  props: {
+    runId: string | null
+    traceEvents: EventEnvelope[]
+    traceView?: TraceView | null
+    selectedNode?: PanelsProps['selectedNode']
+    onDesignGolden?: PanelsProps['onDesignGolden']
+    onPromoteNode?: PanelsProps['onPromoteNode']
+    traceCanCompare?: boolean
+  },
   context: WorkspaceContextValue = workspaceContextStub,
 ): string {
   return renderToStaticMarkup(
@@ -38,16 +49,24 @@ function renderTimelinePanel(
       <Panels
         activePanel="trace"
         skillId="story-deconstruction"
-        selectedNode={null}
+        selectedNode={props.selectedNode ?? null}
         runId={props.runId}
         traceView={props.traceView ?? null}
         onCloseTraceView={() => undefined}
         traceEvents={props.traceEvents}
         onResumeEdgeDownstream={() => undefined}
+        onDesignGolden={props.onDesignGolden}
+        onPromoteNode={props.onPromoteNode}
+        traceCanCompare={props.traceCanCompare}
       />
     </WorkspaceProvider>,
   )
 }
+
+const goldenlessAgentNode = {
+  id: 'draft',
+  data: { label: 'draft', mode: 'agent', goldenState: 'no-golden' },
+} as unknown as PanelsProps['selectedNode']
 
 const oneEvent: EventEnvelope[] = [
   {
@@ -118,6 +137,37 @@ describe('Panels timeline region — viewed-run mount (F1/F2, decision 2026-08-0
     expect(html).toContain('aria-label="Back to run list"')
     // Read-only replay: no run actions are wired for a historical view.
     expect(html).not.toContain('Resume run from last checkpoint')
+  })
+
+  // What you can do to the FOCUSED NODE does not depend on a run existing. The
+  // trace region used to mount TimelinePanel when no run had ever happened, so
+  // an action row living inside TracePanel was unreachable on exactly the skill
+  // that needs it most — a brand new one (ledger CP4, caught on the real app
+  // after #952 shipped a green test against TracePanel in isolation).
+  it('offers Design golden for a focused agent node on a skill that has never run', () => {
+    const html = renderTimelinePanel({
+      runId: null,
+      traceEvents: [],
+      selectedNode: goldenlessAgentNode,
+      onDesignGolden: () => undefined,
+    })
+
+    expect(html).toContain('No runs recorded yet')
+    expect(html).toContain('aria-label="Design golden for node &quot;draft&quot;"')
+  })
+
+  it('does not offer promote-node without a run to promote from', () => {
+    const html = renderTimelinePanel({
+      runId: null,
+      traceEvents: [],
+      selectedNode: goldenlessAgentNode,
+      onDesignGolden: () => undefined,
+      onPromoteNode: async () => undefined,
+      traceCanCompare: false,
+    })
+
+    expect(html).toContain('aria-label="Design golden for node &quot;draft&quot;"')
+    expect(html).not.toContain('Promote node to golden')
   })
 
   it('scopes the live trace to a selected edge instead of swapping the panel out (D5)', () => {

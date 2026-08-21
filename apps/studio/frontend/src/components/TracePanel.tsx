@@ -18,12 +18,10 @@ import {
   FlaskConical,
   GitCompareArrows,
   MoreVertical,
-  PencilLine,
   Play,
-  ShieldCheck,
   X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Button } from './ui/button'
 import {
@@ -61,9 +59,9 @@ interface TracePanelProps {
   selectedNode?: {
     id: string
     /**
-     * The focused node also carries its golden tri-state (atom #30) and phase
-     * mode so the trace can offer a per-node golden-create affordance (atom #32
-     * entry①) for the focused node without re-deriving golden coverage here.
+     * Carried for the focus label and for the trace region's node actions
+     * (`FocusedNodeActions`), which read the golden tri-state (atom #30) and
+     * phase mode rather than re-deriving golden coverage.
      */
     data: { label?: string; mode?: string; goldenState?: GoldenNodeState }
   } | null
@@ -97,24 +95,6 @@ interface TracePanelProps {
   compareLoading?: boolean
   onCompareToGolden?: () => void
   onPromoteToGolden?: () => void
-  /**
-   * Per-node golden create (atom #32 entry①): promote ONLY the focused agent node
-   * to golden from the active run. Surfaced beside the trace's focus chip when a
-   * golden-less agent node is focused, mirroring the Properties-panel affordance
-   * but anchored to the node the user is reading in the trace. Same callback the
-   * Properties panel uses (Workspace.handlePromoteNode), so both entry points write
-   * one node's golden via the node_id-aware saveGoldenBaseline.
-   */
-  onPromoteNode?: (nodeId: string) => Promise<void> | void
-  /**
-   * E3 entry①「trace 内占位节点旁按钮」: design this node's golden with copilot
-   * instead of capturing it from output. Deliberately NOT gated on a run — a
-   * placeholder node is exactly the node that has never produced anything, and
-   * F6 puts no timing condition on writing a golden ("不限制 golden 的创建时机").
-   * Its sibling `onPromoteNode` stays run-gated because promoting means promoting
-   * a real output, which does not exist yet.
-   */
-  onDesignGolden?: (node: { id: string; label?: string }) => void
   canResume?: boolean
   resumeLoading?: boolean
   onResume?: () => void
@@ -149,27 +129,6 @@ interface TracePanelProps {
 
 function envelopePayload(event: EventEnvelope): CallbackEvent {
   return event.payload as CallbackEvent
-}
-
-/**
- * atom #32 entry①: which focused node may get a per-node golden created from the
- * trace. Pure projection of the data the trace already holds — no golden coverage
- * is re-derived here. A node qualifies only when it is an AGENT node (skill/llm/
- * agent; logic & subgraph never get golden, design g-c) and does NOT already have
- * golden ('has-golden' → already captured, nothing to create).
- */
-export function isGoldenlessAgentNode(
-  node: { data: { mode?: string; goldenState?: GoldenNodeState } } | null | undefined,
-): boolean {
-  if (!node) {
-    return false
-  }
-  const mode = node.data.mode
-  const isAgent = mode === 'agent' || mode === 'llm' || mode === 'skill'
-  if (!isAgent) {
-    return false
-  }
-  return node.data.goldenState !== 'has-golden'
 }
 
 /** One entry of the run's `⋮` overflow menu. */
@@ -306,8 +265,6 @@ export function TracePanel({
   compareLoading = false,
   onCompareToGolden,
   onPromoteToGolden,
-  onPromoteNode,
-  onDesignGolden,
   canResume = false,
   resumeLoading = false,
   onResume,
@@ -332,7 +289,6 @@ export function TracePanel({
   // with nothing focused — the phase currently running. It decides where the
   // list SCROLLS, never what it contains.
   const focusPhase = selectedNode?.id ?? activePhase
-  const focusLabel = selectedNode?.data.label ?? focusPhase
   const scopedEvents = scope ? traceEvents.filter((event) => eventInScope(event, scope)) : traceEvents
   const filter = useTraceFilter(scopedEvents)
   const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
@@ -359,30 +315,6 @@ export function TracePanel({
   // something that is not the run (PM 08-19 Q5). The run's verdict stays
   // visible where it belongs: the top bar, which names the run itself (F8).
   const outcome = scope ? null : traceOutcomeEntry(traceEvents, metadata)
-
-  const [nodePromoting, setNodePromoting] = useState(false)
-  // atom #32 entry①: offer per-node golden creation for the focused, golden-less
-  // agent node — only while a node is actually focused, a run exists to promote
-  // from (canCompare === Boolean(runId)), and the wiring is present. It is the
-  // trace's node-scoped counterpart to the run-level Golden action.
-  const canPromoteFocusedNode =
-    Boolean(onPromoteNode) &&
-    canCompare &&
-    isGoldenlessAgentNode(selectedNode)
-  const handlePromoteFocusedNode = async () => {
-    if (!onPromoteNode || !selectedNode || nodePromoting) {
-      return
-    }
-    setNodePromoting(true)
-    try {
-      await onPromoteNode(selectedNode.id)
-    } finally {
-      setNodePromoting(false)
-    }
-  }
-  // E3 entry①: writing down what this node SHOULD produce needs no run — only a
-  // focused agent node that has no golden yet. Deliberately not `&& canCompare`.
-  const canDesignFocusedNodeGolden = Boolean(onDesignGolden) && isGoldenlessAgentNode(selectedNode)
 
   // n4-trace#23: the per-candidate tab strip. Rendered whenever a compare run is
   // active (even before its events stream in) so the user can switch candidates
@@ -548,11 +480,11 @@ export function TracePanel({
     </div>
   ) : null
 
-  // The actions that belong to whatever the trace is focused on. Rendered by BOTH
-  // branches below: a skill that has never run reaches the empty branch, and that
-  // is precisely when "write down what this node should produce" is the only thing
-  // to do here — hiding the row with the event list left E3 entry① unreachable.
-  const focusActionRow = degradedRouteCount > 0 || canPromoteFocusedNode || canDesignFocusedNodeGolden ? (
+  // How this RUN was routed — a fact about the events on screen, and the chip
+  // drives this panel's own search filter, so it belongs here. What you can do
+  // to the focused NODE does not: that row is rendered by the trace region
+  // (`FocusedNodeActions`), which is mounted whether or not a run exists.
+  const routeIssuesRow = degradedRouteCount > 0 ? (
     <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
       {degradedRouteCount > 0 ? (
         <Tooltip>
@@ -578,43 +510,6 @@ export function TracePanel({
           </TooltipContent>
         </Tooltip>
       ) : null}
-      {canDesignFocusedNodeGolden ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label={`Design golden for node "${focusLabel}"`}
-              onClick={() => selectedNode && onDesignGolden?.({ id: selectedNode.id, label: focusLabel ?? undefined })}
-              className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-semibold text-foreground hover:bg-accent"
-            >
-              <PencilLine className="size-3.5" />
-              Design golden
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Open one copilot chat to write down what this node should produce — no run needed.
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
-      {canPromoteFocusedNode ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label={`Promote node "${focusLabel}" to golden`}
-              disabled={nodePromoting}
-              onClick={() => {
-                void handlePromoteFocusedNode()
-              }}
-              className="flex items-center gap-1 rounded-full border border-warning-border px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ShieldCheck className="size-3.5" />
-              {nodePromoting ? 'Promoting node' : 'Promote node to golden'}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Create a golden baseline for just this focused node from the current run</TooltipContent>
-        </Tooltip>
-      ) : null}
     </div>
   ) : null
 
@@ -625,8 +520,8 @@ export function TracePanel({
         {identityStrip}
         {failureBanner}
         {scopeStrip}
-        {focusActionRow ? (
-          <div className="shrink-0 border-b border-border bg-card px-3 py-2">{focusActionRow}</div>
+        {routeIssuesRow ? (
+          <div className="shrink-0 border-b border-border bg-card px-3 py-2">{routeIssuesRow}</div>
         ) : null}
         <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
           {live ? 'Waiting for run events' : 'No events recorded for this run'}
@@ -658,7 +553,7 @@ export function TracePanel({
             onSelectPhases={filter.setSelectedPhases}
           />
         </div>
-        {focusActionRow}
+        {routeIssuesRow}
         {hitlPrompt ? (
           <HitlPromptForm
             prompt={hitlPrompt}

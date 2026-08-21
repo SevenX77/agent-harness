@@ -37,6 +37,7 @@ import { TraceSearchBar } from './trace/TraceSearchBar'
 import { useRunDeltas } from '../hooks/useRunDeltas'
 import { TraceEventList } from './trace/TraceEventList'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+import { useTraceCopy } from './trace/trace-copy'
 
 // Re-exported so existing importers (`@/components/TracePanel`) keep working;
 // the canonical definition now lives in studio/hitl-prompt to give the
@@ -131,10 +132,17 @@ function envelopePayload(event: EventEnvelope): CallbackEvent {
   return event.payload as CallbackEvent
 }
 
-/** One entry of the run's `⋮` overflow menu. */
+/**
+ * One entry of the run's `⋮` overflow menu.
+ *
+ * `key` says which action it is and `pending` whether it is already under way;
+ * between them they decide the word, which the menu looks up in the trace
+ * namespace. The entry carries no sentence of its own — this projection is
+ * pure and has no idea who is reading it.
+ */
 export interface TraceRunAction {
   key: 'resume' | 'compare' | 'promote' | 'report'
-  label: string
+  pending: boolean
   icon: LucideIcon
   disabled: boolean
   run: () => void
@@ -175,7 +183,7 @@ export function traceRunActions({
   if (onResume) {
     actions.push({
       key: 'resume',
-      label: resumeLoading ? 'Resuming' : 'Resume from last checkpoint',
+      pending: resumeLoading,
       icon: Play,
       disabled: !canResume || resumeLoading,
       run: onResume,
@@ -184,7 +192,7 @@ export function traceRunActions({
   if (onCompareToGolden) {
     actions.push({
       key: 'compare',
-      label: compareLoading ? 'Comparing' : 'Compare to golden',
+      pending: compareLoading,
       icon: GitCompareArrows,
       disabled: !canCompare || compareLoading,
       run: onCompareToGolden,
@@ -193,7 +201,7 @@ export function traceRunActions({
   if (onPromoteToGolden) {
     actions.push({
       key: 'promote',
-      label: 'Promote to golden',
+      pending: false,
       icon: BadgeCheck,
       disabled: !canCompare,
       run: onPromoteToGolden,
@@ -219,19 +227,20 @@ function RunStatusMark({
   live: boolean
   verdict: RunVerdict
 }) {
+  const t = useTraceCopy()
   if (live && verdict === 'running') {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             data-trace-verdict="running"
-            aria-label="Run in progress"
+            aria-label={t('panel.running')}
             className="flex size-4 shrink-0 items-center justify-center"
           >
             <span aria-hidden className="size-2 animate-pulse rounded-full bg-primary" />
           </span>
         </TooltipTrigger>
-        <TooltipContent>Running</TooltipContent>
+        <TooltipContent>{t('panel.runningTooltip')}</TooltipContent>
       </Tooltip>
     )
   }
@@ -280,6 +289,7 @@ export function TracePanel({
   onResumeEdgeDownstream,
   edgeResumeLoading = false,
 }: TracePanelProps) {
+  const t = useTraceCopy()
   const traceEvents = traceLogs.map(envelopePayload)
   // Live output goes into the step rows that are producing it (decision
   // 2026-08-09 D6). Only a live view subscribes: a finished run's pieces were
@@ -324,7 +334,7 @@ export function TracePanel({
   const compareTabStrip = hasCompareTabs ? (
     <div
       role="tablist"
-      aria-label="Model compare candidates"
+      aria-label={t('panel.candidates')}
       className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5"
     >
       {compareTabs!.map((tab) => {
@@ -335,7 +345,9 @@ export function TracePanel({
             type="button"
             role="tab"
             aria-selected={isActive}
-            aria-label={`Candidate ${tab.label}${tab.failed ? ' (failed)' : ''}`}
+            aria-label={tab.failed
+              ? t('panel.candidateFailed', { name: tab.label })
+              : t('panel.candidate', { name: tab.label })}
             onClick={() => onSelectCandidate?.(tab.candidateId)}
             className={[
               'flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs font-semibold transition-colors',
@@ -373,12 +385,12 @@ export function TracePanel({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="icon-sm" aria-label="Run actions">
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={t('panel.runActions')}>
               <MoreVertical className="size-4" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Actions for this run</TooltipContent>
+        <TooltipContent>{t('panel.runActionsTooltip')}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
         {runActions.map((action) => {
@@ -386,7 +398,7 @@ export function TracePanel({
           return (
             <DropdownMenuItem key={action.key} disabled={action.disabled} onSelect={action.run}>
               <ActionIcon />
-              {action.label}
+              {action.pending ? t(`action.${action.key}Pending`) : t(`action.${action.key}`)}
             </DropdownMenuItem>
           )
         })}
@@ -409,12 +421,12 @@ export function TracePanel({
               variant="ghost"
               size="icon-sm"
               onClick={onBack}
-              aria-label="Back to run list"
+              aria-label={t('panel.back')}
             >
               <ArrowLeft className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Back to the run list</TooltipContent>
+          <TooltipContent>{t('panel.backTooltip')}</TooltipContent>
         </Tooltip>
       ) : null}
       {/* WHICH run, in full. It was truncated to a 12-char head elsewhere and
@@ -423,9 +435,9 @@ export function TracePanel({
       {isPredict ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <FlaskConical aria-label="Predict attempt" className="size-4 shrink-0 text-muted-foreground" />
+            <FlaskConical aria-label={t('panel.predict')} className="size-4 shrink-0 text-muted-foreground" />
           </TooltipTrigger>
-          <TooltipContent>Predict attempt — no tokens spent on a real run</TooltipContent>
+          <TooltipContent>{t('panel.predictTooltip')}</TooltipContent>
         </Tooltip>
       ) : null}
       {runId ? (
@@ -433,7 +445,7 @@ export function TracePanel({
           {runId}
         </span>
       ) : (
-        <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">Trace</span>
+        <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">{t('panel.title')}</span>
       )}
       <RunStatusMark live={live} verdict={verdict} />
       {runActionsMenu}
@@ -457,13 +469,13 @@ export function TracePanel({
   const scopeStrip = scope ? (
     <div data-trace-scope className="shrink-0 space-y-2 border-b border-border bg-card px-3 py-2">
       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <span>Scope</span>
+        <span>{t('panel.scope')}</span>
         <span className="rounded-full border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
-          {scopeLabel(scope)}
+          {scopeLabel(scope, (boundary) => t(`canvas:boundary.${boundary}`))}
         </span>
         <button
           type="button"
-          aria-label="Clear trace scope"
+          aria-label={t('panel.clearScope')}
           onClick={() => onClearScope?.()}
           className="flex items-center rounded-full border border-border p-0.5 text-muted-foreground hover:bg-accent"
         >
@@ -491,7 +503,7 @@ export function TracePanel({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label={`Show routing decisions — ${degradedRouteCount} route issue${degradedRouteCount === 1 ? '' : 's'}`}
+              aria-label={t('routeIssues.show', { count: degradedRouteCount })}
               aria-pressed={filter.searchTerm === ROUTE_DECISION_SEARCH_TERM}
               onClick={() => filter.setSearchTerm(
                 filter.searchTerm === ROUTE_DECISION_SEARCH_TERM ? '' : ROUTE_DECISION_SEARCH_TERM,
@@ -499,14 +511,11 @@ export function TracePanel({
               className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
             >
               <AlertTriangle className="size-3" />
-              {degradedRouteCount} route issue{degradedRouteCount === 1 ? '' : 's'}
+              {t('routeIssues.chip', { count: degradedRouteCount })}
             </button>
           </TooltipTrigger>
           <TooltipContent>
-            The gateway had to skip, probe, retry, escalate or fall back {degradedRouteCount} time
-            {degradedRouteCount === 1 ? '' : 's'} during this run — the model actually used may differ
-            from the configured one. Click to show every routing decision, including the route that
-            finally answered.
+            {t('routeIssues.tooltip', { count: degradedRouteCount })}
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -515,7 +524,7 @@ export function TracePanel({
 
   if (traceEvents.length === 0) {
     return (
-      <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
+      <div role="log" aria-live="polite" aria-label={t('panel.region')} className="flex h-full min-h-0 flex-col">
         {compareTabStrip}
         {identityStrip}
         {failureBanner}
@@ -524,14 +533,14 @@ export function TracePanel({
           <div className="shrink-0 border-b border-border bg-card px-3 py-2">{routeIssuesRow}</div>
         ) : null}
         <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
-          {live ? 'Waiting for run events' : 'No events recorded for this run'}
+          {live ? t('panel.waiting') : t('panel.empty')}
         </div>
       </div>
     )
   }
 
   return (
-    <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
+    <div role="log" aria-live="polite" aria-label={t('panel.region')} className="flex h-full min-h-0 flex-col">
       {compareTabStrip}
       {identityStrip}
       {failureBanner}

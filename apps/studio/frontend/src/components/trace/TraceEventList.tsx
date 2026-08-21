@@ -18,6 +18,7 @@ import { initialTracePosition } from './trace-initial-scroll'
 import { TraceOutcomeRow } from './TraceOutcomeRow'
 import { TraceResumeSeam } from './TraceResumeSeam'
 import { TraceStepRow } from './TraceStepRow'
+import { useTraceCopy } from './trace-copy'
 
 interface TraceEventListProps {
   events: IndexedTraceEvent[]
@@ -80,6 +81,7 @@ export function TraceEventList({
   onSelectEvent,
   deltas,
 }: TraceEventListProps) {
+  const t = useTraceCopy()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState<HTMLElement | null>(null)
   // Only DELIBERATE toggles are stored. Everything else follows the step's own
@@ -194,7 +196,7 @@ export function TraceEventList({
         <MessageScroller className="h-full">
           <MessageScrollerViewport
             role="listbox"
-            aria-label="Trace events"
+            aria-label={t('list.events')}
             aria-activedescendant={selectedEventId ? `trace-event-${selectedEventId}` : undefined}
             tabIndex={0}
             onKeyDown={handleKeyDown}
@@ -247,7 +249,7 @@ export function TraceEventList({
                             phase === focusPhase ? 'text-foreground' : 'text-muted-foreground/70'
                           }`}
                         >
-                          {phase === RUN_SCOPE ? 'Run' : phase}
+                          {phase === RUN_SCOPE ? t('list.runGroup') : phase}
                         </div>
                       ) : null}
                       {opensIteration ? (
@@ -255,7 +257,7 @@ export function TraceEventList({
                           data-trace-iteration-header={`${phase}:${step.iteration}`}
                           className="mt-1 mb-0.5 pl-7 font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60"
                         >
-                          Iteration {step.iteration}
+                          {t('list.iteration', { number: step.iteration })}
                         </div>
                       ) : null}
                       <div className={step.iteration !== null ? 'pl-3' : undefined}>

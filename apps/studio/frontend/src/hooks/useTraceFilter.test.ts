@@ -3,6 +3,15 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { CallbackEvent } from '../api/types'
 import { filterTraceEvents, useTraceFilter, type TraceFilterCriteria } from './useTraceFilter'
+import i18n from '../i18n'
+import { traceHeadlineText, type TraceCopy } from '../components/trace/trace-copy'
+import { eventHeadline } from '../utils/trace'
+
+// The same sentence the row shows. Search matches what the READER sees, so
+// the projection is handed the rendered headline rather than building one.
+const traceCopy = i18n.getFixedT(null, ['trace', 'canvas']) as unknown as TraceCopy
+const headlineOf = (event: CallbackEvent): string =>
+  traceHeadlineText(eventHeadline(event), traceCopy)
 
 // n5-trace atom #13 (trace-search-filter): the trace panel filters the events it
 // has ALREADY received — client-side, no re-request. These tests pin the three
@@ -38,7 +47,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: [],
       selectedPhases: [],
-    })
+    }, headlineOf)
 
     expect(result).toHaveLength(events.length)
     expect(result.map(({ index }) => index)).toEqual([0, 1, 2, 3, 4])
@@ -53,7 +62,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: 'llm_call',
       selectedCategories: [],
       selectedPhases: [],
-    })
+    }, headlineOf)
 
     expect(result.map(({ event }) => event.event_type)).toEqual(['llm_call'])
     expect(result.map(({ index }) => index)).toEqual([1])
@@ -65,7 +74,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '  REVIEW  ',
       selectedCategories: [],
       selectedPhases: [],
-    })
+    }, headlineOf)
 
     // Both review-phase events match (phase name is part of the search text).
     expect(result.map(({ index }) => index)).toEqual([3, 4])
@@ -77,7 +86,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: [],
       selectedPhases: ['review'],
-    })
+    }, headlineOf)
 
     expect(result.every(({ event }) => event.phase_name === 'review')).toBe(true)
     expect(result.map(({ index }) => index)).toEqual([3, 4])
@@ -92,7 +101,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: [],
       selectedPhases: [],
-    })
+    }, headlineOf)
 
     expect(result.map(({ index }) => index)).toEqual(events.map((_, index) => index))
     expectTypeOf<TraceFilterCriteria>().not.toHaveProperty('activePhase')
@@ -104,11 +113,28 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: '',
       selectedCategories: ['llm'],
       selectedPhases: [],
-    })
+    }, headlineOf)
 
     // The four buckets replace the raw event_type list: picking "llm" keeps the
     // model call and drops the run skeleton around it.
     expect(result.map(({ event }) => event.event_type)).toEqual(['llm_call'])
+  })
+
+  // What a row SAYS is part of what a search matches: a reader who sees
+  // "Phase started: draft" and types "started" must find that row. The sentence
+  // is the reader's language, so it arrives rendered rather than reconstructed.
+  it('matches the words the row actually shows', () => {
+    const events = sampleEvents()
+    const result = filterTraceEvents(events, {
+      searchTerm: 'Phase started',
+      selectedCategories: [],
+      selectedPhases: [],
+    }, headlineOf)
+
+    expect(result.length).toBeGreaterThan(0)
+    for (const { event } of result) {
+      expect(event.event_type).toBe('phase_start')
+    }
   })
 
   it('combines search + phase as an AND, both applied to the same received batch', () => {
@@ -117,7 +143,7 @@ describe('filterTraceEvents (n5-trace #13 client-side projection)', () => {
       searchTerm: 'phase_start',
       selectedCategories: [],
       selectedPhases: ['draft'],
-    })
+    }, headlineOf)
 
     // Only the draft phase_start survives both predicates.
     expect(result.map(({ index }) => index)).toEqual([0])

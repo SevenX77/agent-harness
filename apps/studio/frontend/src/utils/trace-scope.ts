@@ -39,22 +39,29 @@ export function eventInScope(event: CallbackEvent, scope: TraceScope): boolean {
   }
 }
 
-function boundaryAwareName(id: string): string {
-  if (isInputBoundaryId(id)) return 'Input'
-  if (isOutputBoundaryId(id)) return 'Output'
+/**
+ * What the reader calls a graph boundary. Supplied by the caller rather than
+ * written here: the canvas owns those two words in its own namespace, and the
+ * chip must call a boundary exactly what the node on the canvas is called.
+ */
+export type BoundaryName = (boundary: 'input' | 'output') => string
+
+function boundaryAwareName(id: string, boundaryName: BoundaryName): string {
+  if (isInputBoundaryId(id)) return boundaryName('input')
+  if (isOutputBoundaryId(id)) return boundaryName('output')
   return id
 }
 
 /** What the scope chip says — the same names the canvas shows. */
-export function scopeLabel(scope: TraceScope): string {
+export function scopeLabel(scope: TraceScope, boundaryName: BoundaryName): string {
   switch (scope.kind) {
     case 'node':
       return scope.phase
     case 'edge':
-      return `${boundaryAwareName(scope.source)} → ${boundaryAwareName(scope.target)}`
+      return `${boundaryAwareName(scope.source, boundaryName)} → ${boundaryAwareName(scope.target, boundaryName)}`
     case 'input':
-      return 'Input'
+      return boundaryName('input')
     case 'output':
-      return 'Output'
+      return boundaryName('output')
   }
 }

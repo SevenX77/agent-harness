@@ -44,14 +44,26 @@ export function eventPhase(event: CallbackEvent): string {
 }
 
 /**
- * How a transition reads: the phases it joins, in the direction it ran.
- * A transition with no upstream phases starts at the graph's input
- * boundary, which the reader knows as Input.
+ * The phases a transition joins, in the direction it ran.
+ *
+ * Returned as its two ends rather than as a rendered arrow because a
+ * transition with no upstream phases starts at the graph's INPUT BOUNDARY, and
+ * what the reader calls that boundary is a word — one the canvas already owns
+ * in its own namespace. A pure projection cannot know which language to say it
+ * in, so it says which ends the transition has and leaves the naming to the
+ * surface that has a translator.
  */
-function transitionLabel(event: CallbackEvent): string {
-  const from = Array.isArray(event.from_phases) ? (event.from_phases as string[]) : []
-  const to = typeof event.to_phase === 'string' ? event.to_phase : RUN_SCOPE
-  return `${from.length > 0 ? from.join(' + ') : 'Input'} → ${to}`
+export interface TransitionEnds {
+  /** Empty when the transition starts at the graph's input boundary. */
+  from: string[]
+  to: string
+}
+
+function transitionEnds(event: CallbackEvent): TransitionEnds {
+  return {
+    from: Array.isArray(event.from_phases) ? (event.from_phases as string[]) : [],
+    to: typeof event.to_phase === 'string' ? event.to_phase : RUN_SCOPE,
+  }
 }
 
 export function isRunScopedEvent(event: CallbackEvent): boolean {
@@ -65,61 +77,88 @@ export function tokenText(event: CallbackEvent): string | null {
   return null
 }
 
-export function eventMessage(event: CallbackEvent): string {
+/**
+ * What an event has to say for itself, as a fact rather than a sentence.
+ *
+ * This module knows WHICH event happened and what it carried; it does not know
+ * who is reading, so it cannot pick the language to say it in. It therefore
+ * returns the kind of statement plus the values that go in it, and
+ * `components/trace/trace-copy.ts` — the ONE exit — turns that into words
+ * (same shape as the canvas's `GraphEditProblem`, K4c).
+ *
+ * `nothingToAdd` is the case where the row would only print the event type
+ * back at the reader: every kind this build has no statement for
+ * (`input_dispatch`, `agent_loop_iteration`, `run_started`, …). Rows drop the
+ * second line then, rather than showing the same token twice.
+ */
+export type TraceHeadline =
+  | { kind: 'nothingToAdd' }
+  | { kind: 'predictStarted' }
+  | { kind: 'phaseStarted'; phase: string }
+  | { kind: 'phaseFailed'; phase: string }
+  | { kind: 'phaseFinished'; phase: string }
+  | { kind: 'transitionStarted'; ends: TransitionEnds }
+  | { kind: 'transitionFinished'; ends: TransitionEnds }
+  | { kind: 'promptCaptured'; source: string | null }
+  | { kind: 'llmCallCompleted'; model: string | null }
+  | { kind: 'runEnded'; status: string }
+  | { kind: 'routeDecision'; details: RouteDecisionDetails }
+  | { kind: 'callSettings'; details: CallSettingsDetails }
+  /**
+   * The machinery-speaks contract (decision 2026-08-13 D4): an internal
+   * decision event carries its own full sentence in `message`. That text is
+   * the ENGINE's, not this panel's, so it passes through untranslated — the
+   * alternative is one phrase entry per engine event, which would go stale the
+   * day the engine adds one.
+   */
+  | { kind: 'enginesOwnWords'; text: string }
+
+export function eventHeadline(event: CallbackEvent): TraceHeadline {
   switch (event.event_type) {
     case 'predict_chain_start':
-      return 'Predict trace started'
+      return { kind: 'predictStarted' }
     case 'phase_start':
-      return `Phase started: ${eventPhase(event)}`
+      return { kind: 'phaseStarted', phase: eventPhase(event) }
     case 'phase_end':
       // The engine states the outcome (OB13), so the sentence states it too:
       // "Phase finished" under a run that died in that phase is the panel
       // repeating the mistake `phase_end` was given a status to end (E17).
       return event.status === 'failed'
-        ? `Phase failed: ${eventPhase(event)}`
-        : `Phase finished: ${eventPhase(event)}`
+        ? { kind: 'phaseFailed', phase: eventPhase(event) }
+        : { kind: 'phaseFinished', phase: eventPhase(event) }
     case 'edge_start':
-      return `Transition started: ${transitionLabel(event)}`
+      return { kind: 'transitionStarted', ends: transitionEnds(event) }
     case 'edge_end':
-      return `Transition finished: ${transitionLabel(event)}`
+      return { kind: 'transitionFinished', ends: transitionEnds(event) }
     case 'prompt_captured':
-      return `Prompt captured${typeof event.template_source === 'string' ? ` from ${event.template_source}` : ''}`
+      return {
+        kind: 'promptCaptured',
+        source: typeof event.template_source === 'string' ? event.template_source : null,
+      }
     case 'llm_call':
       // A role resolves through a fallback chain, so which model answered is a
       // per-call fact — name it on the line that reports the call.
-      return typeof event.resolved_model === 'string' && event.resolved_model !== ''
-        ? `LLM call completed · ${event.resolved_model}`
-        : 'LLM call completed'
+      return {
+        kind: 'llmCallCompleted',
+        model: typeof event.resolved_model === 'string' && event.resolved_model !== ''
+          ? event.resolved_model
+          : null,
+      }
     case 'run_ended':
-      return `Run ended: ${event.status ?? 'completed'}`
+      return { kind: 'runEnded', status: typeof event.status === 'string' ? event.status : 'completed' }
     case 'llm_route_decision': {
       const details = routeDecisionDetails(event)
-      return details ? routeDecisionMessage(details) : event.event_type
+      return details ? { kind: 'routeDecision', details } : { kind: 'nothingToAdd' }
     }
     case 'llm_call_settings': {
       const details = callSettingsDetails(event)
-      return details ? callSettingsMessage(details) : event.event_type
+      return details ? { kind: 'callSettings', details } : { kind: 'nothingToAdd' }
     }
     default:
-      // The machinery-speaks contract (decision 2026-08-13 D4): every internal
-      // decision event carries a full-sentence `message`. Rendering it here
-      // means a NEW machinery event never degrades to its raw type name.
       return typeof event.message === 'string' && event.message !== ''
-        ? event.message
-        : event.event_type
+        ? { kind: 'enginesOwnWords', text: event.message }
+        : { kind: 'nothingToAdd' }
   }
-}
-
-/**
- * True when the row's message would only repeat the event type back.
- *
- * `eventMessage` falls through to `event.event_type` for every kind it has no
- * sentence for (`input_dispatch`, `agent_loop_iteration`, `run_started`, …), so
- * the row would print the same token twice — once as the kind, once as the
- * message. Rows drop the second line in that case.
- */
-export function eventMessageIsRedundant(event: CallbackEvent): boolean {
-  return eventMessage(event) === event.event_type
 }
 
 export type TraceSeverity = 'error' | 'warning' | 'normal'
@@ -205,10 +244,6 @@ export function eventMockedSource(event: CallbackEvent): MockedSource | null {
   return null
 }
 
-export function mockedSourceLabel(source: MockedSource): string {
-  return source.replace('_', ' ')
-}
-
 export function mockedSourceClass(source: MockedSource): string {
   if (source === 'golden_case') {
     return 'border-warning-border bg-warning/10 text-warning'
@@ -234,30 +269,37 @@ export function mockedSourceClass(source: MockedSource): string {
 // (Read → Explored, Write/Edit → Worked, Bash → Ran), so the agent's actions
 // read like an agent IDE rather than a JSON blob.
 
-const TOOL_CALL_VERBS: Record<string, string> = {
-  Read: 'Explored',
-  Glob: 'Explored',
-  Grep: 'Explored',
-  LS: 'Explored',
-  Write: 'Worked',
-  Edit: 'Worked',
-  MultiEdit: 'Worked',
-  Bash: 'Ran',
+/**
+ * Which of the four things a tool did — the classification, not the word.
+ *
+ * A verb is copy, and this module has no reader to write it for; the trace's
+ * one copy exit turns the class into a word. The copilot panel's tool bubbles
+ * classify the same way for the same reason (`toolVerbClass`, K4b first half).
+ */
+export type ToolVerbClass = 'explored' | 'worked' | 'ran' | 'called'
+
+const TOOL_VERB_CLASS: Record<string, ToolVerbClass> = {
+  Read: 'explored',
+  Glob: 'explored',
+  Grep: 'explored',
+  LS: 'explored',
+  Write: 'worked',
+  Edit: 'worked',
+  MultiEdit: 'worked',
+  Bash: 'ran',
 }
 
 export interface ToolCallSummary {
-  /** Semantic verb for the tool (Explored / Worked / Ran) or a fallback. */
-  verb: string
+  /** What this tool did, as a class the copy exit turns into a verb. */
+  verb: ToolVerbClass
   /** The raw tool name, e.g. "Read". */
   toolName: string
-  /** One-line headline, e.g. "Explored · Read". */
-  headline: string
   /** Serialized args (tool input), empty string when there are none. */
   args: string
   /** Result / output text, trimmed to the leading lines for the summary. */
   resultSummary: string
-  /** Optional duration label, e.g. "120 ms". */
-  durationLabel: string | null
+  /** How long the call took, rounded to whole milliseconds. Null when untimed. */
+  durationMs: number | null
 }
 
 function isToolCallEvent(event: CallbackEvent): boolean {
@@ -286,18 +328,15 @@ export function toolCallSummary(event: CallbackEvent): ToolCallSummary | null {
     return null
   }
   const toolName = String(event.tool_name)
-  const verb = TOOL_CALL_VERBS[toolName] ?? 'Called'
   const args = isJsonObject(event.args) && Object.keys(event.args).length > 0 ? JSON.stringify(event.args, null, 2) : ''
-  const durationLabel = typeof event.duration_ms === 'number' && Number.isFinite(event.duration_ms)
-    ? `${Math.round(event.duration_ms)} ms`
-    : null
   return {
-    verb,
+    verb: TOOL_VERB_CLASS[toolName] ?? 'called',
     toolName,
-    headline: `${verb} · ${toolName}`,
     args,
     resultSummary: summariseResult(event.result),
-    durationLabel,
+    durationMs: typeof event.duration_ms === 'number' && Number.isFinite(event.duration_ms)
+      ? Math.round(event.duration_ms)
+      : null,
   }
 }
 
@@ -392,32 +431,15 @@ export function routeDecisionDetails(event: CallbackEvent): RouteDecisionDetails
   }
 }
 
-function routeLabel(details: RouteDecisionDetails): string {
-  return details.routeId ?? details.endpointId ?? 'unknown route'
-}
-
-/** One sentence per outcome — the row's headline, not the full block. */
-export function routeDecisionMessage(details: RouteDecisionDetails): string {
-  switch (details.decision) {
-    case 'answered':
-      return `Answered by ${routeLabel(details)}`
-    case 'skipped_circuit_open':
-      return `Skipped ${routeLabel(details)} — circuit open`
-    case 'probe_failed':
-      return `Probe failed on ${routeLabel(details)}`
-    case 'retried_same_route':
-      return `Retrying ${routeLabel(details)}`
-    case 'dropped_rejected_settings':
-      return `${routeLabel(details)} refused the runtime settings — running without them`
-    case 'escalated_budget':
-      return `Answer was cut off — retrying ${routeLabel(details)} with a bigger budget`
-    case 'fell_back':
-      return `${routeLabel(details)} failed → ${details.nextRouteId ?? 'unknown route'}`
-    case 'failed_terminal':
-      return `${routeLabel(details)} failed — no fallback allowed`
-    case 'exhausted':
-      return 'No route left — every candidate failed'
-  }
+/**
+ * Which route a decision is about, when it has a name.
+ *
+ * Null when the gateway named neither a route nor an endpoint — the reader's
+ * word for that ("unknown route") is copy, so it is chosen at the copy exit
+ * rather than baked in here.
+ */
+export function routeName(details: RouteDecisionDetails): string | null {
+  return details.routeId ?? details.endpointId ?? null
 }
 
 /**
@@ -545,22 +567,9 @@ export function settingsCarryWarning(settings: readonly SettingOutcome[]): boole
   return settings.some((outcome) => WARNING_VERDICTS.has(outcome.verdict))
 }
 
-/** One line per setting: what was asked for, and what became of it. */
-export function settingOutcomeMessage(outcome: SettingOutcome): string {
-  const requested = outcome.requested === null ? '' : ` ${String(outcome.requested)}`
-  const because = outcome.reason === null ? '' : `: ${outcome.reason}`
-  return `${outcome.setting}${requested} — ${outcome.verdict}${because}`
-}
-
-/** The row's headline: how many settings were judged, and whether any moved. */
-export function callSettingsMessage(details: CallSettingsDetails): string {
-  const count = details.settings.length
-  const noun = count === 1 ? 'setting' : 'settings'
-  if (!settingsCarryWarning(details.settings)) {
-    return `${count} ${noun} sent as asked`
-  }
-  const moved = details.settings.filter((outcome) => WARNING_VERDICTS.has(outcome.verdict)).length
-  return `${moved} of ${count} ${noun} did not run as asked`
+/** How many of these settings did not run as asked. Zero means all of them did. */
+export function settingsThatMoved(settings: readonly SettingOutcome[]): number {
+  return settings.filter((outcome) => WARNING_VERDICTS.has(outcome.verdict)).length
 }
 
 // ── 决议 2026-08-13 D1/D4:LLM 步骤的语义分解 + 机器自述 ─────────────────────
@@ -693,21 +702,41 @@ function promptContentText(content: unknown): string {
   return jsonText(content as never)
 }
 
-/** One labelled fact about a step — the numbers and names its type turns on. */
+/**
+ * What a fact says on the right-hand side.
+ *
+ * Most of the time it is the run's own data, which reads the same in any
+ * language. Sometimes it is a JUDGEMENT this panel makes about the data — a
+ * boolean read as yes/no, a gate's decision read as "the phase ended" — and
+ * that is copy, so it travels as a key for the copy exit to say.
+ */
+export type FactValue =
+  | { kind: 'data'; text: string }
+  | { kind: 'word'; word: 'yes' | 'no' | 'phaseEnded' | 'loopContinues' }
+  | { kind: 'transition'; ends: TransitionEnds }
+
+/**
+ * One labelled fact about a step — the numbers and names its type turns on.
+ *
+ * `label` is a KEY into the trace namespace's `fact` table, not a word: this
+ * module knows which fact it is reporting, not which language to report it in.
+ */
 export interface EventFact {
   label: string
-  value: string
+  value: FactValue
 }
 
 function fact(label: string, value: unknown): EventFact | null {
   if (value === null || value === undefined) return null
   if (Array.isArray(value)) {
     const items = value.filter((item) => typeof item === 'string' || typeof item === 'number')
-    return items.length === 0 ? null : { label, value: items.join(', ') }
+    return items.length === 0 ? null : { label, value: { kind: 'data', text: items.join(', ') } }
   }
-  if (typeof value === 'boolean') return { label, value: value ? 'yes' : 'no' }
-  if (typeof value === 'number') return { label, value: String(value) }
-  if (typeof value === 'string') return value === '' ? null : { label, value }
+  if (typeof value === 'boolean') return { label, value: { kind: 'word', word: value ? 'yes' : 'no' } }
+  if (typeof value === 'number') return { label, value: { kind: 'data', text: String(value) } }
+  if (typeof value === 'string') {
+    return value === '' ? null : { label, value: { kind: 'data', text: value } }
+  }
   return null
 }
 
@@ -730,7 +759,10 @@ function fact(label: string, value: unknown): EventFact | null {
 export function eventFacts(event: CallbackEvent): EventFact[] | null {
   const facts = (...candidates: (EventFact | null)[]): EventFact[] =>
     candidates.filter((candidate): candidate is EventFact => candidate !== null)
-  const transition = (): EventFact | null => fact('transition', transitionLabel(event))
+  const transition = (): EventFact => ({
+    label: 'transition',
+    value: { kind: 'transition', ends: transitionEnds(event) },
+  })
 
   switch (event.event_type) {
     case 'phase_start':
@@ -759,7 +791,7 @@ export function eventFacts(event: CallbackEvent): EventFact[] | null {
     case 'run_started':
       return facts(fact('run', event.run_id), fact('resumed', event.is_resume), fact('checkpoint', event.checkpoint_id))
     case 'run_ended':
-      return facts(fact('status', event.status), fact('wall time', event.wall_time_seconds))
+      return facts(fact('status', event.status), fact('wallTime', event.wall_time_seconds))
     case 'predict_chain_start':
       return facts(fact('run', event.run_id))
     case 'agent_loop_iteration':
@@ -787,7 +819,13 @@ export function eventFacts(event: CallbackEvent): EventFact[] | null {
       // carry what it does not: which turn it was standing on, and — scannable
       // without reading the sentence — whether the loop stopped or went around.
       return facts(
-        fact('outcome', event.decision === 'exit_success' ? 'phase ended' : 'loop continues'),
+        {
+          label: 'outcome',
+          value: {
+            kind: 'word',
+            word: event.decision === 'exit_success' ? 'phaseEnded' : 'loopContinues',
+          },
+        },
         fact('iteration', event.iteration),
       )
     case 'ambiguity_logged':
@@ -820,7 +858,7 @@ export function eventFacts(event: CallbackEvent): EventFact[] | null {
       return facts(
         fact('succeeded', event.succeeded),
         fact('failed', event.failed),
-        fact('wall time', event.wall_time_seconds),
+        fact('wallTime', event.wall_time_seconds),
       )
     case 'interrupted':
       return facts(

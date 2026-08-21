@@ -7,6 +7,7 @@ import type { SelectedEdge } from "../studio/WorkspaceContext"
 import { edgeTamperResumeOptionsFromJson } from "../studio/panels/edge-tamper"
 import { EdgeTamperEditor } from "../studio/panels/EdgeTamperEditor"
 import { TraceText } from "./TraceText"
+import { useTraceCopy } from "./trace-copy"
 
 /**
  * The edge-scope OPERATOR section (decision 2026-08-13 D5): what remains of
@@ -55,6 +56,7 @@ export function EdgeTamperSection({
   onResumeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
   resumeLoading?: boolean
 }) {
+  const t = useTraceCopy()
   const staticInference = isStaticEdgeInference(selectedEdge.contextJson) ? selectedEdge.contextJson : null
   const blackboard = blackboardOf(selectedEdge.contextJson)
   const disabledReason = resumeDisabledReason(selectedEdge.contextJson)
@@ -88,8 +90,7 @@ export function EdgeTamperSection({
   if (selectedEdge.contextJson == null) {
     return (
       <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-        No transition recorded for this edge in the current run. Run the skill to capture the
-        dispatched blackboard.
+        {t("edge.noTransition")}
       </div>
     )
   }
@@ -143,16 +144,16 @@ function RunOutputBody({
   produced: Record<string, unknown>
   producedBy: string
 }) {
+  const t = useTraceCopy()
   return (
     <div className="rounded-md border border-border bg-card p-3">
       <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Run output
+        {t("edge.runOutput")}
       </div>
       <div className="mb-3 text-xs text-muted-foreground">
-        What <span className="font-mono text-foreground">{producedBy}</span> produced, as this run
-        reported it at the end. Nothing runs past this boundary, so there is nothing to resume.
+        {t("edge.runOutputBody", { node: producedBy })}
       </div>
-      <TraceText text={JSON.stringify(produced, null, 2)} label="Run output" language="json" />
+      <TraceText text={JSON.stringify(produced, null, 2)} label={t("text.runOutput")} language="json" />
     </div>
   )
 }
@@ -163,14 +164,14 @@ function RunOutputBody({
  * io.inputs + ancestor io.outputs + the target's runtime_config file injections).
  */
 function StaticInferenceBody({ fields, target }: { fields: StaticEdgeField[]; target: string }) {
+  const t = useTraceCopy()
   return (
     <div className="rounded-md border border-border bg-card p-3">
       <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Inferred blackboard fields
+        {t("edge.inferred")}
       </div>
       <div className="mb-3 text-xs text-muted-foreground">
-        Root inputs, upstream outputs and file imports expected on the blackboard when the run
-        reaches this dot. Run the skill to see the real dispatched values.
+        {t("edge.inferredBody")}
       </div>
       {fields.length > 0 ? (
         <dl className="space-y-2">
@@ -185,24 +186,24 @@ function StaticInferenceBody({ fields, target }: { fields: StaticEdgeField[]; ta
                 ) : null}
                 {field.via_file ? (
                   <Badge variant="outline" className="px-1 py-0 text-[8px]">
-                    file
+                    {t("edge.viaFile")}
                   </Badge>
                 ) : null}
                 {field.consumed_by_target ? (
                   <Badge variant="outline" className="px-1 py-0 text-[8px]">
-                    → {target} input
+                    {t("edge.consumedBy", { node: target })}
                   </Badge>
                 ) : null}
               </dt>
               <dd className="break-all rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                from {field.from}
+                {t("edge.from", { source: field.from })}
               </dd>
             </div>
           ))}
         </dl>
       ) : (
         <div className="text-xs text-muted-foreground">
-          No fields are expected on the blackboard at this edge.
+          {t("edge.inferredEmpty")}
         </div>
       )}
     </div>

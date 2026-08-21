@@ -5,10 +5,12 @@ import enCanvas from "./locales/en/canvas.json"
 import enCopilot from "./locales/en/copilot.json"
 import enErrors from "./locales/en/errors.json"
 import enSettings from "./locales/en/settings.json"
+import enTrace from "./locales/en/trace.json"
 import zhCnCanvas from "./locales/zh-CN/canvas.json"
 import zhCnCopilot from "./locales/zh-CN/copilot.json"
 import zhCnErrors from "./locales/zh-CN/errors.json"
 import zhCnSettings from "./locales/zh-CN/settings.json"
+import zhCnTrace from "./locales/zh-CN/trace.json"
 
 export const defaultNS = "settings"
 
@@ -18,12 +20,14 @@ export const resources = {
     errors: enErrors,
     canvas: enCanvas,
     copilot: enCopilot,
+    trace: enTrace,
   },
   "zh-CN": {
     settings: zhCnSettings,
     errors: zhCnErrors,
     canvas: zhCnCanvas,
     copilot: zhCnCopilot,
+    trace: zhCnTrace,
   },
 } as const
 
@@ -41,7 +45,7 @@ export const i18nReady = i18n.isInitialized
         fallbackLng: "en",
         supportedLngs,
         load: "currentOnly",
-        ns: ["settings", "errors", "canvas", "copilot"],
+        ns: ["settings", "errors", "canvas", "copilot", "trace"],
         detection: {
           order: ["localStorage"],
           caches: ["localStorage"],

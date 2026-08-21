@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { PencilLine, ShieldCheck } from 'lucide-react'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useTraceCopy } from "./trace-copy"
 
 /**
  * A node the golden actions apply to: an agent phase that has no golden yet.
@@ -50,6 +51,7 @@ export function FocusedNodeActions({
   onPromoteNode,
   onDesignGolden,
 }: FocusedNodeActionsProps) {
+  const t = useTraceCopy()
   const [promoting, setPromoting] = useState(false)
 
   const eligible = isGoldenlessAgentNode(node)
@@ -83,17 +85,15 @@ export function FocusedNodeActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label={`Design golden for node "${label}"`}
+              aria-label={t('node.designGoldenAria', { node: label })}
               onClick={() => onDesignGolden?.({ id: node.id, label })}
               className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-semibold text-foreground hover:bg-accent"
             >
               <PencilLine className="size-3.5" />
-              Design golden
+              {t('node.designGolden')}
             </button>
           </TooltipTrigger>
-          <TooltipContent>
-            Open one copilot chat to write down what this node should produce — no run needed.
-          </TooltipContent>
+          <TooltipContent>{t('node.designGoldenTooltip')}</TooltipContent>
         </Tooltip>
       ) : null}
       {canPromoteNode ? (
@@ -101,7 +101,7 @@ export function FocusedNodeActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label={`Promote node "${label}" to golden`}
+              aria-label={t('node.promoteAria', { node: label })}
               disabled={promoting}
               onClick={() => {
                 void promote()
@@ -109,10 +109,10 @@ export function FocusedNodeActions({
               className="flex items-center gap-1 rounded-full border border-warning-border px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ShieldCheck className="size-3.5" />
-              {promoting ? 'Promoting node' : 'Promote node to golden'}
+              {promoting ? t('node.promoting') : t('node.promote')}
             </button>
           </TooltipTrigger>
-          <TooltipContent>Create a golden baseline for just this focused node from the current run</TooltipContent>
+          <TooltipContent>{t('node.promoteTooltip')}</TooltipContent>
         </Tooltip>
       ) : null}
     </div>

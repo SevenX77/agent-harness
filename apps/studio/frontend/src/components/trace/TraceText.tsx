@@ -3,6 +3,7 @@ import { Maximize2 } from 'lucide-react'
 import type { FileOpenRequest } from '../studio/file-types'
 import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 import { TextWell } from '../ui/text-well'
+import { useTraceCopy } from './trace-copy'
 
 /**
  * Full view opens where every other document opens — the workspace editor, as
@@ -35,6 +36,7 @@ export function TraceText({
   autoFollow?: boolean
   className?: string
 }) {
+  const t = useTraceCopy()
   const onFileOpen = useOptionalWorkspaceContext()?.onFileOpen
   return (
     <TextWell
@@ -44,7 +46,7 @@ export function TraceText({
       overflowAction={onFileOpen ? (
         <button
           type="button"
-          aria-label={`View full ${label}`}
+          aria-label={t('text.viewFull', { label })}
           onClick={(event: MouseEvent) => {
             // Wells live inside clickable rows; the link must not also toggle the row.
             event.stopPropagation()
@@ -53,7 +55,7 @@ export function TraceText({
           className="inline-flex items-center gap-1 text-xs font-medium text-link hover:text-link/80"
         >
           <Maximize2 className="h-3 w-3" />
-          View full text
+          {t('text.viewFullText')}
         </button>
       ) : undefined}
     />

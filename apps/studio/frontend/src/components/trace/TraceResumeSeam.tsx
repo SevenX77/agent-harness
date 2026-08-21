@@ -1,6 +1,7 @@
 import { PlayCircle } from 'lucide-react'
 import type { CallbackEvent } from '../../api/types'
 import { eventTimeLabel } from '../../utils/trace'
+import { useTraceCopy } from './trace-copy'
 
 /**
  * Where a paused run picked up again.
@@ -17,6 +18,7 @@ import { eventTimeLabel } from '../../utils/trace'
  * a resume, where it picked up, and what the person answered.
  */
 export function TraceResumeSeam({ event }: { event: CallbackEvent }) {
+  const t = useTraceCopy()
   const phase = typeof event.resumed_from_phase === 'string' && event.resumed_from_phase !== ''
     ? event.resumed_from_phase
     : typeof event.phase_name === 'string' ? event.phase_name : null
@@ -28,10 +30,10 @@ export function TraceResumeSeam({ event }: { event: CallbackEvent }) {
       <span className="h-px flex-1 bg-border" />
       <span className="flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground">
         <PlayCircle className="h-3.5 w-3.5 shrink-0" />
-        <span className="font-medium text-foreground">Resumed</span>
+        <span className="font-medium text-foreground">{t('resume.resumed')}</span>
         {phase ? <span className="font-mono">{phase}</span> : null}
         {answer ? (
-          <span className="truncate" title={answer}>answered: {answer}</span>
+          <span className="truncate" title={answer}>{t('resume.answered', { answer })}</span>
         ) : null}
         {timeLabel ? <span className="font-mono text-muted-foreground/80">{timeLabel}</span> : null}
       </span>

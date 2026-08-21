@@ -2,6 +2,31 @@ import type { JsonObject } from '../api/types'
 
 export type CopilotEventStatus = 'pending' | 'running' | 'success' | 'error'
 
+/** One object the user picked in the composer (design COPILOT_ASSIST-8).
+ *
+ * Identity is `(kind, ref)`. `label` is what the user saw and is echoed back
+ * verbatim — it never locates anything, because a phase that gets renamed must
+ * not make an already-sent message point somewhere else. */
+export interface CopilotMention {
+  kind: 'file' | 'phase' | 'dot' | 'error' | 'trace'
+  /** Unique within `kind`: file = workspace-relative path; phase = phase id,
+   * written `<subgraph>/<phase>` inside a subgraph; dot = `<phase>.<key>`;
+   * error = diagnostic code plus location; trace = `<run_id>#<event_index>`. */
+  ref: string
+  label: string
+}
+
+/** An image the user attached, carried by value: it came from the clipboard or
+ * a file dialog and has no address in the workspace to dereference later. */
+export interface CopilotImageAttachment {
+  kind: 'image'
+  media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  /** Base64, as the model's image content block wants it. */
+  data: string
+  name?: string
+}
+
+
 export interface CopilotEventBase {
   id: string
   status: CopilotEventStatus

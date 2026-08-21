@@ -6,6 +6,8 @@ import { selectFile } from '../lib/tauri'
 import { copilotSessionDirectoryPath, copilotStore } from '../store/copilotStore'
 import type {
   CopilotEvent,
+  CopilotImageAttachment,
+  CopilotMention,
   CopilotMessage,
   CopilotTextDeltaEvent,
   CopilotThinkingDeltaEvent,
@@ -38,6 +40,11 @@ export interface CopilotSendPayload {
   role?: string
   workspace_root?: string
   judge_context?: CopilotJudgeContext
+  // F4 ②: the objects the user picked in THIS composer, and the images they
+  // attached to THIS message. Nothing else may ride along — no current
+  // selection, no recently-opened file (F4 ③).
+  mentions?: CopilotMention[]
+  attachments?: CopilotImageAttachment[]
 }
 
 export interface CopilotJudgeContext {
@@ -53,28 +60,41 @@ export interface CopilotJudgeContext {
   }
 }
 
-/** Build the ws send payload, attaching model_override / role only when present. */
+/** Everything a turn may carry besides the message itself. */
+export interface CopilotSendOptions {
+  modelOverride?: string | null
+  role?: string | null
+  workspaceRoot?: string | null
+  judgeContext?: CopilotJudgeContext | null
+  mentions?: CopilotMention[]
+  attachments?: CopilotImageAttachment[]
+}
+
+/** Build the ws send payload, attaching each optional field only when present. */
 export function buildCopilotSendPayload(
   userMessage: string,
   sessionId: string,
-  modelOverride?: string | null,
-  role?: string | null,
-  workspaceRoot?: string | null,
-  judgeContext?: CopilotJudgeContext | null,
+  options: CopilotSendOptions = {},
 ): CopilotSendPayload {
   const payload: CopilotSendPayload = { user_message: userMessage, session_id: sessionId }
-  if (modelOverride) {
-    payload.model_override = modelOverride
+  if (options.modelOverride) {
+    payload.model_override = options.modelOverride
   }
-  if (role) {
-    payload.role = role
+  if (options.role) {
+    payload.role = options.role
   }
-  const trimmedWorkspaceRoot = workspaceRoot?.trim()
+  const trimmedWorkspaceRoot = options.workspaceRoot?.trim()
   if (trimmedWorkspaceRoot) {
     payload.workspace_root = trimmedWorkspaceRoot
   }
-  if (judgeContext) {
-    payload.judge_context = judgeContext
+  if (options.judgeContext) {
+    payload.judge_context = options.judgeContext
+  }
+  if (options.mentions?.length) {
+    payload.mentions = options.mentions
+  }
+  if (options.attachments?.length) {
+    payload.attachments = options.attachments
   }
   return payload
 }
@@ -310,9 +330,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
 
   const sendMessage = useCallback((
     content: string,
-    modelOverride?: string | null,
-    role?: string | null,
-    judgeContext?: CopilotJudgeContext | null,
+    options: Omit<CopilotSendOptions, 'workspaceRoot'> = {},
   ) => {
     const trimmed = content.trim()
     if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
@@ -323,7 +341,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     assistantMessageIdRef.current = null
     pendingQuerySessionsRef.current.push(sessionId)
     void copilotStore.appendMessage(createMessage('user', trimmed, 'success'), sessionId)
-    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, sessionId, modelOverride, role, workspaceRoot, judgeContext)))
+    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, sessionId, { ...options, workspaceRoot })))
     setIsStreaming(true)
     return true
   }, [workspaceRoot])

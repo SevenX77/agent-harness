@@ -163,6 +163,8 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
                 role=payload.role,
                 workspace_root=payload.workspace_root,
                 judge_context=payload.judge_context,
+                mentions=payload.mentions,
+                attachments=payload.attachments,
             ):
                 await websocket.send_json(event.model_dump(exclude_none=True))
     except WebSocketDisconnect:

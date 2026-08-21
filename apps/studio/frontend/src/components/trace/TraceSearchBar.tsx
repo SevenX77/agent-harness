@@ -7,6 +7,7 @@ import {
   InputGroupText,
 } from '../ui/input-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { useTraceCopy } from './trace-copy'
 
 interface TraceSearchBarProps {
   value: string
@@ -22,12 +23,13 @@ interface TraceSearchBarProps {
  * bar look wrong at every size it was tried at.
  */
 export function TraceSearchBar({ value, onChange, activeFilterCount = 0 }: TraceSearchBarProps) {
+  const t = useTraceCopy()
   return (
     <InputGroup>
       <InputGroupInput
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Search trace events"
+        placeholder={t('search.placeholder')}
       />
       <InputGroupAddon>
         <SearchIcon />
@@ -39,13 +41,12 @@ export function TraceSearchBar({ value, onChange, activeFilterCount = 0 }: Trace
         >
           <Tooltip>
             <TooltipTrigger asChild>
-              <InputGroupText aria-label={`${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} on`}>
+              <InputGroupText aria-label={t('search.filtersOn', { count: activeFilterCount })}>
                 {activeFilterCount}
               </InputGroupText>
             </TooltipTrigger>
             <TooltipContent>
-              {activeFilterCount} filter{activeFilterCount === 1 ? ' is' : 's are'} narrowing this trace —
-              focus the search box to change them
+              {t('search.filtersTooltip', { count: activeFilterCount })}
             </TooltipContent>
           </Tooltip>
         </InputGroupAddon>
@@ -54,11 +55,11 @@ export function TraceSearchBar({ value, onChange, activeFilterCount = 0 }: Trace
         <InputGroupAddon align="inline-end">
           <Tooltip>
             <TooltipTrigger asChild>
-              <InputGroupButton type="button" aria-label="Clear search" onClick={() => onChange('')}>
+              <InputGroupButton type="button" aria-label={t('search.clear')} onClick={() => onChange('')}>
                 <XIcon />
               </InputGroupButton>
             </TooltipTrigger>
-            <TooltipContent>Clear search</TooltipContent>
+            <TooltipContent>{t('search.clear')}</TooltipContent>
           </Tooltip>
         </InputGroupAddon>
       ) : null}

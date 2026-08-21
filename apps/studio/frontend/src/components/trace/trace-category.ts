@@ -11,12 +11,6 @@ export const TRACE_CATEGORIES = ['errors', 'llm', 'tools', 'flow'] as const
 
 export type TraceCategory = (typeof TRACE_CATEGORIES)[number]
 
-export const TRACE_CATEGORY_LABEL: Record<TraceCategory, string> = {
-  errors: 'Errors',
-  llm: 'LLM',
-  tools: 'Tools',
-  flow: 'Flow',
-}
 
 /** Which bucket an event type belongs to. Unknown types are flow (the default skeleton). */
 export function traceEventCategory(eventType: string): TraceCategory {

@@ -8,8 +8,7 @@ import {
   eventFacts,
   machineryNarration,
   promptMessages,
-  eventMessageIsRedundant,
-  eventMessage,
+  eventHeadline,
   eventModelName,
   eventSeverity,
   eventPhase,
@@ -36,18 +35,18 @@ describe('toolCallSummary (D1/P2 agent tool-call folding, n4-trace #16/#24)', ()
 
   it('folds a Read tool_call under the Explored verb', () => {
     const summary = toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Read', args: { path: 'a.py' }, result: 'ok' }))
-    expect(summary?.verb).toBe('Explored')
-    expect(summary?.headline).toBe('Explored · Read')
+    expect(summary?.verb).toBe('explored')
+    expect(summary?.toolName).toBe('Read')
   })
 
   it('folds a Write/Edit tool_call under the Worked verb and a Bash call under Ran', () => {
-    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Write', result: '' }))?.verb).toBe('Worked')
-    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Edit', result: '' }))?.verb).toBe('Worked')
-    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Bash', result: '' }))?.verb).toBe('Ran')
+    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Write', result: '' }))?.verb).toBe('worked')
+    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Edit', result: '' }))?.verb).toBe('worked')
+    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Bash', result: '' }))?.verb).toBe('ran')
   })
 
   it('falls back to a generic verb for an unknown tool name', () => {
-    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'CustomTool', result: '' }))?.verb).toBe('Called')
+    expect(toolCallSummary(event({ event_type: 'tool_call', tool_name: 'CustomTool', result: '' }))?.verb).toBe('called')
   })
 
   it('serializes args and trims an oversized result for the subtree summary', () => {
@@ -61,9 +60,9 @@ describe('toolCallSummary (D1/P2 agent tool-call folding, n4-trace #16/#24)', ()
     expect(summary?.resultSummary).toContain('…')
   })
 
-  it('exposes a rounded duration label when duration_ms is present', () => {
+  it('rounds the duration to whole milliseconds when duration_ms is present', () => {
     const summary = toolCallSummary(event({ event_type: 'tool_call', tool_name: 'Read', result: '', duration_ms: 12.7 }))
-    expect(summary?.durationLabel).toBe('13 ms')
+    expect(summary?.durationMs).toBe(13)
   })
 })
 
@@ -91,33 +90,30 @@ function decisionEvent(overrides: Partial<CallbackEvent> = {}): CallbackEvent {
 }
 
 describe('llm_route_decision visibility (trace-observability F7)', () => {
-  it('renders a human-readable sentence per outcome instead of the raw event name', () => {
-    expect(eventMessage(decisionEvent())).toBe('openai:gpt-4o failed → zhipu:glm-4.7')
-    expect(eventMessage(decisionEvent({ decision: 'answered' }))).toBe('Answered by openai:gpt-4o')
-    expect(eventMessage(decisionEvent({ decision: 'skipped_circuit_open' })))
-      .toBe('Skipped openai:gpt-4o — circuit open')
-    expect(eventMessage(decisionEvent({ decision: 'probe_failed' })))
-      .toBe('Probe failed on openai:gpt-4o')
-    expect(eventMessage(decisionEvent({ decision: 'retried_same_route' })))
-      .toBe('Retrying openai:gpt-4o')
-    expect(eventMessage(decisionEvent({ decision: 'escalated_budget' })))
-      .toBe('Answer was cut off — retrying openai:gpt-4o with a bigger budget')
-    expect(eventMessage(decisionEvent({ decision: 'failed_terminal' })))
-      .toBe('openai:gpt-4o failed — no fallback allowed')
+  it('hands the row the decision itself, for the copy exit to word', () => {
+    for (const decision of [
+      'answered', 'skipped_circuit_open', 'probe_failed', 'retried_same_route',
+      'escalated_budget', 'failed_terminal', 'fell_back',
+    ]) {
+      const headline = eventHeadline(decisionEvent({ decision }))
+      expect(headline.kind).toBe('routeDecision')
+      expect(headline.kind === 'routeDecision' && headline.details.decision).toBe(decision)
+    }
   })
 
   // Runtime settings are preferences: a provider that will not take one still
   // answers, and the reader has to be told the answer was produced without it.
   it('says when an answer came back without the settings that were asked for', () => {
-    expect(eventMessage(decisionEvent({ decision: 'dropped_rejected_settings' })))
-      .toBe('openai:gpt-4o refused the runtime settings — running without them')
+    const headline = eventHeadline(decisionEvent({ decision: 'dropped_rejected_settings' }))
+    expect(headline.kind === 'routeDecision' && headline.details.decision)
+      .toBe('dropped_rejected_settings')
     expect(eventColor(decisionEvent({ decision: 'dropped_rejected_settings' })))
       .toBe('bg-warning')
   })
 
   it('says the chain is exhausted when every candidate failed', () => {
-    expect(eventMessage(decisionEvent({ decision: 'exhausted', route_id: null })))
-      .toBe('No route left — every candidate failed')
+    const headline = eventHeadline(decisionEvent({ decision: 'exhausted', route_id: null }))
+    expect(headline.kind === 'routeDecision' && headline.details.decision).toBe('exhausted')
   })
 
   // Severity is a property of the DECISION, not of the event type: the same
@@ -190,7 +186,7 @@ describe('llm_route_decision visibility (trace-observability F7)', () => {
   it('refuses to interpret an unknown decision', () => {
     const unknown = decisionEvent({ decision: 'teleported' })
     expect(routeDecisionDetails(unknown)).toBeNull()
-    expect(eventMessage(unknown)).toBe('llm_route_decision')
+    expect(eventHeadline(unknown).kind).toBe('nothingToAdd')
     expect(eventColor(unknown)).toBe('bg-muted-foreground/50')
   })
 
@@ -284,25 +280,25 @@ describe('eventPhase (which node an event belongs to)', () => {
 describe('llm_call model', () => {
   it('names the model that answered', () => {
     expect(
-      eventMessage({
+      eventHeadline({
         schema_version: '1.0',
         event_type: 'llm_call',
         timestamp: '2026-08-08T00:00:00Z',
         phase_name: 'review',
         resolved_model: 'deepseek-v4-flash',
       } as CallbackEvent),
-    ).toBe('LLM call completed · deepseek-v4-flash')
+    ).toEqual({ kind: 'llmCallCompleted', model: 'deepseek-v4-flash' })
   })
 
   it('stays generic when the provider reported no model', () => {
     expect(
-      eventMessage({
+      eventHeadline({
         schema_version: '1.0',
         event_type: 'llm_call',
         timestamp: '2026-08-08T00:00:00Z',
         phase_name: 'review',
       } as CallbackEvent),
-    ).toBe('LLM call completed')
+    ).toEqual({ kind: 'llmCallCompleted', model: null })
   })
 })
 
@@ -313,17 +309,18 @@ describe('redundant row messages', () => {
     ...partial,
   } as CallbackEvent)
 
-  // A row prints the kind and then a sentence about it; when `eventMessage` has
-  // no sentence for that kind it falls through to the kind itself, and the row
-  // would say the same word twice (decision 2026-08-08 D3).
-  it('spots the kinds whose message only repeats the kind', () => {
+  // A row prints the kind and then a sentence about it; a kind this build
+  // has no statement for would make the row say the same word twice
+  // (decision 2026-08-08 D3), so it says so instead of inventing one.
+  it('spots the kinds that have nothing to add beyond the kind', () => {
     for (const eventType of ['input_dispatch', 'agent_loop_iteration', 'run_started']) {
-      expect(eventMessageIsRedundant(ev({ event_type: eventType }))).toBe(true)
+      expect(eventHeadline(ev({ event_type: eventType })).kind).toBe('nothingToAdd')
     }
   })
 
-  it('keeps a message that actually says something', () => {
-    expect(eventMessageIsRedundant(ev({ event_type: 'phase_start', phase_name: 'segment' }))).toBe(false)
+  it('keeps a statement that actually says something', () => {
+    expect(eventHeadline(ev({ event_type: 'phase_start', phase_name: 'segment' })))
+      .toEqual({ kind: 'phaseStarted', phase: 'segment' })
   })
 })
 
@@ -357,8 +354,8 @@ describe('every machinery step says what it did (glass-box D4)', () => {
       event_type: 'tool_history_repaired', phase_name: 'work',
       synthesized_count: 2, dropped_count: 1, message: 'Repaired the history.',
     }))).toEqual([
-      { label: 'synthesized', value: '2' },
-      { label: 'dropped', value: '1' },
+      { label: 'synthesized', value: { kind: 'data', text: '2' } },
+      { label: 'dropped', value: { kind: 'data', text: '1' } },
     ])
   })
 
@@ -367,9 +364,9 @@ describe('every machinery step says what it did (glass-box D4)', () => {
       event_type: 'input_dispatch', from_phases: ['draft'], to_phase: 'review',
       dispatched_keys: ['topic', 'draft'], changed_keys: ['draft'],
     }))).toEqual([
-      { label: 'transition', value: 'draft → review' },
-      { label: 'dispatched', value: 'topic, draft' },
-      { label: 'changed', value: 'draft' },
+      { label: 'transition', value: { kind: 'transition', ends: { from: ['draft'], to: 'review' } } },
+      { label: 'dispatched', value: { kind: 'data', text: 'topic, draft' } },
+      { label: 'changed', value: { kind: 'data', text: 'draft' } },
     ])
   })
 
@@ -377,14 +374,14 @@ describe('every machinery step says what it did (glass-box D4)', () => {
     expect(eventFacts(ev({
       event_type: 'agent_exit_decision', decision: 'exit_success', iteration: 2,
     }))).toEqual([
-      { label: 'outcome', value: 'phase ended' },
-      { label: 'iteration', value: '2' },
+      { label: 'outcome', value: { kind: 'word', word: 'phaseEnded' } },
+      { label: 'iteration', value: { kind: 'data', text: '2' } },
     ])
     expect(eventFacts(ev({
       event_type: 'agent_exit_decision', decision: 'continue_nudged', iteration: 1,
     }))).toEqual([
-      { label: 'outcome', value: 'loop continues' },
-      { label: 'iteration', value: '1' },
+      { label: 'outcome', value: { kind: 'word', word: 'loopContinues' } },
+      { label: 'iteration', value: { kind: 'data', text: '1' } },
     ])
   })
 
@@ -445,18 +442,18 @@ describe('a prompt says where each part of it came from', () => {
 // 2026-08-20T17-13-16_4e586d15, ledger E17).
 describe('a phase_end row says how the phase ended', () => {
   it('names the outcome in the sentence, not just that it stopped', () => {
-    expect(eventMessage(event({ event_type: 'phase_end', phase_name: 'impossible', status: 'failed' })))
-      .toBe('Phase failed: impossible')
-    expect(eventMessage(event({ event_type: 'phase_end', phase_name: 'draft', status: 'completed' })))
-      .toBe('Phase finished: draft')
+    expect(eventHeadline(event({ event_type: 'phase_end', phase_name: 'impossible', status: 'failed' })))
+      .toEqual({ kind: 'phaseFailed', phase: 'impossible' })
+    expect(eventHeadline(event({ event_type: 'phase_end', phase_name: 'draft', status: 'completed' })))
+      .toEqual({ kind: 'phaseFinished', phase: 'draft' })
   })
 
   it('mirrors the outcome in the fact table, the way run_ended does', () => {
     expect(eventFacts(event({
       event_type: 'phase_end', phase_name: 'impossible', phase_execution_id: 'b29e2df598cf', status: 'failed',
     }))).toEqual([
-      { label: 'outcome', value: 'failed' },
-      { label: 'execution', value: 'b29e2df598cf' },
+      { label: 'outcome', value: { kind: 'data', text: 'failed' } },
+      { label: 'execution', value: { kind: 'data', text: 'b29e2df598cf' } },
     ])
   })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CallbackEvent } from '../api/types'
-import { callSettingsDetails, settingsCarryWarning, settingOutcomeMessage } from './trace'
+import { callSettingsDetails, settingsCarryWarning, settingsThatMoved } from './trace'
 
 function event(settings: unknown[]): CallbackEvent {
   return {
@@ -36,12 +36,16 @@ describe('call settings details', () => {
     expect(settingsCarryWarning([{ setting: 'seed', requested: 7, verdict: 'ignored', reason: null }])).toBe(true)
   })
 
-  it('shows what was asked for next to what became of it', () => {
-    expect(
-      settingOutcomeMessage({ setting: 'top_p', requested: 5, verdict: 'adjusted', reason: 'sent as 1.0' }),
-    ).toBe('top_p 5 — adjusted: sent as 1.0')
-    expect(settingOutcomeMessage({ setting: 'seed', requested: 7, verdict: 'sent', reason: null })).toBe(
-      'seed 7 — sent',
-    )
+  // The headline says how many settings did not run as asked; the block
+  // below it shows each one's own before and after. Counting is this
+  // module's job, wording is the copy exit's.
+  it('counts the settings that did not run as asked', () => {
+    expect(settingsThatMoved([
+      { setting: 'top_p', requested: 5, verdict: 'adjusted', reason: 'sent as 1.0' },
+      { setting: 'seed', requested: 7, verdict: 'sent', reason: null },
+    ])).toBe(1)
+    expect(settingsThatMoved([
+      { setting: 'seed', requested: 7, verdict: 'applied', reason: null },
+    ])).toBe(0)
   })
 })

@@ -3,16 +3,15 @@ import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 import { formatRunDuration, formatRunTokens } from '../../utils/run-format'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
 import { openRunReport } from '../../utils/run-report'
+import { useTraceCopy } from './trace-copy'
 
+// The icon and tone are presentation; WHAT it says comes from the trace
+// namespace, keyed by the same status.
 const OUTCOME_PRESENTATION = {
-  success: { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' },
-  failed: { icon: AlertCircle, label: 'Run failed', tone: 'text-destructive' },
-  cancelled: { icon: XCircle, label: 'Run cancelled', tone: 'text-destructive' },
-  abandoned: {
-    icon: Unplug,
-    label: 'Run abandoned — the app closed while it was going',
-    tone: 'text-warning',
-  },
+  success: { icon: CheckCircle2, tone: 'text-success' },
+  failed: { icon: AlertCircle, tone: 'text-destructive' },
+  cancelled: { icon: XCircle, tone: 'text-destructive' },
+  abandoned: { icon: Unplug, tone: 'text-warning' },
 } as const
 
 /**
@@ -25,7 +24,9 @@ const OUTCOME_PRESENTATION = {
  * the node grouping above it.
  */
 export function TraceOutcomeRow({ outcome }: { outcome: TraceOutcomeEntry }) {
-  const { icon: Icon, label, tone } = OUTCOME_PRESENTATION[outcome.status]
+  const t = useTraceCopy()
+  const { icon: Icon, tone } = OUTCOME_PRESENTATION[outcome.status]
+  const label = t(`outcome.${outcome.status}`)
   const workspace = useOptionalWorkspaceContext()
   const onFileOpen = workspace?.onFileOpen
   const duration = formatRunDuration(outcome.wallTimeSec)
@@ -69,7 +70,7 @@ export function TraceOutcomeRow({ outcome }: { outcome: TraceOutcomeEntry }) {
             className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
           >
             <FileText className="h-3.5 w-3.5" />
-            Open run report
+            {t('outcome.openReport')}
           </button>
         ) : null}
       </div>

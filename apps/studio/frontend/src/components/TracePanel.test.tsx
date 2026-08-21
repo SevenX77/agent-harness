@@ -313,7 +313,7 @@ describe('TracePanel run actions (⋮ menu)', () => {
   it('offers Resume, enabled, when the run can be resumed', () => {
     const [action] = traceRunActions(resumeOnly)
     expect(action.key).toBe('resume')
-    expect(action.label).toBe('Resume from last checkpoint')
+    expect(action.pending).toBe(false)
     expect(action.disabled).toBe(false)
   })
 
@@ -322,9 +322,9 @@ describe('TracePanel run actions (⋮ menu)', () => {
     expect(action.disabled).toBe(true)
   })
 
-  it('says Resuming, and refuses a second click, while a resume is in flight', () => {
+  it('reports the resume as pending, and refuses a second click, while it is in flight', () => {
     const [action] = traceRunActions({ ...resumeOnly, resumeLoading: true })
-    expect(action.label).toBe('Resuming')
+    expect(action.pending).toBe(true)
     expect(action.disabled).toBe(true)
   })
 

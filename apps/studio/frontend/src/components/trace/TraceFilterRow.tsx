@@ -1,5 +1,6 @@
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
-import { TRACE_CATEGORIES, TRACE_CATEGORY_LABEL, type TraceCategory } from './trace-category'
+import { TRACE_CATEGORIES, type TraceCategory } from './trace-category'
+import { useTraceCopy } from './trace-copy'
 
 interface TraceFilterRowProps {
   phases: string[]
@@ -30,6 +31,7 @@ export function TraceFilterRow({
   onSelectCategories,
   onSelectPhases,
 }: TraceFilterRowProps) {
+  const t = useTraceCopy()
   return (
     <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-200 ease-out group-focus-within/trace-search:grid-rows-[1fr]">
       {/* The 0fr→1fr grid row is what makes an unknown height animate; the inner
@@ -43,12 +45,12 @@ export function TraceFilterRow({
             spacing={1}
             value={selectedCategories}
             onValueChange={(value: string[]) => onSelectCategories(value as TraceCategory[])}
-            aria-label="Filter by event kind"
+            aria-label={t('filter.byKind')}
             className="flex-nowrap"
           >
             {TRACE_CATEGORIES.map((category) => (
               <ToggleGroupItem key={category} value={category} className="shrink-0">
-                {TRACE_CATEGORY_LABEL[category]}
+                {t(`filter.${category}`)}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -62,7 +64,7 @@ export function TraceFilterRow({
                 spacing={1}
                 value={selectedPhases}
                 onValueChange={onSelectPhases}
-                aria-label="Filter by node"
+                aria-label={t('filter.byNode')}
                 className="flex-nowrap"
               >
                 {phases.map((phase) => (

@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { TraceFilterRow } from './TraceFilterRow'
-import { TRACE_CATEGORIES, TRACE_CATEGORY_LABEL } from './trace-category'
+import i18n from '../../i18n'
+import { TRACE_CATEGORIES } from './trace-category'
 
 function render(overrides: Partial<React.ComponentProps<typeof TraceFilterRow>> = {}): string {
   return renderToStaticMarkup(
@@ -21,7 +22,7 @@ describe('TraceFilterRow (decision 2026-08-09 D11)', () => {
     const html = render()
 
     for (const category of TRACE_CATEGORIES) {
-      expect(html).toContain(TRACE_CATEGORY_LABEL[category])
+      expect(html).toContain(i18n.t(`filter.${category}`, { ns: 'trace' }))
     }
     expect(html).toContain('>draft<')
     expect(html).toContain('>review<')

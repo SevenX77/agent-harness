@@ -4,7 +4,6 @@ import type {
   CallSettingsDetails,
   EventFact,
   RouteDecisionDetails,
-  SettingVerdict,
   TraceSeverity,
 } from '../../utils/trace'
 import {
@@ -13,10 +12,9 @@ import {
   answerToolCallsText,
   eventColor,
   eventSeverity,
-  eventMessage,
+  eventHeadline,
   eventMockedSource,
   eventModelName,
-  eventMessageIsRedundant,
   eventPhase,
   eventTimeLabel,
   jsonText,
@@ -27,7 +25,6 @@ import {
   maxSeverity,
   routeDecisionDetails,
   mockedSourceClass,
-  mockedSourceLabel,
   tokenText,
   toolCallSummary,
 } from '../../utils/trace'
@@ -35,6 +32,15 @@ import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
 import { EventTypeBadge } from './EventTypeBadge'
 import { TraceText } from './TraceText'
+import {
+  factLabelText,
+  factValueText,
+  toolCallHeadline,
+  toolDurationText,
+  traceHeadlineText,
+  useTraceCopy,
+  type TraceCopy,
+} from './trace-copy'
 import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 
 interface TraceStepRowProps {
@@ -75,6 +81,7 @@ export function TraceStepRow({
   onSelectEvent,
   liveOutput,
 }: TraceStepRowProps) {
+  const t = useTraceCopy()
   const running = step.status === 'running'
   const severed = step.status === 'severed'
   // Chips describe the outcome, so they read from the half that HAS one.
@@ -97,6 +104,7 @@ export function TraceStepRow({
   // open LLM step) is its own block — the verdict is the row's whole content.
   const ownRouteDecision = routeDecisionDetails(settled)
   const ownCallSettings = callSettingsDetails(settled)
+  const headline = traceHeadlineText(eventHeadline(settled), t)
 
   return (
     <div className="relative pl-5">
@@ -105,7 +113,7 @@ export function TraceStepRow({
         type="button"
         data-trace-event-id={eventId}
         data-trace-step-status={step.status}
-        aria-label={`Trace step ${settled.event_type} in ${eventPhase(settled)}`}
+        aria-label={t('step.aria', { eventType: settled.event_type, phase: eventPhase(settled) })}
         aria-expanded={expanded}
         onClick={() => {
           onToggleExpanded()
@@ -124,14 +132,14 @@ export function TraceStepRow({
             {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
             <EventTypeBadge eventType={settled.event_type} severity={severity} />
             {running ? (
-              <Loader2 aria-label="Step in progress" className="h-3 w-3 animate-spin text-muted-foreground" />
+              <Loader2 aria-label={t('step.inProgress')} className="h-3 w-3 animate-spin text-muted-foreground" />
             ) : null}
             {severed ? (
               <span
-                aria-label="Step never completed — the run ended first"
+                aria-label={t('step.severedAria')}
                 className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
               >
-                never completed
+                {t('step.severed')}
               </span>
             ) : null}
             {timeLabel ? (
@@ -147,7 +155,7 @@ export function TraceStepRow({
           {modelName ? (
             <span
               data-trace-model-chip
-              title={`Model: ${modelName}`}
+              title={t('step.model', { model: modelName })}
               className="flex max-w-[180px] items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs text-muted-foreground"
             >
               <Cpu className="h-3 w-3 shrink-0" />
@@ -156,13 +164,13 @@ export function TraceStepRow({
           ) : null}
           {mockedSource ? (
             <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${mockedSourceClass(mockedSource)}`}>
-              {mockedSourceLabel(mockedSource)}
+              {t(`mocked.${mockedSource}`)}
             </span>
           ) : null}
         </div>
-        {eventMessageIsRedundant(settled) ? null : (
+        {headline === '' ? null : (
           <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-foreground/80">
-            {eventMessage(settled)}
+            {headline}
           </p>
         )}
         {ownRouteDecision ? <RouteDecisionBlock details={ownRouteDecision} severity={severity} /> : null}
@@ -188,22 +196,28 @@ export function TraceStepRow({
 
 /** The tool call named on the collapsed row, so a folded step still says what it did. */
 function ToolHeadline({ step }: { step: TraceStep }) {
+  const t = useTraceCopy()
   const summary = toolCallSummary(step.end?.event ?? step.start.event)
   const startedName = typeof step.start.event.tool_name === 'string' ? step.start.event.tool_name : null
-  const headline = summary?.headline ?? startedName
-  if (!headline) {
+  const toolName = summary?.toolName ?? startedName
+  if (!toolName) {
     return null
   }
+  // A folded row that has only the OPENING event has no classified summary yet;
+  // the tool's own name is all there is to say, and saying it is better than
+  // saying nothing until the call closes.
+  const headline = summary ? toolCallHeadline(summary, t) : toolName
+  const duration = summary ? toolDurationText(summary, t) : null
   return (
     <span className="mt-2 flex items-center gap-2 text-xs">
-      {headline.includes('Bash') ? (
+      {toolName.includes('Bash') ? (
         <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
       ) : (
         <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
       )}
       <span className="font-medium text-foreground">{headline}</span>
-      {summary?.durationLabel ? (
-        <span className="text-muted-foreground">{summary.durationLabel}</span>
+      {duration ? (
+        <span className="text-muted-foreground">{duration}</span>
       ) : null}
     </span>
   )
@@ -243,6 +257,7 @@ function StepBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepOutp
  * arranged the same data by KIND, which is an order no execution ever ran in.
  */
 function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepOutput }) {
+  const t = useTraceCopy()
   const prompt = step.start.event
   const answered = step.end?.event
   const variables = jsonText(prompt.variables)
@@ -259,35 +274,35 @@ function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepO
     <div className="mt-2 space-y-2 text-xs">
       <PromptOrigin event={prompt} />
       {hasVariables ? (
-        <FlowEntry title="Filled in">
-          <TraceText text={variables} label="Prompt variables" language="json" />
+        <FlowEntry title={t('flow.filledIn')}>
+          <TraceText text={variables} label={t('text.promptVariables')} language="json" />
         </FlowEntry>
       ) : null}
       {promptMessages(prompt).map((message, position) => (
-        <FlowEntry key={`sent-${position}`} title={`Sent — ${message.role}`}>
-          <TraceText text={message.text} label={`${message.role} message`} />
+        <FlowEntry key={`sent-${position}`} title={t('flow.sent', { role: message.role })}>
+          <TraceText text={message.text} label={t('text.roleMessage', { role: message.role })} />
         </FlowEntry>
       ))}
       {reasoning ? (
-        <FlowEntry title="Thinking">
-          <TraceText text={reasoning} label="Thinking" className="italic text-muted-foreground" />
+        <FlowEntry title={t('flow.thinking')}>
+          <TraceText text={reasoning} label={t('text.thinking')} className="italic text-muted-foreground" />
         </FlowEntry>
       ) : null}
       {answer ? (
-        <FlowEntry title="Answer">
-          <TraceText text={answer} label="Answer" />
+        <FlowEntry title={t('flow.answer')}>
+          <TraceText text={answer} label={t('text.answer')} />
         </FlowEntry>
       ) : null}
       {toolCalls ? (
-        <FlowEntry title="Tool calls">
-          <TraceText text={toolCalls} label="Tool calls" language="json" />
+        <FlowEntry title={t('flow.toolCalls')}>
+          <TraceText text={toolCalls} label={t('text.toolCalls')} language="json" />
         </FlowEntry>
       ) : null}
       {/* A response none of the semantic entries could claim still gets shown —
           decomposing the answer must never become a way of hiding it. */}
       {bareResponse ? (
-        <FlowEntry title="Response">
-          <TraceText text={jsonText(answered.response_data ?? undefined)} label="Response" language="json" />
+        <FlowEntry title={t('flow.response')}>
+          <TraceText text={jsonText(answered.response_data ?? undefined)} label={t('text.response')} language="json" />
         </FlowEntry>
       ) : null}
       <VerdictBlocks verdicts={step.verdicts} />
@@ -312,6 +327,7 @@ function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepO
  * words in this prompt are the engine's, and which are the author's.
  */
 function PromptOrigin({ event }: { event: CallbackEvent }) {
+  const t = useTraceCopy()
   const onFileOpen = useOptionalWorkspaceContext()?.onFileOpen
   const sourcePath = typeof event.phase_source_path === 'string' ? event.phase_source_path : ''
   const templateText = typeof event.template_text === 'string' ? event.template_text : ''
@@ -321,7 +337,7 @@ function PromptOrigin({ event }: { event: CallbackEvent }) {
   return (
     <>
       {sourcePath ? (
-        <FlowEntry title={`Loaded — ${sourcePath}`}>
+        <FlowEntry title={t('flow.loaded', { path: sourcePath })}>
           {onFileOpen ? (
             <button
               type="button"
@@ -330,14 +346,14 @@ function PromptOrigin({ event }: { event: CallbackEvent }) {
               className="inline-flex items-center gap-1 font-mono text-xs text-link hover:text-link/80"
             >
               <FileText className="h-3 w-3" />
-              Open this phase
+              {t('step.openPhase')}
             </button>
           ) : null}
         </FlowEntry>
       ) : null}
-      <FlowEntry title={`Wrapped — ${templateSource}`}>
+      <FlowEntry title={t('flow.wrapped', { source: templateSource })}>
         {templateText ? (
-          <TraceText text={templateText} label="Prompt template" />
+          <TraceText text={templateText} label={t('text.promptTemplate')} />
         ) : null}
       </FlowEntry>
     </>
@@ -386,11 +402,12 @@ function VerdictBlocks({ verdicts, onlyProblems = false }: { verdicts: TraceStep
 
 /** What a tool was asked to do, while it is still doing it. */
 function ToolArguments({ event }: { event: CallbackEvent }) {
+  const t = useTraceCopy()
   return (
     <div className="mt-2 text-xs">
-      <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{t('step.input')}</div>
       <div className="mt-0.5">
-        <TraceText text={jsonText(event.args)} label="Tool input" language="json" />
+        <TraceText text={jsonText(event.args)} label={t('text.toolInput')} language="json" />
       </div>
     </div>
   )
@@ -410,6 +427,7 @@ function ToolArguments({ event }: { event: CallbackEvent }) {
  * Both wells auto-follow: live text keeps the line arriving in view.
  */
 function LiveOutput({ output }: { output: StepOutput }) {
+  const t = useTraceCopy()
   if (!output.text && !output.thinking) {
     return null
   }
@@ -418,7 +436,7 @@ function LiveOutput({ output }: { output: StepOutput }) {
       {output.thinking ? (
         <TraceText
           text={output.thinking}
-          label="Live thinking"
+          label={t('text.liveThinking')}
           autoFollow
           className="italic text-muted-foreground"
         />
@@ -426,7 +444,7 @@ function LiveOutput({ output }: { output: StepOutput }) {
       {output.text ? (
         <TraceText
           text={output.text}
-          label="Live answer"
+          label={t('text.liveAnswer')}
           autoFollow
           className="text-foreground/90"
         />
@@ -440,18 +458,6 @@ function LiveOutput({ output }: { output: StepOutput }) {
 // code, where a fall-back went, and the failure reason. Tone follows severity
 // rather than the event kind, because the same event reports the route that
 // answered and the run that ran out of routes.
-const DECISION_TITLE: Record<RouteDecisionDetails['decision'], string> = {
-  answered: 'Route used',
-  skipped_circuit_open: 'Route skipped — circuit open',
-  probe_failed: 'Probe failed',
-  retried_same_route: 'Retried same route',
-  dropped_rejected_settings: 'Runtime settings refused — running without them',
-  escalated_budget: 'Token budget raised',
-  fell_back: 'Provider fallback',
-  failed_terminal: 'Route failed — no fallback',
-  exhausted: 'All routes exhausted',
-}
-
 const DECISION_TONE: Record<TraceSeverity, { box: string; title: string; arrow: string }> = {
   error: {
     box: 'border-destructive-border/60 bg-destructive/10',
@@ -470,6 +476,10 @@ const DECISION_TONE: Record<TraceSeverity, { box: string; title: string; arrow: 
   },
 }
 
+function decisionTitle(details: RouteDecisionDetails, t: TraceCopy): string {
+  return t(`decision.${details.decision}`)
+}
+
 /**
  * A degradation the reader has already had explained: this call hit it too.
  *
@@ -486,6 +496,7 @@ function RouteDecisionRepeat({
   occurrence: number
   severity: TraceSeverity
 }) {
+  const t = useTraceCopy()
   const tone = DECISION_TONE[severity]
   return (
     <div
@@ -493,11 +504,11 @@ function RouteDecisionRepeat({
       className={`mt-2 flex flex-wrap items-center gap-1.5 rounded border px-2 py-1 text-xs ${tone.box}`}
     >
       <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${tone.title}`} />
-      <span className={tone.title}>{DECISION_TITLE[details.decision]} again</span>
+      <span className={tone.title}>{t('route.again', { title: decisionTitle(details, t) })}</span>
       {details.endpointId ? (
-        <span className="text-muted-foreground">endpoint: {details.endpointId}</span>
+        <span className="text-muted-foreground">{t('route.endpoint', { id: details.endpointId })}</span>
       ) : null}
-      <span className="text-muted-foreground">({occurrence} times so far — reason above)</span>
+      <span className="text-muted-foreground">{t('route.repeats', { count: occurrence })}</span>
     </div>
   )
 }
@@ -509,31 +520,32 @@ function RouteDecisionBlock({
   details: RouteDecisionDetails
   severity: TraceSeverity
 }) {
+  const t = useTraceCopy()
   const tone = DECISION_TONE[severity]
   return (
     <div className={`mt-2 rounded border p-2 ${tone.box}`}>
       <div className={`flex flex-wrap items-center gap-1.5 text-xs font-semibold ${tone.title}`}>
         {severity === 'normal' ? <Cpu className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-        {DECISION_TITLE[details.decision]}
+        {decisionTitle(details, t)}
         {details.endpointId ? (
-          <span className="font-normal text-muted-foreground">endpoint: {details.endpointId}</span>
+          <span className="font-normal text-muted-foreground">{t('route.endpoint', { id: details.endpointId })}</span>
         ) : null}
         {details.protocol ? (
           <span className="font-normal text-muted-foreground">{details.protocol}</span>
         ) : null}
         {details.statusCode !== null ? (
-          <span className="font-normal text-muted-foreground">HTTP {details.statusCode}</span>
+          <span className="font-normal text-muted-foreground">{t('route.http', { status: details.statusCode })}</span>
         ) : null}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground">
         <span className="rounded border border-border bg-background px-1.5 py-0.5">
-          {details.providerModelId ?? details.routeId ?? 'unknown route'}
+          {details.providerModelId ?? details.routeId ?? t('route.unknown')}
         </span>
         {details.decision === 'fell_back' ? (
           <>
             <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
             <span className="rounded border border-border bg-background px-1.5 py-0.5">
-              {details.nextRouteId ?? 'unknown route'}
+              {details.nextRouteId ?? t('route.unknown')}
             </span>
           </>
         ) : null}
@@ -541,7 +553,7 @@ function RouteDecisionBlock({
           <>
             <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
             <span className="rounded border border-destructive-border/60 bg-destructive/10 px-1.5 py-0.5 text-destructive">
-              no remaining route
+              {t('route.noRemaining')}
             </span>
           </>
         ) : null}
@@ -550,7 +562,7 @@ function RouteDecisionBlock({
           unsaid lets the reader keep reading an answer that no longer counts. */}
       {details.voidedStreamedAnswer ? (
         <p className="mt-1.5 text-xs font-medium text-warning">
-          Discarded the partial answer already shown above.
+          {t('route.discarded')}
         </p>
       ) : null}
       {details.reason ? (
@@ -563,25 +575,26 @@ function RouteDecisionBlock({
 // n4-trace #16/#24: the verb-classified call with its args (input) and result
 // (output), so the agent is not a black box and nobody has to read raw JSON.
 function ToolCallSubtree({ summary }: { summary: NonNullable<ReturnType<typeof toolCallSummary>> }) {
+  const t = useTraceCopy()
   return (
     <div className="mt-2 text-xs">
       <div className="flex items-center gap-1.5 font-medium text-foreground">
         <ListTree className="h-3.5 w-3.5" />
-        {summary.headline}
+        {toolCallHeadline(summary, t)}
       </div>
       {summary.args ? (
         <div className="mt-1.5">
-          <div className="text-[10px] font-semibold uppercase text-muted-foreground">Input</div>
+          <div className="text-[10px] font-semibold uppercase text-muted-foreground">{t('step.input')}</div>
           <div className="mt-0.5">
-            <TraceText text={summary.args} label="Tool input" language="json" />
+            <TraceText text={summary.args} label={t('text.toolInput')} language="json" />
           </div>
         </div>
       ) : null}
       {summary.resultSummary ? (
         <div className="mt-1.5">
-          <div className="text-[10px] font-semibold uppercase text-muted-foreground">Result</div>
+          <div className="text-[10px] font-semibold uppercase text-muted-foreground">{t('step.result')}</div>
           <div className="mt-0.5">
-            <TraceText text={summary.resultSummary} label="Tool result" />
+            <TraceText text={summary.resultSummary} label={t('text.toolResult')} />
           </div>
         </div>
       ) : null}
@@ -601,6 +614,7 @@ function MachineryBody({
   narration: ReturnType<typeof machineryNarration>
   facts: EventFact[]
 }) {
+  const t = useTraceCopy()
   if (narration === null && facts.length === 0) {
     return null
   }
@@ -608,12 +622,15 @@ function MachineryBody({
     <div className="mt-2 space-y-1.5 rounded-md border border-border bg-muted/30 p-2 text-xs">
       {facts.length > 0 ? (
         <dl data-trace-facts className="flex flex-wrap gap-x-4 gap-y-1">
-          {facts.map((item) => (
-            <div key={item.label} className="flex min-w-0 items-baseline gap-1.5">
-              <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{item.label}</dt>
-              <dd className="min-w-0 truncate font-mono text-foreground" title={item.value}>{item.value}</dd>
-            </div>
-          ))}
+          {facts.map((item) => {
+            const value = factValueText(item.value, t)
+            return (
+              <div key={item.label} className="flex min-w-0 items-baseline gap-1.5">
+                <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{factLabelText(item, t)}</dt>
+                <dd className="min-w-0 truncate font-mono text-foreground" title={value}>{value}</dd>
+              </div>
+            )
+          })}
         </dl>
       ) : null}
       {narration !== null && narration.details.length > 0 ? (
@@ -653,26 +670,16 @@ function MachineryBody({
  * stuck, but nobody mistakes it for a reading.
  */
 function UnreadEventBody({ event }: { event: CallbackEvent }) {
+  const t = useTraceCopy()
   return (
     <div data-trace-unread-event={event.event_type} className="mt-2 space-y-1.5">
       <p className="flex items-center gap-1.5 rounded border border-warning-border bg-warning-background px-2 py-1 text-xs text-warning-foreground">
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-        This build has no reading for <code className="font-mono">{event.event_type}</code> — showing the raw event.
+        {t('step.unread', { eventType: event.event_type })}
       </p>
-      <TraceText text={jsonText(event as never)} label="Event payload" language="json" />
+      <TraceText text={jsonText(event as never)} label={t('text.eventPayload')} language="json" />
     </div>
   )
-}
-
-// A setting that did not run as asked is the whole reason this block exists, so
-// it says the verdict in words rather than colouring the row and hoping.
-const VERDICT_LABEL: Record<SettingVerdict, string> = {
-  applied: 'applied',
-  sent: 'sent',
-  adjusted: 'adjusted to fit',
-  unsupported: 'not supported here',
-  rejected: 'refused',
-  ignored: 'ignored',
 }
 
 function CallSettingsBlock({
@@ -682,6 +689,7 @@ function CallSettingsBlock({
   details: CallSettingsDetails
   severity: TraceSeverity
 }) {
+  const t = useTraceCopy()
   if (details.settings.length === 0) {
     return null
   }
@@ -690,7 +698,7 @@ function CallSettingsBlock({
     <div className={`mt-2 rounded border p-2 ${tone.box}`}>
       <div className={`flex flex-wrap items-center gap-1.5 text-xs font-semibold ${tone.title}`}>
         {severity === 'normal' ? <Cpu className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-        Runtime settings
+        {t('settings.title')}
         {details.providerModelId ? (
           <span className="font-normal text-muted-foreground">{details.providerModelId}</span>
         ) : null}
@@ -706,8 +714,11 @@ function CallSettingsBlock({
               {outcome.requested === null ? '—' : String(outcome.requested)}
             </span>
             <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
+            {/* A setting that did not run as asked is the whole reason this
+                block exists, so it says the verdict in words rather than
+                colouring the row and hoping. */}
             <span className="rounded border border-border bg-background px-1.5 py-0.5">
-              {VERDICT_LABEL[outcome.verdict]}
+              {t(`settings.${outcome.verdict}`)}
             </span>
             {outcome.reason ? (
               <span className="font-sans text-muted-foreground">{outcome.reason}</span>

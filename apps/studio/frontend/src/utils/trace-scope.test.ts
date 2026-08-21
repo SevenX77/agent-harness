@@ -62,12 +62,24 @@ describe('eventInScope', () => {
 })
 
 describe('scopeLabel', () => {
+  // The two boundary words come from the caller, so the chip and the
+  // canvas node can never call the same boundary two different things.
+  const boundaryName = (boundary: 'input' | 'output') =>
+    boundary === 'input' ? 'Input' : 'Output'
+
   it('names each scope the way the canvas does', () => {
-    expect(scopeLabel({ kind: 'node', phase: 'draft' })).toBe('draft')
-    expect(scopeLabel({ kind: 'edge', source: 'draft', target: 'review' })).toBe('draft → review')
-    expect(scopeLabel({ kind: 'edge', source: '__global_input__', target: 'draft' })).toBe('Input → draft')
-    expect(scopeLabel({ kind: 'edge', source: 'review', target: '__global_output__' })).toBe('review → Output')
-    expect(scopeLabel({ kind: 'input' })).toBe('Input')
-    expect(scopeLabel({ kind: 'output' })).toBe('Output')
+    expect(scopeLabel({ kind: 'node', phase: 'draft' }, boundaryName)).toBe('draft')
+    expect(scopeLabel({ kind: 'edge', source: 'draft', target: 'review' }, boundaryName))
+      .toBe('draft → review')
+    expect(scopeLabel({ kind: 'edge', source: '__global_input__', target: 'draft' }, boundaryName))
+      .toBe('Input → draft')
+    expect(scopeLabel({ kind: 'edge', source: 'review', target: '__global_output__' }, boundaryName))
+      .toBe('review → Output')
+    expect(scopeLabel({ kind: 'input' }, boundaryName)).toBe('Input')
+    expect(scopeLabel({ kind: 'output' }, boundaryName)).toBe('Output')
+  })
+
+  it('asks the caller for the boundary word rather than writing one in', () => {
+    expect(scopeLabel({ kind: 'input' }, () => '输入')).toBe('输入')
   })
 })

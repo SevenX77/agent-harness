@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Clock, FileText, Hash, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, FileText, Hash, Unplug, XCircle } from 'lucide-react'
 import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 import { formatRunDuration, formatRunTokens } from '../../utils/run-format'
 import type { TraceOutcomeEntry } from '../../utils/trace-outcome'
@@ -8,6 +8,11 @@ const OUTCOME_PRESENTATION = {
   success: { icon: CheckCircle2, label: 'Run succeeded', tone: 'text-success' },
   failed: { icon: AlertCircle, label: 'Run failed', tone: 'text-destructive' },
   cancelled: { icon: XCircle, label: 'Run cancelled', tone: 'text-destructive' },
+  abandoned: {
+    icon: Unplug,
+    label: 'Run abandoned — the app closed while it was going',
+    tone: 'text-warning',
+  },
 } as const
 
 /**

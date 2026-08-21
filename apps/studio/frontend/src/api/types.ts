@@ -294,7 +294,19 @@ export interface BatchRunResponse {
 }
 
 /** What a run can be. `cancelled` is the user stopping it, which is not a failure. */
-export type RunStatus = 'running' | 'success' | 'failed' | 'paused' | 'cancelled'
+/**
+ * How a run stands.
+ *
+ * `abandoned` is the ending nobody chose: whatever was executing the run
+ * went away — the app closed mid-run, the sidecar was killed — so the run
+ * neither finished, nor failed, nor was cancelled by a person. Before it
+ * existed such a run kept its last written status, `running`, forever,
+ * because the only party that could correct it had died.
+ *
+ * NOT `interrupted`: the engine spends that word on a run that stopped to ask
+ * a human, which means someone is expected back. One word cannot mean both.
+ */
+export type RunStatus = 'running' | 'success' | 'failed' | 'paused' | 'cancelled' | 'abandoned'
 
 export interface BatchRunItem {
   input_id: string

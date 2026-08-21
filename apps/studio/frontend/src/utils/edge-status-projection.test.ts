@@ -126,6 +126,7 @@ describe("EDGE_STATUS_AT_RUN_END — the registered close table", () => {
       success: "done",
       failed: "failed",
       cancelled: "paused",
+      abandoned: "paused",
       paused: "paused",
     })
   })

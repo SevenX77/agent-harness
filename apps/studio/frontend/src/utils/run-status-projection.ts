@@ -21,9 +21,23 @@ import { isRootPhasePath, phasePathOf } from "./phase-path"
  * nothing is executing; `cancelled` is the user ending it, which is not a
  * failure (RunStatus's own definition in api/types.ts).
  */
-export type RunVerdict = "running" | "paused" | "success" | "failed" | "cancelled"
+export type RunVerdict =
+  | "running"
+  | "paused"
+  | "success"
+  | "failed"
+  | "cancelled"
+  | "abandoned"
 
-/** What the streamed run_ended statuses mean in verdict terms. */
+/**
+ * What the streamed run_ended statuses mean in verdict terms.
+ *
+ * The engine's `interrupted` is a run that stopped to ask a human — it emits
+ * an `InterruptedEvent` and then this status — so it folds to `paused`, the
+ * verdict for "nothing is executing and it can continue". That is a different
+ * situation from the record status `abandoned`, where nobody is coming back;
+ * the two are spelled differently for exactly that reason.
+ */
 const RUN_ENDED_EVENT_VERDICT: Readonly<Record<string, RunVerdict>> = {
   completed: "success",
   crashed: "failed",
@@ -42,6 +56,9 @@ export const NODE_STATUS_AT_RUN_END: Readonly<
   success: "success",
   failed: "error",
   cancelled: "paused",
+  // Nothing failed and nobody asked — whatever was running the run left.
+  // The node stopped where it stopped, which is what paused looks like.
+  abandoned: "paused",
   paused: "paused",
 }
 

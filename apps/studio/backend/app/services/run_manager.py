@@ -62,6 +62,7 @@ from app.services.gate_events import GateOutcome, publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
 from app.services.run_ids import is_predict_run_id, new_run_id
+from app.services.run_liveness import hold_run_liveness, run_worker_is_alive
 from app.services.run_report import write_run_report
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
@@ -195,7 +196,38 @@ def _run_worker_main(
     roles_path_override: str | None = None,
     runtime_config: dict[str, Any] | None = None,
 ) -> None:
-    """Subprocess entrypoint that executes EngineAdapter.run_artifact.
+    """Subprocess entrypoint: claim the run, then execute it.
+
+    The claim is an OS lock on the run's own directory, held for exactly as long
+    as this process lives. It is what lets a LATER sidecar answer "is this run
+    still going?" instead of trusting a record its own writer may not have
+    survived to correct (see ``run_liveness``). Wrapping rather than inlining
+    keeps the two jobs apart: this function owns the claim, the one below owns
+    the run.
+    """
+    run_dir = Path(run_dir_raw)
+    with hold_run_liveness(run_dir):
+        _execute_run_in_worker(
+            skill_id,
+            run_dir_raw,
+            inputs,
+            process_queue,
+            art_ref,
+            roles_path_override,
+            runtime_config,
+        )
+
+
+def _execute_run_in_worker(
+    skill_id: str,
+    run_dir_raw: str,
+    inputs: dict[str, Any],
+    process_queue: Any,
+    art_ref: dict[str, Any],
+    roles_path_override: str | None = None,
+    runtime_config: dict[str, Any] | None = None,
+) -> None:
+    """Executes EngineAdapter.run_artifact.
 
     ``roles_path_override`` (n4-trace#23): a model-compare candidate worker is
     handed its own materialized ``llm_roles.yaml`` here; setting the env var in
@@ -1079,7 +1111,9 @@ class RunManager:
                 # was silently one run shorter — which is how a mid-save read
                 # spent months looking like "the run was never there".
                 try:
-                    metadata.append(_metadata_with_input_summary(metadata_path))
+                    metadata.append(
+                        self._reconciled(skill_id, _metadata_with_input_summary(metadata_path))
+                    )
                 except Exception as exc:
                     response = error_response(
                         error_code="RUN_METADATA_UNREADABLE",
@@ -1162,8 +1196,40 @@ class RunManager:
         "failed": "fail",
         "paused": "paused",
         "cancelled": "stopped",
+        "abandoned": "stopped",
         "running": "started",
     }
+
+    def _reconciled(self, skill_id: str, metadata: RunMetadata) -> RunMetadata:
+        """The run's status as it actually stands, not merely as it was last written.
+
+        ``running`` and ``paused`` are claims about a worker, and a record cannot
+        keep a claim honest by itself: a sidecar holds its live runs in memory
+        only, so a restarted one starts empty while the record still reads
+        ``running``. Asked whether the run was going, the list answered yes and
+        ``pause_run`` answered ``RUN_NOT_RUNNING`` — one question, two answers,
+        and the badge spun for the rest of the session (ledger C1).
+
+        Checking is possible because a worker holds a lock on its own run
+        directory for as long as it lives (``run_liveness``). Nobody holding it
+        means nobody is running the run, and a run whose worker vanished ended —
+        ``abandoned``, which is neither ``cancelled`` (a person asked) nor
+        ``failed`` (the run itself failed).
+
+        A run THIS sidecar started is left alone: its registry entry is the
+        memory, and a worker that has not written its lock yet would otherwise be
+        declared dead in the moment between spawn and first claim.
+        """
+        if metadata.status not in {"running", "paused"}:
+            return metadata
+        if metadata.run_id in self._runs:
+            return metadata
+        run_dir = run_dir_for(skill_id, metadata.run_id)
+        if run_worker_is_alive(run_dir):
+            return metadata
+        abandoned = metadata.model_copy(update={"status": "abandoned"})
+        _write_run_metadata(run_dir, abandoned)
+        return abandoned
 
     async def pause_run(self, skill_id: str, run_id: str) -> RunMetadata:
         """Stop the worker but leave the run continuable.
@@ -1341,7 +1407,9 @@ class RunManager:
                 f"Run not found: {run_id}",
                 {"skill_id": skill_id, "run_id": run_id},
             )
-        return RunMetadata.model_validate_json(read_published_text(metadata_path))
+        return self._reconciled(
+            skill_id, RunMetadata.model_validate_json(read_published_text(metadata_path))
+        )
 
     def register_transient_predict_run(
         self,

@@ -99,6 +99,22 @@ describe("runVerdict — the one answer to 'how does this run stand'", () => {
     expect(runVerdict(events, null, "run-1", "cancelled")).toBe("cancelled")
   })
 
+  it("reports a run whose worker vanished as abandoned, not as still running", () => {
+    // The backend reconciles the record when nobody holds the run's worker lock
+    // (ledger C1). The projection has to carry that word through, or the badge
+    // reads `running` from a record that already gave up saying so.
+    const events = [event({ event_type: "phase_start", phase_name: "draft" })]
+    expect(runVerdict(events, metadata("abandoned"))).toBe("abandoned")
+  })
+
+  it("keeps the engine's interrupted apart from an abandoned record", () => {
+    // Same-looking word, opposite situations: the engine emits run_ended
+    // `interrupted` when a run stops to ask a human — someone is expected back,
+    // so it folds to `paused`. `abandoned` means nobody is coming back.
+    expect(runVerdict([event({ event_type: "run_ended", status: "interrupted" })], null)).toBe("paused")
+    expect(runVerdict([], metadata("abandoned"))).toBe("abandoned")
+  })
+
   it("ignores other runs' run_ended when scoped to a run id", () => {
     const events = [
       envelope({ event_type: "run_ended", status: "completed" }, { runId: "run-2" }),
@@ -141,6 +157,14 @@ describe("deriveNodeStatuses — 铁律: a run at a terminal state leaves nothin
     })
   })
 
+  it("closes a mid-flight node when the record says the worker was abandoned", () => {
+    // The app was closed mid-run: no run_ended, no gate, and the record only
+    // learned the truth when the next sidecar found nobody holding the lock.
+    // The node stopped where it stopped — it neither failed nor succeeded.
+    const events = [event({ event_type: "phase_start", phase_name: "draft" })]
+    expect(deriveNodeStatuses(events, null, metadata("abandoned"))).toEqual({ draft: "paused" })
+  })
+
   it("keeps running nodes running while the run is live", () => {
     const events = [event({ event_type: "phase_start", phase_name: "draft" })]
     expect(deriveNodeStatuses(events, null, metadata("running"))).toEqual({ draft: "running" })
@@ -153,6 +177,7 @@ describe("NODE_STATUS_AT_RUN_END — the registered node close table", () => {
       success: "success",
       failed: "error",
       cancelled: "paused",
+      abandoned: "paused",
       paused: "paused",
     })
   })

@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, CirclePause, Loader2, XCircle, type LucideIcon } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CirclePause, Loader2, Unplug, XCircle, type LucideIcon } from 'lucide-react'
 import type { RunStatus } from '../api/types'
 import type { RunVerdict } from './run-status-projection'
 
@@ -34,6 +34,11 @@ export function runStatusMark(
       return { icon: Loader2, label: 'Run in progress', tone: 'animate-spin text-muted-foreground' }
     case 'cancelled':
       return { icon: XCircle, label: 'Run cancelled', tone: 'text-destructive' }
+    case 'abandoned':
+      // Warning, not destructive: nothing went wrong with the run, it just
+      // lost whatever was executing it — the same tone as paused, which is
+      // the state it most resembles from the reader's side.
+      return { icon: Unplug, label: 'Run abandoned — the app closed while it was going', tone: 'text-warning' }
     case 'failed':
       return { icon: AlertCircle, label: 'Run failed', tone: 'text-destructive' }
     default:

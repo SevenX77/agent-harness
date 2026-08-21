@@ -1,5 +1,4 @@
 import type { CallbackEvent } from '../api/types'
-import type { IndexedTraceEvent } from '../hooks/useTraceFilter'
 import { traceEventId } from '../hooks/useTraceSelection'
 import type { RunVerdict } from './run-status-projection'
 import { eventPhase, eventSeverity, routeDecisionDetails } from './trace'
@@ -10,6 +9,18 @@ import { eventPhase, eventSeverity, routeDecisionDetails } from './trace'
  * at a terminal state leaves nothing running). It is not `done`: the reader
  * should see "this never finished", not a summary that looks complete.
  */
+/**
+ * One received event and where it sits in the list it arrived in.
+ *
+ * The position travels with the event because everything downstream — row
+ * identity, scroll anchoring, selection — is stated in terms of it, and a
+ * position recomputed after a narrowing would name a different row.
+ */
+export interface IndexedTraceEvent {
+  event: CallbackEvent
+  index: number
+}
+
 export type TraceStepStatus = 'running' | 'done' | 'severed'
 
 /**

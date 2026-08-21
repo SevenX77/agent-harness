@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CallbackEvent } from '../api/types'
-import type { IndexedTraceEvent } from '../hooks/useTraceFilter'
+import type { IndexedTraceEvent } from './trace-steps'
 import { buildTraceSteps } from './trace-steps'
 
 function indexed(events: Partial<CallbackEvent>[]): IndexedTraceEvent[] {

@@ -506,6 +506,36 @@ export const copilotStore = {
       event.type === 'tool_approval_required' ? { ...event, decision } : event,
     )
   },
+  /**
+   * Settle a held approval that expired before anyone answered it.
+   *
+   * The other settle paths take a frontend event id because they start at a
+   * card the user clicked. This one starts at the server, which has never seen
+   * that id — it knows the hold only as `tool_use_id` — so the lookup runs the
+   * other way round (problem ledger CP7).
+   *
+   * Only a still-pending hold is touched. A verdict and an expiry can cross on
+   * the wire, and the user's answer is the one that actually happened; an
+   * expiry arriving behind it must not rewrite the record into something
+   * nobody chose.
+   */
+  timeOutToolApproval(toolUseId: string) {
+    const expired = state.sessions
+      .flatMap((session) => session.messages)
+      .flatMap((message) => message.events)
+      .find(
+        (event) =>
+          event.type === 'tool_approval_required' &&
+          event.toolUseId === toolUseId &&
+          event.decision === 'pending',
+      )
+    if (!expired) {
+      return
+    }
+    settleEvent(expired.id, (event) =>
+      event.type === 'tool_approval_required' ? { ...event, decision: 'timed_out' } : event,
+    )
+  },
   reviewPatch(eventId: string, review: 'accepted' | 'rejected') {
     settleEvent(eventId, (event) =>
       event.type === 'patch_proposed' ? { ...event, review } : event,

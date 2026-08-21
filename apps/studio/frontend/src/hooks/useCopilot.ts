@@ -10,7 +10,7 @@ import type {
   CopilotTextDeltaEvent,
   CopilotThinkingDeltaEvent,
 } from '../types/copilot'
-import { normalizeCopilotEvent } from '../types/copilot'
+import { normalizeCopilotEvent, readToolApprovalExpiry } from '../types/copilot'
 import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
@@ -278,8 +278,18 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
         reconnectTimer = window.setTimeout(connect, delay)
       }
       socket.onmessage = (message) => {
-        const event = normalizeCopilotEvent(JSON.parse(String(message.data)) as unknown, nextId('event'))
-        appendAssistantEvent(event)
+        const record = JSON.parse(String(message.data)) as unknown
+        // An expired hold is not a new thing to show — it is the ending of a
+        // card already on screen, so it settles that card instead of appending
+        // below it. Appending would leave the original still saying "Waiting
+        // for approval." with live buttons, which is the state this event
+        // exists to end (problem ledger CP7).
+        const expiry = readToolApprovalExpiry(record)
+        if (expiry) {
+          copilotStore.timeOutToolApproval(expiry)
+          return
+        }
+        appendAssistantEvent(normalizeCopilotEvent(record, nextId('event')))
       }
     }
 

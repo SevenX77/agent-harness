@@ -74,7 +74,24 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
   实现上后端**按会话记住每条已结束审批的结束原因**(参照 supervisor 记录子进程退出原因:
   「没了」和「因为超时没了」不是同一个答案),生命周期与会话同长,`_cleanup_pending_tool_approvals`
   清挂起时一并清掉——所以它不会无限增长,而一个已被清掉的会话里的审批号,本来就正是第③种。
-- **测试点**：Write/Edit 可在 workspace 内直接修改文件且不触发 D12 违规报警；改后 predict/run 读取最新文件；工具事件展示文件名与 diff/summary（可取到前后内容时）；Bash 审批拒绝后不执行。
+- **决策 COPILOT_ASSIST-8(挂起自己过期时,要在它那张卡上说出来;2026-08-20 立,问题台账 CP7)**：
+  一条挂起审批到时无人应答,后端**停任务、保会话**(`can_use_tool` 回 `interrupt=True`)。
+  这里**刻意不折算成「用户拒绝」**:把一个没有人做过的拒绝喂给模型,它会带着一个错误
+  信号继续往下跑。而这件事**必须回到那张卡上**:过期事件要**指名 `tool_use_id`**,
+  前端据此把那一张卡 settle 成 `decision: timed_out` —— 按钮消失,文案从
+  「Waiting for approval.」换成「超时,任务已停,发新消息可继续」。
+  **为什么做成 `decision` 的第四个取值,而不是另开一个字段**:这一个字段回答的正是
+  「这次挂起是怎么结束的」;再加一个字段回答同一个问题,就多了一个随时会跟它打架的
+  东西(呼应通用工程原则「显式状态与唯一 owner」)。**没有人决议本身就是一种结局**,
+  它该被记下来,而不是靠另一个布尔值旁注。
+  **为什么过期事件必须自报家门**:它从前是一条泛型 `error` —— 能说「有东西过期了」,
+  说不出**是哪一张卡**。于是没有任何一张卡认得出这是在说自己,它们全都继续停在
+  「Waiting for approval.」、按钮照样可点,而背后的任务早就停了。这正是仓规
+  「事件说不清是哪份数据变了,就去修事件契约」的原样场景。
+  **与 COPILOT_ASSIST-7 的分工**:两者是同一条挂起生命周期的两半 —— 7 管**用户来问**
+  的时候(点了一张陈旧的卡)后端要如实答出是哪一种结局;8 管**没有人问**的时候后端要
+  主动说,而且要说给具体的那一张卡听。
+- **测试点**：Write/Edit 可在 workspace 内直接修改文件且不触发 D12 违规报警；改后 predict/run 读取最新文件；工具事件展示文件名与 diff/summary（可取到前后内容时）；Bash 审批拒绝后不执行；挂起超时后那张卡自报 `timed_out`、按钮消失、并说明任务已停。
 - **归属**：Write/Edit 自写归 region [[copilot]] / `copilot-assist`；Studio 自有写入仍归 platform [[native-fs]]。
 
 ### F6 建技能向导
@@ -123,6 +140,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 | COPILOT_ASSIST-4 | SDK 测试 | 单元 `copilot-sdk-test-parity`；**为什么**：copilot test 必须走真实 `ClaudeSDKClient`，不能用 AsyncAnthropic 假路径 |
 | COPILOT_ASSIST-6 | 决议归消息记录所有 | 单元 `copilot-session-persistence`；**为什么**：决议存在卡片 `useState` 里,会话落盘存的却是「刚到时的样子」,重挂载即复活成未决议 |
 | COPILOT_ASSIST-7 | 挂起消失要分三种结局 | 单元 `copilot-session-persistence`；**为什么**：一个 `approval_not_found` 同时指「已决议」「超时」「会话没了」,前端还断言成 expired |
+| COPILOT_ASSIST-8 | 挂起自己过期要落到那张卡上 | 单元 `copilot-session-persistence`；**为什么**：超时只发一条泛型 `error`,说不出是哪一张卡,于是每张卡都继续停在「Waiting for approval.」、按钮照样可点,而背后的任务早已停了 |
 | COPILOT_ASSIST-5 | 会话身份契约（2026-08-15 用户裁决） | 单元 `copilot-session-persistence`；**为什么**：每个前端会话标签对应一条**独立的后端 SDK 对话**，会话身份必须显式进契约——此前 New chat 只换前端视图，报文无 session 标识，后端按 skill 只存一条 SDK 对话，生成中新建标签发的消息被注入正在跑的对话（2026-08-15 实测缺陷）。目标契约：① ws 报文必带 `session_id`（前端标签的 session id，缺失即边界拒绝）；② 后端 SDK client 缓存键 = (skill, **session**, model, provider, credential, workspace)，不同标签绝不共享对话；③ 流式事件按**发起查询的会话**归属渲染，与"当前激活标签"无关，切标签不串流；④ 关闭标签经 `POST /api/skills/{skill_id}/copilot/session-close` 结束对应后端 client（每 client 一个 CLI 子进程，不关则漏资源）；⑤ ws 断连仍重置该 skill 全部会话、一条连接内查询仍串行（单活跃查询不变式不变，审批/中断继续按 skill 键） |
 
 ## 6. 测试关键点

@@ -43,6 +43,25 @@ export async function resolveToolApprovalDecision({
   return { label: `${event.toolName} approved.`, response }
 }
 
+/**
+ * What the card says about a hold that is no longer open, or null while it is.
+ *
+ * An expiry gets a sentence rather than a word because it is the only ending
+ * the user did not cause and cannot see anywhere else: the task behind the
+ * card was stopped, not merely refused, and the session is still there to
+ * carry on from (problem ledger CP7).
+ */
+function describeDecision(event: CopilotToolApprovalRequiredEvent): string | null {
+  switch (event.decision) {
+    case 'pending':
+      return null
+    case 'timed_out':
+      return `${event.toolName} timed out waiting for an answer — the task was stopped. Send a new message to carry on.`
+    default:
+      return `${event.toolName} ${event.decision}.`
+  }
+}
+
 interface ToolApprovalCardProps {
   event: CopilotToolApprovalRequiredEvent
   skillId: string | null
@@ -55,7 +74,8 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
   const [errorLabel, setErrorLabel] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const settled = event.decision !== 'pending'
-  const decisionLabel = settled ? `${event.toolName} ${event.decision}.` : null
+  const expired = event.decision === 'timed_out'
+  const decisionLabel = describeDecision(event)
 
   async function decide(approve: boolean) {
     if (!skillId || isResolving || settled) {
@@ -129,7 +149,11 @@ export function ToolApprovalCard({ event, skillId }: ToolApprovalCardProps) {
       <pre className="mt-1.5 max-h-40 overflow-auto rounded-md bg-background p-2 font-mono text-foreground">
         {event.detail}
       </pre>
-      <p className={`mt-1 ${errorLabel ? 'text-destructive' : 'text-muted-foreground'}`}>
+      <p
+        className={`mt-1 ${
+          errorLabel ? 'text-destructive' : expired ? 'text-warning' : 'text-muted-foreground'
+        }`}
+      >
         {errorLabel ?? decisionLabel ?? 'Waiting for approval.'}
       </p>
     </div>

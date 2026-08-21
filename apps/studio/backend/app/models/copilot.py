@@ -125,6 +125,27 @@ class CopilotEventToolApprovalRequired(CopilotEventBase):
     detail: str
 
 
+class CopilotEventToolApprovalTimedOut(CopilotEventBase):
+    """A held tool call whose approval window expired before anyone answered.
+
+    Carries ``tool_use_id`` because the point of the event is to name WHICH
+    hold died. The timeout used to travel as a generic ``error``, which could
+    say that something expired but not what — so the card it was about had no
+    way to recognise itself and sat on "Waiting for approval." with live
+    buttons, forever, while the task behind it had already been stopped
+    (problem ledger CP7).
+
+    The stop is not negotiable and not a denial: ``can_use_tool`` returns
+    ``interrupt=True`` so the model halts, rather than handing it a refusal no
+    human ever made and letting the turn run on (COPILOT_ASSIST-8).
+    """
+
+    type: Literal["tool_approval_timed_out"] = "tool_approval_timed_out"
+    tool_use_id: str
+    tool_name: str
+    message: str
+
+
 class CopilotEventDone(CopilotEventBase):
     type: Literal["done"] = "done"
 
@@ -144,6 +165,7 @@ CopilotEvent: TypeAlias = Annotated[
     | CopilotEventToolUseResult
     | CopilotEventPatchProposed
     | CopilotEventToolApprovalRequired
+    | CopilotEventToolApprovalTimedOut
     | CopilotEventDone
     | CopilotEventError,
     Field(discriminator="type"),

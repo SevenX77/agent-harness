@@ -79,6 +79,7 @@ from app.models.copilot import (
     CopilotEventText,
     CopilotEventThinking,
     CopilotEventToolApprovalRequired,
+    CopilotEventToolApprovalTimedOut,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
@@ -541,7 +542,9 @@ async def _hold_for_tool_approval(
             " — task stopped, session preserved; send a new message to continue."
         )
         await sink.queue.put(
-            CopilotEventError(message=message, error_code="tool_approval_timeout")
+            CopilotEventToolApprovalTimedOut(
+                tool_use_id=tool_use_id, tool_name=tool_name, message=message
+            )
         )
         _settled_tool_approvals[(skill_id, tool_use_id)] = _APPROVAL_TIMED_OUT
         return PermissionResultDeny(message=message, interrupt=True)

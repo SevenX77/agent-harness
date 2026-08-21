@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from app.models.runs import RunMetadata
 from app.services.git_local import GitLocalService
-from app.services.run_manager import RunManager, RunRecord
+from app.services.run_manager import RunManager
 
 
 def _metadata() -> RunMetadata:
@@ -26,17 +26,6 @@ def _metadata() -> RunMetadata:
     )
 
 
-def _record(run_dir: Path, metadata: RunMetadata) -> RunRecord:
-    return RunRecord(
-        metadata=metadata,
-        skill_id="text-segmentation",
-        run_dir=run_dir,
-        process=None,
-        process_queue=None,
-        # The subject of this file: a run that DOES try to archive the skill,
-        # meeting a workspace that is not a git repository.
-        auto_commit=True,
-    )
 
 
 def test_run_metadata_accepts_no_git_status() -> None:
@@ -59,10 +48,11 @@ def test_successful_run_in_non_git_workspace_reports_no_git_without_error(
 
     manager = RunManager()
     manager.git_service = GitLocalService()
-    metadata = _metadata()
-    record = _record(run_dir, metadata)
 
-    updated = asyncio.run(manager._auto_commit_successful_run(record, metadata))
+    # Archiving is about the run's directory, so it is asked for the directory:
+    # a paused run ended by a sidecar that never started it has no record to
+    # pass, and one sealing sequence serves both (ledger C1 ④).
+    updated = asyncio.run(manager._auto_commit_successful_run(run_dir, _metadata()))
 
     assert updated.git_status == "no_git"
 

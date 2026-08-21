@@ -132,6 +132,9 @@ const mocks = vi.hoisted(() => ({
   runStreamEvents: [] as EventEnvelope[],
   projectRunHistory: vi.fn(),
   settleRunStatus: vi.fn(),
+  // What the server says this skill's runs are. Empty unless the case is about
+  // a run that outlived the window which started it.
+  runHistoryList: [] as RunMetadata[],
   refreshLocalHistory: vi.fn(),
   settingsPageProps: null as null | {
     initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
@@ -295,9 +298,20 @@ vi.mock('@/hooks/useRunHistory', async (importActual) => {
   const actual = await importActual<typeof import('@/hooks/useRunHistory')>()
   return {
     ...actual,
-    useRunHistory: () => {
-      throw new Error('Workspace must not subscribe to the run-history list')
-    },
+    // Workspace reads this list for ONE thing: which run of the open skill is
+    // under way, which only the server knows (ledger C1 ④). It shares the
+    // Timeline's SWR key, so the pair still costs one cold load per skill —
+    // the point the #468 ruling was protecting, now recorded that way in
+    // STUDIO_REQUEST_AUDIT.md.
+    useRunHistory: () => ({
+      runs: mocks.runHistoryList,
+      total: mocks.runHistoryList.length,
+      error: undefined,
+      isLoading: false,
+      refresh: vi.fn(),
+      startOptimisticRun: vi.fn(),
+      deleteRun: vi.fn(),
+    }),
     useRunHistoryProjection: () => ({
       projectRun: mocks.projectRunHistory,
       settleRunStatus: mocks.settleRunStatus,
@@ -513,6 +527,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.getRunDetail.mockReset()
     mocks.projectRunHistory.mockReset()
     mocks.projectRunHistory.mockResolvedValue(undefined)
+    mocks.runHistoryList = []
     mocks.refreshLocalHistory.mockReset()
     toastMocks.warning.mockReset()
     mocks.panelsProps = null
@@ -2075,6 +2090,7 @@ describe('Workspace run_ended history wiring (integration)', () => {
     mocks.projectRunHistory.mockResolvedValue(undefined)
     mocks.settleRunStatus.mockReset()
     mocks.settleRunStatus.mockResolvedValue(undefined)
+    mocks.runHistoryList = []
     // A run that ends with a node still open gives the resume anchor something
     // to ask about, so this suite needs the validity probe answered too.
     mocks.getResumeValidity.mockReset()
@@ -2690,3 +2706,84 @@ function skillDetail(skillId = 'writer-smoke'): SkillDetail {
     lint_result: null,
   }
 }
+
+// Ledger C1 ④: a run outlives the window that started it — reloading the app,
+// or switching skills and back, threw away the only thing that knew a run was
+// under way, so Pause and Stop vanished while the worker kept going. The server
+// knows, and since ledger C1 ② it knows truthfully (a `running` row is checked
+// against the worker's lock before it is returned), so a freshly-mounted
+// Workspace adopts that answer. Client render, because the adoption is an
+// effect and SSR runs none.
+describe('Workspace adopts the run the server says is under way (integration)', () => {
+  let container: HTMLDivElement
+  let root: ReturnType<typeof createRoot>
+
+  const serverRun = (status: RunMetadata['status']): RunMetadata => ({
+    run_id: 'run-from-before-the-reload',
+    status,
+    started_at: '2026-08-21T09:14:02-07:00',
+    metrics: null,
+    input_summary: null,
+  })
+
+  beforeEach(() => {
+    ;(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {}
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        onmessage: ((event: { data: string }) => void) | null = null
+        close() {}
+      },
+    )
+    mocks.runStreamEvents = []
+    mocks.runHistoryList = []
+    mocks.lintStatus = 'passed'
+    mocks.centerActionBarProps = null
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  function mountFresh() {
+    act(() => {
+      root.render(
+        createElement(Workspace, {
+          skillId: 'writer-smoke',
+          onSelectSkill: vi.fn(),
+          onCloseSkill: vi.fn(),
+        }),
+      )
+    })
+  }
+
+  it('offers Pause and Stop for a run that was already going when the window opened', () => {
+    mocks.runHistoryList = [serverRun('running')]
+
+    mountFresh()
+
+    expect(mocks.centerActionBarProps?.stage).toBe('running')
+  })
+
+  it('offers Resume and Stop for a run that was left paused', () => {
+    mocks.runHistoryList = [serverRun('paused')]
+
+    mountFresh()
+
+    expect(mocks.centerActionBarProps?.stage).toBe('paused')
+  })
+
+  it('leaves the bar alone when every run of this skill has ended', () => {
+    mocks.runHistoryList = [serverRun('abandoned')]
+
+    mountFresh()
+
+    expect(mocks.centerActionBarProps?.stage).toBe('idle')
+  })
+})

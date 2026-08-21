@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunMetadata, TokensMetrics } from '@/api/types'
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, projectRunMetadata, projectRunStatus, runOutcomeFeedback } from './useRunHistory'
+import { archiveFeedbackForGitStatus, nextAdoptedLiveRun, nextLocalHistoryRefreshKey, projectRunMetadata, projectRunStatus, runOutcomeFeedback } from './useRunHistory'
 
 // N6 #2 (history-auto-refresh): when a run reaches run_ended the backend has
 // autocommitted a new "Auto run" snapshot, so the Local History list must be
@@ -273,5 +273,71 @@ describe('projectRunStatus', () => {
   it('leaves the list alone for a run it has never heard of', () => {
     const before = list('running')
     expect(projectRunStatus(before, 'run-other', 'failed')).toEqual(before)
+  })
+})
+
+// Ledger C1 ④: "which run is live" was answered from this window's memory, so a
+// reload left a running worker with no reachable Pause or Stop. The server owns
+// that answer — and since ledger C1 ② it reconciles a `running` row against the
+// worker's lock before returning it — so the frontend adopts it, once per skill.
+describe('nextAdoptedLiveRun', () => {
+  const row = (runId: string, status: RunMetadata['status']): RunMetadata => ({
+    run_id: runId,
+    status,
+    started_at: '2026-08-21T09:14:02-07:00',
+    metrics: null,
+    input_summary: null,
+  })
+
+  const ask = (over: Partial<Parameters<typeof nextAdoptedLiveRun>[0]>) =>
+    nextAdoptedLiveRun({
+      skillId: 'writer-smoke',
+      runs: [],
+      listLoaded: true,
+      liveRunId: null,
+      answeredFor: null,
+      ...over,
+    })
+
+  it('adopts the run a worker is on, so Pause and Stop are reachable again', () => {
+    const answer = ask({ runs: [row('run-2', 'running'), row('run-1', 'success')] })
+
+    expect(answer).toEqual({ key: 'writer-smoke', run: row('run-2', 'running') })
+  })
+
+  it('adopts a paused run too — it is the run Resume and Stop are about', () => {
+    const answer = ask({ runs: [row('run-2', 'paused')] })
+
+    expect(answer?.run?.run_id).toBe('run-2')
+  })
+
+  it('adopts nothing when every run of this skill has ended', () => {
+    const answer = ask({ runs: [row('run-2', 'abandoned'), row('run-1', 'failed')] })
+
+    expect(answer).toEqual({ key: 'writer-smoke', run: null })
+  })
+
+  it('waits for the list rather than reading "not loaded yet" as "no run"', () => {
+    expect(ask({ listLoaded: false })).toBeNull()
+  })
+
+  it('does not yank the run this session just started', () => {
+    const answer = ask({ runs: [row('run-old', 'running')], liveRunId: 'run-new' })
+
+    expect(answer).toEqual({ key: 'writer-smoke', run: null })
+  })
+
+  it('asks once per skill — a second look is not a data change', () => {
+    expect(ask({ runs: [row('run-2', 'running')], answeredFor: 'writer-smoke' })).toBeNull()
+  })
+
+  it('asks again for a different skill', () => {
+    const answer = ask({ runs: [row('run-2', 'running')], answeredFor: 'other-skill' })
+
+    expect(answer?.key).toBe('writer-smoke')
+  })
+
+  it('has nothing to answer with no skill open', () => {
+    expect(ask({ skillId: null, runs: [row('run-2', 'running')] })).toBeNull()
   })
 })

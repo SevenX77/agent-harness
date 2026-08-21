@@ -1203,12 +1203,19 @@ class RunManager:
     def _reconciled(self, skill_id: str, metadata: RunMetadata) -> RunMetadata:
         """The run's status as it actually stands, not merely as it was last written.
 
-        ``running`` and ``paused`` are claims about a worker, and a record cannot
-        keep a claim honest by itself: a sidecar holds its live runs in memory
-        only, so a restarted one starts empty while the record still reads
-        ``running``. Asked whether the run was going, the list answered yes and
-        ``pause_run`` answered ``RUN_NOT_RUNNING`` — one question, two answers,
-        and the badge spun for the rest of the session (ledger C1).
+        ``running`` is a claim about a worker, and a record cannot keep a claim
+        honest by itself: a sidecar holds its live runs in memory only, so a
+        restarted one starts empty while the record still reads ``running``.
+        Asked whether the run was going, the list answered yes and ``pause_run``
+        answered ``RUN_NOT_RUNNING`` — one question, two answers, and the badge
+        spun for the rest of the session (ledger C1).
+
+        ``paused`` is checked by nothing here, because it is not a claim about a
+        worker: ``pause_run`` ends the worker deliberately and keeps the
+        checkpoint, so "nobody holds the lock" is true of every paused run, alive
+        sidecar or not. Reconciling it rewrote a pause the user chose as
+        ``abandoned`` — "the app closed while it was going" — about a run that had
+        already stopped on purpose (ledger C1 ④).
 
         Checking is possible because a worker holds a lock on its own run
         directory for as long as it lives (``run_liveness``). Nobody holding it
@@ -1220,7 +1227,7 @@ class RunManager:
         memory, and a worker that has not written its lock yet would otherwise be
         declared dead in the moment between spawn and first claim.
         """
-        if metadata.status not in {"running", "paused"}:
+        if metadata.status != "running":
             return metadata
         if metadata.run_id in self._runs:
             return metadata
@@ -1239,13 +1246,16 @@ class RunManager:
         can pick the run up from there. Pausing is that: end the process, keep
         everything, and say the run is waiting rather than over.
         """
-        record = self._runs.get(run_id)
-        if record is None or record.metadata.status != "running":
+        if self._metadata_for(skill_id, run_id).status != "running":
             raise standard_http_exception(
                 "RUN_NOT_RUNNING",
                 f"Run is not running: {run_id}",
                 {"skill_id": skill_id, "run_id": run_id},
             )
+        # A `running` run always has a record here: one this sidecar does not
+        # hold has no worker either, and `_reconciled` has already closed it as
+        # `abandoned` — which the status check above rejects.
+        record = self._runs[run_id]
         self._terminate_worker(record)
         metadata = record.metadata.model_copy(update={"status": "paused"})
         record.metadata = metadata
@@ -1265,18 +1275,35 @@ class RunManager:
         Deleting was the only way to end a run early and it removes the run
         directory, so "end this and keep what it got" could not be said. This is
         the ending; pausing is the other choice, and both leave the run readable.
+
+        Whether a run can be ended is read from its record, not from this
+        sidecar's memory of it. A paused run has no worker to signal — `pause_run`
+        ended it deliberately — so ending it is a write to its own directory,
+        which the run id alone reaches. Requiring a registry entry made the list
+        say `paused` while this said 409 about every run a previous sidecar had
+        paused: one question, two answers (ledger C1 ④).
         """
-        record = self._runs.get(run_id)
-        if record is None or record.metadata.status not in {"running", "paused"}:
+        metadata = self._metadata_for(skill_id, run_id)
+        if metadata.status not in {"running", "paused"}:
             raise standard_http_exception(
                 "RUN_NOT_RUNNING",
                 f"Run is neither running nor paused: {run_id}",
                 {"skill_id": skill_id, "run_id": run_id},
             )
+        cancelled = metadata.model_copy(update={"status": "cancelled"})
+        record = self._runs.get(run_id)
+        if record is None:
+            # Only `paused` reaches here: an unheld `running` run reconciles to
+            # `abandoned`, which the check above rejects.
+            return await self._seal_terminal_run(
+                skill_id=skill_id,
+                run_dir=run_dir_for(skill_id, run_id),
+                metadata=cancelled,
+                auto_commit=False,
+            )
         self._terminate_worker(record)
-        metadata = record.metadata.model_copy(update={"status": "cancelled"})
-        await self._finalize_terminal_run(record, metadata)
-        return metadata
+        await self._finalize_terminal_run(record, cancelled)
+        return cancelled
 
     @staticmethod
     def _terminate_worker(record: RunRecord) -> None:
@@ -1548,30 +1575,58 @@ class RunManager:
         # The record is what every reader asks for the run's status, and it is
         # deliberately the LAST thing to go terminal: whoever sees it flip may
         # immediately read the sealed run dir, so the flip has to trail
-        # finalization, not lead it — and sealing leads finalization for the same
-        # reason, since this is the only place that runs however the run ended.
-        # It also has to precede the auto-commit, or the archived snapshot is of
-        # a run the archive itself says is unfinished. The assignment sits in
-        # `finally` because a storage write that fails must not strand the
-        # record — and every future reader of it — on "running" forever.
+        # finalization, not lead it. The assignment sits in `finally` because a
+        # storage write that fails must not strand the record — and every future
+        # reader of it — on "running" forever.
         try:
-            await asyncio.to_thread(_seal_run_artifacts, record.run_dir)
-            await self._copy_final_state_to_storage(record)
-            # The report reads the run's FINAL metadata (outcome, failure reason,
-            # archive status), so it is written after that lands.
-            if metadata.status == "success" and record.auto_commit:
-                metadata = await self._auto_commit_successful_run(record, metadata)
-            _write_run_metadata(record.run_dir, metadata)
-            await asyncio.to_thread(write_run_report, record.run_dir)
-            await self._save_run_metadata(record.skill_id, metadata)
+            metadata = await self._seal_terminal_run(
+                skill_id=record.skill_id,
+                run_dir=record.run_dir,
+                metadata=metadata,
+                auto_commit=record.auto_commit,
+            )
         finally:
             record.metadata = metadata
+
+    async def _seal_terminal_run(
+        self,
+        *,
+        skill_id: str,
+        run_dir: Path,
+        metadata: RunMetadata,
+        auto_commit: bool,
+    ) -> RunMetadata:
+        """Close a run out on disk however it ended, and announce that it ended.
+
+        Everything here is about the run DIRECTORY, so it asks for the directory
+        rather than for a record: a paused run that this sidecar never started is
+        ended through exactly this path, and a second copy of the sequence for
+        that one caller would be two answers to "what does ending a run do".
+
+        Sealing leads, because this is the only place that runs however the run
+        ended, and it precedes the auto-commit or the archived snapshot is of a
+        run the archive itself says is unfinished. The gate is published in
+        `finally` for the same reason the record flip is: a failed write must not
+        leave every listener waiting for an ending that already happened.
+        """
+        try:
+            await asyncio.to_thread(_seal_run_artifacts, run_dir)
+            await self._copy_final_state_to_storage(run_dir)
+            # The report reads the run's FINAL metadata (outcome, failure reason,
+            # archive status), so it is written after that lands.
+            if metadata.status == "success" and auto_commit:
+                metadata = await self._auto_commit_successful_run(run_dir, metadata)
+            _write_run_metadata(run_dir, metadata)
+            await asyncio.to_thread(write_run_report, run_dir)
+            await self._save_run_metadata(skill_id, metadata)
+        finally:
             await publish_skill_gate(
-                skill_id=record.skill_id,
+                skill_id=skill_id,
                 gate="run",
                 outcome=self._GATE_OUTCOME_BY_RUN_STATUS[metadata.status],
                 run_id=metadata.run_id,
             )
+        return metadata
 
     async def _save_run_metadata(self, skill_id: str, metadata: RunMetadata) -> None:
         metadata_store = self._metadata_store()
@@ -1615,17 +1670,17 @@ class RunManager:
             await self._save_run_metadata(skill_id, metadata)
         return metadata
 
-    async def _copy_final_state_to_storage(self, record: RunRecord) -> None:
-        final_state_path = record.run_dir / "final_state.json"
+    async def _copy_final_state_to_storage(self, run_dir: Path) -> None:
+        final_state_path = run_dir / "final_state.json"
         if not final_state_path.exists():
             return
         content = await asyncio.to_thread(final_state_path.read_text, encoding="utf-8")
         await self._storage_backend().write_text(str(final_state_path), content)
 
     async def _auto_commit_successful_run(
-        self, record: RunRecord, metadata: RunMetadata
+        self, run_dir: Path, metadata: RunMetadata
     ) -> RunMetadata:
-        skill_dir = record.run_dir.parent.parent.parent
+        skill_dir = run_dir.parent.parent.parent
         git_status: Literal["committed", "unchanged", "locked", "failed", "no_git"]
         try:
             # The archiver reports what it did; "not a git repo" and "the run
@@ -1633,7 +1688,7 @@ class RunManager:
             git_status = await asyncio.to_thread(
                 self.git_service.auto_commit_run,
                 skill_dir,
-                record.metadata.run_id,
+                metadata.run_id,
             )
             if git_status != "committed":
                 logger.info(

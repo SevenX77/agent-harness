@@ -8,12 +8,16 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { download, extractWithTar, verifySha256 } = require('./download_runtime')
+const {
+  DEFAULT_DOWNLOADS_DIR,
+  download,
+  extractWithTar,
+  verifySha256,
+} = require('./download_runtime')
 
 const TAURI_DIR = path.resolve(__dirname, '..')
 const DEFAULT_LOCK_PATH = path.join(TAURI_DIR, 'ah-vendor.lock.json')
 const DEFAULT_VENDOR_AH_DIR = path.join(TAURI_DIR, 'vendor', 'ah')
-const DEFAULT_DOWNLOADS_DIR = path.join(TAURI_DIR, 'vendor', 'downloads')
 // The single release tarball carries both binaries (the official installer
 // installs exactly these two from it); a snapshot missing either is incomplete.
 const AH_BINARIES = ['ah', 'ahd']
@@ -153,6 +157,7 @@ if (require.main === module) {
 
 module.exports = {
   AH_BINARIES,
+  DEFAULT_DOWNLOADS_DIR,
   DEFAULT_LOCK_PATH,
   ensureAhVendor,
   findBinaryDir,

@@ -7,6 +7,8 @@ const path = require('node:path')
 const test = require('node:test')
 
 const {
+  DEFAULT_DOWNLOADS_DIR,
+  DEFAULT_VENDOR_DIR,
   REQUIRED_TARGETS,
   artifactFor,
   extractWithTar,
@@ -71,7 +73,58 @@ test('tar is never handed an absolute path, so both tars read it the same way', 
       `tar argument "${arg}" is absolute; on Windows that carries a drive letter and GNU tar reads it as a hostname`)
     assert.ok(!/^[A-Za-z]:/.test(arg),
       `tar argument "${arg}" starts with a drive letter, which GNU tar resolves as a remote host`)
+    assert.ok(!arg.includes('\\'),
+      `tar argument "${arg}" contains a backslash, which GNU tar reads as an escape character`)
   }
+})
+
+// A single `..\` survives GNU tar; a deeper one does not, so the shallow case
+// cannot stand in for this. Measured when the download cache moved out of
+// `vendor/`: `-C ..\..\vendor\python\.python-runtime-XXX` failed with "Cannot
+// open: No such file or directory" against a directory that existed.
+test('a destination several levels away is still spelled the way tar reads it', () => {
+  const { args } = tarExtractCommand(
+    path.join('a', 'b', 'cache', 'downloads', 'cpython.tar.gz'),
+    path.join('a', 'b', 'vendor', 'python', '.python-runtime-XXX'),
+  )
+
+  assert.deepEqual(
+    args,
+    ['-xf', 'cpython.tar.gz', '-C', '../../vendor/python/.python-runtime-XXX'],
+  )
+})
+
+// `tauri.conf.json` ships `vendor/**/*`, so `vendor/` IS the payload: whatever
+// is in it goes to every user. The download cache used to live at
+// `vendor/downloads/`, which put the .tar.gz the runtime was extracted FROM
+// next to the runtime itself — 48.9 MB of it in a 154.7 MB installer, a third
+// of the download, for files nothing reads after the build (ledger D4).
+//
+// Keeping the cache outside `vendor/` is what makes the simple glob correct.
+// The alternative — listing vendor's subdirectories one by one in
+// `bundle.resources` — leaves the trap in place and fails the other way round:
+// a new payload directory nobody adds to the list silently does NOT ship, and
+// a missing payload is worse than a fat one.
+test('the download cache is not inside the directory that gets bundled', () => {
+  const vendor = path.resolve(DEFAULT_VENDOR_DIR)
+  const downloads = path.resolve(DEFAULT_DOWNLOADS_DIR)
+
+  assert.ok(
+    !downloads.startsWith(vendor + path.sep) && downloads !== vendor,
+    `the download cache (${downloads}) is inside the bundled payload (${vendor}), so every ` +
+      'archive it caches ships to users inside the installer',
+  )
+})
+
+test('both vendoring scripts cache into the same place', () => {
+  // One cache, one definition. ensure_ah_vendor.js already takes `download`
+  // and `verifySha256` from this module; taking the cache location from
+  // anywhere else is how the two drifted apart in the first place.
+  const ahVendor = require('./ensure_ah_vendor')
+  assert.equal(
+    path.resolve(ahVendor.DEFAULT_DOWNLOADS_DIR),
+    path.resolve(DEFAULT_DOWNLOADS_DIR),
+  )
 })
 
 test('extractWithTar unpacks an archive whichever tar is on PATH', () => {

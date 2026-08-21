@@ -188,11 +188,11 @@ def test_run_worker_reports_failed_when_result_unsuccessful(
 
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
-    metrics = json.loads(
-        LocalRunArtifactStore(root=storage_root)
-        .get_run_object("run", "metrics.json")
-        .decode("utf-8")
-    )
+    store = LocalRunArtifactStore(root=storage_root)
+    # The worker writes the run's objects; closing the run to further writes
+    # is the finalizer's call, and no finalizer runs in a bare worker test.
+    store.seal_run("run")
+    metrics = json.loads(store.get_run_object("run", "metrics.json").decode("utf-8"))
     assert metrics["status"] == "failed"
 
 

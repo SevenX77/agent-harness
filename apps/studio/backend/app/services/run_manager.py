@@ -515,6 +515,38 @@ def _persist_run_artifacts(
         run_dir.name,
         object_payloads,
     )
+
+
+def _seal_run_artifacts(run_dir: Path) -> None:
+    """Close this run's artifact record: commit what is on disk, then seal.
+
+    Sealing declares that no further object will be added to the run, and the
+    PARENT is the only party that can ever declare it truthfully. The worker can
+    only speak for the graceful ending; a worker killed from outside runs no code
+    at all, so a seal left to it never happens — and every read of that run then
+    answers `artifact.run_not_sealed`, however completely the run is otherwise
+    finished (problem ledger P1). Predict already learned the same lesson from
+    the other side: anything outside the seal is unreachable however plainly it
+    sits in the directory (`predictor.py`).
+
+    `trace.jsonl` is streamed into the run dir as the run goes and only committed
+    at the end, so a run that died mid-phase has events on disk that never
+    reached the store. They are committed here rather than sealed over, because a
+    detail that reports "nothing happened" about a run whose trace file is right
+    there is the same defect wearing different clothes.
+    """
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    if store.is_sealed(run_dir.name):
+        return
+    # A run that produced nothing at all still gets a manifest, so "sealed" means
+    # readable without exception: readers reach a run THROUGH its manifest, and a
+    # sealed run without one answers not-found to every question about itself.
+    store.begin_run(run_dir.name)
+    trace_file = run_dir / "trace.jsonl"
+    if trace_file.exists():
+        store.put_batch(run_dir.name, {"trace.jsonl": trace_file.read_bytes()})
     store.seal_run(run_dir.name)
 
 
@@ -1070,13 +1102,31 @@ class RunManager:
         metadata = self._metadata_for(skill_id, run_id).model_copy(
             update={"report_path": _run_report_path(run_dir)}
         )
-        final_context = _read_run_artifact_json(run_dir, "final_state.json")
+        # What this run COMMITTED, asked once and asked directly. A run that was
+        # killed mid-flight reaches a verdict without ever writing a final state
+        # or a trace, and "it produced neither" is a fact about that run, not a
+        # failure to read it — the detail has a null context and an empty event
+        # list to say so. Deciding that by catching `artifact.not_found` instead
+        # would fold in a second, opposite case: an object the manifest DECLARES
+        # whose blob is gone, which is corruption and must keep surfacing
+        # (`test_run_detail_exposes_missing_sealed_artifact_without_legacy_json_fallback`).
+        # An unsealed run still raises here, because "still going" is its own
+        # answer and the caller turns it into a 409.
+        produced = _run_objects(run_dir)
         return RunDetail(
             metadata=metadata,
-            input_data=_read_run_artifact_json_if_present(run_dir, "input_data.json"),
-            events=_read_run_artifact_events(run_dir),
-            final_context=final_context,
-            artifacts=_read_run_artifact_paths(run_dir),
+            input_data=(
+                _read_run_artifact_json(run_dir, "input_data.json")
+                if "input_data.json" in produced
+                else None
+            ),
+            events=_read_run_artifact_events(run_dir) if "trace.jsonl" in produced else [],
+            final_context=(
+                _read_run_artifact_json(run_dir, "final_state.json")
+                if "final_state.json" in produced
+                else None
+            ),
+            artifacts=_readable_artifact_paths(run_dir, produced),
         )
 
     def rebuild_run_report(self, skill_id: str, run_id: str) -> RunMetadata:
@@ -1430,10 +1480,14 @@ class RunManager:
         # The record is what every reader asks for the run's status, and it is
         # deliberately the LAST thing to go terminal: whoever sees it flip may
         # immediately read the sealed run dir, so the flip has to trail
-        # finalization, not lead it. The assignment sits in
+        # finalization, not lead it — and sealing leads finalization for the same
+        # reason, since this is the only place that runs however the run ended.
+        # It also has to precede the auto-commit, or the archived snapshot is of
+        # a run the archive itself says is unfinished. The assignment sits in
         # `finally` because a storage write that fails must not strand the
         # record — and every future reader of it — on "running" forever.
         try:
+            await asyncio.to_thread(_seal_run_artifacts, record.run_dir)
             await self._copy_final_state_to_storage(record)
             # The report reads the run's FINAL metadata (outcome, failure reason,
             # archive status), so it is written after that lands.
@@ -1775,6 +1829,13 @@ def _read_run_artifact_json(run_dir: Path, path: str) -> dict[str, Any] | None:
 
 
 def _read_run_artifact_json_if_present(run_dir: Path, path: str) -> dict[str, Any] | None:
+    """For readers that describe runs which may still be going.
+
+    The run LIST covers live runs, whose artifacts are by definition not sealed
+    yet, so both "no such object" and "not sealed" mean the same thing to it:
+    there is nothing to summarise yet. A reader of ONE finished run must not
+    reuse this — it cannot tell an absent object from an unreadable one.
+    """
     from app.core.adapters.http_transport import StudioAdapterError
 
     try:
@@ -1825,17 +1886,39 @@ def _run_report_path(run_dir: Path) -> str | None:
     return report.relative_to(skill_dir).as_posix()
 
 
-def _read_run_artifact_paths(run_dir: Path) -> list[str]:
+def _run_objects(run_dir: Path) -> dict[str, str]:
+    """Everything this run committed, path → content hash: its record of itself.
+
+    Readers reach a sealed run THROUGH this record, so it is also the answer to
+    "did this run produce X": anything absent from it is unreachable however
+    plainly a file of that name sits in the directory. A ref carrying no path is
+    left out — there is no name by which anyone could ask for it.
+    """
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
-    refs = store.list_run_objects(run_dir.name)
+    return {
+        ref.path: ref.content_hash
+        for ref in store.list_run_objects(run_dir.name)
+        if ref.path is not None
+    }
+
+
+def _readable_artifact_paths(run_dir: Path, objects: dict[str, str]) -> list[str]:
+    """The run's user-facing artifacts, each proven readable before it is listed.
+
+    The blob is fetched and thrown away on purpose: a listing is an offer to open
+    the file, and one that names a blob nobody can read is a promise the API
+    cannot keep.
+    """
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
     paths: list[str] = []
-    for ref in refs:
-        path = ref.path
-        if not isinstance(path, str) or not path.startswith("artifacts/"):
+    for path, content_hash in objects.items():
+        if not path.startswith("artifacts/"):
             continue
-        store.get_object(hash=ref.content_hash)
+        store.get_object(hash=content_hash)
         paths.append(path)
     return sorted(paths)
 

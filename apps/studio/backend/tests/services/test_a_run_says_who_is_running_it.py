@@ -16,8 +16,7 @@ really is going, lock free means the worker is gone and the run ended
 from __future__ import annotations
 
 import json
-import shutil
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,26 +30,25 @@ SKILL = "text-segmentation"
 
 
 @pytest.fixture
-def claim_running() -> Iterator[Callable[[str], Path]]:
-    """Leave a run directory exactly as a hard-killed sidecar leaves one, then clear it.
+def claim_running(studio_roots: tuple[Path, Path]) -> Callable[[str], Path]:
+    """Leave a run directory exactly as a hard-killed sidecar leaves one.
 
-    Cleaning up matters more than usual here: a record left behind reads as a
-    real run in every later `list_runs`, and the reconciler will rewrite it.
+    Depends on ``studio_roots`` so ``run_dir_for`` resolves inside the test's own
+    temporary skills root. Without it the skill id below resolves against
+    whatever this machine happens to have installed — which passed on the author's
+    box (where a `text-segmentation` skill exists, and where the test then wrote
+    run records into it) and failed in CI with `SKILL_NOT_FOUND`.
     """
-    made: list[Path] = []
+    del studio_roots
 
     def claim(run_id: str) -> Path:
         run_dir = run_dir_for(SKILL, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         metadata = RunMetadata(run_id=run_id, status="running", started_at=datetime.now(UTC))
         (run_dir / "run_metadata.json").write_text(metadata.persisted_json(), encoding="utf-8")
-        made.append(run_dir)
         return run_dir
 
-    yield claim
-
-    for run_dir in made:
-        shutil.rmtree(run_dir, ignore_errors=True)
+    return claim
 
 
 def _stored_status(run_dir: Path) -> str:

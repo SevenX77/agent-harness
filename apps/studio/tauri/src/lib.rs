@@ -601,20 +601,40 @@ struct CliAgentOverride {
     effort: String,
 }
 
-/// 仓内安装脚本定位:dev 阶段 app 从仓里跑,沿祖先目录找;打包构建找不到时明确报错,
-/// 不猜路径。
-fn find_repo_script(relative: &str) -> Result<PathBuf, String> {
-    let mut dir = std::env::current_dir().map_err(|error| format!("cannot resolve cwd: {error}"))?;
-    loop {
-        let candidate = dir.join(relative);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-        if !dir.pop() {
-            return Err(format!("installer script not found: {relative} (packaged build?)"));
+/// 一键安装脚本的位置。解析规则与 [`studio_agents_dir`] 同一条:debug 构建用仓里那份
+/// 活的,打包构建用 vendor 快照;找不到就明确报错,不猜。
+///
+/// 它从前是**沿当前工作目录的祖先目录往上找**。工作目录不是一个位置,是进程碰巧从哪里
+/// 启动;那条路径只在「app 从仓里跑」时成立,打包版头上没有仓,于是必然答
+/// `installer script not found (packaged build?)` —— 一键安装在打包版里从来没能用过。
+/// 现在脚本随 `vendor/resources/scripts/` 一起装进安装目录(`sync_resources.js` 复制,
+/// `bundle.resources` 的 `vendor/**/*` 带上),打包版按资源根解析得到。
+fn cli_installer_script() -> Result<PathBuf, String> {
+    let relative = Path::new("scripts").join(CLI_INSTALLER_SCRIPT_NAME);
+    if cfg!(debug_assertions) {
+        // CARGO_MANIFEST_DIR = apps/studio/tauri;仓根在它上面第三级。
+        if let Some(repo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3) {
+            let live = repo_root.join(&relative);
+            if live.is_file() {
+                return Ok(live);
+            }
         }
     }
+    let Some(root) = STUDIO_RESOURCE_ROOT.get() else {
+        return Err("installer script unavailable: resource root not registered".to_string());
+    };
+    let packaged = root.join("vendor").join("resources").join(&relative);
+    if packaged.is_file() {
+        return Ok(packaged);
+    }
+    Err(format!(
+        "installer script missing at {} (vendor snapshot incomplete; re-run sync_resources.js)",
+        packaged.display()
+    ))
 }
+
+/// 一份定义两处共用:Rust 按它解析,`sync_resources.js` 按它复制,测试按它断言两边同名。
+const CLI_INSTALLER_SCRIPT_NAME: &str = "install-claude-code-wsl.ps1";
 
 /// 一键安装 = 拉起可见 PowerShell 控制台跑仓内全链安装脚本(WSL/tmux/ah/claude/codex)。
 /// 设计修订 2026-08-06:脚本含交互式 OAuth 登录步骤,只读流式视图承载不了,所以给真
@@ -624,7 +644,7 @@ fn launch_cli_installer() -> Result<(), String> {
     if !cfg!(target_os = "windows") {
         return Err("The bundled installer script is Windows-only; install ah/tmux/claude/codex via your package manager.".to_string());
     }
-    let script = find_repo_script("scripts/install-claude-code-wsl.ps1")?;
+    let script = cli_installer_script()?;
     Command::new("cmd")
         .args([
             "/C",
@@ -5978,14 +5998,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 提案 §3(PR-2)—— 安装脚本沿祖先目录定位;找不到明确报错不猜路径。
+    /// 台账 D1 —— debug 构建解析到仓里那份活脚本,而且**不靠工作目录**:从
+    /// `CARGO_MANIFEST_DIR` 往上数,所以进程从哪儿启动都答同一个位置。
     #[test]
-    fn test_find_repo_script_walks_ancestors() {
-        let found = find_repo_script("scripts/install-claude-code-wsl.ps1")
-            .expect("dev tree has the installer script");
-        assert!(found.is_file());
-        let missing = find_repo_script("scripts/definitely-not-a-real-script-xyz.ps1");
-        assert!(missing.is_err());
+    fn cli_installer_script_resolves_without_depending_on_the_working_directory() {
+        let from_repo = cli_installer_script().expect("dev tree has the installer script");
+        assert!(from_repo.is_file());
+
+        let restore = std::env::current_dir().expect("cwd readable");
+        std::env::set_current_dir(std::env::temp_dir()).expect("temp dir is a valid cwd");
+        let from_elsewhere = cli_installer_script();
+        std::env::set_current_dir(restore).expect("cwd restored");
+
+        assert_eq!(
+            from_elsewhere.expect("resolution must not depend on the cwd"),
+            from_repo,
+        );
+    }
+
+    /// 打包链把脚本装进安装目录才有一键安装:Rust 解析的相对位置与
+    /// `sync_resources.js` 复制到的位置必须是同一处,否则打包版又回到「找不到」。
+    #[test]
+    fn packaged_installer_script_path_matches_what_sync_resources_copies() {
+        let sync = include_str!("../scripts/sync_resources.js");
+        assert!(
+            sync.contains(CLI_INSTALLER_SCRIPT_NAME),
+            "sync_resources.js must copy {CLI_INSTALLER_SCRIPT_NAME} into the bundled resources"
+        );
+        assert!(
+            sync.contains("'scripts'"),
+            "the bundled copy must land under resources/scripts/, where cli_installer_script looks"
+        );
     }
 
     #[test]

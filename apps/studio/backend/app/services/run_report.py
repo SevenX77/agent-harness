@@ -71,7 +71,23 @@ class _Execution:
 
     @property
     def status(self) -> str:
-        if self.reported_failed or self.errors:
+        # Only what the phase SAID about its own ending decides this. `errors`
+        # is deliberately not consulted: it holds the things that went wrong
+        # inside the execution, and going wrong inside is not the same as
+        # ending badly. A submission the finish gate rejected is the clearest
+        # case — being sent back to fix it is what the correction loop is FOR,
+        # and run 2026-08-20T19-55-51_722f59b0 printed phase `first` as
+        # `failed` for exactly that, in a row whose own `corrections` column
+        # said `1`, while `trace.jsonl` and the canvas both had it completing.
+        # `builtin_subagent_fallback` is the same shape from the other side:
+        # its own note says "it finished", on a lesser path.
+        #
+        # The two entries that really do cut the loop — `protocol_violation`
+        # and `loop_detected` — need no help from here: since the engine states
+        # the outcome on `phase_end` (ledger E17/OB13), an execution they killed
+        # closes as failed and is caught by `reported_failed` above. Nothing is
+        # hidden either way; every error still prints in the Failure section.
+        if self.reported_failed:
             return "failed"
         if self.interrupted:
             return "interrupted"

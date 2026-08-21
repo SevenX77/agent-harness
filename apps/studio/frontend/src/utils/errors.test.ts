@@ -1,6 +1,24 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { AxiosError, AxiosHeaders, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
+import i18n from '../i18n'
 import { errorDiagnosticDetails, errorMessage } from './errors'
+
+function backendError(payload: Record<string, unknown>): AxiosError {
+  const config: InternalAxiosRequestConfig = {
+    baseURL: 'http://127.0.0.1:8787/api',
+    url: '/skills/demo/publish',
+    method: 'post',
+    headers: new AxiosHeaders(),
+  }
+  const response: AxiosResponse = {
+    config,
+    data: payload,
+    headers: {},
+    status: 400,
+    statusText: 'Bad Request',
+  }
+  return new AxiosError('Request failed with status code 400', 'ERR_BAD_REQUEST', config, {}, response)
+}
 
 describe('errorMessage', () => {
   it('surfaces nested Tauri command messages', () => {
@@ -18,6 +36,39 @@ describe('errorMessage', () => {
         current_content: 'large file body',
       },
     })).toBe('File changed on disk. Reload the file and try again.')
+  })
+})
+
+// Which language a typed failure is read in is a fact about the reader, so the
+// frontend decides it. The server used to: `skills.py` wrote these two messages
+// in Chinese and they went into the toast verbatim (ledger K4).
+describe('errorMessage for a typed backend failure', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en')
+  })
+
+  it('renders the code in the reader language, with details filling the blanks', async () => {
+    const error = backendError({
+      error_code: 'APP_SETTINGS_INCOMPLETE',
+      http_status: 400,
+      message: 'app settings incomplete: gitea_host is not set',
+      details: { field: 'gitea_host' },
+    })
+
+    await i18n.changeLanguage('en')
+    expect(errorMessage(error)).toBe('Settings are incomplete: gitea_host is not set. Open Settings to set it.')
+
+    await i18n.changeLanguage('zh-CN')
+    expect(errorMessage(error)).toContain('gitea_host')
+    expect(errorMessage(error)).not.toBe('app settings incomplete: gitea_host is not set')
+  })
+
+  it('falls back to the backend message for a code nobody has written a reader-facing text for', () => {
+    expect(errorMessage(backendError({
+      error_code: 'PUBLISH_FAILED',
+      http_status: 400,
+      message: 'remote rejected: non-fast-forward',
+    }))).toBe('remote rejected: non-fast-forward')
   })
 })
 

@@ -1,4 +1,6 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { CheckCircle2, CircleAlert, Loader2, TerminalSquare, Wrench } from 'lucide-react'
 import type { CopilotToolUseResultEvent, CopilotToolUseStartEvent } from '../../types/copilot'
 
@@ -14,14 +16,18 @@ interface ToolCallBubbleProps {
 
 // F1: each tool call folds under a semantic verb (read=Explored / write=Worked /
 // Bash=Ran), collapsed by default — visual fold only, never omitted.
-const toolVerbs: Record<string, { running: string; done: string }> = {
-  Read: { running: 'Exploring', done: 'Explored' },
-  Glob: { running: 'Exploring', done: 'Explored' },
-  Grep: { running: 'Exploring', done: 'Explored' },
-  Write: { running: 'Working', done: 'Worked' },
-  Edit: { running: 'Working', done: 'Worked' },
-  Bash: { running: 'Running', done: 'Ran' },
-  Skill: { running: 'Using skill', done: 'Used skill' },
+//
+// The table maps a tool to its verb CLASS, not to a word: the words live in the
+// `copilot` translation namespace under `tool.verb.<class>` so the fold reads in
+// the reader's language.
+const toolVerbClass: Record<string, 'explore' | 'work' | 'run' | 'skill'> = {
+  Read: 'explore',
+  Glob: 'explore',
+  Grep: 'explore',
+  Write: 'work',
+  Edit: 'work',
+  Bash: 'run',
+  Skill: 'skill',
 }
 
 // studio MCP 工具（mcp__studio__<tool>）显示为 studio:<tool>。
@@ -29,22 +35,23 @@ function displayToolName(name: string): string {
   return name.startsWith('mcp__studio__') ? `studio:${name.slice('mcp__studio__'.length)}` : name
 }
 
-function toolCallLabel(event: ToolCallEvent, failed: boolean): string {
-  const verbs = toolVerbs[event.tool_name]
+function toolCallLabel(event: ToolCallEvent, failed: boolean, t: TFunction<'copilot'>): string {
+  const verbClass = toolVerbClass[event.tool_name]
   const name = displayToolName(event.tool_name)
   if (event.type === 'tool_use_start') {
-    return verbs ? verbs.running : `Running ${name}`
+    return verbClass ? t(`tool.verb.${verbClass}.running`) : t('tool.runningOther', { tool: name })
   }
   if (failed) {
-    return `${name} failed`
+    return t('tool.failed', { tool: name })
   }
-  return verbs ? verbs.done : `${name} completed`
+  return verbClass ? t(`tool.verb.${verbClass}.done`) : t('tool.doneOther', { tool: name })
 }
 
 function ToolCallBubbleBase({ event, streaming = false }: ToolCallBubbleProps) {
   const isResult = event.type === 'tool_use_result'
   const failed = isResult && !event.success
-  const label = toolCallLabel(event, failed)
+  const { t } = useTranslation('copilot')
+  const label = toolCallLabel(event, failed, t)
   // A running tool spins only while the turn streams; a start event left behind
   // by a settled turn shows a neutral check, never a forever-spinner (R7-A).
   const pending = event.type === 'tool_use_start' && streaming

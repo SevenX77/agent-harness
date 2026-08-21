@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { FolderOpen, MessageSquarePlus, Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -16,29 +17,39 @@ import type { CopilotSession } from '../../store/copilotStore'
 /** A session reduced to what the tab bar needs to render + select (R17). */
 export interface SessionTab {
   id: string
-  label: string
+  name: SessionTabName
   isActive: boolean
   isTemporary?: boolean
 }
 
 /**
- * Derive a short, human label for a session tab. Sessions have no title, so we
- * use the first user message (trimmed + first line) as the label, falling back
- * to a 1-based "Chat N" when the session has no user turn yet (e.g. a freshly
- * minted "+" chat). Keeps the bar readable without depending on backend titles.
+ * How a session is named on its tab: by its ordinal while it has no user turn
+ * yet (a freshly minted "+" chat), otherwise by the first line of the first
+ * user message. Sessions carry no title, so the name has to be derived.
  */
-export function sessionTabLabel(session: CopilotSession, index: number): string {
+export type SessionTabName =
+  | { kind: 'ordinal'; number: number }
+  | { kind: 'firstMessage'; text: string }
+
+/**
+ * Derive a session tab's name.
+ *
+ * Returns a DESCRIPTOR rather than a finished string: the ordinal fallback is a
+ * sentence in the reader's language, and this module has no way to know which
+ * language that is. The view turns the descriptor into words.
+ */
+export function sessionTabName(session: CopilotSession, index: number): SessionTabName {
   const firstUser = session.messages.find((message) => message.role === 'user')
   const raw = firstUser?.content.trim().split('\n', 1)[0]?.trim() ?? ''
   if (raw.length === 0) {
-    return `Chat ${index + 1}`
+    return { kind: 'ordinal', number: index + 1 }
   }
-  return raw.length > 24 ? `${raw.slice(0, 24)}…` : raw
+  return { kind: 'firstMessage', text: raw.length > 24 ? `${raw.slice(0, 24)}…` : raw }
 }
 
 /**
  * Pure list→tabs mapping: the order is preserved from the store (chronological),
- * each tab carries a derived label and whether it is the active session. Kept
+ * each tab carries a derived name and whether it is the active session. Kept
  * pure + exported so the selection logic is unit-testable without a DOM (R17).
  */
 export function sessionTabs(
@@ -47,7 +58,7 @@ export function sessionTabs(
 ): SessionTab[] {
   return sessions.map((session, index) => ({
     id: session.id,
-    label: sessionTabLabel(session, index),
+    name: sessionTabName(session, index),
     isActive: session.id === activeSessionId,
   }))
 }
@@ -73,6 +84,22 @@ export function consumeHorizontalWheel(
   return true
 }
 
+/**
+ * The words the tab strip renders, in the reader's language.
+ *
+ * Props rather than a `useTranslation` call inside the view: the view is a
+ * pure function of props and its unit tests call it as one, which a hook
+ * would break. `SessionTabs` — the component around it — owns `t`.
+ */
+export interface SessionTabsCopy {
+  /** A chat with no user turn yet, named by its 1-based position. */
+  ordinalName: (number: number) => string
+  close: (name: string) => string
+  actions: string
+  newChat: string
+  restoreChat: string
+}
+
 interface SessionTabsProps {
   sessions: CopilotSession[]
   activeSessionId: string | null
@@ -88,7 +115,15 @@ interface SessionTabsProps {
  * draft tab so the restore action is always reachable.
  */
 export function SessionTabs(props: SessionTabsProps) {
+  const { t } = useTranslation('copilot')
   const stripRef = useRef<HTMLDivElement | null>(null)
+  const copy: SessionTabsCopy = {
+    ordinalName: (number) => t('session.fallbackLabel', { number }),
+    close: (name) => t('session.close', { label: name }),
+    actions: t('session.actions'),
+    newChat: t('session.new'),
+    restoreChat: t('session.restore'),
+  }
 
   // R5-B: vertical wheel over the strip scrolls it horizontally. Native wheel
   // listener (not React onWheel) because preventDefault needs passive:false.
@@ -108,7 +143,7 @@ export function SessionTabs(props: SessionTabsProps) {
     return () => viewport.removeEventListener('wheel', onWheel)
   })
 
-  return <SessionTabsView {...props} stripRef={stripRef} />
+  return <SessionTabsView {...props} stripRef={stripRef} copy={copy} />
 }
 
 /** Hook-free presentational strip — kept separate so interaction tests can walk
@@ -121,11 +156,19 @@ export function SessionTabsView({
   onRestore,
   onClose,
   stripRef,
-}: SessionTabsProps & { stripRef?: React.Ref<HTMLDivElement> }) {
+  copy,
+}: SessionTabsProps & { stripRef?: React.Ref<HTMLDivElement>; copy: SessionTabsCopy }) {
   const persistedTabs = sessionTabs(sessions, activeSessionId)
   const tabs: SessionTab[] = persistedTabs.length > 0
     ? persistedTabs
-    : [{ id: '__temporary-copilot-draft__', label: 'Chat 1', isActive: true, isTemporary: true }]
+    : [{
+        id: '__temporary-copilot-draft__',
+        name: { kind: 'ordinal', number: 1 },
+        isActive: true,
+        isTemporary: true,
+      }]
+  const nameOf = (tab: SessionTab) =>
+    tab.name.kind === 'ordinal' ? copy.ordinalName(tab.name.number) : tab.name.text
 
   return (
     <div className="flex items-center gap-1 border-b border-sidebar-border px-2 py-1.5">
@@ -160,17 +203,17 @@ export function SessionTabsView({
                     tab.isActive ? '' : 'text-muted-foreground',
                   )}
                 >
-                  <span className="truncate">{tab.label}</span>
+                  <span className="truncate">{nameOf(tab)}</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{tab.label}</TooltipContent>
+              <TooltipContent>{nameOf(tab)}</TooltipContent>
             </Tooltip>
             {tab.isTemporary ? null : (
               <Button
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Close ${tab.label}`}
+                aria-label={copy.close(nameOf(tab))}
                 onClick={() => onClose(tab.id)}
                 className="size-6 rounded-s-none text-muted-foreground opacity-60 hover:text-foreground group-hover/tab:opacity-100"
               >
@@ -190,7 +233,7 @@ export function SessionTabsView({
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-label="Chat actions"
+            aria-label={copy.actions}
             className="shrink-0 text-muted-foreground"
           >
             <Plus />
@@ -199,11 +242,11 @@ export function SessionTabsView({
         <DropdownMenuContent align="end" className="w-40">
           <DropdownMenuItem onSelect={() => onNew()}>
             <MessageSquarePlus />
-            New chat
+            {copy.newChat}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onRestore()}>
             <FolderOpen />
-            Restore chat
+            {copy.restoreChat}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

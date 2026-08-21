@@ -281,7 +281,10 @@ export function errorMessage(error: unknown, fallback?: string): string {
       return error.data.message
     }
     if (error.type === 'HashConflict') {
-      return 'File changed on disk. Reload the file and try again.'
+      // The one native rejection this function words itself: Rust reports the
+      // conflict as a tagged object with no message, so there is nothing to
+      // pass through — and it still has to read in the reader's language.
+      return i18n.t('native.hashConflict', { ns: 'errors' })
     }
     if (fallback) {
       return fallback

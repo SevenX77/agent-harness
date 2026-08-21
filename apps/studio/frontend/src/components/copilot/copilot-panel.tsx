@@ -1,4 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, ChevronDown, CircleAlert, History, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
@@ -62,6 +64,7 @@ interface ChatMessageItemProps {
 }
 
 function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }: ChatMessageItemProps) {
+  const { t } = useTranslation('copilot')
   const isUser = message.role === 'user'
   if (isUser) {
     // chat.md contract: the colored message surface is Bubble, never a styled
@@ -84,7 +87,7 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
   // takes over as the waiting indicator.
   const waiting =
     streaming && !message.content && !message.events.some((event) => event.type === 'thinking_delta')
-  const ctx: ProcessRenderContext = { streaming, skillId, workspaceRoot, onFileChanged }
+  const ctx: ProcessRenderContext = { t, streaming, skillId, workspaceRoot, onFileChanged }
 
   const renderSegmentNode = (segment: TranscriptSegment, isFinalAnswer: boolean) => {
     if (segment.kind === 'text') {
@@ -148,6 +151,8 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
 
 /** Shared context for rendering one process segment (live or inside the fold). */
 interface ProcessRenderContext {
+  /** The words this render uses, in the reader's language. */
+  t: TFunction<'copilot'>
   streaming: boolean
   skillId: string | null
   workspaceRoot?: string | null
@@ -160,6 +165,7 @@ interface ProcessRenderContext {
  * spinners stop once the turn settles (see ToolCallBubble `streaming`).
  */
 function renderProcessSegment(segment: TranscriptSegment, ctx: ProcessRenderContext): ReactNode {
+  const { t } = ctx
   if (segment.kind === 'text') {
     // Intermediate narration before the final answer — dim, one size down.
     return (
@@ -188,7 +194,7 @@ function renderProcessSegment(segment: TranscriptSegment, ctx: ProcessRenderCont
       <div key={event.id} className="py-0.5 text-xs text-destructive">
         <div className="flex items-center gap-2 font-medium">
           <CircleAlert className="size-3.5" />
-          Copilot error
+          {t('message.error')}
         </div>
         <p className="mt-1 whitespace-pre-wrap leading-snug">{event.message}</p>
       </div>
@@ -221,7 +227,7 @@ function renderProcessSegment(segment: TranscriptSegment, ctx: ProcessRenderCont
   if (event.type === 'unknown') {
     return (
       <details key={event.id} className="py-0.5 text-xs text-muted-foreground">
-        <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Unknown Copilot event</summary>
+        <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">{t('message.unknownEvent')}</summary>
         <pre className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/30 p-2 leading-snug">
           {JSON.stringify(event.payload, null, 2)}
         </pre>
@@ -239,9 +245,10 @@ function renderProcessSegment(segment: TranscriptSegment, ctx: ProcessRenderCont
  * module (decision 2026-08-14「和copilot的thinking一样」).
  */
 function ThinkingBlock({ content, streaming }: { content: string; streaming: boolean }) {
+  const { t } = useTranslation('copilot')
   return (
     <details open={streaming} className="py-0.5 text-xs text-muted-foreground">
-      <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">Thought</summary>
+      <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">{t('message.thought')}</summary>
       <TextWell
         text={content}
         autoFollow={streaming}
@@ -256,9 +263,10 @@ export const ChatMessageItem = React.memo(ChatMessageItemBase)
 /** F6 R3/R4: visible wait for the first answer token (cold spawns take 10-30s).
  * shadcn `shimmer` utility — the official loading-text treatment. */
 function ThinkingRow() {
+  const { t } = useTranslation('copilot')
   return (
     <div className="py-1 text-sm text-muted-foreground" data-copilot-thinking="true">
-      <span className="shimmer">Thinking…</span>
+      <span className="shimmer">{t('message.thinking')}</span>
     </div>
   )
 }
@@ -362,12 +370,14 @@ function isAssistantLingering(state: AssistantState): boolean {
 //
 // starting = CLI 已经拉起但还没就绪;unknown = Studio 还没拿到任何一帧快照
 // (决议 2026-08-03 D-C3)。`starting` 是更具体的事实,同时出现时它优先。
-export function codeAssistantPendingLabel(status: CodeAssistantStatus): string | null {
+export function codeAssistantPendingPhase(
+  status: CodeAssistantStatus,
+): 'starting' | 'checking' | null {
   if (status.claude.status === 'starting' || status.codex.status === 'starting') {
-    return 'Starting…'
+    return 'starting'
   }
   if (status.claude.status === 'unknown' || status.codex.status === 'unknown') {
-    return 'Checking…'
+    return 'checking'
   }
   return null
 }
@@ -385,23 +395,29 @@ export function closableCodeAssistantIds(status: CodeAssistantStatus): CodeAssis
   ]
 }
 
-export function codeAssistantCloseButtonLabel(status: CodeAssistantStatus): string | null {
+/** What the close control does, named as an action rather than as a sentence. */
+export type CodeAssistantCloseAction =
+  | { kind: 'detach' }
+  | { kind: 'closeAll' }
+  | { kind: 'closeOne'; assistant: CodeAssistantId }
+
+export function codeAssistantCloseAction(
+  status: CodeAssistantStatus,
+): CodeAssistantCloseAction | null {
   const closable = closableCodeAssistantIds(status)
   if (closable.length === 0) {
     return null
   }
   if (closable.every(id => isAssistantReadOnly(status[id]))) {
-    return 'Detach'
+    return { kind: 'detach' }
   }
   if (closable.length > 1) {
-    return 'Close assistants'
+    return { kind: 'closeAll' }
   }
-  return closable[0] === 'claude' ? 'Close Claude code' : 'Close Codex'
+  return { kind: 'closeOne', assistant: closable[0] }
 }
 
-function codeAssistantLabel(assistant: CodeAssistantId): string {
-  return assistant === 'claude' ? 'Claude code' : 'Codex'
-}
+
 
 // Attach 覆盖的集合与 Close 相同：有运行时就既能看它、也能关它（PM 裁决 2026-08-04，
 // 取代 D-A3「lingering 可 Close 不可 Attach」）。ah 有意用 `remain-on-exit` 把死窗格
@@ -409,12 +425,19 @@ function codeAssistantLabel(assistant: CodeAssistantId): string {
 //
 // 但残留的入口必须**说明它是已退出的会话**：不标出来，点下去看到一块冻住的窗格会被读成
 // 卡死。销毁那块窗格只能由 Close 显式发起，attach 不碰它。
-export function codeAssistantAttachMenuLabels(status: CodeAssistantStatus): string[] {
-  return closableCodeAssistantIds(status).map((assistant) =>
-    isAssistantLingering(status[assistant])
-      ? `Attach ${codeAssistantLabel(assistant)} (exited)`
-      : `Attach ${codeAssistantLabel(assistant)}`,
-  )
+export interface CodeAssistantAttachEntry {
+  assistant: CodeAssistantId
+  /** ah keeps an exited pane around for forensics; saying so is the point. */
+  exited: boolean
+}
+
+export function codeAssistantAttachEntries(
+  status: CodeAssistantStatus,
+): CodeAssistantAttachEntry[] {
+  return closableCodeAssistantIds(status).map((assistant) => ({
+    assistant,
+    exited: isAssistantLingering(status[assistant]),
+  }))
 }
 
 function judgeContextMatchesScope(context: CopilotJudgeContext, scope?: DraftJudgeContextScope): boolean {
@@ -450,6 +473,11 @@ const CliTerminalView = lazy(() =>
   import('./cli-terminal-view').then((module) => ({ default: module.CliTerminalView })),
 )
 
+/** The product name of a code assistant, as the reader's language spells it. */
+function assistantNameFor(assistant: CodeAssistantId, t: TFunction<'copilot'>): string {
+  return assistant === 'claude' ? t('assistant.claude') : t('assistant.codex')
+}
+
 export function CopilotPanel({
   skillId,
   workspaceRoot,
@@ -465,6 +493,7 @@ export function CopilotPanel({
   cliSession = null,
   onCliSessionChange,
 }: CopilotPanelProps) {
+  const { t } = useTranslation('copilot')
   const [draft, setDraft] = useState('')
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
@@ -630,14 +659,19 @@ export function CopilotPanel({
   // Attach 与 Close 覆盖同一个集合：有运行时就既能看它、也能关它。残留（`lingering`）
   // 也在里面——ah 有意留着的那块死窗格正是使用者想看的最后一屏（PM 裁决 2026-08-04）。
   const closableCodeAssistants = closableCodeAssistantIds(codeAssistantStatus)
-  const codeAssistantCloseLabel = codeAssistantCloseButtonLabel(codeAssistantStatus)
-  const codeAssistantAttachLabels = codeAssistantAttachMenuLabels(codeAssistantStatus)
+  const closeAction = codeAssistantCloseAction(codeAssistantStatus)
+  const assistantName = (assistant: CodeAssistantId) => assistantNameFor(assistant, t)
+  const closeActionLabel = (action: CodeAssistantCloseAction) =>
+    action.kind === 'closeOne'
+      ? t('header.closeOne', { assistant: assistantName(action.assistant) })
+      : t(`header.${action.kind}`)
+  const attachEntries = codeAssistantAttachEntries(codeAssistantStatus)
   const isClaudeOpenDisabled = codeAssistantStatus.claude.status === 'inactive' && isAssistantReadOnly(codeAssistantStatus.claude)
   const isCodexOpenDisabled = codeAssistantStatus.codex.status === 'inactive' && isAssistantReadOnly(codeAssistantStatus.codex)
   const allReadOnlyInactive = isClaudeOpenDisabled && isCodexOpenDisabled
   // 进行态优先级低于"真有东西在跑":claude 在跑而 codex 正在启动时,头部仍然给
   // Attach/Close(那是此刻唯一有用的动作),不被一个 spinner 顶掉。
-  const codeAssistantPending = codeAssistantPendingLabel(codeAssistantStatus)
+  const pendingPhase = codeAssistantPendingPhase(codeAssistantStatus)
   const pickerRole = useMemo(
     () => (selectedOption ? { fallback_chain: selectedOption.fallbackChain } : null),
     [selectedOption],
@@ -652,7 +686,7 @@ export function CopilotPanel({
       return
     }
     setSelectedRouteId(routeId)
-    toast.info('Route switched. Future messages will use it.')
+    toast.info(t('toast.routeSwitched'))
   }
 
   const refreshCodeAssistantStatus = useCallback(async () => {
@@ -859,14 +893,14 @@ export function CopilotPanel({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    aria-label="收起 MoirAI"
+                    aria-label={t('header.collapse')}
                     onClick={onCollapse}
                     className="flex shrink-0 items-center justify-center rounded-sm outline-none transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-[color:var(--studio-canvas-accent)]"
                   >
                     <MoiraiMark className="size-[18px] text-[color:var(--studio-canvas-accent-strong)]" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">收起</TooltipContent>
+                <TooltipContent side="bottom">{t('header.collapseTooltip')}</TooltipContent>
               </Tooltip>
             ) : (
               <MoiraiMark className="size-[18px] shrink-0 text-[color:var(--studio-canvas-accent-strong)]" title="MoirAI" />
@@ -879,12 +913,14 @@ export function CopilotPanel({
             {copilot.connectionStatus !== 'open' ? (
               <span className="inline-flex shrink-0 items-center rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
                 {copilot.connectionStatus}
-                {copilot.reconnectInMs ? ` · retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
+                {copilot.reconnectInMs
+                  ? t('header.retryIn', { seconds: Math.round(copilot.reconnectInMs / 1000) })
+                  : ''}
               </span>
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {codeAssistantCloseLabel ? (
+            {closeAction ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -892,11 +928,11 @@ export function CopilotPanel({
                     variant="outline"
                     size="sm"
                     disabled={closingCodeAssistant || !codeAssistantWorkspace}
-                    aria-label="Manage code assistant"
+                    aria-label={t('header.manageAssistant')}
                     className="studio-canvas-input-surface shrink-0"
                   >
                     <MonitorCheck data-icon="inline-start" />
-                    CLI running
+                    {t('header.cliRunning')}
                     <ChevronDown className="size-3" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -910,7 +946,9 @@ export function CopilotPanel({
                       }}
                     >
                       <SquareTerminal data-icon="inline-start" />
-                      {codeAssistantAttachLabels[index] ?? `Attach ${codeAssistantLabel(assistant)}`}
+                      {attachEntries[index]?.exited
+                        ? t('header.attachExited', { assistant: assistantName(assistant) })
+                        : t('header.attach', { assistant: assistantName(assistant) })}
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuSeparator />
@@ -921,22 +959,22 @@ export function CopilotPanel({
                     }}
                   >
                     <Square data-icon="inline-start" className="fill-current" />
-                    {codeAssistantCloseLabel}
+                    {closeActionLabel(closeAction)}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : codeAssistantPending ? (
+            ) : pendingPhase ? (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 disabled
-                aria-label="Code assistant pending"
+                aria-label={t('header.assistantPending')}
                 aria-busy="true"
                 className="studio-canvas-input-surface shrink-0"
               >
                 <Loader2 className="size-3.5 animate-spin" data-icon="inline-start" />
-                {codeAssistantPending}
+                {t(`header.${pendingPhase}`)}
               </Button>
             ) : (
               <DropdownMenu>
@@ -946,12 +984,12 @@ export function CopilotPanel({
                     variant="outline"
                     size="sm"
                     disabled={!codeAssistantWorkspace || allReadOnlyInactive}
-                    aria-label="Open code assistant"
+                    aria-label={t('header.openAssistant')}
                     className="studio-canvas-input-surface shrink-0"
-                    title={allReadOnlyInactive ? 'Workspace-owned config is read-only' : undefined}
+                    title={allReadOnlyInactive ? t('header.readOnlyTitle') : undefined}
                   >
                     <SquareTerminal data-icon="inline-start" />
-                    Open in CLI {allReadOnlyInactive && '(read-only)'}
+                    {t('header.openInCli')} {allReadOnlyInactive && t('header.readOnlySuffix')}
                     <ChevronDown className="size-3" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -961,18 +999,18 @@ export function CopilotPanel({
                     onSelect={() => {
                       handleOpenCodeAssistant('claude')
                     }}
-                    title={codeAssistantStatus.claude.readOnly ? 'Workspace-owned config is read-only' : undefined}
+                    title={codeAssistantStatus.claude.readOnly ? t('header.readOnlyTitle') : undefined}
                   >
-                    Claude code {isClaudeOpenDisabled && '(read-only)'}
+                    {t('assistant.claude')} {isClaudeOpenDisabled && t('header.readOnlySuffix')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={!codeAssistantWorkspace || isCodexOpenDisabled}
                     onSelect={() => {
                       handleOpenCodeAssistant('codex')
                     }}
-                    title={codeAssistantStatus.codex.readOnly ? 'Workspace-owned config is read-only' : undefined}
+                    title={codeAssistantStatus.codex.readOnly ? t('header.readOnlyTitle') : undefined}
                   >
-                    Codex {isCodexOpenDisabled && '(read-only)'}
+                    {t('assistant.codex')} {isCodexOpenDisabled && t('header.readOnlySuffix')}
                   </DropdownMenuItem>
                   {lastOpenedAssistant && (
                     <>
@@ -987,12 +1025,12 @@ export function CopilotPanel({
                         }}
                         title={
                           codeAssistantStatus[lastOpenedAssistant].readOnly
-                            ? 'Workspace-owned config is read-only'
+                            ? t('header.readOnlyTitle')
                             : undefined
                         }
                       >
                         <History data-icon="inline-start" />
-                        Resume {codeAssistantLabel(lastOpenedAssistant)}
+                        {t('header.resume', { assistant: assistantName(lastOpenedAssistant) })}
                       </DropdownMenuItem>
                     </>
                   )}
@@ -1035,7 +1073,7 @@ export function CopilotPanel({
             }}
             className="studio-canvas-input-surface w-full justify-start"
           >
-            Ask Copilot Judge
+            {t('judge.ask')}
           </Button>
         </div>
       ) : null}
@@ -1077,28 +1115,28 @@ export function CopilotPanel({
               <ReactMarkdown>
                 {skillId
                   ? inEvalView
-                    ? '**Copilot Judge**\n\nAsk me to review the current artifact and golden diff. I use the Eval context endpoint, not a separate judge backend.'
-                    : 'Ask about this skill, workflow, or current screen. General questions are allowed.'
-                  : '**Create a skill with Copilot**\n\nUse Templates as a scaffold, or describe the Skill you want me to help create.'}
+                    ? t('empty.judge')
+                    : t('empty.skill')
+                  : t('empty.create')}
               </ReactMarkdown>
             </div>
             {!skillId ? (
               <div className="mt-3 space-y-2">
                 <button
                   type="button"
-                  onClick={() => setDraft('Help me create a new Skill. Ask clarifying questions, then propose a minimal skill.md.')}
+                  onClick={() => setDraft(t('empty.describeSkillDraft'))}
                   className="studio-canvas-input-surface w-full rounded-md border px-2 py-1.5 text-start text-xs font-medium text-foreground hover:bg-muted"
                 >
-                  Describe my Skill
+                  {t('empty.describeSkill')}
                 </button>
                 <div className="text-xs">
-                  {templatesLoading ? 'Loading templates...' : 'Templates'}
+                  {templatesLoading ? t('empty.templatesLoading') : t('empty.templates')}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {templates.slice(0, 3).map((template) => (
                       <button
                         key={template.id}
                         type="button"
-                        onClick={() => setDraft(`Use the "${template.name}" template as a scaffold and help me create a Skill.`)}
+                        onClick={() => setDraft(t('empty.templateDraft', { template: template.name }))}
                         className="studio-canvas-input-surface rounded-md border px-2 py-1 text-xs text-foreground hover:bg-muted"
                       >
                         {template.name}
@@ -1145,7 +1183,7 @@ export function CopilotPanel({
             onKeyDown={handleComposerKeyDown}
             rows={3}
             className="min-h-[60px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
-            placeholder="Use '@' to mention nodes..."
+            placeholder={t('composer.placeholder')}
           />
           {/* F6: inside the bordered box only the send action lives (stop joins it
               with F7-③ interrupt); every settings control sits BELOW the box. */}
@@ -1158,7 +1196,7 @@ export function CopilotPanel({
                 onClick={() => {
                   void copilot.interrupt()
                 }}
-                aria-label="Stop generating"
+                aria-label={t('composer.stop')}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
               >
                 <Square className="size-3 fill-current" />
@@ -1167,7 +1205,7 @@ export function CopilotPanel({
               <button
                 type="submit"
                 disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
-                aria-label="Send message"
+                aria-label={t('composer.send')}
                 className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                   draft.trim() && copilot.connectionStatus === 'open'
                     ? 'bg-[color:var(--studio-canvas-accent)] text-primary-foreground hover:bg-primary/80'

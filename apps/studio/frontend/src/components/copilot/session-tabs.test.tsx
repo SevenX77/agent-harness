@@ -3,7 +3,8 @@ import type { ComponentProps, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { CopilotSession } from '../../store/copilotStore'
-import { SessionTabs, SessionTabsView, consumeHorizontalWheel, sessionTabLabel, sessionTabs } from './session-tabs'
+import { SessionTabs, SessionTabsView, consumeHorizontalWheel, sessionTabName, sessionTabs } from './session-tabs'
+import type { SessionTabsCopy } from './session-tabs'
 
 vi.mock('@/components/ui/button', () => ({
   Button: ({
@@ -27,24 +28,39 @@ function session(id: string, messages: Array<{ role: 'user' | 'assistant'; conte
   }
 }
 
-describe('sessionTabLabel', () => {
-  it('uses the first user message first line as the label', () => {
-    expect(sessionTabLabel(session('s1', [{ role: 'user', content: 'How do I add a node?\nmore' }]), 0)).toBe(
-      'How do I add a node?',
+// The view takes its words as props (SessionTabsCopy), so a test that calls it
+// directly supplies them. Plain, recognisable strings keep the assertions about
+// wiring rather than about wording.
+const copy: SessionTabsCopy = {
+  ordinalName: (number) => `Chat ${number}`,
+  close: (name) => `Close ${name}`,
+  actions: 'Chat actions',
+  newChat: 'New chat',
+  restoreChat: 'Restore chat',
+}
+
+describe('sessionTabName', () => {
+  it('uses the first user message first line as the name', () => {
+    expect(sessionTabName(session('s1', [{ role: 'user', content: 'How do I add a node?\nmore' }]), 0)).toEqual(
+      { kind: 'firstMessage', text: 'How do I add a node?' },
     )
   })
 
   it('truncates long first messages', () => {
-    const label = sessionTabLabel(
+    const name = sessionTabName(
       session('s1', [{ role: 'user', content: 'a'.repeat(40) }]),
       0,
     )
-    expect(label).toBe(`${'a'.repeat(24)}…`)
+    expect(name).toEqual({ kind: 'firstMessage', text: `${'a'.repeat(24)}…` })
   })
 
-  it('falls back to a 1-based Chat N when there is no user turn', () => {
-    expect(sessionTabLabel(session('s1', []), 0)).toBe('Chat 1')
-    expect(sessionTabLabel(session('s2', [{ role: 'assistant', content: 'hi' }]), 1)).toBe('Chat 2')
+  // The ordinal is a DESCRIPTOR: 'Chat 1' in English and '对话 1' in Chinese
+  // are the same tab, so this function must not decide between them.
+  it('falls back to the 1-based ordinal when there is no user turn', () => {
+    expect(sessionTabName(session('s1', []), 0)).toEqual({ kind: 'ordinal', number: 1 })
+    expect(sessionTabName(session('s2', [{ role: 'assistant', content: 'hi' }]), 1)).toEqual(
+      { kind: 'ordinal', number: 2 },
+    )
   })
 })
 
@@ -56,8 +72,8 @@ describe('sessionTabs', () => {
     )
 
     expect(tabs).toEqual([
-      { id: 's1', label: 'first', isActive: false },
-      { id: 's2', label: 'Chat 2', isActive: true },
+      { id: 's1', name: { kind: 'firstMessage', text: 'first' }, isActive: false },
+      { id: 's2', name: { kind: 'ordinal', number: 2 }, isActive: true },
     ])
   })
 
@@ -171,6 +187,7 @@ describe('SessionTabs', () => {
       onNew: () => undefined,
       onRestore: () => undefined,
       onClose: () => undefined,
+      copy,
     })
 
     const all = collectElements(element)
@@ -190,6 +207,7 @@ describe('SessionTabs', () => {
       onNew,
       onRestore: () => undefined,
       onClose: () => undefined,
+      copy,
     })
 
     const newItem = collectElements(element).find(
@@ -209,6 +227,7 @@ describe('SessionTabs', () => {
       onNew: () => undefined,
       onRestore,
       onClose: () => undefined,
+      copy,
     })
 
     const restoreItem = collectElements(element).find(

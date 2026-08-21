@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -67,16 +68,27 @@ export async function seedGoldenForRun(
   return { plan }
 }
 
-/** What the bar says it did, in the user's terms rather than the plan's. */
-export function seedOutcomeMessage(plan: GoldenSeedPlan): string {
+/** What the bar did, in the user's terms rather than the plan's. */
+export type SeedOutcome =
+  | { kind: 'locked' }
+  | { kind: 'nothingMissing' }
+  | { kind: 'seeded'; nodeIds: string[] }
+
+/**
+ * Read the plan as an outcome.
+ *
+ * A descriptor, not a sentence: which language the reader gets is not
+ * something a plan-reading function can know (设计源 i18n.md §3 Strategy C).
+ * `seedOutcomeMessage` in the view turns this into words.
+ */
+export function seedOutcome(plan: GoldenSeedPlan): SeedOutcome {
   if (plan.baseline_locked) {
-    return 'Golden 已锁定,未填充'
+    return { kind: 'locked' }
   }
   if (plan.seeded.length === 0) {
-    return '每个节点都已有 golden,未改动'
+    return { kind: 'nothingMissing' }
   }
-  const names = plan.seeded.map((target) => target.node_id).join('、')
-  return `已用本次 run 的输出填充 ${plan.seeded.length} 个节点的 golden:${names}`
+  return { kind: 'seeded', nodeIds: plan.seeded.map((target) => target.node_id) }
 }
 
 interface AnalysisBarProps {
@@ -92,7 +104,17 @@ interface AnalysisBarProps {
  * offering to auto-write golden. Confirm or dismiss makes it disappear.
  */
 export function AnalysisBar({ skillId, runId, workspaceRoot, onJudgePrepared, onDismiss }: AnalysisBarProps) {
+  const { t } = useTranslation('copilot')
   const [busy, setBusy] = useState(false)
+
+  const seedOutcomeMessage = (outcome: SeedOutcome): string => {
+    if (outcome.kind === 'locked') return t('analysis.locked')
+    if (outcome.kind === 'nothingMissing') return t('analysis.nothingMissing')
+    return t('analysis.seeded', {
+      count: outcome.nodeIds.length,
+      nodes: outcome.nodeIds.join(t('analysis.nodeSeparator')),
+    })
+  }
 
   const handleConfirm = async () => {
     setBusy(true)
@@ -104,7 +126,7 @@ export function AnalysisBar({ skillId, runId, workspaceRoot, onJudgePrepared, on
       if (result.judge) {
         onJudgePrepared?.(result.judge)
       }
-      toast.success(seedOutcomeMessage(result.plan))
+      toast.success(seedOutcomeMessage(seedOutcome(result.plan)))
     } catch (error) {
       toast.error(errorMessage(error))
     } finally {
@@ -116,7 +138,7 @@ export function AnalysisBar({ skillId, runId, workspaceRoot, onJudgePrepared, on
   return (
     <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-accent/50 px-3 py-1.5 text-xs">
       <Sparkles className="size-3.5 text-foreground" />
-      <span className="min-w-0 flex-1 text-foreground">运行完成 — 用本次输出补上缺 golden 的节点?</span>
+      <span className="min-w-0 flex-1 text-foreground">{t('analysis.prompt')}</span>
       <Button
         type="button"
         onClick={() => void handleConfirm()}
@@ -125,14 +147,14 @@ export function AnalysisBar({ skillId, runId, workspaceRoot, onJudgePrepared, on
         variant="secondary"
         className="h-6 px-2 text-xs"
       >
-        确认
+        {t('analysis.confirm')}
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="icon"
         onClick={onDismiss}
-        aria-label="忽略分析"
+        aria-label={t('analysis.dismiss')}
         className="size-6 text-muted-foreground hover:text-foreground"
       >
         <X className="size-3.5" />

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { seedGoldenForRun, seedOutcomeMessage } from './analysis-bar'
+import { seedGoldenForRun, seedOutcome } from './analysis-bar'
 import type { GoldenSeedPlan, GoldenSeedTarget } from '@/api/types'
 
 const plan = (seeded: GoldenSeedTarget[], overrides: Partial<GoldenSeedPlan> = {}): GoldenSeedPlan => ({
@@ -94,23 +94,26 @@ describe('seedGoldenForRun (F7)', () => {
   })
 })
 
-describe('seedOutcomeMessage', () => {
+// A descriptor, not a sentence: the bar words it in the reader's language,
+// so what this function owes is WHICH outcome happened and which nodes it
+// touched — never the wording (设计源 i18n.md §3 Strategy C).
+describe('seedOutcome', () => {
   it('names the nodes it filled', () => {
     expect(
-      seedOutcomeMessage(
+      seedOutcome(
         plan([
           { node_id: 'setup', reason: 'absent' },
           { node_id: 'review', reason: 'case_file_missing' },
         ]),
       ),
-    ).toBe('已用本次 run 的输出填充 2 个节点的 golden:setup、review')
+    ).toEqual({ kind: 'seeded', nodeIds: ['setup', 'review'] })
   })
 
   it('says nothing changed when every node already had one', () => {
-    expect(seedOutcomeMessage(plan([]))).toBe('每个节点都已有 golden,未改动')
+    expect(seedOutcome(plan([]))).toEqual({ kind: 'nothingMissing' })
   })
 
   it('says a locked golden was left alone', () => {
-    expect(seedOutcomeMessage(plan([], { baseline_locked: true }))).toBe('Golden 已锁定,未填充')
+    expect(seedOutcome(plan([], { baseline_locked: true }))).toEqual({ kind: 'locked' })
   })
 })

@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Route } from 'lucide-react'
 import type { RegistryResponse, RoleEntry } from '../../api/llm'
 import { Button } from '../ui/button'
@@ -56,6 +57,17 @@ export function firstAvailableRoute(options: RouteOption[]): string | null {
   return options.find((option) => option.available)?.routeId ?? null
 }
 
+/**
+ * The words the route menus render, in the reader's language.
+ *
+ * Props, not a hook inside the menus: they are pure functions of props and
+ * their unit tests call them as such. `ModelPicker` owns `t`.
+ */
+export interface ModelPickerCopy {
+  off: string
+  selectRoute: (route: string) => string
+}
+
 interface ModelPickerMenuProps {
   options: RouteOption[]
   selectedRouteId: string
@@ -63,7 +75,13 @@ interface ModelPickerMenuProps {
   onClose?: () => void
 }
 
-export function ModelPickerMenu({ options, selectedRouteId, onSelect, onClose }: ModelPickerMenuProps) {
+export function ModelPickerMenu({
+  options,
+  selectedRouteId,
+  onSelect,
+  onClose,
+  copy,
+}: ModelPickerMenuProps & { copy: ModelPickerCopy }) {
   return (
     <>
       {options.map((option) => {
@@ -73,7 +91,7 @@ export function ModelPickerMenu({ options, selectedRouteId, onSelect, onClose }:
             disabled={!option.available}
             variant={selectedRouteId === option.routeId ? 'default' : 'ghost'}
             size="sm"
-            aria-label={`Select route ${option.routeId}`}
+            aria-label={copy.selectRoute(option.routeId)}
             onClick={option.available ? () => {
               onSelect(option.routeId)
               onClose?.()
@@ -86,7 +104,7 @@ export function ModelPickerMenu({ options, selectedRouteId, onSelect, onClose }:
           >
             <span className="min-w-0 truncate">{option.routeId}</span>
             {!option.available ? (
-              <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">Off</span>
+              <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{copy.off}</span>
             ) : null}
           </Button>
         )
@@ -108,14 +126,19 @@ export function ModelPickerMenu({ options, selectedRouteId, onSelect, onClose }:
   )
 }
 
-function ModelPickerDropdownItems({ options, selectedRouteId, onSelect }: ModelPickerMenuProps) {
+function ModelPickerDropdownItems({
+  options,
+  selectedRouteId,
+  onSelect,
+  copy,
+}: ModelPickerMenuProps & { copy: ModelPickerCopy }) {
   return (
     <>
       {options.map((option) => (
         <DropdownMenuItem
           key={option.routeId}
           disabled={!option.available}
-          aria-label={`Select route ${option.routeId}`}
+          aria-label={copy.selectRoute(option.routeId)}
           onSelect={() => onSelect(option.routeId)}
           className={`justify-between ${
             selectedRouteId === option.routeId ? 'bg-accent text-accent-foreground' : ''
@@ -123,7 +146,7 @@ function ModelPickerDropdownItems({ options, selectedRouteId, onSelect }: ModelP
         >
           <span className="min-w-0 truncate">{option.routeId}</span>
           {!option.available ? (
-            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">Off</span>
+            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{copy.off}</span>
           ) : null}
         </DropdownMenuItem>
       ))}
@@ -132,7 +155,12 @@ function ModelPickerDropdownItems({ options, selectedRouteId, onSelect }: ModelP
 }
 
 export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant = 'icon' }: ModelPickerProps) {
+  const { t } = useTranslation('copilot')
   const options = useMemo(() => getRouteOptions(role, registry), [registry, role])
+  const copy: ModelPickerCopy = {
+    off: t('route.off'),
+    selectRoute: (route) => t('route.selectOne', { route }),
+  }
   const fallbackRoute = firstAvailableRoute(options)
   const effectiveRouteId = selectedRouteId || role?.fallback_chain?.[0]?.route_id || ''
 
@@ -154,11 +182,12 @@ export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant
 
   if (variant === 'full') {
     return (
-      <div className="flex flex-wrap gap-1.5" aria-label="Copilot route picker">
+      <div className="flex flex-wrap gap-1.5" aria-label={t('route.picker')}>
         <ModelPickerMenu
           options={options}
           selectedRouteId={effectiveRouteId}
           onSelect={onSelect}
+          copy={copy}
         />
       </div>
     )
@@ -177,20 +206,23 @@ export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="Select Copilot route"
+              aria-label={t('route.select')}
             >
               <Route className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>{effectiveRouteId ? `Route: ${effectiveRouteId}` : 'Select route'}</TooltipContent>
+        <TooltipContent>
+          {effectiveRouteId ? t('route.current', { route: effectiveRouteId }) : t('route.none')}
+        </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="start" side="top" className="w-64">
-        <DropdownMenuLabel>Route</DropdownMenuLabel>
+        <DropdownMenuLabel>{t('route.label')}</DropdownMenuLabel>
         <ModelPickerDropdownItems
           options={options}
           selectedRouteId={effectiveRouteId}
           onSelect={onSelect}
+          copy={copy}
         />
       </DropdownMenuContent>
     </DropdownMenu>

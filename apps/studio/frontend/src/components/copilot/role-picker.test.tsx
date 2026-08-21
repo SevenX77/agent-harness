@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps, ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { CredentialsState, ModelGroup, RoleEntry, RolesData } from '../../api/llm'
-import { RolePicker, copilotRoleOptions, type CopilotRoleOption } from './role-picker'
+import { RolePicker, RolePickerView, copilotRoleOptions, type CopilotRoleOption } from './role-picker'
 
 vi.mock('../ui/button', () => ({
   Button: ({
@@ -283,10 +283,21 @@ describe('RolePicker', () => {
 
   it('calls onSelect with the chosen role when a menu item is selected', () => {
     const onSelect = vi.fn()
-    const element = RolePicker({
+    const element = RolePickerView({
       options,
       selectedRole: 'copilot_claude_opus_4_8',
       onSelect,
+      copy: {
+        loading: 'Loading copilot role',
+        loadingTooltip: 'Loading copilot roles…',
+        loadingList: 'Loading copilot roles',
+        label: 'Copilot role',
+        none: 'No copilot role',
+        addHint: 'Add a Copilot role in Settings → Copilot',
+        select: 'Select copilot role',
+        current: (role) => `Role: ${role}`,
+        selectRole: (role) => `Select role ${role}`,
+      },
     }) as ReactElement<{ children: ReactNode[] }>
 
     // DropdownMenu > [trigger, content]; content children = [label, ...items]

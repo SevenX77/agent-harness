@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import i18n from '../i18n'
 import { toast } from 'sonner'
 import { closeCopilotSession, interruptCopilot, wsUrl } from '../api/client'
 import { nextBackoffMs } from '../lib/websocket'
@@ -363,7 +364,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
 
   const restoreSession = useCallback(async () => {
     if (!skillId || !workspaceRoot) {
-      toast.error('No skill workspace available')
+      toast.error(i18n.t('toast.noWorkspace', { ns: 'copilot' }))
       return
     }
     const selectedPath = await selectFile(copilotSessionDirectoryPath(workspaceRoot, skillId))
@@ -372,7 +373,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     }
     const restored = await copilotStore.restoreSessionFromFile(selectedPath)
     if (!restored) {
-      toast.error('Copilot session could not be restored', {
+      toast.error(i18n.t('toast.restoreFailed', { ns: 'copilot' }), {
         description: copilotStore.getSnapshot().persistenceError ?? undefined,
       })
     }

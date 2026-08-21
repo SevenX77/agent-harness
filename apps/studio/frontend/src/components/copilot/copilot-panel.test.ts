@@ -8,9 +8,9 @@ import type { CopilotMessage } from '../../types/copilot'
 import {
   buildCopilotJudgeDraft,
   buildGoldenDesignDraft,
-  codeAssistantAttachMenuLabels,
-  codeAssistantCloseButtonLabel,
-  codeAssistantPendingLabel,
+  codeAssistantAttachEntries,
+  codeAssistantCloseAction,
+  codeAssistantPendingPhase,
   copilotBackendErrorMessage,
   CopilotPanel,
   isComposerSendKey,
@@ -503,10 +503,10 @@ describe('buildCopilotJudgeDraft', () => {
     // the read-only Detach case is covered by test_readonly_active_close_is_detach.
     const active = { status: 'active', readOnly: false } as const
     const inactive = { status: 'inactive', readOnly: false } as const
-    expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: inactive })).toBeNull()
-    expect(codeAssistantCloseButtonLabel({ claude: active, codex: inactive })).toBe('Close Claude code')
-    expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: active })).toBe('Close Codex')
-    expect(codeAssistantCloseButtonLabel({ claude: active, codex: active })).toBe('Close assistants')
+    expect(codeAssistantCloseAction({ claude: inactive, codex: inactive })).toBeNull()
+    expect(codeAssistantCloseAction({ claude: active, codex: inactive })).toEqual({ kind: 'closeOne', assistant: 'claude' })
+    expect(codeAssistantCloseAction({ claude: inactive, codex: active })).toEqual({ kind: 'closeOne', assistant: 'codex' })
+    expect(codeAssistantCloseAction({ claude: active, codex: active })).toEqual({ kind: 'closeAll' })
   })
 
   it('offers BOTH Attach and Close for a lingering runtime, and says the session exited', () => {
@@ -520,19 +520,19 @@ describe('buildCopilotJudgeDraft', () => {
     const inactive = { status: 'inactive', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
 
-    expect(codeAssistantCloseButtonLabel({ claude: lingering, codex: inactive })).toBe('Close Claude code')
-    expect(codeAssistantCloseButtonLabel({ claude: inactive, codex: lingering })).toBe('Close Codex')
-    expect(codeAssistantCloseButtonLabel({ claude: lingering, codex: active })).toBe('Close assistants')
+    expect(codeAssistantCloseAction({ claude: lingering, codex: inactive })).toEqual({ kind: 'closeOne', assistant: 'claude' })
+    expect(codeAssistantCloseAction({ claude: inactive, codex: lingering })).toEqual({ kind: 'closeOne', assistant: 'codex' })
+    expect(codeAssistantCloseAction({ claude: lingering, codex: active })).toEqual({ kind: 'closeAll' })
 
-    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: inactive })).toEqual([
-      'Attach Claude code (exited)',
+    expect(codeAssistantAttachEntries({ claude: lingering, codex: inactive })).toEqual([
+      { assistant: 'claude', exited: true },
     ])
     // 对照组:活会话不带后缀 —— 证明后缀是按相位算出来的,不是常量。
-    expect(codeAssistantAttachMenuLabels({ claude: lingering, codex: active })).toEqual([
-      'Attach Claude code (exited)',
-      'Attach Codex',
+    expect(codeAssistantAttachEntries({ claude: lingering, codex: active })).toEqual([
+      { assistant: 'claude', exited: true },
+      { assistant: 'codex', exited: false },
     ])
-    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: inactive })).toEqual([])
+    expect(codeAssistantAttachEntries({ claude: inactive, codex: inactive })).toEqual([])
   })
 
   it('subscribes to ah runtime events so a delayed CLI start updates the button without polling', async () => {
@@ -595,10 +595,17 @@ describe('buildCopilotJudgeDraft', () => {
     // Migrated to the task-8 per-assistant payload shape; attach-label semantic unchanged.
     const active = { status: 'active', readOnly: false } as const
     const inactive = { status: 'inactive', readOnly: false } as const
-    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: inactive })).toEqual([])
-    expect(codeAssistantAttachMenuLabels({ claude: active, codex: inactive })).toEqual(['Attach Claude code'])
-    expect(codeAssistantAttachMenuLabels({ claude: inactive, codex: active })).toEqual(['Attach Codex'])
-    expect(codeAssistantAttachMenuLabels({ claude: active, codex: active })).toEqual(['Attach Claude code', 'Attach Codex'])
+    expect(codeAssistantAttachEntries({ claude: inactive, codex: inactive })).toEqual([])
+    expect(codeAssistantAttachEntries({ claude: active, codex: inactive })).toEqual([
+      { assistant: 'claude', exited: false },
+    ])
+    expect(codeAssistantAttachEntries({ claude: inactive, codex: active })).toEqual([
+      { assistant: 'codex', exited: false },
+    ])
+    expect(codeAssistantAttachEntries({ claude: active, codex: active })).toEqual([
+      { assistant: 'claude', exited: false },
+      { assistant: 'codex', exited: false },
+    ])
   })
 
   // ── studio-ah-state-contract-v1 task 9 (read-only Detach control semantics) RED tests ──
@@ -820,12 +827,12 @@ describe('buildCopilotJudgeDraft', () => {
     const inactive = { status: 'inactive', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
 
-    expect(codeAssistantPendingLabel({ claude: unknown, codex: unknown })).toBe('Checking…')
-    expect(codeAssistantPendingLabel({ claude: starting, codex: inactive })).toBe('Starting…')
-    expect(codeAssistantPendingLabel({ claude: unknown, codex: starting })).toBe('Starting…')
+    expect(codeAssistantPendingPhase({ claude: unknown, codex: unknown })).toBe('checking')
+    expect(codeAssistantPendingPhase({ claude: starting, codex: inactive })).toBe('starting')
+    expect(codeAssistantPendingPhase({ claude: unknown, codex: starting })).toBe('starting')
     // 对照组:没有任何进行中的相位就没有进行态控件。
-    expect(codeAssistantPendingLabel({ claude: inactive, codex: inactive })).toBeNull()
-    expect(codeAssistantPendingLabel({ claude: active, codex: inactive })).toBeNull()
+    expect(codeAssistantPendingPhase({ claude: inactive, codex: inactive })).toBeNull()
+    expect(codeAssistantPendingPhase({ claude: active, codex: inactive })).toBeNull()
   })
 
   it('renders a spinning pending control instead of a look-alike disabled Open', async () => {
@@ -940,11 +947,13 @@ describe('buildCopilotJudgeDraft', () => {
     const unknown = { status: 'unknown', readOnly: false } as const
     const active = { status: 'active', readOnly: false } as const
 
-    expect(codeAssistantCloseButtonLabel({ claude: unknown, codex: unknown })).toBeNull()
-    expect(codeAssistantAttachMenuLabels({ claude: unknown, codex: unknown })).toEqual([])
+    expect(codeAssistantCloseAction({ claude: unknown, codex: unknown })).toBeNull()
+    expect(codeAssistantAttachEntries({ claude: unknown, codex: unknown })).toEqual([])
     // 对照组:另一侧真的在跑时,只有它进这两类。
-    expect(codeAssistantCloseButtonLabel({ claude: unknown, codex: active })).toBe('Close Codex')
-    expect(codeAssistantAttachMenuLabels({ claude: unknown, codex: active })).toEqual(['Attach Codex'])
+    expect(codeAssistantCloseAction({ claude: unknown, codex: active })).toEqual({ kind: 'closeOne', assistant: 'codex' })
+    expect(codeAssistantAttachEntries({ claude: unknown, codex: active })).toEqual([
+      { assistant: 'codex', exited: false },
+    ])
   })
 
   it('test_degraded_exposes_working_open', async () => {

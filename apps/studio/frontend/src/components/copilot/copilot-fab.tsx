@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { MoiraiMark } from './moirai-mark'
 import {
@@ -26,6 +27,7 @@ interface CopilotFabProps {
  * into the panel — so this component owns drag + hit-testing, not the animation.
  */
 export function CopilotFab({ position, onPositionChange, onOpen }: CopilotFabProps) {
+  const { t } = useTranslation('copilot')
   const rootRef = useRef<HTMLDivElement>(null)
   const [bounds, setBounds] = useState<Size | null>(null)
   const dragRef = useRef<{ pointer: Point; origin: Point; moved: boolean } | null>(null)
@@ -85,7 +87,7 @@ export function CopilotFab({ position, onPositionChange, onOpen }: CopilotFabPro
     >
       <button
         type="button"
-        aria-label="打开 MoirAI"
+        aria-label={t('fab.open')}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -97,7 +99,7 @@ export function CopilotFab({ position, onPositionChange, onOpen }: CopilotFabPro
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--studio-canvas-accent)]',
         )}
       >
-        <MoiraiMark className="size-5 text-[color:var(--studio-canvas-accent-strong)]" title="打开 MoirAI" />
+        <MoiraiMark className="size-5 text-[color:var(--studio-canvas-accent-strong)]" title={t('fab.open')} />
       </button>
     </div>
   )

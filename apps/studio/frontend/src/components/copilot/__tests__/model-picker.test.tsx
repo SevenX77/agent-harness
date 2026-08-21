@@ -149,7 +149,12 @@ describe('ModelPicker', () => {
   it('calls onSelect with exact route_id when an available route is selected', () => {
     const onSelect = vi.fn()
     const options = getRouteOptions(role, registry)
-    const element = ModelPickerMenu({ options, selectedRouteId: 'openrouter:anthropic-claude-sonnet', onSelect })
+    const element = ModelPickerMenu({
+      options,
+      selectedRouteId: 'openrouter:anthropic-claude-sonnet',
+      onSelect,
+      copy: { off: 'Off', selectRoute: (route) => `Select route ${route}` },
+    })
     // Each route renders as a keyed wrapper (span, or Tooltip for disabled
     // routes) around the Button — walk down to the first element with onClick.
     const wrappers: MenuButtonElement[] = Array.isArray(element.props.children)

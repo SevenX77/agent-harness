@@ -1,4 +1,5 @@
 import { BrainCircuit, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { CredentialsState, ModelGroup, RoleRouteEntry, RolesData } from '../../api/llm'
 import { deriveCopilotDisplayRoles } from '../studio/settings/copilot/copilot-role-derivation'
 import { Button } from '../ui/button'
@@ -64,7 +65,49 @@ interface RolePickerProps {
 /** R7-C: the fixed default label shown while roles load (PM 2026-08-06: deepseek-v4-flash). */
 const LOADING_DEFAULT_LABEL = 'DeepSeek V4 Flash'
 
-export function RolePicker({ options, selectedRole, onSelect, loading = false }: RolePickerProps) {
+/**
+ * The words the picker renders, in the reader's language.
+ *
+ * Props rather than a hook inside the view, for the same reason
+ * `SessionTabsView` takes them: the view is a pure function of props and its
+ * interaction test calls it as one.
+ */
+export interface RolePickerCopy {
+  loading: string
+  loadingTooltip: string
+  loadingList: string
+  label: string
+  none: string
+  addHint: string
+  select: string
+  current: (role: string) => string
+  selectRole: (role: string) => string
+}
+
+export function RolePicker(props: RolePickerProps) {
+  const { t } = useTranslation('copilot')
+  const copy: RolePickerCopy = {
+    loading: t('role.loading'),
+    loadingTooltip: t('role.loadingTooltip'),
+    loadingList: t('role.loadingList'),
+    label: t('role.label'),
+    none: t('role.none'),
+    addHint: t('role.addHint'),
+    select: t('role.select'),
+    current: (role) => t('role.current', { role }),
+    selectRole: (role) => t('role.selectRole', { role }),
+  }
+  return <RolePickerView {...props} copy={copy} />
+}
+
+/** Hook-free presentational picker — see `RolePickerCopy`. */
+export function RolePickerView({
+  options,
+  selectedRole,
+  onSelect,
+  loading = false,
+  copy,
+}: RolePickerProps & { copy: RolePickerCopy }) {
   // R7-C (PM 2026-07-02): the picker anchor is ALWAYS present. While config loads
   // it shows the fixed default (opus4.8) with a spinning icon — the skeleton moves
   // INTO the dropdown options, not the trigger — so the selector never vanishes or
@@ -79,7 +122,7 @@ export function RolePicker({ options, selectedRole, onSelect, loading = false }:
                 type="button"
                 variant="ghost"
                 size="sm"
-                aria-label="Loading copilot role"
+                aria-label={copy.loading}
                 className="h-7 gap-1 px-2 text-xs text-muted-foreground"
               >
                 <Loader2 className="size-3.5 animate-spin" />
@@ -87,11 +130,11 @@ export function RolePicker({ options, selectedRole, onSelect, loading = false }:
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent>Loading copilot roles…</TooltipContent>
+          <TooltipContent>{copy.loadingTooltip}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="start" side="top" className="w-56">
-          <DropdownMenuLabel>Copilot role</DropdownMenuLabel>
-          <div className="space-y-1.5 px-2 py-1.5" aria-label="Loading copilot roles">
+          <DropdownMenuLabel>{copy.label}</DropdownMenuLabel>
+          <div className="space-y-1.5 px-2 py-1.5" aria-label={copy.loadingList}>
             <Skeleton className="h-5 w-full rounded-sm" />
             <Skeleton className="h-5 w-3/4 rounded-sm" />
           </div>
@@ -114,14 +157,14 @@ export function RolePicker({ options, selectedRole, onSelect, loading = false }:
             variant="ghost"
             size="sm"
             disabled
-            aria-label="No copilot role"
+            aria-label={copy.none}
             className="h-7 gap-1 px-2 text-xs text-muted-foreground"
           >
             <BrainCircuit className="size-3.5" />
-            <span className="min-w-0 truncate">No copilot role</span>
+            <span className="min-w-0 truncate">{copy.none}</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Add a Copilot role in Settings → Copilot</TooltipContent>
+        <TooltipContent>{copy.addHint}</TooltipContent>
       </Tooltip>
     )
   }
@@ -137,7 +180,7 @@ export function RolePicker({ options, selectedRole, onSelect, loading = false }:
               type="button"
               variant="ghost"
               size="sm"
-              aria-label="Select copilot role"
+              aria-label={copy.select}
               className="h-7 gap-1 px-2 text-xs text-muted-foreground"
             >
               {/* R5-C: the picker chooses which model persona backs THIS chat —
@@ -147,14 +190,16 @@ export function RolePicker({ options, selectedRole, onSelect, loading = false }:
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>{selectedRole ? `Role: ${selectedRole}` : 'Select copilot role'}</TooltipContent>
+        <TooltipContent>
+          {selectedRole ? copy.current(selectedRole) : copy.select}
+        </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="start" side="top" className="w-56">
-        <DropdownMenuLabel>Copilot role</DropdownMenuLabel>
+        <DropdownMenuLabel>{copy.label}</DropdownMenuLabel>
         {options.map((option) => (
           <DropdownMenuItem
             key={option.role}
-            aria-label={`Select role ${option.role}`}
+            aria-label={copy.selectRole(option.role)}
             onSelect={() => onSelect(option.role)}
             className={`justify-between ${
               selectedRole === option.role ? 'bg-accent text-accent-foreground' : ''

@@ -691,6 +691,48 @@ endpoints that are absent from the API Keys save snapshot」只钉住"差集删�
 把旧草稿丢弃并采用新快照,所以下一次 payload 带的是**新** id。(副作用另说:用户当时正在输入的
 内容会被服务端快照盖掉——那是 UX 问题,不是误删。)
 
+### CI 红灯溯源批次 2026-08-21:运行时状态存储的锁文件被写坏了(Windows)
+
+**来源**:不是用户报障,是**追一盏随机红灯**追出来的。`cross-platform-smoke
+(windows-latest)` 是七道必过门禁里唯一在 Windows 上跑测试的那道,它在
+`test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner`
+上间歇性变红。先确认**不是某个 PR 引入的**:同一个失败在 `main` 上就有
+(run 32428036298,2026-08-20 23:17),更早还有一次(2026-08-19,run 32227500016)——
+也就是说这段时间**每个人的每个 PR 都在掷骰子**。
+
+**机制(实测,不是推断)**:`app/core/adapters/runtime_state_store_local.py` 的
+`_platform_lock_file` 在 Windows 分支上,开头先"确保文件里有一个字节可锁":
+
+```python
+file.seek(0, os.SEEK_END)
+if file.tell() == 0:
+    file.write(b"\0")
+    file.flush()
+```
+
+这一次写**既在锁外、也在 `try` 外**,而那个 `try` 正是把 `PermissionError` 读作
+"别人占着,重试"的地方。冷启动时八个进程同时看到一个 0 字节的文件:赢的那个锁住
+字节 0,而某个在那次写落盘**之前**读到 `tell()==0` 的落后者,接着自己去写字节 0。
+Windows 对"写进被锁区间"的回答是 ERROR_LOCK_VIOLATION,Python 抛成
+`PermissionError(13)` —— 与"别人占着"同一个异常类,却抛在没人接的地方,于是**裸着
+逃过 `StudioAdapterError` 契约**。这不只是测试脏:一个 Windows 用户同时开两个
+Studio 进程,拿到的会是一个未分类的 PermissionError,而不是干净的"租约被占"。
+
+**在 Windows 11 开发机上实测过两件事,而不是推理**:①`msvcrt.locking(LK_NBLCK, 1)`
+锁一个 **0 字节**的文件**成功** —— 那个字节从来就不需要(`LockFileEx` 明文允许锁
+超出文件尾的区间,`flock` 压根不看大小);②往另一个句柄锁着的字节里写,抛的正是
+`PermissionError(13, 'Permission denied')` —— CI 那条错误,原样复现。
+
+**修法(PR #928)= 删掉那次写,不是把 `except` 放宽**。没有写,就没有会输掉竞争的写,
+`PermissionError` 也就保住"别人占着"这一个含义。放宽 except 是反方向:那等于让同一个
+异常类继续有两种意思,再靠 catch 的位置去猜是哪一种。
+
+**验收判据**:两条测试钉的是**让这个竞争不可能存在的那条性质**,而不是重演八路冷启动
+再指望它输 —— 跑完一整轮 acquire / heartbeat / snapshot 之后锁文件仍是 **0 字节**;
+以及一个空锁文件**能被锁住**(万一哪天某个平台真要求先有字节,这里会在一个地方大声
+失败,而不是变成必过门禁上的随机红灯)。这条不变式跨平台成立 —— `flock` 同样不写文件 ——
+所以 Linux / macOS 上这道守卫一样有效。**状态**:进行中(PR #928),合并即完。
+
 ### 环境 blocker(在册)
 
 | # | 项 | 状态 | 处置 |

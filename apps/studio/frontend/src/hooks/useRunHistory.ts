@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useSWRConfig } from 'swr'
 import useSWR from 'swr'
 import { api, fetcher, getLocalHistory, revertSkill } from '../api/client'
-import type { GitHistoryItem, RunListResponse, RunMetadata } from '../api/types'
+import type { GitHistoryItem, RunListResponse, RunMetadata, RunStatus } from '../api/types'
 import { formatRunDuration, formatRunTokens } from '../utils/run-format'
 import { STUDIO_TRUTH_SWR_CONFIG } from './studio-swr-policy'
 
@@ -45,6 +45,33 @@ export function projectRunMetadata(
   return {
     total: current.total + (existed ? 0 : 1),
     runs: [run, ...current.runs.filter((item) => item.run_id !== run.run_id)],
+  }
+}
+
+/**
+ * Close an existing row's status without claiming to know the rest of its
+ * record.
+ *
+ * The row was projected at start with `running`, and the terminal record is
+ * what normally replaces it. When that read-back fails there is still one fact
+ * known for certain — the gate said how the run ended — and a list row left
+ * reading "running" beside a canvas reading "failed" is two answers to one
+ * question. Only the status moves: token totals and report paths live in the
+ * record, and inventing them here would be the same defect pointed the other
+ * way. A run id the list has never heard of is left alone; its row arrives with
+ * the next real fetch, already terminal.
+ */
+export function projectRunStatus(
+  current: RunListResponse | undefined,
+  runId: string,
+  status: RunStatus,
+): RunListResponse | undefined {
+  if (!current) {
+    return current
+  }
+  return {
+    total: current.total,
+    runs: current.runs.map((item) => (item.run_id === runId ? { ...item, status } : item)),
   }
 }
 
@@ -92,7 +119,18 @@ export function useRunHistoryProjection(skillId: string | null) {
     )
   }, [mutate, skillId])
 
-  return { projectRun }
+  const settleRunStatus = useCallback(async (runId: string, status: RunStatus) => {
+    if (!skillId) {
+      return
+    }
+    await mutate<RunListResponse>(
+      runHistoryKey(skillId),
+      (current) => projectRunStatus(current, runId, status),
+      { revalidate: false },
+    )
+  }, [mutate, skillId])
+
+  return { projectRun, settleRunStatus }
 }
 
 export function useLocalHistory(skillId: string | null) {

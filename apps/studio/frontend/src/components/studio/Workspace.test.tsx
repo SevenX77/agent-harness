@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
     ) => Promise<void> | void
     compileErrorsByNodeId?: Record<string, unknown[]>
     sequentialOverwriteErrorsByNodeId?: Record<string, unknown[]>
+    statusByNodeId?: Record<string, string>
   },
   centerActionBarProps: null as null | {
     stage?: string
@@ -123,6 +124,7 @@ const mocks = vi.hoisted(() => ({
   // mocks so we can flip a run to run_ended and assert the resulting effect wiring.
   runStreamEvents: [] as EventEnvelope[],
   projectRunHistory: vi.fn(),
+  settleRunStatus: vi.fn(),
   refreshLocalHistory: vi.fn(),
   settingsPageProps: null as null | {
     initialTab?: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
@@ -174,11 +176,27 @@ vi.mock('@/api/client', () => ({
   wsUrl: () => 'ws://127.0.0.1:8787/ws/events',
 }))
 
+const skillDetailCache = new Map<string, SkillDetail>()
+
+/**
+ * SWR hands back the same object until the data itself changes. A fixture
+ * rebuilt on every render does not, so any effect keyed on `skillDetail.files`
+ * re-fires forever — invisible until a test ends a run with a failed node,
+ * which is the state that switches such an effect on.
+ */
+function stableSkillDetail(skillId: string): SkillDetail {
+  const cached = skillDetailCache.get(skillId)
+  if (cached) return cached
+  const built = skillDetail(skillId)
+  skillDetailCache.set(skillId, built)
+  return built
+}
+
 vi.mock('@/hooks/useSkills', () => ({
   useSkills: (skillId: string | null) => {
     mocks.useSkillsIds.push(skillId)
     return {
-      skillDetail: skillId ? skillDetail(skillId) : undefined,
+      skillDetail: skillId ? stableSkillDetail(skillId) : undefined,
       skillDetailError: null,
       mutateSkillDetail: mocks.mutateSkillDetail,
     }
@@ -274,6 +292,7 @@ vi.mock('@/hooks/useRunHistory', async (importActual) => {
     },
     useRunHistoryProjection: () => ({
       projectRun: mocks.projectRunHistory,
+      settleRunStatus: mocks.settleRunStatus,
     }),
     useLocalHistory: () => {
       throw new Error('Workspace must not subscribe to the local-history list')
@@ -291,6 +310,7 @@ vi.mock('@/lib/hash', () => ({
 vi.mock('@/components/GraphCanvas', () => ({
   GraphCanvas: (props: {
     skillId?: string | null
+    statusByNodeId?: Record<string, string>
     onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph', phaseId?: string) => Promise<void> | void
     onDeletePhase?: (phaseId: string) => Promise<void> | void
     onNodeFileOpen?: (fileOrPath: unknown) => void
@@ -2039,6 +2059,23 @@ describe('Workspace run_ended history wiring (integration)', () => {
     mocks.getRunDetail.mockReset()
     mocks.projectRunHistory.mockReset()
     mocks.projectRunHistory.mockResolvedValue(undefined)
+    mocks.settleRunStatus.mockReset()
+    mocks.settleRunStatus.mockResolvedValue(undefined)
+    // A run that ends with a node still open gives the resume anchor something
+    // to ask about, so this suite needs the validity probe answered too.
+    mocks.getResumeValidity.mockReset()
+    mocks.getResumeValidity.mockResolvedValue({
+      run_id: 'run-1',
+      resume_allowed: false,
+      reason: 'run_failed',
+      checkpoint_id: null,
+      checkpoint_ns: null,
+      resume_from_node_id: 'draft',
+      resume_to_node_id: null,
+      dirty_fields: [],
+      snapshot_content_hash: null,
+      current_content_hash: null,
+    })
     mocks.refreshLocalHistory.mockReset()
     mocks.resolveRunInput.mockReset()
     mocks.resolveRunInput.mockResolvedValue({ topic: 'mars' })
@@ -2121,8 +2158,8 @@ describe('Workspace run_ended history wiring (integration)', () => {
     })
   }
 
-  /** The backend's post-finalization signal: everything on disk is now written. */
-  async function emitTerminalRunGate(outcome: 'pass' | 'fail' = 'pass') {
+  /** One `run` gate off the studio event stream — the path a copilot-driven run takes too. */
+  async function emitRunGate(outcome: 'started' | 'pass' | 'fail') {
     await act(async () => {
       mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillGate?.({
         skillId: 'writer-smoke',
@@ -2133,6 +2170,11 @@ describe('Workspace run_ended history wiring (integration)', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+  }
+
+  /** The backend's post-finalization signal: everything on disk is now written. */
+  async function emitTerminalRunGate(outcome: 'pass' | 'fail' = 'pass') {
+    await emitRunGate(outcome)
   }
 
   async function startRunToCompletion(
@@ -2159,6 +2201,24 @@ describe('Workspace run_ended history wiring (integration)', () => {
     await emitTerminalRunGate()
 
     expect(mocks.getRunDetail).toHaveBeenCalledWith('writer-smoke', 'run-1')
+  })
+
+  // Ledger N5. Killing a worker used to leave the run detail unreadable, and the
+  // whole convergence chain hung off that one read: the gate's own verdict was
+  // read to decide the effect existed and then dropped, so a failed read left
+  // the canvas with nothing to settle on and the badge spun for the rest of the
+  // session. #937 fixed the backend's 409, which is what makes this a latent
+  // single point rather than a live one — and exactly why it needs a test.
+  it('settles the run from the gate verdict when the detail cannot be read', async () => {
+    mocks.runStreamEvents = [phaseStartEvent('run-1', 'draft')]
+    mocks.getRunDetail.mockImplementation(() => Promise.reject(new Error('artifact store unreachable')))
+    renderWithEffects()
+    await emitRunGate('started')
+    await emitRunGate('fail')
+
+    expect(mocks.graphCanvasProps?.statusByNodeId?.draft).toBe('error')
+    expect(mocks.settleRunStatus).toHaveBeenCalledWith('run-1', 'failed')
+    expect(toastMocks.error).toHaveBeenCalledWith(expect.stringMatching(/Run ended/i))
   })
 
   it('re-fetches the run detail and surfaces a successful, revertable archive toast when committed', async () => {
@@ -2252,6 +2312,20 @@ describe('Workspace run_ended history wiring (integration)', () => {
     }))
   })
 })
+
+/** A phase that opened and never closed — what a killed worker leaves behind. */
+function phaseStartEvent(runId: string, phaseName: string): EventEnvelope {
+  return {
+    schema_version: 'studio.event.v1',
+    stream_id: `${runId}-stream`,
+    seq: 1,
+    cursor: '1',
+    run_id: runId,
+    event_type: 'phase_start',
+    timestamp: '2026-06-17T00:00:01Z',
+    payload: { event_type: 'phase_start', phase_name: phaseName } as EventEnvelope['payload'],
+  }
+}
 
 function runEndedEvent(runId: string): EventEnvelope {
   return {

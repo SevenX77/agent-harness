@@ -15,6 +15,7 @@
  */
 
 import type { CompileError, PredictDiagnosticExport } from "@/api/types"
+import type { RunVerdict } from "@/utils/run-status-projection"
 
 import type { SkillBuildStage } from "./center-action-bar"
 
@@ -59,8 +60,15 @@ export type GateEffect =
    * This run is over and written out, so its record can now be read: its row
    * belongs in the run list, its outcome belongs in a toast, and any node still
    * painted "running" belongs to a run that no longer is.
+   *
+   * `verdict` is how it ended, stated by the gate itself. Carrying it costs
+   * nothing — the projection below already reads `outcome` to decide this
+   * effect exists — and it is the difference between the receiver KNOWING the
+   * run ended and merely knowing to go ask. The record read-back it goes on to
+   * make is a round trip that can fail, and when it did there was no other
+   * answer left (ledger N5).
    */
-  | { kind: "finalize-run"; runId: string }
+  | { kind: "finalize-run"; runId: string; verdict: RunVerdict }
 
 export interface GateProjection {
   stage: SkillBuildStage
@@ -80,6 +88,31 @@ const STAGE_BY_OUTCOME: Record<SkillGate, Record<GateOutcome, SkillBuildStage>> 
   // still reaches the user — through the `open-drawer` effect below, which is
   // keyed on the outcome and not on the stage.
   run: { started: "running", pass: "predict-pass", fail: "predict-pass", paused: "paused", stopped: "predict-pass" },
+}
+
+/**
+ * What a gate outcome means to the run-status projection, or null when the gate
+ * is not describing an ending.
+ *
+ * The two vocabularies overlap without matching: a gate says `pass` where the
+ * projection says `success`, and `stopped` where it says `cancelled`. Passing
+ * a gate word straight into the slot that decides every node badge would put a
+ * value the projection has never heard of into `NODE_STATUS_AT_RUN_END`, so the
+ * translation is written down once, here, next to the words being translated.
+ */
+export function runVerdictFromGateOutcome(outcome: GateOutcome): RunVerdict | null {
+  switch (outcome) {
+    case "pass":
+      return "success"
+    case "fail":
+      return "failed"
+    case "paused":
+      return "paused"
+    case "stopped":
+      return "cancelled"
+    case "started":
+      return null
+  }
 }
 
 export function projectGateEvent(event: SkillGateEvent): GateProjection {
@@ -108,9 +141,12 @@ export function projectGateEvent(event: SkillGateEvent): GateProjection {
   // A predict is a run for everything that happens at the end of one: it has a
   // directory, an account, a `run_ended`, a row in the same list and the same
   // node badges. Only a compile produces no run, and only "started" is not an
-  // ending — so those two are the exclusions, not the gate's name.
-  if (event.gate !== "compile" && event.outcome !== "started" && event.runId) {
-    effects.push({ kind: "finalize-run", runId: event.runId })
+  // ending — so those two are the exclusions, not the gate's name. "Is this an
+  // ending" is asked by translating the outcome, so the two places that decide
+  // it cannot drift into disagreeing.
+  const verdict = runVerdictFromGateOutcome(event.outcome)
+  if (event.gate !== "compile" && verdict && event.runId) {
+    effects.push({ kind: "finalize-run", runId: event.runId, verdict })
   }
 
   return { stage, effects }

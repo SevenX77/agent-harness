@@ -48,7 +48,7 @@ import {
   type SkillGateEvent,
 } from "./gate-state"
 import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@/utils/edge-status-projection"
-import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runVerdict, runningPhaseOf } from "@/utils/run-status-projection"
+import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -701,8 +701,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     for (const effect of effects) {
       if (effect.kind === "finalize-run") {
         // Published after the backend finished writing the run out, so this is
-        // the moment the finished run may be read (see `finalizedRunId`).
-        setFinalizedRunId(effect.runId)
+        // the moment the finished run may be read (see `finalizedRun`) — and
+        // the gate says how it ended, so the canvas can settle on that answer
+        // whether or not the read-back succeeds.
+        setFinalizedRun({ runId: effect.runId, verdict: effect.verdict })
         continue
       }
       if (effect.kind === "close-drawers") {
@@ -748,7 +750,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // is emitted after all of it, so it — not the stream event — is what anything
   // reading FINISHED-run state must wait for (SSOT: revalidate on the backend's
   // post-commit domain event for the exact dataset).
-  const [finalizedRunId, setFinalizedRunId] = useState<string | null>(null)
+  // Held as (which run, how it ended) rather than an id alone: the gate states
+  // both, and keeping only the id meant the verdict had to be fetched back and
+  // could then be lost (ledger N5).
+  const [finalizedRun, setFinalizedRun] = useState<{ runId: string; verdict: RunVerdict } | null>(null)
+  const finalizedRunId = finalizedRun?.runId ?? null
 
   // N6 #2 (history-auto-refresh): a successful run autocommits a new "Auto run"
   // snapshot on the backend (GET /skills/{id}/history). Revalidate the Local
@@ -758,7 +764,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // consumes; Workspace only holds a revalidator and does not subscribe to the
   // Local History list, so opening a skill does not cold-load `/history`.
   const { refresh: refreshLocalHistory } = useLocalHistoryRevalidator(currentSkillId)
-  const { projectRun } = useRunHistoryProjection(currentSkillId)
+  const { projectRun, settleRunStatus } = useRunHistoryProjection(currentSkillId)
   // Track which (skill, run) pair has already triggered a refresh so the effect
   // fires once on the not-ended → ended edge, not on every subsequent re-render
   // while the terminated run keeps replaying its log. nextLocalHistoryRefreshKey
@@ -796,14 +802,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({
       skillId: currentSkillId,
-      completedRunId: finalizedRunId,
+      completedRunId: finalizedRun?.runId ?? null,
       lastRefreshedKey: archiveFeedbackRunRef.current,
     })
-    if (!feedbackKey || !finalizedRunId || !currentSkillId) {
+    if (!feedbackKey || !finalizedRun || !currentSkillId) {
       return
     }
     const targetSkillId = currentSkillId
-    const finishedRunId = finalizedRunId
+    const finishedRunId = finalizedRun.runId
+    const finishedVerdict = finalizedRun.verdict
     archiveFeedbackRunRef.current = feedbackKey
     let cancelled = false
     const announceArchiveOutcome = async () => {
@@ -840,16 +847,24 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           toast.warning(feedback.message)
         }
       } catch (error) {
-        if (!cancelled) {
-          toast.error(`Could not read archive status: ${errorMessage(error)}`)
+        if (cancelled) {
+          return
         }
+        // The record is what carries the numbers, the report path and the
+        // archive status, and none of that can be invented here. How the run
+        // ENDED is not in that set: the gate already said it, the canvas is
+        // already settled on it, and the list row settles on it too so the two
+        // surfaces cannot disagree. What the user is told is what actually
+        // happened — the run ended, its details could not be read.
+        await settleRunStatus(finishedRunId, finishedVerdict)
+        toast.error(`Run ended — could not read its details: ${errorMessage(error)}`)
       }
     }
     void announceArchiveOutcome()
     return () => {
       cancelled = true
     }
-  }, [currentSkillId, finalizedRunId, projectRun])
+  }, [currentSkillId, finalizedRun, projectRun, settleRunStatus])
 
   // The sealed record for the run the canvas is lit by, when we have it. This
   // is the projection's second truth channel (D7 铁律): a cancel or crash can
@@ -867,15 +882,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // viewed run while the canvas was hard-wired to the live stream, so opening
   // a finished run from the timeline left every edge dot with no transition to
   // find and the pre-run static guess back on screen (ledger T6 缺陷②).
+  // The gate's verdict belongs to the run the gate named, so it travels with
+  // the live triple and is absent from a history view — an older run's state is
+  // its own record's business.
+  const liveGateVerdict = finalizedRun?.runId === runId ? finalizedRun.verdict : null
   const viewedRun = useMemo(
     () => (viewedTrace?.source === "history"
-      ? { runId: viewedTrace.runId, metadata: viewedTrace.metadata, events: viewedTrace.events }
-      : { runId, metadata: liveRunMetadata, events: runStream.events }),
-    [viewedTrace, runId, liveRunMetadata, runStream.events],
+      ? { runId: viewedTrace.runId, metadata: viewedTrace.metadata, events: viewedTrace.events, gateVerdict: null }
+      : { runId, metadata: liveRunMetadata, events: runStream.events, gateVerdict: liveGateVerdict }),
+    [viewedTrace, runId, liveRunMetadata, runStream.events, liveGateVerdict],
   )
   const viewedTraceEvents = viewedRun.events
   const edgeStatusByEdgeId = useMemo(
-    () => deriveEdgeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata),
+    () => deriveEdgeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata, viewedRun.gateVerdict),
     [viewedRun],
   )
   /** The root phases the graph declares as its outputs — Output's producers. */
@@ -889,11 +908,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // leaving it, Output from the phases producing it (no event ever reaches the
   // endpoint itself) — and both land in one status map driving the whole board.
   const viewedRunVerdict = useMemo(
-    () => runVerdict(viewedRun.events, viewedRun.metadata, viewedRun.runId),
+    () => runVerdict(viewedRun.events, viewedRun.metadata, viewedRun.runId, viewedRun.gateVerdict),
     [viewedRun],
   )
   const statusByNodeId = useMemo<Record<string, SkillNodeStatus>>(() => {
-    const phaseStatuses = deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata)
+    const phaseStatuses = deriveNodeStatuses(viewedRun.events, viewedRun.runId, viewedRun.metadata, viewedRun.gateVerdict)
     return {
       ...phaseStatuses,
       [INPUT_ID]: inputBoundaryStatus(edgeStatusByEdgeId),
@@ -2818,6 +2837,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         traceCanResume={Boolean(runId)}
         traceResumeLoading={resumeLoading}
         traceLiveMetadata={liveRunRecord?.runId === runId ? liveRunRecord.metadata : null}
+        traceGateVerdict={liveGateVerdict}
         onResumeRun={handleResume}
         onResumeNode={runId ? handleResumeNode : undefined}
         onSubmitHitlResponse={handleSubmitHitlResponse}

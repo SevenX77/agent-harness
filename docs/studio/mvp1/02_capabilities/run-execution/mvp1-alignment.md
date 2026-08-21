@@ -260,8 +260,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   `worker.lock` 的独占 OS 锁(`apps/studio/backend/app/services/run_liveness.py`)。
   任何后来者要问"这个 run 还在跑吗",就去抢那把锁:抢不到 = 有活着的持有者,
   抢得到 = 没人在跑。RunManager 在 `list_runs` 与 `_metadata_for` 两个读出口上做
-  **对账**:记录说 `running`/`paused`、且该 run 不在本进程的内存注册表里、且锁没人持有,
+  **对账**:记录说 `running`、且该 run 不在本进程的内存注册表里、且锁没人持有,
   就把记录改写成新状态 `abandoned` 并返回改写后的记录。
+  **对账只查 `running` 一种状态**(2026-08-21 订正):`paused` 不是一句关于 worker 的
+  声明——`pause_run` 是**故意**把 worker 结束掉并留下 checkpoint 的,所以"没人持锁"
+  对每一个 paused run 都恒真。把它一并对账,等于把用户自己按下的暂停改写成
+  "app 在它跑着的时候关掉了",而那句话不是事实(台账 C1 ④)。
 - 决策:
   - **"在跑"是一句声明,声明必须可被核对。** sidecar 只把在飞的 run 放在内存里,
     所以换一个 sidecar 起来,注册表是空的而磁盘记录还写着 `running`。同一个问题因此
@@ -298,6 +302,45 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   (`abandoned` 有自己的徽章)、`edge-status-projection.test.ts`(收尾表覆盖它)。
 - Status: target-design(2026-08-21 立)。
 - 归属: capability `run-execution`(owner);region `timeline` · `canvas`(引)。
+
+### F9. 正在跑的那次 run 属于 skill,不属于打开它的那扇窗
+
+- 机制: Workspace 打开一个 skill 时,从**该 skill 的 run 列表**(`GET
+  /skills/{id}/runs`,与 Timeline 共用同一个 SWR key)冷载一次,取其中状态为
+  `running` 或 `paused` 的最新一条,作为本次会话的 live run:置 `runId`(trace 流
+  因此重新订阅到它,后端把事件日志整段重放,画布的灯与 Trace 面板一起回来)、置
+  live 记录、把底栏 stage 置成 `running` / `paused`(于是 Pause / Stop / Resume
+  重新可点)。规则本体是纯函数 `nextAdoptedLiveRun`(`hooks/useRunHistory.ts`)。
+- 决策:
+  - **"哪次 run 是活的"从前只有窗口的记忆回答得出。** `runId` 只在**本窗口亲自发起**
+    run 时被写入,并在每次切换 skill 时清空。于是刷新一次 app、或者切走再切回来,
+    worker 还在跑而按钮全没了——除了关掉整个 app,没有第二种把它停下来的办法
+    (台账 C1 ④)。
+  - **服务端本来就知道,而且从 F8 起知道得可靠。** `running` 那一行在返回之前已经
+    对着 worker 的锁核对过,所以它不是一句会过期的旧话。冷载的是**已有的真相**,
+    不是新造一个问题去问。
+  - **`paused` 同样要认领。** 它不是关于 worker 的声明,但它**就是这个 skill 当前的
+    那次 run**——Resume 与 Stop 说的是它,画布上该显示的也是它。
+  - **一个 skill 只问一次,此后不再问。** 面板挂载、窗口聚焦、WebSocket 重连都不是
+    数据变化(SSOT 读取原则),再问就成了轮询。本会话已经有 live run 时直接记为
+    "问过了、无需认领",免得列表晚到一步把用户刚发起的 run 顶掉。
+  - **它没有让请求变多。** Workspace 与 Timeline 共用同一个 key,SWR 去重;从前
+    Timeline 打开时会发的那一次请求,现在提前到打开 skill 时发,**总数仍是每个 skill
+    一次**。这一点也是 `STUDIO_REQUEST_AUDIT.md` 里那条"Workspace 不订阅 run 列表"
+    的裁决被改写的理由:它当初挡的是**重复拉取**,而不是"永远不许读这份列表",
+    而如今 Workspace 有了一个真实的、只此一个的读取理由。
+  - **已知窗口(接受并写明)**:列表返回之后、客户端渲染之前的那几毫秒里 run 恰好
+    结束,则底栏会短暂停在 `running`。gate 订阅从挂载起就在,所以更早或更晚结束的
+    run 都会被正常收尾;这个窗口只能靠再引入一次读取来消除,不值得。
+- 原话/来源: 用户 2026-08-19「运行时观测」模块拆解(台账 C1 ④)。
+- 测试: `hooks/useRunHistory.test.ts`(`nextAdoptedLiveRun`:认领 running / 认领
+  paused / 全都结束了就不认领 / 列表没加载完不当作"没有" / 不顶掉本会话刚起的 run /
+  一个 skill 只问一次)、`components/studio/Workspace.test.tsx`(客户端渲染三条:
+  服务端说 running 则底栏为 `running`、说 paused 则为 `paused`、全结束则仍为 `idle`;
+  前两条在修复前实测为 `idle`)。
+- Status: target-design(2026-08-21 立)。
+- 归属: capability `run-execution`(owner);region `center-action-bar` · `canvas` ·
+  `timeline`(引)。
 
 ## 3. 接口契约
 - Entry: Run is enabled only after compile-pass and predict-pass.

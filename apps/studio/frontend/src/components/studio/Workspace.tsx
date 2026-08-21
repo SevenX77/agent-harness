@@ -18,7 +18,7 @@ import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk }
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, runOutcomeFeedback, useLocalHistoryRevalidator, useRunHistoryProjection } from "@/hooks/useRunHistory"
+import { archiveFeedbackForGitStatus, nextAdoptedLiveRun, nextLocalHistoryRefreshKey, runOutcomeFeedback, useLocalHistoryRevalidator, useRunHistory, useRunHistoryProjection } from "@/hooks/useRunHistory"
 import { useTraceSelection } from "@/hooks/useTraceSelection"
 import { useSkills } from "@/hooks/useSkills"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
@@ -800,6 +800,35 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // run's numbers can never be shown as the next run's (decision 2026-08-08 D5,
   // widened from report path to the whole record by 2026-08-09 D8).
   const [liveRunRecord, setLiveRunRecord] = useState<{ runId: string; metadata: RunMetadata } | null>(null)
+
+  // Which run this skill is on is the SERVER's answer, and this reads it once
+  // when the skill's run list first loads (ledger C1 ④). The same SWR key the
+  // Timeline reads, so both share the one in-flight request; the adoption rule
+  // and why it never asks twice live in `nextAdoptedLiveRun`.
+  const { runs: skillRuns, isLoading: skillRunsLoading, error: skillRunsError } = useRunHistory(currentSkillId)
+  const adoptedLiveRunRef = useRef<string | null>(null)
+  useEffect(() => {
+    const adoption = nextAdoptedLiveRun({
+      skillId: currentSkillId,
+      runs: skillRuns,
+      // An unreadable list is not an answer, so the question stays open rather
+      // than being settled as "this skill has no run under way".
+      listLoaded: !skillRunsLoading && !skillRunsError,
+      liveRunId: runId,
+      answeredFor: adoptedLiveRunRef.current,
+    })
+    if (!adoption) return
+    adoptedLiveRunRef.current = adoption.key
+    const adopted = adoption.run
+    if (!adopted) return
+    setRunId(adopted.run_id)
+    // The record travels with the id: without it every node the trace last saw
+    // start would stay lit as running under a run that is standing still
+    // (the same reason `handlePause` feeds the sealed record to the projection).
+    setLiveRunRecord({ runId: adopted.run_id, metadata: adopted })
+    updateStage(adoption.key, adopted.status === "paused" ? "paused" : "running")
+  }, [currentSkillId, runId, skillRuns, skillRunsError, skillRunsLoading, updateStage])
+
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({
       skillId: currentSkillId,

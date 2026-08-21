@@ -212,6 +212,67 @@ export function nextLocalHistoryRefreshKey(args: {
   return key
 }
 
+/** Which run of a skill is under way, and the fact that the question was asked. */
+export interface LiveRunAdoption {
+  /** The skill this answer is about — the caller persists it to ask once. */
+  key: string
+  /** The run under way, or null when this skill has none. */
+  run: RunMetadata | null
+}
+
+/**
+ * Which run of the open skill is under way — asked of the server, once.
+ *
+ * "Which run is live" used to be answered only by this session's memory: the id
+ * was set when THIS window started a run and reset on every skill switch. So a
+ * reload left a running worker on screen with no Pause and no Stop, and no way
+ * to reach either short of closing the app — the run was going, and the only
+ * thing that knew about it had been thrown away (ledger C1 ④).
+ *
+ * The server owns the answer, and since ledger C1 ② it owns it truthfully: a
+ * `running` row is reconciled against the worker's lock before the list returns
+ * it, so it means a worker really is there. The list is already cold-loaded per
+ * skill, so this is a read of truth the app has, not a new question to ask.
+ *
+ * `paused` counts too. It is not a claim about a worker — pausing ends the
+ * worker on purpose — but it IS this skill's current run: the one Resume and
+ * Stop are about, and the one whose trace belongs on the canvas.
+ *
+ * Asked once per skill, never again, because nothing else here is a data change:
+ * a re-ask on mount or focus would be exactly the polling the SSOT rule forbids.
+ * A session that already has a live run of its own answers "nothing to adopt" —
+ * the question is settled, and a later list arrival must not yank the run the
+ * user just started.
+ *
+ * Returns null while the answer is not available yet or already given; otherwise
+ * the key to persist plus the run to adopt (null = this skill has none, and the
+ * key still gets persisted so the question is not asked twice).
+ */
+export function nextAdoptedLiveRun(args: {
+  skillId: string | null
+  runs: RunMetadata[]
+  listLoaded: boolean
+  liveRunId: string | null
+  answeredFor: string | null
+}): LiveRunAdoption | null {
+  const { skillId, runs, listLoaded, liveRunId, answeredFor } = args
+  if (!skillId || answeredFor === skillId) {
+    return null
+  }
+  // An empty list before the load resolves means "not yet", not "none": treating
+  // it as the answer would record it, and the question is only asked once.
+  if (!listLoaded) {
+    return null
+  }
+  if (liveRunId !== null) {
+    return { key: skillId, run: null }
+  }
+  // Newest first, as the server sorts them: a batch puts several runs under way
+  // at once, and the bar speaks for one — the most recent one started.
+  const run = runs.find((item) => item.status === 'running' || item.status === 'paused') ?? null
+  return { key: skillId, run }
+}
+
 export type ArchiveFeedbackVariant = 'success' | 'warning'
 
 export interface ArchiveFeedback {

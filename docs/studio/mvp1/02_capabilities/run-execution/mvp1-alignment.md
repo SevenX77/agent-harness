@@ -254,6 +254,51 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - Status: target-design(2026-08-20 立)。
 - 归属: capability `run-execution`; region `canvas`.
 
+### F8. 一个 run 说自己在跑,就得说得出是谁在跑它
+
+- 机制: 执行一次 run 的 worker 进程,在它**整个生命周期内**持有该 run 自己目录下
+  `worker.lock` 的独占 OS 锁(`apps/studio/backend/app/services/run_liveness.py`)。
+  任何后来者要问"这个 run 还在跑吗",就去抢那把锁:抢不到 = 有活着的持有者,
+  抢得到 = 没人在跑。RunManager 在 `list_runs` 与 `_metadata_for` 两个读出口上做
+  **对账**:记录说 `running`/`paused`、且该 run 不在本进程的内存注册表里、且锁没人持有,
+  就把记录改写成新状态 `abandoned` 并返回改写后的记录。
+- 决策:
+  - **"在跑"是一句声明,声明必须可被核对。** sidecar 只把在飞的 run 放在内存里,
+    所以换一个 sidecar 起来,注册表是空的而磁盘记录还写着 `running`。同一个问题因此
+    有两个答案:run 列表答"在跑"(读记录),`pause_run` 答 `RUN_NOT_RUNNING` 409
+    (读注册表)。徽章会一直转到用户重装数据为止。**一个问题两个答案,本身就是缺陷。**
+  - **借鉴对象与取舍**:PostgreSQL 在 `postmaster.pid` 旁边锁住数据目录,systemd 处理
+    `PIDFile` 时同样把"锁还在不在"当作存活事实、而不是把那个数字当事实。理由相同:
+    **持有者无论怎么死,OS 都会释放锁**,包括来不及跑任何清理的 kill。
+  - **拒绝 pid 探测**(`os.kill(pid, 0)`):pid 会被复用,一个被回收的 pid 会让死掉的 run
+    读起来还活着——那正是这里要消灭的谎言,换个地方重新长出来。
+  - **拒绝心跳时间戳**:心跳需要一个"多久算过期"的阈值,而一个正在等慢速 LLM 调用的
+    相位,和一个已经死掉的 worker,在阈值面前长得一模一样。
+  - **参考对象在本仓不成立的部分**:PostgreSQL 可以假设一个众所周知的数据目录和一个
+    比机器上一切都活得久的 supervisor。本仓没有守护进程——sidecar 随 app 窗口一起死——
+    所以既没有那个统一的落锁点,也没有可以问的 supervisor。锁因此落在**每个 run 自己的
+    目录里**,靠遍历 run 找到,而不是去一个中心位置看。
+  - **`abandoned`,不是 `interrupted`**:引擎已经把 `interrupted` 用在"停下来问人"上
+    (`RunEndedEvent.status="interrupted"`,紧跟一个 `InterruptedEvent` 发出),那是
+    **有人会回来**的情形,和这里正好相反。一个词只能指一样东西。
+  - **`abandoned` 也不是 `failed` 或 `cancelled`**:run 本身没有失败,也没有人要求结束它。
+    它是**没人选的那种结束**——执行它的东西走了。
+  - **pid 仍然记在锁旁边**,但它不是存活答案;它是"父进程句柄丢了以后还想停掉这个
+    worker"时唯一能用的把手。
+- UI 投影: `abandoned` 在三处落地,共用同一套读法——run 列表与 Trace 顶条的徽章
+  (`runStatusMark`:拔掉插头的图标 + warning 色 + "Run abandoned — the app closed while
+  it was going")、画布节点的收尾表(`NODE_STATUS_AT_RUN_END` → `paused`)、边的收尾表
+  (`EDGE_STATUS_AT_RUN_END` → `paused`)。收 `paused` 而不是红色错误:节点没有失败,
+  它只是停在了它停下的地方。
+- 原话/来源: 用户 2026-08-19「运行时观测」模块拆解(台账 C1);缺陷 2026-08-21 实测复现。
+- 测试: `apps/studio/backend/tests/services/test_a_run_says_who_is_running_it.py`
+  (锁没人持有 = worker 不在;worker 不清理地死掉照样释放;新 sidecar 不再把没人跑的 run
+  报成在跑;worker 还握着锁的 run 不被动)。前端:`run-status-projection.test.ts`
+  (`abandoned` 传得穿投影,且与引擎的 `interrupted` 分得开)、`run-status-mark.test.ts`
+  (`abandoned` 有自己的徽章)、`edge-status-projection.test.ts`(收尾表覆盖它)。
+- Status: target-design(2026-08-21 立)。
+- 归属: capability `run-execution`(owner);region `timeline` · `canvas`(引)。
+
 ## 3. 接口契约
 - Entry: Run is enabled only after compile-pass and predict-pass.
 - Input: i/o panel supplies single or batch input selection.
@@ -273,6 +318,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 | RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
 | RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
 | RUN_EXECUTION-12 | 被看的那次 run 拥有它旁边的动作 | F3；**为什么**：trace 可以显示历史 run,而动作若问「哪次 run 是活的」就会作用在别的 run 上——Resume 续错 run、golden 量错 run、节点 compare 在有 run 的情况下拒绝执行;Pause / Stop 仍问 live,因为它们作用的是 worker 而不是记录 |
+| RUN_EXECUTION-12 | run 的 worker 用一把 OS 锁给"我在跑"作证,没人持锁的 run 结束为 `abandoned` | F8；**为什么**：sidecar 只在内存里记在飞的 run，换一个 sidecar 起来，同一个问题就有两个答案——列表答「在跑」、`pause_run` 答 `RUN_NOT_RUNNING`；锁是唯一一个持有者怎么死都会被释放的凭据，pid 会复用、心跳分不清慢 LLM 与死进程 |
 | RUN_EXECUTION-11 | 报告在被打开时重新生成 | F6；**为什么**：RUN_EXECUTION-5 说它可随时重生,却没有任何入口,历史报告永远停在写它那天的渲染逻辑上;按"打开"重生是每次用户动作 O(1) 次写,且不必再引入一个要人记得 bump 的渲染器版本号 |
 | RUN_EXECUTION-10 | 点了名的东西要能点开 | F6；**为什么**：输入文件与被对照的 run 从前只是文本；链接从实际目录推出,推不出就不给,点不开的链接比纯文本更坏 |
 | RUN_EXECUTION-8 | 重复逐次记账 + 节点状态入表 | F6；**为什么**：求和行回答不了「哪个 item 慢/挂了」，而「跑了几次」与「一次里想了几轮」是两件事 |

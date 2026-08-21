@@ -38,6 +38,9 @@ export const EDGE_STATUS_AT_RUN_END: Readonly<
   success: "done",
   failed: "failed",
   cancelled: "paused",
+  // The transition never completed and never failed — whatever was
+  // executing the run left mid-flight. It stopped where it stopped.
+  abandoned: "paused",
   paused: "paused",
 }
 

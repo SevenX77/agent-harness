@@ -98,7 +98,20 @@ class BatchRunRequest(BaseModel):
 #:
 #: Declared once because a run's status travels through the batch views too, and a
 #: vocabulary that is only half-extended rejects its own data at validation.
-RunStatus = Literal["running", "success", "failed", "paused", "cancelled"]
+RunStatus = Literal["running", "success", "failed", "paused", "cancelled", "abandoned"]
+"""How a run stands.
+
+``abandoned`` is the ending nobody chose: the worker executing the run went
+away — the app was closed mid-run, the sidecar was killed — so the run neither
+finished nor failed nor was cancelled by a person. Before it existed such a run
+kept its last written status, ``running``, forever, because the only party that
+could correct it had died (ledger C1).
+
+NOT ``interrupted``: the engine already spends that word on a run that stopped
+to ask a human (``RunEndedEvent.status="interrupted"``, emitted beside an
+``InterruptedEvent`` — ``graph_agent/core/runner.py``), which is the opposite
+situation — someone is expected back. One word cannot mean both.
+"""
 
 #: The statuses from which a run cannot continue, so its artifacts are final and
 #: anything projected from them stays true. ``paused`` is deliberately absent:

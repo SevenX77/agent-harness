@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import sys
 import threading
@@ -30,13 +29,26 @@ if sys.platform == "win32":
     # `LK_NBLCK` does not retry at all: it raises PermissionError immediately
     # when the byte is taken. That is the primitive worth having — it lets the
     # waiting be ours, and therefore unbounded, matching flock.
+    #
+    # Nothing here writes to the file, and that is load-bearing rather than
+    # incidental. This function used to open by ensuring the file had a byte to
+    # lock (`if tell() == 0: write(b"\0")`) — outside the lock, and outside the
+    # `try` below that reads PermissionError as "someone else holds it". On a
+    # cold start every process sees a 0-byte file at once; the winner locks byte
+    # 0, and a straggler whose `tell()` read 0 just before that then writes byte
+    # 0 itself. Windows answers a write into a locked range with
+    # ERROR_LOCK_VIOLATION, surfaced as PermissionError(13) — indistinguishable
+    # from the contention above and, being outside the try, escaping raw past
+    # the StudioAdapterError contract. It made
+    # `cross-platform-smoke (windows-latest)` red at random (main run
+    # 32428036298, 2026-08-20).
+    #
+    # The byte was never needed: `LockFileEx` documents locking a range beyond
+    # end-of-file as legal, `msvcrt.locking` on a 0-byte file was measured
+    # succeeding on Windows 11, and `flock` never consulted size at all.
     _WINDOWS_LOCK_RETRY_SECONDS = 0.05
 
     def _platform_lock_file(file: Any) -> None:
-        file.seek(0, os.SEEK_END)
-        if file.tell() == 0:
-            file.write(b"\0")
-            file.flush()
         while True:
             file.seek(0)
             try:

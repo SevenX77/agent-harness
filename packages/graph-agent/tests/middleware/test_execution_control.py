@@ -142,22 +142,29 @@ class TestDeadEndDetection:
         pruned = cb.events_of(DeadEndPrunedEvent)
         assert [(e.phase_name, e.summary) for e in pruned] == [("probe", warning.content)]
 
-    def test_warning_deduped_by_signature(self) -> None:
-        """Calling after_model twice with the same failure pattern must
-        emit the warning exactly once — repeated injections would spam
-        the LLM context with duplicate guidance."""
+    def test_failures_already_warned_about_do_not_warn_again(self) -> None:
+        """The same failures must produce guidance once, not once per turn.
+
+        What stops the repeat is the warning itself: it is appended to the
+        history the count is read from, so the failures behind it are out of
+        the window. Asking the SAME history twice is not the scenario — every
+        ``after_model`` sees a history one turn longer than the last, and the
+        injected warning is part of that growth.
+        """
         mw = ExecutionControlMiddleware(dead_end_threshold=3)
-        messages = [
+        messages: list[Any] = [
             _failing_tool_message("read_file", "denied"),
             _failing_tool_message("read_file", "denied"),
             _failing_tool_message("read_file", "denied"),
         ]
 
         first = mw.after_model(_state(messages=messages), runtime=None)  # type: ignore[arg-type]
-        second = mw.after_model(_state(messages=messages), runtime=None)  # type: ignore[arg-type]
-
         assert first is not None
-        assert second is None  # signature unchanged → suppressed
+
+        warned = [*messages, *first["messages"], _failing_tool_message("read_file", "denied")]
+        second = mw.after_model(_state(messages=warned), runtime=None)  # type: ignore[arg-type]
+
+        assert second is None  # one failure since the warning — nowhere near the line
 
     def test_warning_streak_broken_by_different_tool(self) -> None:
         mw = ExecutionControlMiddleware(dead_end_threshold=3)

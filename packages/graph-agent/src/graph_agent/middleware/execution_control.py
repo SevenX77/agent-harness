@@ -45,6 +45,8 @@ from graph_agent.middleware.invocation_scope import agent_invocation_key
 logger = logging.getLogger(__name__)
 
 
+_DEAD_END_WARNING_NAME = "dead_end_warning"
+
 _DEAD_END_WARNING_TEMPLATE = (
     "<dead_end_warning>\n"
     "工具 `{tool_name}` 已连续失败 {count} 次。不要机械地重复同一路径。\n"
@@ -68,10 +70,13 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
        ToolCall events under one iteration boundary, so the count has to
        restart for each batch item / loop round / resume — see
        ``invocation_scope.agent_invocation_key``.
-    2. **Dead-end detection** (``after_model``): when the most recent
-       ToolMessage stream contains ``dead_end_threshold`` consecutive
-       same-tool errors, inject a structured warning so the LLM
-       breaks out of the failing path.
+    2. **Dead-end detection** (``after_model``): when the last
+       ``dead_end_threshold`` TOOL RESULTS are all errors from the same
+       tool, inject a structured warning so the LLM breaks out of the
+       failing path. "Consecutive" counts tool results, not adjacent list
+       entries — the AIMessage that asked for each call necessarily sits
+       between two results, so a window that stopped at it could only ever
+       see one turn's worth (see ``_summarize_recent_failures``).
     No-progress tool loops are NOT this middleware's concern:
     ``LoopDetectionMiddleware`` owns them, with the same window and
     threshold, and it both emits ``LoopDetectedEvent`` and injects the
@@ -97,7 +102,6 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         # batch item / loop round / resume, so the turn count is per
         # invocation and not per instance.
         self._iterations_by_invocation: dict[str, int] = {}
-        self._last_dead_end_signature: str | None = None
 
     @property
     def iteration(self) -> int:
@@ -156,36 +160,51 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> tuple[str, int, str] | None:
         """Return ``(tool_name, consecutive_count, latest_error)`` or ``None``.
 
-        Walks the message list backwards. Counts how many consecutive
-        ``ToolMessage(status='error')`` entries share the same
-        ``name`` (the LLM keeps mechanically calling the same tool).
-        Returns ``None`` when the streak is below the configured
-        threshold or when a non-error breaks the streak.
+        Walks the message list backwards over TOOL RESULTS, ignoring the
+        AIMessages between them. That distinction is the whole behaviour:
+        "the LLM keeps mechanically calling the same tool" is one call per
+        turn, so every pair of failures has the AIMessage that asked for the
+        second one sitting between them. A window that ended at the first
+        non-tool entry could only ever count the results of a SINGLE turn —
+        the parallel-tool-call shape — and so never fired in a real run
+        (ledger E5: seven consecutive rejected ``finish_task`` calls, zero
+        ``DeadEndPrunedEvent``).
+
+        The window shape is taken from the sibling in this same chain,
+        ``LoopDetectionMiddleware._recent_tool_messages``, which reads tool
+        history exactly this way. What is NOT taken from it is its signature:
+        it keys on tool name AND identical content, because a no-progress loop
+        is the same answer coming back, whereas a dead end is the same tool
+        failing however the error is worded.
+
+        Two things end the streak, both facts about tool results: a result
+        that is not an error, and a result from a different tool. One thing
+        floors the window: a warning this middleware already injected — the
+        model has been told about those failures, so counting them again
+        would make every further failure re-warn. Reading the floor out of
+        the message history rather than remembering it on the instance also
+        keeps batch items, loop rounds and resumes from suppressing each
+        other's warnings; one instance serves all of them (see
+        ``_iterations_by_invocation``).
         """
         tool_name: str | None = None
         latest_error = ""
         count = 0
-        seen_failure = False
 
         for msg in reversed(messages):
             if isinstance(msg, ToolMessage):
-                status = getattr(msg, "status", None)
-                current_name = str(getattr(msg, "name", None) or "unknown")
-                content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                if status == "error":
-                    if tool_name is None:
-                        tool_name = current_name
-                        latest_error = content[:300]
-                    if current_name != tool_name:
-                        break
-                    count += 1
-                    seen_failure = True
-                    continue
-                if seen_failure:
+                if getattr(msg, "status", None) != "error":
                     break
-                return None
-            if seen_failure:
-                # Any non-tool message after a failure streak ends the window.
+                current_name = str(getattr(msg, "name", None) or "unknown")
+                if tool_name is None:
+                    tool_name = current_name
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    latest_error = content[:300]
+                elif current_name != tool_name:
+                    break
+                count += 1
+                continue
+            if getattr(msg, "name", None) == _DEAD_END_WARNING_NAME:
                 break
 
         if tool_name is None or count < self._dead_end_threshold:
@@ -201,11 +220,6 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
             return None
 
         tool_name, count, latest_error = summary
-        signature = f"{tool_name}:{count}:{latest_error}"
-        if signature == self._last_dead_end_signature:
-            return None
-        self._last_dead_end_signature = signature
-
         warning = _DEAD_END_WARNING_TEMPLATE.format(
             tool_name=tool_name,
             count=count,
@@ -221,7 +235,7 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
             tool_name,
             count,
         )
-        return {"messages": [HumanMessage(name="dead_end_warning", content=warning)]}
+        return {"messages": [HumanMessage(name=_DEAD_END_WARNING_NAME, content=warning)]}
 
 
 __all__ = ["ExecutionControlMiddleware"]

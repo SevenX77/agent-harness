@@ -21,6 +21,12 @@ def _isolate_studio_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setenv("HOME", str(tmp_path))
 
 
+#: What the engine says when its revisit guard trips. The adapter carries this
+#: sentence across the boundary, so a fake that omits it is not a fake of the
+#: real payload.
+DEADLOCK_MESSAGE = "Predict stopped: phase 'draft' ran 11 times in a single pass without moving on."
+
+
 def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_result(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -162,7 +168,10 @@ def test_dispatch_predict_job_translates_sdk_deadlock_error(
     def fake_predict_artifact_deadlock(_adapter: object, _payload: dict[str, Any]) -> None:
         from app.core.adapters.http_transport import StudioAdapterError
 
-        raise StudioAdapterError("engine.predict_deadlock", {"phase_name": "draft", "actual_path": ["draft"] * 11})
+        raise StudioAdapterError(
+            "engine.predict_deadlock",
+            {"phase_name": "draft", "actual_path": ["draft"] * 11, "message": DEADLOCK_MESSAGE},
+        )
 
     monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", fake_predict_artifact_deadlock)
 
@@ -725,7 +734,7 @@ def test_a_predict_that_deadlocks_still_leaves_its_account(
 
         raise StudioAdapterError(
             "engine.predict_deadlock",
-            {"phase_name": "draft", "actual_path": ["draft"] * 11},
+            {"phase_name": "draft", "actual_path": ["draft"] * 11, "message": DEADLOCK_MESSAGE},
         )
 
     skill_dir = _predict_account_fixture(monkeypatch, tmp_path, fake_predict_artifact)

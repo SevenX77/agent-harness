@@ -161,15 +161,25 @@ class _HitLInterruptCheckpoint:
     options: list[str] | None = None
 
 
-class PredictDeadlockError(RuntimeError):
-    """Raised when Predict heuristic stubs appear to trap routing in a loop."""
+#: How many times one phase may run inside a SINGLE iteration before predict
+#: gives up on it. Iterations are counted separately, so a loop over a thousand
+#: items is a thousand groups of one and never approaches this.
+MAX_PHASE_REVISITS = 10
 
-    def __init__(self, phase_name: str, actual_path: list[str]) -> None:
+
+class PredictDeadlockError(RuntimeError):
+    """Raised when predict's stand-in outputs appear to trap routing in a loop."""
+
+    def __init__(self, phase_name: str, visits: int, actual_path: list[str]) -> None:
         self.phase_name = phase_name
+        self.visits = visits
         self.actual_path = actual_path
         super().__init__(
-            f"Predict P2 deadlock guard tripped for phase '{phase_name}' "
-            f"after {actual_path.count(phase_name)} visits"
+            f"Predict stopped: phase '{phase_name}' ran {visits} times in a single "
+            "pass without moving on. Predict feeds every agent node the same "
+            "stand-in output every time it runs, so a route that branches on that "
+            "output keeps choosing the same edge. Run the skill for real to see "
+            "which way it goes."
         )
 
 
@@ -381,12 +391,25 @@ def predict_skill(  # noqa: C901
     phases = [assemble_phase_record(item) for item in raw_phases]
     actual_path = [phase.phase_name for phase in phases]
 
-    # Deadlock guard for heuristic stubs
+    # Deadlock guard for heuristic stubs.
+    #
+    # Counted per ITERATION, not per phase name. A phase repeats for two very
+    # different reasons: because its `iterate` says to — the item list is
+    # resolved once, before the loop, so those repeats are finite and planned —
+    # or because routing came back to it, which is the trap this guard is for.
+    # Counting names alone cannot tell them apart, and a plain loop over eleven
+    # items was enough to kill a working skill with a deadlock error (ledger K5).
+    # The archived predict-v2 design named this risk and scoped the guard to the
+    # stub strategy as the mitigation; the strategy is a property of the RUN, so
+    # that alone never separated the two cases.
     if type(strategy).__name__ == "HeuristicStubStrategy":
-        counts = Counter(actual_path)
-        for phase_name, count in counts.items():
-            if count > 10:  # MAX_PHASE_REVISITS
-                raise PredictDeadlockError(phase_name, actual_path)
+        visits = Counter(
+            (str(item.get("phase_name") or item.get("name") or ""), str(item.get("iteration_ns") or ""))
+            for item in raw_phases
+        )
+        for (phase_name, _iteration), count in visits.items():
+            if count > MAX_PHASE_REVISITS:
+                raise PredictDeadlockError(phase_name, count, actual_path)
 
     # Path diff
     expected_path = getattr(strategy, "expected_path", None)

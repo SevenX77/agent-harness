@@ -384,8 +384,9 @@ NOT-OWNS: 测试输入/predict 触发 → 03; 真实 run/运行态可视化 → 
 
 ### [backend-only] (失败退路)predict 中 heuristic-stub 把路由困在环里 → P2 deadlock guard 触发(某 phase 重访超阈值即报错)
 - **能力·区域**: `predict` · `center-action-bar` — 目标: public-api-contract predict_skill(unattended predict 行为); 引擎 P2 启发式桩
-- **动机**: predict 用占位结果驱动 agent 路由时, 桩可能让条件路由死循环。引擎有死锁守卫(MAX_PHASE_REVISITS=10)显式报错而非挂死, 是 predict 的安全网。前端无此错误呈现。
-- **证据**: PredictDeadlockError + MAX_PHASE_REVISITS=10 (services/predictor.py:20-32); dispatch_predict_job 捕获 SDK 死锁转抛 (predictor.py:124-125)
+- **动机**: predict 用占位结果驱动 agent 路由时, 桩可能让条件路由死循环。引擎有死锁守卫(`MAX_PHASE_REVISITS`)显式报错而非挂死, 是 predict 的安全网。
+- **计数口径(2026-08-21 修正,台账 K5)**: 阈值**按「一次迭代内的重访次数」计**, 不按 phase 名在整条路径里出现几次。`iterate` 让同一个 phase 每个 item 跑一遍, 那是计划本身, 不是卡住; 按名字数会把一个 11 个 item 的普通循环判成死锁(实测过)。每条 phase 记录带 `iteration_ns`, 计数按 (phase, iteration) 分组。
+- **证据**: `PredictDeadlockError` + `MAX_PHASE_REVISITS` 都在引擎 (`packages/graph-agent/src/graph_agent/core/runner.py`), studio 侧只做转抛并**原样带上引擎那句话** (`services/predictor.py`); 适配器把 message 一并过界 (`core/adapters/engine.py`)
 
 ### [target-design] (失败退路)predict 写文件撞覆盖白名单 hash 冲突(403/409)→ 提供重新加载, 或后端原子 read-modify-write 加白名单字段
 - **能力·区域**: `conflict-overwrite` · `properties` — 目标: skill-lifecycle design §5 / DEF-011(原 S1 覆盖白名单 hash, 降级为独立本地小修)

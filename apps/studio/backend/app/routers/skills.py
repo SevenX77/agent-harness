@@ -493,7 +493,7 @@ async def sync_skill(
         response = error_response(
             error_code="APP_SETTINGS_INCOMPLETE",
             http_status=400,
-            message="User ID 未配置, 请到 Settings 设置",
+            message="app settings incomplete: user_id is not set",
             details={"field": "user_id"},
             retry_strategy="not_retryable",
         )
@@ -502,7 +502,7 @@ async def sync_skill(
         response = error_response(
             error_code="APP_SETTINGS_INCOMPLETE",
             http_status=400,
-            message="Gitea Host 未配置, 请到 Settings 设置",
+            message="app settings incomplete: gitea_host is not set",
             details={"field": "gitea_host"},
             retry_strategy="not_retryable",
         )

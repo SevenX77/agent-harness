@@ -1,5 +1,6 @@
 {
   "codes": {
+    "APP_SETTINGS_INCOMPLETE": "设置没填完:{{field}} 还没配。到 Settings 里填上。",
     "missing_api_key": "API key 为空。请先填写 key 再测试。",
     "timeout": "请求在 8 秒后超时。",
     "invalid_api_key": "API key 无效或被服务商拒绝。",

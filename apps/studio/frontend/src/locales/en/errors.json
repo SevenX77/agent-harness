@@ -1,5 +1,6 @@
 {
   "codes": {
+    "APP_SETTINGS_INCOMPLETE": "Settings are incomplete: {{field}} is not set. Open Settings to set it.",
     "missing_api_key": "API key is empty. Add a key before testing.",
     "timeout": "The request timed out after 8 seconds.",
     "invalid_api_key": "API key is invalid or was rejected by the provider.",

@@ -1,4 +1,5 @@
 import { AxiosError } from 'axios'
+import i18n from '../i18n'
 import type { ErrorResponse, JsonObject, JsonValue, LintError } from '../api/types'
 
 export const BACKEND_UNAVAILABLE_MESSAGE = 'Backend unavailable'
@@ -217,13 +218,38 @@ export function lintErrorsFromError(error: unknown): LintError[] {
   return asLintErrors(details.errors)
 }
 
+/**
+ * What the user reads for a typed backend failure — chosen HERE, not by the server.
+ *
+ * A backend response carries a stable `error_code` plus the `details` that make it
+ * specific; which language those become is a fact about who is reading, and the
+ * server does not know that. It used to: two `skills.py` branches wrote their
+ * message in Chinese and `errorMessage` piped `payload.message` into the toast
+ * verbatim, so the string a Chinese and an English reader saw was decided in
+ * Python (ledger K4).
+ *
+ * `details` is passed as interpolation values, so a message can name the field it
+ * is about. An untranslated code falls back to the backend's own message — that is
+ * the code's developer-facing text, which is the right thing to show when nobody
+ * has written a reader-facing one yet.
+ */
+function translatedErrorCode(payload: Partial<ErrorResponse> | undefined): string | null {
+  const code = payload?.error_code
+  if (!code || !i18n.isInitialized) {
+    return null
+  }
+  const values = isRecord(payload?.details) ? payload.details : {}
+  const translated = i18n.t(`codes.${code}`, { ns: 'errors', defaultValue: '', ...values })
+  return translated || null
+}
+
 export function errorMessage(error: unknown): string {
   if (isBackendUnavailableError(error)) {
     return BACKEND_UNAVAILABLE_MESSAGE
   }
   if (error instanceof AxiosError) {
     const payload = error.response?.data as Partial<ErrorResponse> | undefined
-    return payload?.message ?? error.message
+    return translatedErrorCode(payload) ?? payload?.message ?? error.message
   }
   if (error instanceof Error) {
     return error.message

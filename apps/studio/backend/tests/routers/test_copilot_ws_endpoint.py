@@ -117,6 +117,8 @@ def test_copilot_ws_forwards_model_override(
             "role": None,
             "workspace_root": None,
             "judge_context": None,
+            "mentions": [],
+            "attachments": [],
         }
     ]
 
@@ -219,6 +221,8 @@ def test_copilot_ws_forwards_workspace_root(
             "role": None,
             "workspace_root": "/abs/imported-skill",
             "judge_context": None,
+            "mentions": [],
+            "attachments": [],
         }
     ]
 
@@ -253,6 +257,8 @@ def test_copilot_ws_forwards_structured_judge_context(
             "session_id": "tab-1",
             "role": "copilot_judge",
             "judge_context": judge_context,
+            "mentions": [],
+            "attachments": [],
         })
         assert websocket.receive_json()["type"] == "done"
 
@@ -265,6 +271,8 @@ def test_copilot_ws_forwards_structured_judge_context(
             "role": "copilot_judge",
             "workspace_root": None,
             "judge_context": judge_context,
+            "mentions": [],
+            "attachments": [],
         }
     ]
 

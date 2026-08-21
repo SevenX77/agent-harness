@@ -45,9 +45,41 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **机制**：① 显式 @ → 输入框弹 MentionMenu(files/phases/dots/errors/trace，键盘导航，模糊过滤 <50ms)；② 只有用户在 composer 中选择/保留的 @mention 随本次 Copilot 消息发送；③ 禁止点画布节点/dot/文件后自动把对象送给 Copilot，禁止隐式 view/选中/dirty buffer 后台同步；④ 后端 resolver 只处理当前 WS 消息 payload 中的显式 mentions/attachments/judge context；⑤ 发送后**第一条**回显本轮实际注入清单。
 - **决策+动机**：**composer = 输入框内联彩色 pill**(需 tiptap 类富文本，react-mentions overlay 渲染不了真 DOM pill)；**dot=黑板**(对齐 trace 走查，取代旧 @edge_context 边语义)；**上下文回显插在 agent 开跑前、第一条**(可折叠、点开看实际内容/文档，反 hidden prompt magic，与 F1"不省略"一套)。
 - **原话**：「输入框内联彩色 pill」/「能否插入在 agent 开始任务的前面... user输入完按发送后, 第一条弹出的就是这个信息, 可折叠, 可查看具体内容或文档」
-- **status**：现纯空壳(占位符 + disabled "Add context")= target。
+- **status**：线上契约与后端已 live——payload 带 `mentions[]` / `attachments[]`,resolver 按 COPILOT_ASSIST-8 分「读正文」与「只给引用」两类,⑤ 的回显逐条说明每一条实际变成了什么;**composer 仍是空壳**(占位符 + disabled "Add context"),① 的 MentionMenu、内联 pill、附图入口尚未实现 = target(问题台账 CP1)。
 - **测试点**：输入 `@plan`→菜单过滤高亮、选中成内联 pill 可删；点击画布节点/dot/文件本身不触发后端 Copilot 请求；发送消息时 payload 只包含 composer 内显式 mentions；发送后第一条=注入清单点开看内容；大工程菜单 <50ms / 超 150K 截断告警。
 - **归属**：region [[copilot]](菜单/pill/回显)；可提名对象来自 [[canvas]]/[[editor]]/[[timeline]]，但提名只由 composer 内显式选择触发。
+- **决策 COPILOT_ASSIST-8(一次提名是用户挑出来的一个东西,不是一段被猜出来的上下文;2026-08-20 立,问题台账 CP1)**:
+  F4 已经说清「谁能被提名」和「什么时候注入」,没说**一次提名在线上长什么样**。这条把它定死。
+  - **提名的身份 = `(kind, ref)`,两者都由发出这条消息的前端给出**,后端不反查、不补全、不猜。
+    `kind` 是封闭集 `file | phase | dot | error | trace`——正是 ① 列的五类;`ref` 在该 kind 内
+    唯一定位那个对象(file=工作区相对路径;phase=相位 id,子图内的写成 `<subgraph>/<phase>`;
+    dot=黑板键 `<phase>.<key>`;error=诊断 code 加位置;trace=`<run_id>#<event_index>`)。
+  - **为什么 `ref` 必须由前端给**:提名这个动作发生在 composer 里,那一刻用户看着的是哪个对象
+    **只有前端知道**。让后端拿显示名去反查,等于把「用户挑了哪一个」变成一次模糊匹配——而 ③
+    禁的正是「系统替用户决定上下文是什么」。同理,一条提名解析不到东西时不许**顺手换一个近似的**。
+  - **`label` 只用于回显,不参与定位**。显示名会变(相位改个名),而已经发出去的那条消息里,
+    用户当时看见的就该是当时那个字——把 label 当 id 会让历史消息在改名后指向别处。
+  - **附件的内容随消息走,不是一个待解引用的路径**:`attachments[]` 每项是 `kind: "image"` +
+    `media_type` + base64 `data` + 可选 `name`。图片没有「工作区里的稳定坐标」——用户是从剪贴板
+    或文件对话框拿来的,下一秒那个文件可能就不在了。这与 mention 用 `ref` 恰恰相反,分界是
+    **这个东西在工作区里有没有一个改天还找得到的地址**。
+  - **注入内容还是注入引用,按「这个东西在工作区里有没有一份可以现在读出来的正文」分**:
+    `file` 与 `phase` 指向工作区里的真文件,后端**读出正文注入**(超出预算按 F4 ① 的
+    150K 告警口径截断并在回显里说明截了);`dot` / `error` / `trace` 指向的是**某一次运行或某一次
+    编译期间才存在的东西**,后端不去解引用,只把 `(kind, ref, label)` 原样作为结构化引用注入——
+    copilot 手上本来就有取它们的工具,而后端替它取一次,等于把「哪一次 run 的哪个值」这个判断
+    从模型手里挪走,又绕回 ③ 禁止的那条路。**这是能力边界,不是省事**:注入引用的那三类,回显
+    里写明「给的是引用不是正文」,用户看得见自己得到的是哪一种。
+  - **解析失败当场说,不静默丢**:取正文的两类,`ref` 解析不到(文件被删、相位被改名)时,
+    ⑤ 的回显里逐条明写「这一条没解析到」,并**照常发出这一轮**——不悄悄摘掉(用户会以为它
+    进去了),也不因此拒绝整条消息(用户的问题本身仍然有效)。呼应 F1「不省略」:
+    **注入清单说的必须是实际注入的**。
+  - **边界**:resolver 的输入只有本条 WS 消息里的 `mentions` / `attachments` / `judge_context`,
+    不读「当前选中的节点」「最近打开的文件」这类会话侧状态——③④ 在这里没有留任何入口。
+  - **借了什么拒了什么**:身份用 `(kind, ref)` 两段而不是一个大字符串,借的是 URI 的
+    scheme+path 分法——kind 决定 ref 该怎么解释,于是加一类可提名对象不需要改解析规则;
+    **拒**了真的用 URI 字符串(`file://…`),因为那要求每一类都能编码进一套转义规则,而
+    `dot` 的键、`trace` 的事件下标本来就不是路径,硬套只会让前后端各写一份易错的拆分。
 
 ### F5 Copilot 自写 + diff 气泡 + Bash 审批
 - **机制**：MVP1 明确允许 Copilot SDK `Read/Write/Edit` 在当前 workspace/cwd/add_dirs 范围内自行读写文件；Studio 不要求把 Write/Edit 拦成 Rust 写入或 `patch_proposed` 才算合规。工具事件仍要回显，能拿到前后内容时展示 diff 气泡 / Open Compare；写后 compile/predict/run 使用磁盘上的最新结果。Bash 命令仍逐条审批卡(human-in-the-loop)，因为 Bash 可执行任意 shell 与重定向写入。

@@ -124,7 +124,7 @@ describe('buildCopilotSendPayload', () => {
   })
 
   it('attaches the selected role so the composer picker reaches the ws payload', () => {
-    expect(buildCopilotSendPayload('hello', 'session-1', null, 'copilot_judge')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', { role: 'copilot_judge' })).toEqual({
       user_message: 'hello',
       session_id: 'session-1',
       role: 'copilot_judge',
@@ -132,7 +132,7 @@ describe('buildCopilotSendPayload', () => {
   })
 
   it('keeps model_override behavior intact alongside role', () => {
-    expect(buildCopilotSendPayload('hello', 'session-1', 'anthropic:claude', 'copilot_chat')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', { modelOverride: 'anthropic:claude', role: 'copilot_chat' })).toEqual({
       user_message: 'hello',
       session_id: 'session-1',
       model_override: 'anthropic:claude',
@@ -141,7 +141,7 @@ describe('buildCopilotSendPayload', () => {
   })
 
   it('attaches imported workspace root so the backend runs Copilot in that cwd', () => {
-    expect(buildCopilotSendPayload('hello', 'session-1', null, 'copilot_chat', '/abs/imported-skill')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', { role: 'copilot_chat', workspaceRoot: '/abs/imported-skill' })).toEqual({
       user_message: 'hello',
       session_id: 'session-1',
       role: 'copilot_chat',
@@ -150,7 +150,7 @@ describe('buildCopilotSendPayload', () => {
   })
 
   it('attaches structured judge context separately from the user message', () => {
-    expect(buildCopilotSendPayload('judge it', 'session-1', null, 'copilot_judge', null, {
+    expect(buildCopilotSendPayload('judge it', 'session-1', { role: 'copilot_judge', judgeContext: {
       compare_result_ref: 'skill-1/golden/golden-1/compare/run-1/compare_result.json',
       judge_context_ref: 'skill-1/runs/run-1/copilot_judge/golden-1/judge_context.json',
       baseline_ref: 'skill-1/golden/golden-1/baseline.json',
@@ -161,7 +161,7 @@ describe('buildCopilotSendPayload', () => {
         node_group_count: 1,
         failed_node_count: 1,
       },
-    })).toEqual({
+    } })).toEqual({
       user_message: 'judge it',
       session_id: 'session-1',
       role: 'copilot_judge',
@@ -180,8 +180,38 @@ describe('buildCopilotSendPayload', () => {
     })
   })
 
+  // F4 ②: what the user picked in the composer, and only that. The payload is
+  // the whole channel — anything not in it (current selection, open file) is
+  // context the backend must never see, which is F4 ③.
+  it('carries the mentions the user picked, by ref and not by label', () => {
+    expect(buildCopilotSendPayload('explain this', 'session-1', {
+      mentions: [{ kind: 'phase', ref: 'event-timeline/review', label: 'review' }],
+    })).toEqual({
+      user_message: 'explain this',
+      session_id: 'session-1',
+      mentions: [{ kind: 'phase', ref: 'event-timeline/review', label: 'review' }],
+    })
+  })
+
+  it('carries an attached image by value', () => {
+    expect(buildCopilotSendPayload('look', 'session-1', {
+      attachments: [{ kind: 'image', media_type: 'image/png', data: 'aGVsbG8=', name: 'shot.png' }],
+    })).toEqual({
+      user_message: 'look',
+      session_id: 'session-1',
+      attachments: [{ kind: 'image', media_type: 'image/png', data: 'aGVsbG8=', name: 'shot.png' }],
+    })
+  })
+
+  it('omits mention and attachment keys when the composer had none', () => {
+    expect(buildCopilotSendPayload('hello', 'session-1', { mentions: [], attachments: [] })).toEqual({
+      user_message: 'hello',
+      session_id: 'session-1',
+    })
+  })
+
   it('omits empty role and override values', () => {
-    expect(buildCopilotSendPayload('hello', 'session-1', '', '', '   ')).toEqual({
+    expect(buildCopilotSendPayload('hello', 'session-1', { modelOverride: '', role: '', workspaceRoot: '   ' })).toEqual({
       user_message: 'hello',
       session_id: 'session-1',
     })

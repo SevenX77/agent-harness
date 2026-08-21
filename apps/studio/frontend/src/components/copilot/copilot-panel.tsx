@@ -794,12 +794,11 @@ export function CopilotPanel({
         }
       }
     }
-    if (copilot.sendMessage(
-      draft,
-      selectedRouteId || defaultRouteId || null,
-      roleKey,
-      activeJudgeContext,
-    )) {
+    if (copilot.sendMessage(draft, {
+      modelOverride: selectedRouteId || defaultRouteId || null,
+      role: roleKey,
+      judgeContext: activeJudgeContext,
+    })) {
       setDraft('')
       setDraftJudgeContext(null)
     }

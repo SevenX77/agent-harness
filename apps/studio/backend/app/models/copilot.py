@@ -7,12 +7,57 @@ from typing import Annotated, Any, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class CopilotMention(BaseModel):
+    """One object the user picked in the composer (COPILOT_ASSIST-8).
+
+    Identity is ``(kind, ref)``, both given by the frontend that sent the
+    message: only the composer knows which object the user was looking at when
+    they picked it, so resolving a display name back to an object here would
+    turn "which one did they mean" into a fuzzy match — the thing F4 ③ forbids.
+    ``label`` is what the user saw and is echoed back verbatim; it never
+    locates anything, because display names drift and an already-sent message
+    must keep showing the word it was sent with.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The five kinds F4 ① makes mentionable.
+    kind: Literal["file", "phase", "dot", "error", "trace"]
+    # Unique within `kind`: file = workspace-relative path; phase = phase id,
+    # written `<subgraph>/<phase>` inside a subgraph; dot = `<phase>.<key>`;
+    # error = diagnostic code plus location; trace = `<run_id>#<event_index>`.
+    ref: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+
+
+class CopilotImageAttachment(BaseModel):
+    """An image the user attached, carried by value with the message.
+
+    Unlike a mention, an attachment has no stable address in the workspace —
+    it came from the clipboard or a file dialog and may be gone a second later
+    — so its bytes travel with the turn instead of a ref to dereference.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["image"] = "image"
+    media_type: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    # Base64, as the Anthropic image content block wants it.
+    data: str = Field(min_length=1)
+    name: str | None = None
+
+
 class CopilotWsRequestPayload(BaseModel):
     """Incoming Copilot WebSocket request payload."""
 
     model_config = ConfigDict(extra="ignore")
 
     user_message: str
+    # F4 ②④: the ONLY context this turn carries. The resolver reads these and
+    # `judge_context`, never session-side state like "the currently selected
+    # node" or "the most recently opened file".
+    mentions: list[CopilotMention] = Field(default_factory=list)
+    attachments: list[CopilotImageAttachment] = Field(default_factory=list)
     # 会话身份契约(COPILOT_ASSIST-5):消息属于哪个前端会话标签。后端以
     # (skill, session) 隔离 SDK 对话;没有归属的消息在边界拒绝,绝不落进
     # "当前恰好活跃的对话"。

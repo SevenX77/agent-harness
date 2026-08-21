@@ -82,8 +82,15 @@ from app.models.copilot import (
     CopilotEventToolApprovalTimedOut,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
+    CopilotImageAttachment,
+    CopilotMention,
 )
 from app.services import agent_assets
+from app.services.copilot_context import (
+    mention_echo_lines,
+    render_mentions_xml,
+    resolve_mentions,
+)
 from app.services.copilot_skill_binding import CopilotSkillBinding
 from app.services.copilot_tools import build_copilot_mcp_servers
 
@@ -985,18 +992,72 @@ def _context_resolved_event(
     skill_id: str,
     *,
     judge_context: dict[str, Any] | None = None,
+    mentions: list[CopilotMention] | None = None,
+    attachments: list[CopilotImageAttachment] | None = None,
+    skill_dir: Path | None = None,
 ) -> CopilotEventContextResolved:
-    """Build the first-event echo of explicit request context injected this turn."""
+    """Build the first-event echo of explicit request context injected this turn.
+
+    F4 ⑤ and F1 "不省略" together mean this must describe what was ACTUALLY
+    injected — a mention that failed to resolve is named as failed here rather
+    than quietly left out, because a user who sees nothing assumes it went in.
+    """
     del skill_id
     parts: list[str] = []
     detail_lines: list[str] = []
     if judge_context is not None:
         parts.append("judge context")
         detail_lines.append(render_copilot_judge_context_xml(judge_context))
+    if mentions and skill_dir is not None:
+        resolved = resolve_mentions(mentions, skill_dir=skill_dir)
+        parts.append(f"{len(resolved)} mentions")
+        detail_lines.extend(mention_echo_lines(resolved))
+    if attachments:
+        parts.append(f"{len(attachments)} image(s)")
+        detail_lines.extend(
+            f"[image] {attachment.name or 'unnamed'} ({attachment.media_type})"
+            for attachment in attachments
+        )
     parts.append(f"assets@{agent_assets.assets_fingerprint()}")
     summary = "Injected this turn: " + " · ".join(parts)
     detail = "\n".join(detail_lines) if detail_lines else "(no request context)"
     return CopilotEventContextResolved(summary=summary, detail=detail)
+
+
+async def _one_message(message: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    """The SDK's streaming prompt form is an async iterable, even for one message."""
+    yield message
+
+
+def _turn_message_with_attachments(
+    prompt: str,
+    attachments: list[CopilotImageAttachment],
+) -> dict[str, Any] | None:
+    """The SDK message dict for a turn that carries images, or None for text.
+
+    ``ClaudeSDKClient.query`` accepts a bare string, and that is what a text
+    turn should send — building content blocks for every turn would put the
+    same text through a shape only images need.
+    """
+    if not attachments:
+        return None
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    content.extend(
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": attachment.media_type,
+                "data": attachment.data,
+            },
+        }
+        for attachment in attachments
+    )
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": content},
+        "parent_tool_use_id": None,
+    }
 
 
 def render_copilot_judge_context_xml(judge_context: dict[str, Any]) -> str:
@@ -1148,6 +1209,8 @@ async def stream_query(
     role: str | None = None,
     workspace_root: str | Path | None = None,
     judge_context: dict[str, Any] | None = None,
+    mentions: list[CopilotMention] | None = None,
+    attachments: list[CopilotImageAttachment] | None = None,
 ) -> AsyncIterator[CopilotEvent]:
     """Stream one Copilot query inside one frontend tab's conversation
     (``session_id``), using the selected copilot role (default copilot_chat)
@@ -1181,7 +1244,13 @@ async def stream_query(
         return
 
     # F4: first event echoes the injected context (anti hidden-prompt-magic).
-    yield _context_resolved_event(skill_id, judge_context=judge_context)
+    yield _context_resolved_event(
+        skill_id,
+        judge_context=judge_context,
+        mentions=mentions,
+        attachments=attachments,
+        skill_dir=resolved_workspace,
+    )
 
     failures: list[str] = []
     failed_route_ids: list[str] = []
@@ -1250,12 +1319,16 @@ async def stream_query(
             _active_clients[skill_id] = client
             consumer: asyncio.Task[None] | None = None
             try:
+                turn_prompt = _prompt_with_turn_context(
+                    skill_id,
+                    user_message,
+                    judge_context=judge_context,
+                    mentions=mentions,
+                    skill_dir=resolved_workspace,
+                )
+                image_message = _turn_message_with_attachments(turn_prompt, attachments or [])
                 await client.query(
-                    _prompt_with_turn_context(
-                        skill_id,
-                        user_message,
-                        judge_context=judge_context,
-                    )
+                    _one_message(image_message) if image_message is not None else turn_prompt
                 )
                 consumer = asyncio.create_task(
                     _drain_sdk_response(client, translator, queue)
@@ -1505,6 +1578,8 @@ def _prompt_with_turn_context(
     user_message: str,
     *,
     judge_context: dict[str, Any] | None = None,
+    mentions: list[CopilotMention] | None = None,
+    skill_dir: Path | None = None,
 ) -> str:
     """Current turn prompt = explicit request context + user message."""
 
@@ -1514,6 +1589,10 @@ def _prompt_with_turn_context(
         layers.append(
             "## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
         )
+    if mentions and skill_dir is not None:
+        rendered = render_mentions_xml(resolve_mentions(mentions, skill_dir=skill_dir))
+        if rendered:
+            layers.append("## Mentioned by the user\n" + rendered)
     if not layers:
         return user_message
     return "\n\n".join(layers) + f"\n\n## 用户消息\n{user_message}"

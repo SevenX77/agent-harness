@@ -103,8 +103,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - 机制: list past runs, show status/duration/token summaries, and open a run detail/replay view.
 - 决策: run aftercare belongs in the timeline/history area, not in the graph authoring form.
 - 原话/来源: `01_workflows/04_run-and-verify.md:52` and `01_workflows/04_run-and-verify.md:58` list history and detail actions.
-- 测试: completed/failed runs appear; detail drawer can replay with same input; delete removes a run row.
-- Status: history live, detail drawer orphan.
+- 决策(被看的那次 run 拥有它旁边的每个动作): trace 能显示的 run 有两种——正在跑的那次,和从历史里点开的那次。**旁边的动作一律作用在「此刻显示的这次」上**:Compare to golden、Promote、节点 model compare、四条 Resume(整跑 / HITL 应答 / 边上下文 / 从某节点)全部读同一个来源。**Pause 与 Stop 是例外,并且例外有理由**:它们作用的是**还在跑的那个 worker**,而只有 live run 有 worker,所以它们问的本来就是另一个问题。分开之前,「我在看哪次 run」有两个答案:一个是 trace 自己算出来的,一个是「哪次 run 是活的」;于是看着旧 run 按 Resume 会去续**另一次** run,Compare to golden 量的是**另一次** run,而节点 compare 直接拒绝说「先跑一次」——明明屏幕上就摆着一次跑完的 run。
+- 测试: completed/failed runs appear; detail drawer can replay with same input; delete removes a run row;从历史点开一次 run 之后,golden diff 绑定的是它、节点 compare 发给后端的 base run 是它、Resume 续的是它(`Workspace.test.tsx` 三条,均在修复前实证会红)。
+- Status: history live, detail drawer orphan;被看的 run 拥有旁边动作 = live。
 - 归属: region `timeline`, `local-history`; capability `run-execution`.
 
 ### F4. Batch Run
@@ -271,6 +272,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 | RUN_EXECUTION-2 | 节点态 | 单元 `run-execution-node-status`；**为什么**：run events 经 state-engine 投到节点灯/边，非画布默认假态 |
 | RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
 | RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
+| RUN_EXECUTION-12 | 被看的那次 run 拥有它旁边的动作 | F3；**为什么**：trace 可以显示历史 run,而动作若问「哪次 run 是活的」就会作用在别的 run 上——Resume 续错 run、golden 量错 run、节点 compare 在有 run 的情况下拒绝执行;Pause / Stop 仍问 live,因为它们作用的是 worker 而不是记录 |
 | RUN_EXECUTION-11 | 报告在被打开时重新生成 | F6；**为什么**：RUN_EXECUTION-5 说它可随时重生,却没有任何入口,历史报告永远停在写它那天的渲染逻辑上;按"打开"重生是每次用户动作 O(1) 次写,且不必再引入一个要人记得 bump 的渲染器版本号 |
 | RUN_EXECUTION-10 | 点了名的东西要能点开 | F6；**为什么**：输入文件与被对照的 run 从前只是文本；链接从实际目录推出,推不出就不给,点不开的链接比纯文本更坏 |
 | RUN_EXECUTION-8 | 重复逐次记账 + 节点状态入表 | F6；**为什么**：求和行回答不了「哪个 item 慢/挂了」，而「跑了几次」与「一次里想了几轮」是两件事 |

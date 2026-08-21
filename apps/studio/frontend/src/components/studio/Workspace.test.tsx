@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import { compareReplayArgsForJudgeResult, hasMiniMapToolSpace, Workspace } from './Workspace'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
-import type { EventEnvelope, LintError, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
+import type { EventEnvelope, LintError, RunDetail, RunMetadata, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 import { BackendUnavailableError } from '@/utils/errors'
 import { INPUT_ID } from '@/components/nodes'
 
@@ -21,6 +21,12 @@ const mocks = vi.hoisted(() => ({
     lintErrors?: LintError[] | null
     traceSelectedEventId?: string | null
     onSelectTraceEvent?: (index: number, event: unknown) => void
+    // Ledger L2②: the trace's actions must target the run the trace SHOWS.
+    onSelectRun?: (run: RunMetadata) => Promise<void> | void
+    onStartNodeCompare?: (nodeId: string) => Promise<void> | void
+    onResumeRun?: () => Promise<void> | void
+    traceCanCompare?: boolean
+    traceCanResume?: boolean
   },
   graphCanvasProps: null as null | {
     skillId?: string | null
@@ -108,6 +114,7 @@ const mocks = vi.hoisted(() => ({
   getSkillDetail: vi.fn(),
   fetcher: vi.fn(async () => []),
   getCompareGroup: vi.fn(),
+  startNodeCompareRun: vi.fn(),
   getRunDetail: vi.fn(),
   getResumeValidity: vi.fn(),
   postPredictRun: vi.fn(),
@@ -164,6 +171,7 @@ vi.mock('@/api/client', () => ({
   compileSkill: mocks.compileSkill,
   fetcher: mocks.fetcher,
   getCompareGroup: mocks.getCompareGroup,
+  startNodeCompareRun: mocks.startNodeCompareRun,
   getRunDetail: mocks.getRunDetail,
   getResumeValidity: mocks.getResumeValidity,
   getSkillDetail: mocks.getSkillDetail,
@@ -388,6 +396,12 @@ vi.mock('./Panels', () => ({
     onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
     workspaceRoot?: string | null
     lintErrors?: LintError[] | null
+    // Ledger L2②: the trace's actions must target the run the trace SHOWS.
+    onSelectRun?: (run: RunMetadata) => Promise<void> | void
+    onStartNodeCompare?: (nodeId: string) => Promise<void> | void
+    onResumeRun?: () => Promise<void> | void
+    traceCanCompare?: boolean
+    traceCanResume?: boolean
   }) => {
     mocks.panelsProps = props
     return <aside data-testid="panels" />
@@ -2184,6 +2198,55 @@ describe('Workspace run_ended history wiring (integration)', () => {
     await startRunToEngineEnd(gitStatus, status)
     await emitTerminalRunGate()
   }
+
+  // Ledger L2②. The trace can show ANY run — the live one or one picked out of
+  // history — and every action beside it used to ask `runId`, which only ever
+  // names the live one. Reading an older run and pressing Resume continued a
+  // different run than the one on screen; Compare to golden measured a different
+  // run; node compare refused outright with "Run the skill first" while a run was
+  // right there. One question, "which run am I looking at", had two answers.
+  async function viewOlderRunFromHistory() {
+    await startRunToCompletion('committed')
+    mocks.getRunDetail.mockResolvedValue(runDetailWithGitStatus('older-run', 'committed'))
+    await act(async () => {
+      await mocks.panelsProps?.onSelectRun?.(
+        runDetailWithGitStatus('older-run', 'committed').metadata,
+      )
+      await Promise.resolve()
+    })
+  }
+
+  it('measures golden against the run the trace is showing, not the live one', async () => {
+    await viewOlderRunFromHistory()
+
+    expect(mocks.goldenDiffCalls.at(-1)?.runId).toBe('older-run')
+    expect(mocks.panelsProps?.traceCanCompare).toBe(true)
+  })
+
+  it("compares a node's models against the run the trace is showing", async () => {
+    mocks.startNodeCompareRun.mockResolvedValue({ compare_group_id: 'grp-1', runs: [] })
+
+    await viewOlderRunFromHistory()
+    await act(async () => {
+      await mocks.panelsProps?.onStartNodeCompare?.('draft')
+    })
+
+    expect(mocks.startNodeCompareRun).toHaveBeenCalledWith('writer-smoke', 'older-run', 'draft')
+    expect(toastMocks.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Run the skill first'),
+    )
+  })
+
+  it('resumes the run the trace is showing, not whichever run is live', async () => {
+    mocks.resumeRun.mockResolvedValue({ run_id: 'resumed-run' })
+
+    await viewOlderRunFromHistory()
+    await act(async () => {
+      await mocks.panelsProps?.onResumeRun?.()
+    })
+
+    expect(mocks.resumeRun).toHaveBeenCalledWith('writer-smoke', 'older-run')
+  })
 
   it('does not read the finished run while the backend is still finalizing it', async () => {
     // The engine's run_ended arrives BEFORE the studio backend auto-commits and

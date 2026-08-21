@@ -1531,6 +1531,21 @@ function PhaseFrontmatterForm({
                   onFileOpen={onFileOpen}
                 />
               </PanelFieldRow>
+              <PanelFieldRow>
+                {/* A subgraph node has no `llm_role` of its own — its phases each
+                    declare one — so its compare candidates cannot live inside the
+                    role field the way an agent node's do. The comparison is still
+                    defined for it: `build_candidate_roles` swaps the model of EVERY
+                    role in the truth precisely because a subgraph's role names are
+                    not knowable from the node. The backend has always accepted it;
+                    only this entry was missing. */}
+                <LlmNodeCompareField
+                  modelGroups={modelGroups}
+                  skillId={skillId}
+                  nodeId={phaseId}
+                  onStartNodeCompare={onStartNodeCompare}
+                />
+              </PanelFieldRow>
             </>
           ) : null}
           <PanelFieldRow>

@@ -4,6 +4,7 @@ import type { RunVerdict } from "@/utils/run-status-projection"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
+import { CompareCandidateTabs } from "@/components/trace/CompareCandidateTabs"
 import { FocusedNodeActions } from "@/components/trace/FocusedNodeActions"
 import type { CompareTab } from "../run-compare"
 import { useSkills } from "@/hooks/useSkills"
@@ -279,9 +280,21 @@ export function Panels({
         onDesignGolden={onDesignGolden}
       />
     )
+    // Which candidate's side-run am I looking at — a question about the compare
+    // GROUP, not about the base trace under it. It used to be answered inside
+    // the live TracePanel, which made a group started off a historical run
+    // unreachable (ledger L2 ③). Same reasoning as focusedNodeActions above.
+    const compareCandidateTabs = (
+      <CompareCandidateTabs
+        tabs={compareTabs}
+        activeCandidateId={activeCandidateId}
+        onSelect={onSelectCandidate}
+      />
+    )
     if (traceView?.source === "live" && runId) {
       return (
         <div className="flex h-full min-h-0 flex-col">
+          {compareCandidateTabs}
           {focusedNodeActions}
           <div className="min-h-0 flex-1">
         <TracePanel
@@ -305,9 +318,6 @@ export function Panels({
           onResume={onResumeRun}
           hitlSubmitting={traceResumeLoading}
           onSubmitHitlResponse={onSubmitHitlResponse}
-          compareTabs={compareTabs}
-          activeCandidateId={activeCandidateId}
-          onSelectCandidate={onSelectCandidate}
           scope={traceScope}
           onClearScope={onClearTraceScope}
           selectedEdge={selectedEdge}
@@ -321,6 +331,7 @@ export function Panels({
     if (traceView?.source === "history") {
       return (
         <div className="flex h-full min-h-0 flex-col">
+          {compareCandidateTabs}
           {focusedNodeActions}
           <div className="min-h-0 flex-1">
         <TracePanel
@@ -344,6 +355,7 @@ export function Panels({
     }
     return (
       <div className="flex h-full min-h-0 flex-col">
+        {compareCandidateTabs}
         {focusedNodeActions}
         <div className="min-h-0 flex-1">
           <TimelinePanel onSelectRun={onSelectRun} loadingRunId={historyLoadingRunId} />

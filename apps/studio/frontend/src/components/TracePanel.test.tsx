@@ -465,47 +465,6 @@ describe('TracePanel routing decision summary chip (trace-observability F7)', ()
   })
 })
 
-describe('TracePanel model-compare tabs (PR2 node-compare)', () => {
-  const compareTabs = [
-    { candidateId: 'fast', label: 'deepseek-v4', runId: 'run-f', failed: false, running: false },
-    { candidateId: 'slow', label: 'claude-opus', runId: 'run-s', failed: true, running: false },
-  ]
-
-  it('renders one tab per candidate, marking the failed candidate', () => {
-    const html = render({ compareTabs, activeCandidateId: 'fast' })
-    expect(html).toContain('aria-label="Model compare candidates"')
-    expect(html).toContain('aria-label="Candidate deepseek-v4"')
-    // The failed candidate's tab carries the failure in its accessible name.
-    expect(html).toContain('aria-label="Candidate claude-opus (failed)"')
-    expect(html).toContain('>deepseek-v4<')
-    expect(html).toContain('>claude-opus<')
-  })
-
-  it('marks the active candidate tab as selected', () => {
-    const html = render({ compareTabs, activeCandidateId: 'slow' })
-    const slowIdx = html.indexOf('aria-label="Candidate claude-opus (failed)"')
-    // aria-selected="true" lives on the active tab's button (same element as the label).
-    expect(html.slice(slowIdx - 120, slowIdx)).toContain('aria-selected="true"')
-    const fastIdx = html.indexOf('aria-label="Candidate deepseek-v4"')
-    expect(html.slice(fastIdx - 120, fastIdx)).toContain('aria-selected="false"')
-  })
-
-  it('renders the tab strip even while a candidate run has no events yet', () => {
-    const html = renderToStaticMarkup(
-      <TracePanel traceLogs={[]} compareTabs={compareTabs} activeCandidateId="fast" live />,
-    )
-    // Empty-state still shows the candidate tabs so the user can switch.
-    expect(html).toContain('aria-label="Model compare candidates"')
-    expect(html).toContain('aria-label="Candidate deepseek-v4"')
-    expect(html).toContain('Waiting for run events')
-  })
-
-  it('omits the tab strip when no compare run is active', () => {
-    const html = render({})
-    expect(html).not.toContain('aria-label="Model compare candidates"')
-  })
-})
-
 describe('failed run reason', () => {
   const failedMetadata = {
     run_id: 'run-1',

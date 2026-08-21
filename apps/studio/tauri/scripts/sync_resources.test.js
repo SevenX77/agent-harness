@@ -7,9 +7,25 @@ const path = require('node:path')
 const test = require('node:test')
 
 const {
+  INSTALLER_SCRIPTS,
   copyRuntimeResources,
   skillsSourceDir,
 } = require('./sync_resources')
+
+/**
+ * A repo root shaped the way `copyRuntimeResources` requires — it carries the
+ * installer scripts the app ships. Tests below then state only the thing they
+ * are actually about, instead of each rebuilding what every repo root has.
+ */
+function fakeRepoRoot(tempRoot) {
+  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const scriptsDir = path.join(repoRoot, 'scripts')
+  fs.mkdirSync(scriptsDir, { recursive: true })
+  for (const name of INSTALLER_SCRIPTS) {
+    fs.writeFileSync(path.join(scriptsDir, name), '# installer\n', 'utf8')
+  }
+  return repoRoot
+}
 
 // What ships is either named explicitly or lives in the repo. The fallback in
 // between used to be `<repo>/../skills` — whatever directory happened to carry
@@ -41,7 +57,7 @@ test('skillsSourceDir reports nothing to bundle rather than guessing a directory
 
 test('copyRuntimeResources ships an empty skills directory when there is nothing to bundle', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
-  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const repoRoot = fakeRepoRoot(tempRoot)
   const vendorDir = path.join(tempRoot, 'vendor')
   // The sibling exists and must still be ignored — this is the shape the dev
   // machine is actually in.
@@ -65,7 +81,7 @@ test('copyRuntimeResources ships an empty skills directory when there is nothing
 // the source tree; they just have no business inside an installer (ledger D5).
 test('copyRuntimeResources does not ship the repo config directory', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
-  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const repoRoot = fakeRepoRoot(tempRoot)
   const vendorDir = path.join(tempRoot, 'vendor')
   fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true })
   fs.writeFileSync(path.join(repoRoot, 'config', 'llm_roles.yaml'), 'roles: []\n', 'utf8')
@@ -96,7 +112,7 @@ test('skillsSourceDir honors an explicit STUDIO_SKILLS_SOURCE_DIR override', () 
 
 test('copyRuntimeResources copies external skills without tool metadata directories', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
-  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const repoRoot = fakeRepoRoot(tempRoot)
   const vendorDir = path.join(tempRoot, 'vendor')
   const externalSkills = path.join(tempRoot, 'skills')
   const skillDir = path.join(externalSkills, 'demo-skill')
@@ -122,4 +138,39 @@ test('copyRuntimeResources copies external skills without tool metadata director
   assert.equal(fs.existsSync(path.join(copiedSkill, '.gemini')), false)
   assert.equal(fs.existsSync(path.join(copiedSkill, '.workspace')), false)
   assert.equal(fs.existsSync(path.join(copiedSkill, '__pycache__')), false)
+})
+
+// The one-click CLI installer used to be looked up at runtime by walking up
+// from the process working directory, so it only ever resolved when the app ran
+// inside the repo; the packaged app has no repo above it and answered "installer
+// script not found" every time (ledger D1). A file the app needs in order to
+// work is a resource of the app.
+test('copyRuntimeResources ships the CLI installer script inside the app', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
+  const repoRoot = fakeRepoRoot(tempRoot)
+  const vendorDir = path.join(tempRoot, 'vendor')
+
+  copyRuntimeResources({ repoRoot, vendorDir, env: {} })
+
+  for (const name of INSTALLER_SCRIPTS) {
+    assert.equal(
+      fs.existsSync(path.join(vendorDir, 'resources', 'scripts', name)),
+      true,
+      `${name} must land where the Rust side resolves it`,
+    )
+  }
+})
+
+// Unlike bundled skills, which may legitimately be absent, a missing installer
+// leaves a button in the UI that cannot work. Fail the build instead.
+test('copyRuntimeResources refuses to build an installer with no installer script', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-sync-resources-'))
+  const repoRoot = path.join(tempRoot, 'agent-harness')
+  const vendorDir = path.join(tempRoot, 'vendor')
+  fs.mkdirSync(repoRoot, { recursive: true })
+
+  assert.throws(
+    () => copyRuntimeResources({ repoRoot, vendorDir, env: {} }),
+    /Installer script not found/,
+  )
 })

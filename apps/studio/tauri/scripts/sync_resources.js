@@ -86,7 +86,35 @@ function copyRuntimeResources({
     console.log('[resources] no skills to bundle: set STUDIO_SKILLS_SOURCE_DIR to ship some')
   }
   fs.mkdirSync(path.join(resourcesTarget, 'workspaces'), { recursive: true })
+  copyInstallerScripts({ repoRoot, resourcesTarget })
 }
+
+/**
+ * The one-click CLI installer script, shipped INSIDE the app.
+ *
+ * It used to be found at runtime by walking up from the process working
+ * directory, which only ever resolved because dev runs inside the repo — the
+ * packaged app has no repo above it and answered "installer script not found
+ * (packaged build?)" every time (ledger D1). A file the app needs in order to
+ * work is a resource of the app, not something to look for in the neighbourhood.
+ *
+ * Missing is a hard error, not an empty directory: unlike bundled skills, an
+ * absent installer leaves a button in the UI that cannot work.
+ */
+function copyInstallerScripts({ repoRoot = REPO_ROOT, resourcesTarget } = {}) {
+  const scriptsTarget = path.join(resourcesTarget, 'scripts')
+  fs.mkdirSync(scriptsTarget, { recursive: true })
+  for (const name of INSTALLER_SCRIPTS) {
+    const source = path.join(repoRoot, 'scripts', name)
+    if (!fs.existsSync(source)) {
+      throw new Error(`Installer script not found: ${source}`)
+    }
+    fs.copyFileSync(source, path.join(scriptsTarget, name))
+  }
+}
+
+/** Kept in step with `CLI_INSTALLER_SCRIPT_NAME` in `src/lib.rs` (a test asserts it). */
+const INSTALLER_SCRIPTS = ['install-claude-code-wsl.ps1']
 
 function main() {
   copyBackend()
@@ -104,7 +132,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  INSTALLER_SCRIPTS,
   copyBackend,
+  copyInstallerScripts,
   copyRuntimeResources,
   skillsSourceDir,
   shouldCopyResourcePath,

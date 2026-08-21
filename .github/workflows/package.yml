@@ -1,0 +1,114 @@
+# Builds the Windows installer, and proves the app it installs can find its own
+# Python sidecar.
+#
+# Why this exists: until now nothing in CI ever ran `tauri build`. The release
+# chain was therefore only as correct as the last person who happened to run it
+# by hand on their own machine — and it had been broken for an unknown length of
+# time, in a way no test could see (`tauri.conf.json` called `python3`, which
+# does not exist on Windows, so `beforeBuildCommand` died before Rust started).
+#
+# The second step matters as much as the first. A release build that cannot find
+# its resources does not fail: `resource_root_for_runtime_mode` in
+# `apps/studio/tauri/src/sidecar.rs` falls back to `default_tauri_dir()`, which
+# is `env!("CARGO_MANIFEST_DIR")` — the BUILD machine's source path, compiled
+# into the binary. On the builder's own box that path exists, so a package
+# missing its sidecar still launches there and looks fine. Installing the
+# artifact and asserting the sidecar resolves INSIDE the install directory is
+# the only check that tells those two apart.
+name: package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/studio/tauri/**'
+      - 'apps/studio/backend/scripts/build_vendor.py'
+      - '.github/workflows/package.yml'
+      - 'uv.lock'
+      - '**/pyproject.toml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio/tauri/**'
+      - 'apps/studio/backend/scripts/build_vendor.py'
+      - '.github/workflows/package.yml'
+      - 'uv.lock'
+      - '**/pyproject.toml'
+
+permissions:
+  contents: read
+
+# The only workflow here that carries a concurrency group, because it is the
+# only one where a superseded run is expensive: push twice to a PR and the
+# first build spends the better part of an hour producing an installer for a
+# commit nobody will look at again. `ci.yml` runs in minutes and is left alone.
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    # A cold Rust release build of the Tauri stack plus the vendored dependency
+    # closure. The paths filter above keeps it off PRs that cannot affect it.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # `beforeBuildCommand` runs `uv run python backend/scripts/build_vendor.py`,
+      # and build_vendor.py drives `uv export` / `uv pip install` over the
+      # workspace. Both need the workspace resolved first.
+      - name: Sync workspace dependencies
+        run: uv sync --all-packages --all-extras --group dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/studio/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/studio/frontend
+        run: npm ci
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/studio/tauri
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.11" --locked
+
+      # This single command runs the whole chain: frontend build, portable
+      # CPython download, ah vendoring, the backend dependency closure, resource
+      # sync, then the Rust release build and the NSIS bundle.
+      - name: Build the installer
+        working-directory: apps/studio/tauri
+        run: cargo tauri build --bundles nsis
+
+      - name: Install it and check the sidecar landed inside
+        shell: pwsh
+        run: ./apps/studio/tauri/scripts/verify_installed_sidecar.ps1
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: skill-studio-windows-nsis
+          path: apps/studio/tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          # ~155 MB a run, and what it is for — downloading and trying the
+          # installer by hand — has a lifetime measured in days, not the
+          # default 90.
+          retention-days: 14

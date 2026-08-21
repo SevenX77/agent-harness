@@ -8,9 +8,7 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { spawnSync } = require('node:child_process')
-
-const { download, verifySha256 } = require('./download_runtime')
+const { download, extractWithTar, verifySha256 } = require('./download_runtime')
 
 const TAURI_DIR = path.resolve(__dirname, '..')
 const DEFAULT_LOCK_PATH = path.join(TAURI_DIR, 'ah-vendor.lock.json')
@@ -76,20 +74,6 @@ async function ensureArchive(artifact, downloadsDir, downloadFile) {
   } catch (error) {
     fs.rmSync(partialPath, { force: true })
     throw error
-  }
-}
-
-// -xf lets bsdtar (Windows 10+) and GNU tar alike auto-detect the xz stream.
-// GNU tar (Git Bash/msys) reads `D:\...` as a remote-host spec (the colon), so
-// both paths are passed colon-free: relative, from the archive's directory —
-// safe because the downloads dir and the extract dir live in the same vendor
-// tree by construction.
-function extractWithTar(archivePath, intoDir) {
-  const cwd = path.dirname(archivePath)
-  const args = ['-xf', path.basename(archivePath), '-C', path.relative(cwd, intoDir) || '.']
-  const result = spawnSync('tar', args, { cwd, stdio: 'inherit' })
-  if (result.status !== 0) {
-    throw new Error(`tar extraction failed with exit code ${result.status}`)
   }
 }
 

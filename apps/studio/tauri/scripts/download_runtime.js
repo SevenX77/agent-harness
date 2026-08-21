@@ -169,14 +169,43 @@ async function ensureArchive(artifact, downloadsDir) {
   }
 }
 
+// How every archive in this vendor tree gets unpacked. `tar` is not one
+// program: on Windows it is whichever of System32's bsdtar or Git's GNU tar
+// comes first on PATH, and the two disagree about what a colon means. GNU tar
+// reads `D:\...\cpython.tar.gz` as the rsh-style `host:path` and tries to reach
+// a machine called `D` ("Cannot connect to D: resolve failed"); bsdtar reads it
+// as a path. Measured here on GNU tar 1.35 vs bsdtar 3.8.4: every relative form
+// (`sub`, `../dest`, `..\dest`) is accepted by both and only the drive-letter
+// absolute form splits them.
+//
+// So neither end is absolute: tar runs from the archive's own directory and
+// names both the archive and the destination relative to it. Two alternatives
+// were rejected — GNU's `--force-local`, which bsdtar has no such flag for, and
+// pinning an absolute tar, since neither program is guaranteed present. Those
+// pick a winner between the two tars; this removes the disagreement instead.
+// `-xf` rather than `-xzf` so the same command serves .tar.gz and .tar.xz
+// alike; both programs sniff the compression.
+function tarExtractCommand(archivePath, intoDir) {
+  const cwd = path.dirname(archivePath)
+  return {
+    cwd,
+    args: ['-xf', path.basename(archivePath), '-C', path.relative(cwd, intoDir) || '.'],
+  }
+}
+
+function extractWithTar(archivePath, intoDir) {
+  const { cwd, args } = tarExtractCommand(archivePath, intoDir)
+  const result = spawnSync('tar', args, { cwd, stdio: 'inherit' })
+  if (result.status !== 0) {
+    throw new Error(`tar extraction failed with exit code ${result.status}`)
+  }
+}
+
 function extractRuntime(archivePath, runtimeDir, target, artifact, lock) {
   fs.mkdirSync(path.dirname(runtimeDir), { recursive: true })
   const tempDir = fs.mkdtempSync(path.join(path.dirname(runtimeDir), '.python-runtime-'))
   try {
-    const result = spawnSync('tar', ['-xzf', archivePath, '-C', tempDir], { stdio: 'inherit' })
-    if (result.status !== 0) {
-      throw new Error(`tar extraction failed with exit code ${result.status}`)
-    }
+    extractWithTar(archivePath, tempDir)
 
     const extractedPythonDir = path.join(tempDir, 'python')
     const sourceDir = fs.existsSync(extractedPythonDir) ? extractedPythonDir : tempDir
@@ -236,11 +265,13 @@ module.exports = {
   REQUIRED_TARGETS,
   artifactFor,
   download,
+  extractWithTar,
   hostTargetTriple,
   loadLock,
   main,
   pythonExecutable,
   sha256File,
+  tarExtractCommand,
   validateLock,
   verifySha256,
 }

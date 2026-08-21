@@ -354,6 +354,22 @@ impl CliDependencyStatus {
 /// Windows-binary 陷阱判据;登录态只读存在性/有效期,不碰凭据内容。
 /// 最新版检查(修订 2026-08-12)同乘这一次探测:curl 后台并行查三源,本地探测跑完
 /// 才 wait,慢网只慢不卡;查询失败不发 `latest:` 行——查不到 ≠ 版本旧。
+///
+/// **登录态判「过期」的判据(修订 2026-08-21,台账 P5 的同源问题)**:一份 OAuth
+/// 凭据有两个到期时刻,只有后一个意味着「你得重新登录」。
+/// `~/.claude/.credentials.json` 两个都存着:`expiresAt` 是 access token 的
+/// (实测这台机器 8 小时档),`refreshTokenExpiresAt` 是 refresh token 的
+/// (实测 14 天档)。access token 过期是**每天都发生的常态**,CLI 下次调用拿
+/// refresh token 自己换新;拿它判 broken 等于天天给一个能用的登录报「过期」,
+/// 是凭空造一个不存在的故障。所以这里只认 `refreshTokenExpiresAt`。
+///
+/// codex 那一行因此**只能报 ok**,不是漏写:`~/.codex/auth.json` 里唯一带
+/// 到期时刻的是 `id_token`(实测 1 小时档,等价于 access token),而
+/// `refresh_token` 是不透明串(实测中段 4 字符,不是 JWT),本地读不出它的
+/// 到期时刻。`codex login status` 也只看文件在不在——实测 id_token 已过期时
+/// 它照答 "Logged in using ChatGPT"。主动去换一次 token 又被 ah 决议 0006
+/// 挡着(refresh token 每次使用都轮转,探测一次就把 CLI 自己的凭据链岔开)。
+/// **说不出到期时刻就不下判断**,同一条原则,claude 缺字段时也报 ok。
 const CLI_DEPENDENCY_PROBE_SCRIPT: &str = r#"host_home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6); [ -n "$host_home" ] || host_home="$HOME"
 latest_dir=""
 if command -v curl >/dev/null 2>&1 && latest_dir=$(mktemp -d 2>/dev/null); then
@@ -377,11 +393,11 @@ probe_cli claude "$host_home/.local/bin/claude"
 probe_cli codex "$host_home/.codex/packages/standalone/current/bin/codex"
 cred="$host_home/.claude/.credentials.json"
 if [ -s "$cred" ] && grep -q '"accessToken"' "$cred" 2>/dev/null; then
-  exp=$(grep -o '"expiresAt":[0-9]*' "$cred" | head -1 | cut -d: -f2)
+  rexp=$(grep -o '"refreshTokenExpiresAt":[0-9]*' "$cred" | head -1 | cut -d: -f2)
   now_ms=$(( $(date +%s) * 1000 ))
   acct=$(grep -o '"emailAddress": *"[^"]*"' "$host_home/.claude.json" 2>/dev/null | head -1 | cut -d'"' -f4)
-  if [ -n "$exp" ] && [ "$exp" -gt "$now_ms" ]; then printf 'claude_auth\tok\t\t\t%s\n' "$acct"
-  else printf 'claude_auth\tbroken\t\ttoken expired\t%s\n' "$acct"; fi
+  if [ -n "$rexp" ] && [ "$rexp" -le "$now_ms" ]; then printf 'claude_auth\tbroken\t\tsign-in expired\t%s\n' "$acct"
+  else printf 'claude_auth\tok\t\t\t%s\n' "$acct"; fi
 else printf 'claude_auth\tmissing\t\t\n'; fi
 if [ -s "$host_home/.codex/auth.json" ]; then
   idt=$(grep -o '"id_token": *"[^"]*"' "$host_home/.codex/auth.json" 2>/dev/null | head -1 | cut -d'"' -f4)
@@ -6176,33 +6192,90 @@ mod tests {
         Some(String::from_utf8_lossy(&output.ok()?.stdout).into_owned())
     }
 
-    /// 台账 P4 的判据:token 过期时仍要说出挂着的是哪个账号——换账号排障最需要
+    /// 造一份 claude 凭据 fixture:账号写进 `.claude.json`,凭据字段由调用方给。
+    ///
+    /// `home` 每个用例一份独立目录,`run_probe_script_against_home` 跑完即删。
+    fn claude_credentials_home(tag: &str, oauth_fields: &str) -> std::path::PathBuf {
+        let home = std::env::temp_dir().join(format!(
+            "studio-probe-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".claude.json"),
+            "{\n  \"oauthAccount\": {\n    \"emailAddress\": \"probe@example.com\"\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claude/.credentials.json"),
+            format!(r#"{{"claudeAiOauth":{{"accessToken":"test-not-a-real-token",{oauth_fields}}}}}"#),
+        )
+        .unwrap();
+        home
+    }
+
+    /// 2001 年与 2100 年,两头都远离任何真机时钟,所以用例不看今天是几号。
+    const LONG_PAST_MS: i64 = 1_000_000_000_000;
+    const FAR_FUTURE_MS: i64 = 4_102_444_800_000;
+
+    /// 台账 P4 的判据:登录过期时仍要说出挂着的是哪个账号——换账号排障最需要
     /// 知道这件事的,恰恰就是这一刻。
     ///
     /// 字段丢在探测这一端,所以也只能修在这一端:渲染层是「给了就画」
     /// (`CliSection.tsx:279-282` 的 `row.account ? … : null`),它对 state 一无所知。
     #[test]
-    fn test_an_expired_claude_token_still_names_its_account() {
-        let home = std::env::temp_dir().join(format!("studio-probe-expired-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(home.join(".claude")).unwrap();
-        std::fs::write(
-            home.join(".claude.json"),
-            "{\n  \"oauthAccount\": {\n    \"emailAddress\": \"expired-probe@example.com\"\n  }\n}\n",
-        )
-        .unwrap();
-        // expiresAt 落在 2001 年,远早于任何真机时钟,claude_auth 必走 broken 分支。
-        std::fs::write(
-            home.join(".claude/.credentials.json"),
-            r#"{"claudeAiOauth":{"accessToken":"test-not-a-real-token","expiresAt":1000000000000}}"#,
-        )
-        .unwrap();
+    fn test_an_expired_sign_in_still_names_its_account() {
+        let home = claude_credentials_home(
+            "signin-expired",
+            &format!(
+                r#""expiresAt":{LONG_PAST_MS},"refreshTokenExpiresAt":{LONG_PAST_MS}"#
+            ),
+        );
         let Some(stdout) = run_probe_script_against_home(&home) else {
             return;
         };
         assert!(
-            stdout.contains("claude_auth\tbroken\t\ttoken expired\texpired-probe@example.com"),
+            stdout.contains("claude_auth\tbroken\t\tsign-in expired\tprobe@example.com"),
             "过期的 claude 登录行必须仍在第 5 列给出账号;实际输出: {stdout}"
+        );
+    }
+
+    /// 判据来自凭据文件本身:`.credentials.json` 存着**两个**到期时刻,
+    /// `expiresAt` 是 access token 的(实测这台机器上是 8 小时档),
+    /// `refreshTokenExpiresAt` 是 refresh token 的(实测 14 天档)。
+    /// access token 过期是**每天都会发生的常态**,CLI 下次调用自己换新的;
+    /// 拿它判 broken 等于每天给一个能用的登录扣「过期」的帽子。
+    /// 真正意味着「必须重新登录」的,是那个换新用的凭据自己也过期了。
+    #[test]
+    fn test_a_stale_access_token_is_not_a_signed_out_account() {
+        let home = claude_credentials_home(
+            "access-stale",
+            &format!(
+                r#""expiresAt":{LONG_PAST_MS},"refreshTokenExpiresAt":{FAR_FUTURE_MS}"#
+            ),
+        );
+        let Some(stdout) = run_probe_script_against_home(&home) else {
+            return;
+        };
+        assert!(
+            stdout.contains("claude_auth\tok\t\t\tprobe@example.com"),
+            "access token 过期但 refresh 仍在有效期内时,登录行必须是 ok;实际输出: {stdout}"
+        );
+    }
+
+    /// 说不出到期时刻,就不许替它宣布过期。缺字段是「不知道」,不是「已掉线」——
+    /// 同一条原则也是 codex 那一行只能报 ok 的理由(台账 P5):它的 refresh token
+    /// 是不透明串,本地根本没有可读的到期时刻。
+    #[test]
+    fn test_a_credential_without_a_refresh_expiry_is_not_declared_expired() {
+        let home = claude_credentials_home("no-refresh-expiry", r#""expiresAt":1000000000000"#);
+        let Some(stdout) = run_probe_script_against_home(&home) else {
+            return;
+        };
+        assert!(
+            stdout.contains("claude_auth\tok\t\t\tprobe@example.com"),
+            "凭据里没有 refresh 到期时刻时,不得判定过期;实际输出: {stdout}"
         );
     }
 
@@ -6217,7 +6290,8 @@ mod tests {
             "/mnt/*",
             ".claude/.credentials.json",
             ".codex/auth.json",
-            "expiresAt",
+            // 到期判据认的是 refresh 凭据那一个,不是 access token 的 expiresAt。
+            "refreshTokenExpiresAt",
         ] {
             assert!(
                 CLI_DEPENDENCY_PROBE_SCRIPT.contains(needle),

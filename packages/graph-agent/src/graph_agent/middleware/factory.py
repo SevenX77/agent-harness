@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents import AgentState
@@ -38,7 +38,6 @@ def build_middleware_chain(
     io_manager: IOManager,
     schema_engine: SchemaEngine | None = None,
     current_phase_schema: type[BaseModel] | SchemaObject | None = None,
-    business_validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] | None = None,
     phase_name: str = "unknown",
     unattended: bool = False,
     interrupt_fn: InterruptFn | None = None,
@@ -68,7 +67,6 @@ def build_middleware_chain(
             unattended=unattended,
             schema_engine=schema_engine,
             current_phase_schema=current_phase_schema,
-            business_validator=business_validator,
             phase_name=phase_name,
             interrupt_fn=interrupt_fn,
             callbacks=callbacks,
@@ -103,7 +101,6 @@ def build_middleware_chain_cognitive_flow(
     io_manager: IOManager | None = None,
     schema_engine: SchemaEngine | None = None,
     current_phase_schema: type[BaseModel] | SchemaObject | None = None,
-    business_validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] | None = None,
     phase_name: str = "unknown",
     unattended: bool = False,
     interrupt_fn: InterruptFn | None = None,
@@ -119,7 +116,6 @@ def build_middleware_chain_cognitive_flow(
         unattended=unattended,
         schema_engine=schema_engine,
         current_phase_schema=current_phase_schema,
-        business_validator=business_validator,
         phase_name=phase_name,
         interrupt_fn=interrupt_fn,
     )

@@ -18,7 +18,6 @@ def test_beta_factory_builds_six_middlewares_in_contract_order() -> None:
         io_manager=object(),
         schema_engine=object(),
         current_phase_schema=object(),
-        business_validator=None,
         phase_name="main",
         unattended=False,
         interrupt_fn=None,

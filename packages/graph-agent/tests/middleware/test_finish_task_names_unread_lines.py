@@ -56,11 +56,6 @@ UNREAD_LINES: tuple[tuple[int, str], ...] = (
     (8, "    start_line: 6"),
 )
 
-# 真跑里模型实际收到的那条反馈:相位校验器在残缺数据上得出的判读。
-# 它把模型指向一个不存在的问题(章节分析没坏,坏的是输出格式没被读懂)。
-VALIDATOR_VERDICT_ON_TRUNCATED_DATA = "No segments produced. Re-analyze the chapter text."
-
-
 class Recorder:
     def __init__(self) -> None:
         self.events: list[Any] = []
@@ -72,39 +67,18 @@ class Recorder:
         return [e for e in self.events if getattr(e, "event_type", "") == "finish_task_verdict"]
 
 
-class RecordingValidator:
-    """记下自己有没有被调用过。
-
-    "这一轮没有运行业务校验"是可以直接断言的事实,不必从"错误文本里没出现
-    它的话"反推——后者在业务校验根本没接上时也成立。
-    """
-
-    def __init__(self, errors: list[str]) -> None:
-        self._errors = errors
-        self.calls: list[list[dict[str, Any]]] = []
-
-    def __call__(self, items: list[dict[str, Any]]) -> tuple[bool, list[str]]:
-        self.calls.append(items)
-        return False, list(self._errors)
-
-
 def _schema() -> Any:
     # 故意用 `list[str]`:残缺后的 ['index: 1'] 完美满足这个类型,schema 这一关
     # 拦不住它(见 test_truncated_data_that_satisfies_the_schema_is_refused_anyway)。
     return SchemaEngine().parse_from_md("parsed_segments: list[str]\nsegments_summary: str")
 
 
-def _middleware(
-    recorder: Recorder,
-    *,
-    business_validator: Any | None = None,
-) -> CognitiveFlowMiddleware:
+def _middleware(recorder: Recorder) -> CognitiveFlowMiddleware:
     return CognitiveFlowMiddleware(
         IOManager([IODef(source_field="business_data_parsed", target_field="items")]),
         schema_engine=SchemaEngine(),
         current_phase_schema=_schema(),
         phase_name="segment",
-        business_validator=business_validator,
         callbacks=(recorder,),
     )
 
@@ -179,26 +153,32 @@ def test_the_verdict_details_narrate_the_parse_gap_on_a_rejected_verdict() -> No
     )
 
 
-def test_the_business_verdict_derived_from_truncated_data_never_reaches_the_model() -> None:
-    """先证明 gap 确实被报了,再证明残缺数据推出的判读没被一起报。
+def test_no_later_stage_judges_the_data_that_was_not_read() -> None:
+    """先证明 gap 确实被报了,再证明后面的关卡一道都没在残缺数据上开口。
 
-    #850 的这条测试只有一句 `assert "segments_summary" not in joined`,没有正向
-    前置:功能完全没实现时 errors 是空的,否定断言照样成立(2026-08-18 实测,
-    回退到 49f7ad0d 它 PASSED)。一条在"什么都没做"时也成立的断言没有区分力。
+    真跑 09f67b86 里模型收到的是相位校验器在残缺数据上得出的判读
+    (「No segments produced. Re-analyze the chapter text.」)——它把模型指向一个
+    不存在的问题:章节分析没坏,坏的是输出格式没被读懂。所以 gap 必须**短路**,
+    而不是"照常判完再把 gap 一起附上"。
+
+    判据落在叙述上,因为叙述逐步记录了哪一关真的跑过:gap 之后不该再出现
+    schema 那一步。#850 的原版只有一句"结论文本没出现",而功能完全没实现时
+    那句照样成立(2026-08-18 实测回退到 49f7ad0d 它 PASSED)——一条在"什么都
+    没做"时也成立的断言没有区分力。
     """
     recorder = Recorder()
-    validator = RecordingValidator([VALIDATOR_VERDICT_ON_TRUNCATED_DATA])
 
-    command = _submit(_middleware(recorder, business_validator=validator), NESTED_BULLET_MD)
+    command = _submit(_middleware(recorder), NESTED_BULLET_MD)
 
     content = str(_reply_to_model(command).content)
     for line_number, text in UNREAD_LINES:
         assert _quotes_line(content, line_number, text), f"第 {line_number} 行没被点名"
-    assert validator.calls == [], (
-        f"业务校验判的是模型根本没写过的东西,这一轮不许运行;实际被喂了:{validator.calls}"
-    )
-    assert VALIDATOR_VERDICT_ON_TRUNCATED_DATA not in content, (
-        "真跑里模型收到的正是这句,它指向一个不存在的问题,不许和 gap 一起回给模型"
+
+    (verdict,) = recorder.verdicts()
+    joined = " ".join(verdict.details).lower()
+    assert "md2json" in joined, "gap 是在解析之后发现的,所以解析那一步必须在叙述里"
+    assert "schema check" not in joined, (
+        f"gap 之后不许再有关卡在残缺数据上下结论;实际叙述:{verdict.details}"
     )
 
 

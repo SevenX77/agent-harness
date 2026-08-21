@@ -19,6 +19,19 @@ from graph_agent.runtime.state_mapper import (
 )
 
 
+def _project_and_require(mapper: StateMapper, state: WorkflowState) -> WorkflowState:
+    """The two halves ``PhaseWrapper`` runs back to back on entering a phase.
+
+    They are separate methods because only the second one may reject: reporting
+    what a phase was handed calls the projection alone (ledger E18). These cases
+    are about the input contract's semantics — which fields count as required at
+    which nesting level — so they exercise the pair.
+    """
+    phase_input = mapper.select_declared_inputs(state)
+    mapper.require_declared_inputs(phase_input)
+    return phase_input
+
+
 def test_filter_runtime_inputs_uses_declared_schema_properties() -> None:
     schema = {
         "type": "object",
@@ -29,7 +42,7 @@ def test_filter_runtime_inputs_uses_declared_schema_properties() -> None:
     assert filter_runtime_inputs({"topic": "A", "extra": True}, schema) == {"topic": "A"}
 
 
-def test_build_phase_input_missing_required_field_raises_state_mapping_fatal() -> None:
+def test_a_missing_required_input_field_is_a_mapping_failure() -> None:
     """MVP1 contract (compile-rules §2.3 / graph-exec §3): slicing must fail fast
     when a declared-required input field is absent from the blackboard, instead
     of silently dropping it and letting the phase run on partial input."""
@@ -48,14 +61,14 @@ def test_build_phase_input_missing_required_field_raises_state_mapping_fatal() -
     )
 
     with pytest.raises(GraphAgentFatalError) as exc_info:
-        mapper.build_phase_input(state)
+        _project_and_require(mapper, state)
 
     assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
     assert exc_info.value.payload.phase_id == "analyze"
     assert "chapter" in str(exc_info.value)
 
 
-def test_build_phase_input_passes_when_required_fields_present() -> None:
+def test_a_present_required_input_field_passes() -> None:
     mapper = StateMapper(
         input_schema={
             "type": "object",
@@ -70,12 +83,12 @@ def test_build_phase_input_passes_when_required_fields_present() -> None:
         messages=[],
     )
 
-    phase_input = mapper.build_phase_input(state)
+    phase_input = _project_and_require(mapper, state)
 
     assert phase_input["data"].model_dump() == {"topic": "A"}
 
 
-def test_build_phase_input_missing_nested_required_field_raises() -> None:
+def test_a_missing_nested_required_input_field_is_a_mapping_failure() -> None:
     """MVP1 contract (compile-rules §2.3 slice row): ``required`` is enforced at
     EVERY object nesting level, not only the top. A declared-required sub-field
     of a present object (``chapter.aa_number``) missing from the blackboard is
@@ -102,14 +115,14 @@ def test_build_phase_input_missing_nested_required_field_raises() -> None:
     )
 
     with pytest.raises(GraphAgentFatalError) as exc_info:
-        mapper.build_phase_input(state)
+        _project_and_require(mapper, state)
 
     assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
     assert exc_info.value.payload.field_path == "chapter.aa_number"
     assert "chapter.aa_number" in str(exc_info.value)
 
 
-def test_build_phase_input_passes_when_nested_required_present() -> None:
+def test_a_present_nested_required_input_field_passes() -> None:
     mapper = StateMapper(
         input_schema={
             "type": "object",
@@ -130,12 +143,12 @@ def test_build_phase_input_passes_when_nested_required_present() -> None:
         messages=[],
     )
 
-    phase_input = mapper.build_phase_input(state)
+    phase_input = _project_and_require(mapper, state)
 
     assert phase_input["data"].model_dump() == {"chapter": {"aa_number": 3, "title": "x"}}
 
 
-def test_build_phase_input_absent_optional_object_skips_nested_required() -> None:
+def test_an_absent_optional_object_skips_its_nested_required() -> None:
     """Nested required only bites when the parent object is present (standard
     JSON-Schema semantics): an ABSENT optional object must not raise on its
     unmet sub-required — only the missing parent (if the parent itself is
@@ -161,7 +174,7 @@ def test_build_phase_input_absent_optional_object_skips_nested_required() -> Non
         messages=[],
     )
 
-    phase_input = mapper.build_phase_input(state)
+    phase_input = _project_and_require(mapper, state)
 
     assert phase_input["data"].model_dump() == {"topic": "A"}
 
@@ -285,3 +298,34 @@ def test_reader_sandbox_state_does_not_inherit_parent_blackboard(tmp_path: Path)
     assert state["messages"] == []
     assert state["flow"].timeout_s == 60
     assert getattr(state["flow"], "run_id", None) is None
+
+
+def test_the_projection_alone_never_rejects_a_missing_required_field() -> None:
+    """The half that reports must not be the half that judges.
+
+    ``_emit_input_dispatch`` calls the projection to say what a phase was
+    handed. While the two were one method, that call raised on a missing
+    required input — killing the run from the reporting path, before the phase's
+    execution had been announced, so no event ever named the phase (E18).
+    """
+    mapper = StateMapper(
+        input_schema={
+            "type": "object",
+            "required": ["chapter"],
+            "properties": {"chapter": {"type": "string"}},
+        },
+        phase_id="analyze",
+    )
+    state = WorkflowState(
+        data=BusinessData.model_validate({"topic": "A"}),
+        flow=FrameworkState(),
+        messages=[],
+    )
+
+    projected = mapper.select_declared_inputs(state)
+
+    assert projected["data"].model_dump() == {}, (
+        "the projection keeps only declared inputs that are actually there"
+    )
+    with pytest.raises(GraphAgentFatalError):
+        mapper.require_declared_inputs(projected)

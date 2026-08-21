@@ -74,7 +74,7 @@ def test_gamma2_input_funnel_drops_unknown_fields_into_normalized_inputs() -> No
         messages=["parent"],
     )
 
-    phase_state = mapper.build_phase_input(state)
+    phase_state = mapper.select_declared_inputs(state)
 
     assert phase_state["data"].model_dump() == {"topic": "A", "also": "not implicit"}
 

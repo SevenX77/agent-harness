@@ -22,7 +22,7 @@ messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外
 相位之间的数据只走黑板:相位在 `io.inputs` 里声明它消费什么,就只拿到什么;上游相位的对话记录
 不是第二条入口。这条规则约束的是**递给相位什么**,不约束**运行留下什么**——相位产出的 messages
 仍然并回全局 `WorkflowState.messages` 通道,所以整次运行的对话记录、checkpoint 与 HITL resume
-都建立在完整历史之上。落点:`runtime/state_mapper.py` 的 `build_phase_input`;同形的
+都建立在完整历史之上。落点:`runtime/state_mapper.py` 的 `select_declared_inputs`;同形的
 SUBGRAPH(`graph_assembler.py:1638`)与 subagent(`:2916`)本来就是这个语义。
 理由与现场证据见 `.kiro/specs/decision-2026-08-16-a-phase-opens-its-own-conversation.md`。
 

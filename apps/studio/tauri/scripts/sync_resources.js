@@ -132,6 +132,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  INSTALLER_SCRIPTS,
   copyBackend,
   copyInstallerScripts,
   copyRuntimeResources,

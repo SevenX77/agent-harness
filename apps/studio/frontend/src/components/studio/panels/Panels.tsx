@@ -89,6 +89,7 @@ interface PanelsProps {
   onClearTraceScope?: () => void
   /** Per-node golden promote (atom #32), surfaced in the node Properties panel. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
+  onDesignGolden?: (node: { id: string; label?: string }) => void
   // n4-trace#23 (P8 model-compare): per-candidate Trace tabs + selection, forwarded
   // to the live TracePanel so the user can switch between candidate runs.
   compareTabs?: CompareTab[]
@@ -148,6 +149,7 @@ export function Panels({
   onResumeEdgeDownstream,
   onClearTraceScope,
   onPromoteNode,
+  onDesignGolden,
   compareTabs,
   activeCandidateId,
   onSelectCandidate,
@@ -280,6 +282,7 @@ export function Panels({
           onCompareToGolden={onCompareToGolden}
           onPromoteToGolden={onPromoteToGolden}
           onPromoteNode={onPromoteNode}
+          onDesignGolden={onDesignGolden}
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
           metadata={traceLiveMetadata}

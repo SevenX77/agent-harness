@@ -767,3 +767,64 @@ describe('a narrowed trace does not end with a verdict about the whole run (PM 0
     expect(scoped).not.toContain('2 route issues')
   })
 })
+
+describe('TracePanel design-golden entry (E3 entry①)', () => {
+  const goldenlessAgentNode = { id: 'nodeA', data: { label: 'Node A', mode: 'agent' as const } }
+
+  it('offers to design this node’s golden when the skill has never run', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[]}
+        selectedNode={goldenlessAgentNode}
+        canCompare={false}
+        onDesignGolden={() => undefined}
+      />,
+    )
+    expect(html).toContain('Design golden')
+    expect(html).toContain('aria-label="Design golden for node ')
+    expect(html).toContain('Node A')
+  })
+
+  it('offers it during a run too, beside the promote button', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={goldenlessAgentNode}
+        canCompare
+        onDesignGolden={() => undefined}
+        onPromoteNode={() => undefined}
+      />,
+    )
+    expect(html).toContain('Design golden')
+    expect(html).toContain('Promote node to golden')
+  })
+
+  it('omits it once the focused agent node already has golden', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[]}
+        selectedNode={{ id: 'nodeA', data: { label: 'Node A', mode: 'agent', goldenState: 'has-golden' } }}
+        onDesignGolden={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Design golden')
+  })
+
+  it('omits it for a node that never gets golden', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={[]}
+        selectedNode={{ id: 'gate', data: { label: 'Gate', mode: 'logic' } }}
+        onDesignGolden={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Design golden')
+  })
+
+  it('omits it when no handler is wired', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel traceLogs={[]} selectedNode={goldenlessAgentNode} />,
+    )
+    expect(html).not.toContain('Design golden')
+  })
+})

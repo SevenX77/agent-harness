@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CopilotMessage } from '../../types/copilot'
 import {
   buildCopilotJudgeDraft,
+  buildGoldenDesignDraft,
   codeAssistantAttachMenuLabels,
   codeAssistantCloseButtonLabel,
   codeAssistantPendingLabel,
@@ -1232,3 +1233,26 @@ function copilotState(overrides: Partial<{
     switchSession: vi.fn(),
   }
 }
+
+describe('buildGoldenDesignDraft (E3 entry①)', () => {
+  it('asks for the node by name and points at the two documents the design names', () => {
+    const draft = buildGoldenDesignDraft({ id: 'nodeA', label: 'Draft section' })
+
+    expect(draft).toContain('Draft section')
+    expect(draft).toContain('nodeA')
+    expect(draft).toContain('GRAPH.md')
+    expect(draft).toContain('SKILL.md')
+  })
+
+  it('tells copilot the schema is not the standard to design against', () => {
+    const draft = buildGoldenDesignDraft({ id: 'nodeA' })
+
+    expect(draft).toContain('不要把 input/output schema 当成黄金标准')
+    expect(draft).toContain('谨慎')
+  })
+
+  it('falls back to the node id when the node has no label', () => {
+    expect(buildGoldenDesignDraft({ id: 'nodeA' })).toContain('「nodeA」')
+    expect(buildGoldenDesignDraft({ id: 'nodeA', label: '   ' })).toContain('「nodeA」')
+  })
+})

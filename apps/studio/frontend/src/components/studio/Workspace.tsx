@@ -1025,6 +1025,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [goldenDiff, mutateGoldenBaselines],
   )
 
+  // E3 entry①: the trace asks for a golden to be DESIGNED for one node. The panel
+  // consumes the request and clears it, so a re-render cannot replay it.
+  const [goldenDesignRequest, setGoldenDesignRequest] = useState<{ nodeId: string; label?: string } | null>(null)
+  const handleDesignGolden = useCallback(
+    (node: { id: string; label?: string }) => {
+      setGoldenDesignRequest({ nodeId: node.id, label: node.label })
+      // Opened directly rather than through the morph: the morph animates the panel
+      // out of the FAB the user pressed, and a press in the trace has no FAB to
+      // come from.
+      setCopilotOpen(true)
+    },
+    [],
+  )
+
   const copilot = useCopilot(currentSkillId, currentWorkspaceRoot)
 
   useEffect(() => {
@@ -2837,6 +2851,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onCompareToGolden={handleCompareToGolden}
         onPromoteToGolden={handlePromoteToGolden}
         onPromoteNode={handlePromoteNode}
+        onDesignGolden={handleDesignGolden}
         traceSelectedEventId={traceSelection.selectedEventId}
         onSelectTraceEvent={(index, event) => traceSelection.selectEvent(event, index)}
         traceCanResume={Boolean(runId)}
@@ -2898,6 +2913,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         view={copilotJudgeRefs ? "eval" : "edit"}
         judgeRefs={copilotJudgeRefs}
         completedRunId={completedRunId}
+        goldenDesignRequest={goldenDesignRequest}
+        onGoldenDesignRequestHandled={() => setGoldenDesignRequest(null)}
         onJudgePrepared={setCopilotJudgeResult}
         onFileChanged={handleCopilotFileChanged}
         onCollapse={() => startMorph("close", fabPosition)}

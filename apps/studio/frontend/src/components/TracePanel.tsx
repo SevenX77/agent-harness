@@ -18,6 +18,7 @@ import {
   FlaskConical,
   GitCompareArrows,
   MoreVertical,
+  PencilLine,
   Play,
   ShieldCheck,
   X,
@@ -105,6 +106,15 @@ interface TracePanelProps {
    * one node's golden via the node_id-aware saveGoldenBaseline.
    */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
+  /**
+   * E3 entry①「trace 内占位节点旁按钮」: design this node's golden with copilot
+   * instead of capturing it from output. Deliberately NOT gated on a run — a
+   * placeholder node is exactly the node that has never produced anything, and
+   * F6 puts no timing condition on writing a golden ("不限制 golden 的创建时机").
+   * Its sibling `onPromoteNode` stays run-gated because promoting means promoting
+   * a real output, which does not exist yet.
+   */
+  onDesignGolden?: (node: { id: string; label?: string }) => void
   canResume?: boolean
   resumeLoading?: boolean
   onResume?: () => void
@@ -297,6 +307,7 @@ export function TracePanel({
   onCompareToGolden,
   onPromoteToGolden,
   onPromoteNode,
+  onDesignGolden,
   canResume = false,
   resumeLoading = false,
   onResume,
@@ -369,6 +380,9 @@ export function TracePanel({
       setNodePromoting(false)
     }
   }
+  // E3 entry①: writing down what this node SHOULD produce needs no run — only a
+  // focused agent node that has no golden yet. Deliberately not `&& canCompare`.
+  const canDesignFocusedNodeGolden = Boolean(onDesignGolden) && isGoldenlessAgentNode(selectedNode)
 
   // n4-trace#23: the per-candidate tab strip. Rendered whenever a compare run is
   // active (even before its events stream in) so the user can switch candidates
@@ -534,6 +548,76 @@ export function TracePanel({
     </div>
   ) : null
 
+  // The actions that belong to whatever the trace is focused on. Rendered by BOTH
+  // branches below: a skill that has never run reaches the empty branch, and that
+  // is precisely when "write down what this node should produce" is the only thing
+  // to do here — hiding the row with the event list left E3 entry① unreachable.
+  const focusActionRow = degradedRouteCount > 0 || canPromoteFocusedNode || canDesignFocusedNodeGolden ? (
+    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+      {degradedRouteCount > 0 ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Show routing decisions — ${degradedRouteCount} route issue${degradedRouteCount === 1 ? '' : 's'}`}
+              aria-pressed={filter.searchTerm === ROUTE_DECISION_SEARCH_TERM}
+              onClick={() => filter.setSearchTerm(
+                filter.searchTerm === ROUTE_DECISION_SEARCH_TERM ? '' : ROUTE_DECISION_SEARCH_TERM,
+              )}
+              className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
+            >
+              <AlertTriangle className="size-3" />
+              {degradedRouteCount} route issue{degradedRouteCount === 1 ? '' : 's'}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            The gateway had to skip, probe, retry, escalate or fall back {degradedRouteCount} time
+            {degradedRouteCount === 1 ? '' : 's'} during this run — the model actually used may differ
+            from the configured one. Click to show every routing decision, including the route that
+            finally answered.
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+      {canDesignFocusedNodeGolden ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Design golden for node "${focusLabel}"`}
+              onClick={() => selectedNode && onDesignGolden?.({ id: selectedNode.id, label: focusLabel ?? undefined })}
+              className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-semibold text-foreground hover:bg-accent"
+            >
+              <PencilLine className="size-3.5" />
+              Design golden
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Open one copilot chat to write down what this node should produce — no run needed.
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+      {canPromoteFocusedNode ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Promote node "${focusLabel}" to golden`}
+              disabled={nodePromoting}
+              onClick={() => {
+                void handlePromoteFocusedNode()
+              }}
+              className="flex items-center gap-1 rounded-full border border-warning-border px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ShieldCheck className="size-3.5" />
+              {nodePromoting ? 'Promoting node' : 'Promote node to golden'}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Create a golden baseline for just this focused node from the current run</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  ) : null
+
   if (traceEvents.length === 0) {
     return (
       <div role="log" aria-live="polite" aria-label="Trace" className="flex h-full min-h-0 flex-col">
@@ -541,6 +625,9 @@ export function TracePanel({
         {identityStrip}
         {failureBanner}
         {scopeStrip}
+        {focusActionRow ? (
+          <div className="shrink-0 border-b border-border bg-card px-3 py-2">{focusActionRow}</div>
+        ) : null}
         <div className="flex flex-1 items-center justify-center text-sm font-medium text-muted-foreground">
           {live ? 'Waiting for run events' : 'No events recorded for this run'}
         </div>
@@ -571,53 +658,7 @@ export function TracePanel({
             onSelectPhases={filter.setSelectedPhases}
           />
         </div>
-        {degradedRouteCount > 0 || canPromoteFocusedNode ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-          {degradedRouteCount > 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={`Show routing decisions — ${degradedRouteCount} route issue${degradedRouteCount === 1 ? '' : 's'}`}
-                  aria-pressed={filter.searchTerm === ROUTE_DECISION_SEARCH_TERM}
-                  onClick={() => filter.setSearchTerm(
-                    filter.searchTerm === ROUTE_DECISION_SEARCH_TERM ? '' : ROUTE_DECISION_SEARCH_TERM,
-                  )}
-                  className="flex items-center gap-1 rounded-full border border-warning-border bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20"
-                >
-                  <AlertTriangle className="size-3" />
-                  {degradedRouteCount} route issue{degradedRouteCount === 1 ? '' : 's'}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                The gateway had to skip, probe, retry, escalate or fall back {degradedRouteCount} time
-                {degradedRouteCount === 1 ? '' : 's'} during this run — the model actually used may differ
-                from the configured one. Click to show every routing decision, including the route that
-                finally answered.
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
-          {canPromoteFocusedNode ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={`Promote node "${focusLabel}" to golden`}
-                  disabled={nodePromoting}
-                  onClick={() => {
-                    void handlePromoteFocusedNode()
-                  }}
-                  className="flex items-center gap-1 rounded-full border border-warning-border px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ShieldCheck className="size-3.5" />
-                  {nodePromoting ? 'Promoting node' : 'Promote node to golden'}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Create a golden baseline for just this focused node from the current run</TooltipContent>
-            </Tooltip>
-          ) : null}
-        </div>
-        ) : null}
+        {focusActionRow}
         {hitlPrompt ? (
           <HitlPromptForm
             prompt={hitlPrompt}

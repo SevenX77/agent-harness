@@ -129,7 +129,7 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 |---|---|---|---|
 | E1 | agent 节点 golden 状态机:🔘未测试 → 🟡逻辑OK → 🟢有golden | canvas | target-design |
 | E2 | mock 由 golden 状态自动决定(无→占位 / 有→golden_case) | — | target-design |
-| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮 ②**predict/run 跑完 copilot 输入框上方分析 bar 弹窗**(确认→无 golden 节点自动写 golden;细化自旧 sonner 批量,见 [`copilot-assist`](../02_capabilities/copilot-assist/mvp1-alignment.md) F7) | trace/copilot | target-design |
+| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮(`TracePanel` 的 Design golden,**不要求先有 run**——占位节点正是从没产出过东西的那种节点;点它开一个新的 copilot chat,提示词按 [`golden-eval`](../02_capabilities/golden-eval/mvp1-alignment.md) §4 描述驱动那条写)②**predict/run 跑完 copilot 输入框上方分析 bar 弹窗**(确认→无 golden 节点自动写 golden;细化自旧 sonner 批量,见 [`copilot-assist`](../02_capabilities/copilot-assist/mvp1-alignment.md) F7) | trace/copilot | live |
 | E4 | golden 创建路B(手动):按 io.outputs schema 自动生成空模版 json,i/o 面板手填 | i/o 面板 | target-design |
 | E5 | golden 设置/文件归 i/o 面板 | i/o 面板 | target-design |
 | E6 | golden 失效:改 prompt/agent 内部不失效;**仅改 output schema 致缺字段 → 编译错误,必须补才能 predict** | — | target-design |

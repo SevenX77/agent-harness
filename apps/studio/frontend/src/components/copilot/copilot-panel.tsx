@@ -274,6 +274,15 @@ interface CopilotPanelProps {
   } | null
   // F7: id of the run that just finished (predict/run) — drives the analysis bar.
   completedRunId?: string | null
+  /**
+   * E3 entry①: the node the trace asked to design a golden for. A queued intent
+   * owned by the workspace rather than a prop the panel reads at will — the panel
+   * opens one chat for it and calls `onGoldenDesignRequestHandled`, and the
+   * workspace clears it. Without that handshake the same request would re-fire on
+   * every render that happens to keep the prop.
+   */
+  goldenDesignRequest?: { nodeId: string; label?: string } | null
+  onGoldenDesignRequestHandled?: () => void
   onJudgePrepared?: (refs: CopilotJudgeResponse) => void
   // F5/DEF-025: a copilot edit hit disk — reload the editor buffer + recompile.
   onFileChanged?: (path: string, action: CopilotFileAction) => void
@@ -448,6 +457,8 @@ export function CopilotPanel({
   view = 'edit',
   judgeRefs = null,
   completedRunId = null,
+  goldenDesignRequest = null,
+  onGoldenDesignRequestHandled,
   onJudgePrepared,
   onFileChanged,
   onCollapse,
@@ -519,6 +530,18 @@ export function CopilotPanel({
   useEffect(() => {
     setDraftJudgeContext((current) => nextDraftJudgeContext(draft, current, { skillId, view, judgeRefs }))
   }, [draft, skillId, view, judgeRefs])
+
+  // E3 entry①: "开单个 copilot chat" — one node, one chat. A new session rather
+  // than the current one because designing this node's golden is its own
+  // conversation, and appending it to whatever was being discussed would bury it.
+  useEffect(() => {
+    if (!goldenDesignRequest) {
+      return
+    }
+    copilot.newSession()
+    setDraft(buildGoldenDesignDraft({ id: goldenDesignRequest.nodeId, label: goldenDesignRequest.label }))
+    onGoldenDesignRequestHandled?.()
+  }, [goldenDesignRequest, copilot, onGoldenDesignRequestHandled])
 
   const refreshRegistry = useCallback((options: { force?: boolean } = {}) => {
     getRegistry(options)
@@ -1184,6 +1207,32 @@ export function CopilotPanel({
       )}
     </aside>
   )
+}
+
+/**
+ * E3 entry①'s prompt, written to the spec in golden-eval/mvp1-alignment.md §4
+ * ("Copilot 设计 golden 的 prompt(描述驱动)"): read every node's `description` in
+ * GRAPH.md for what this node does inside the workflow, read SKILL.md for what the
+ * author asked of it, and only then produce the expected output. The schema is
+ * explicitly NOT the standard to design against — the author's own i/o standard may
+ * be what is wrong — while changing it is allowed only after reading the whole
+ * context. Stops when the golden is usable and the user accepts it.
+ */
+export function buildGoldenDesignDraft(node: { id: string; label?: string }): string {
+  const name = node.label?.trim() || node.id
+  return [
+    `为节点「${name}」(id: ${node.id})设计 golden——它这一次**应该**产出什么。`,
+    '',
+    '怎么做:',
+    '1. 先读 `GRAPH.md` 里每个节点的 `description`,弄清这个节点在整条 workflow 里承担什么。',
+    '2. 再读该节点的 `SKILL.md`,弄清作者具体要它干什么、是怎么设计的。',
+    '3. 综合这两者,写出一份具体的期望输出。',
+    '',
+    '边界:',
+    '- **不要把 input/output schema 当成黄金标准**——作者定的输入输出标准本身可能就有问题。',
+    '- 确实需要改 schema 时要谨慎,并且贯穿上下文一起看,不要只盯着这一个节点。',
+    '- 产出可用、且我认可之后才算完成。',
+  ].join('\n')
 }
 
 export function buildCopilotJudgeDraft(refs: CopilotJudgeResponse): string {

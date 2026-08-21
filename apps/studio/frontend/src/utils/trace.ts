@@ -72,7 +72,12 @@ export function eventMessage(event: CallbackEvent): string {
     case 'phase_start':
       return `Phase started: ${eventPhase(event)}`
     case 'phase_end':
-      return `Phase finished: ${eventPhase(event)}`
+      // The engine states the outcome (OB13), so the sentence states it too:
+      // "Phase finished" under a run that died in that phase is the panel
+      // repeating the mistake `phase_end` was given a status to end (E17).
+      return event.status === 'failed'
+        ? `Phase failed: ${eventPhase(event)}`
+        : `Phase finished: ${eventPhase(event)}`
     case 'edge_start':
       return `Transition started: ${transitionLabel(event)}`
     case 'edge_end':
@@ -130,6 +135,13 @@ export type TraceSeverity = 'error' | 'warning' | 'normal'
  * pill — ask this one function rather than each keeping a list of types.
  */
 export function eventSeverity(event: CallbackEvent): TraceSeverity {
+  // An event that reports its own outcome is believed, whatever its type —
+  // the same rule the canvas applies in `run-status-projection`. Written once
+  // here rather than as a per-type list, so a phase that failed (OB13) and a
+  // run that crashed both earn the dot without either being special-cased.
+  if (event.status === 'failed' || event.status === 'crashed' || event.status === 'error') {
+    return 'error'
+  }
   if (event.event_type === 'protocol_violation') {
     return 'error'
   }
@@ -722,8 +734,9 @@ export function eventFacts(event: CallbackEvent): EventFact[] | null {
 
   switch (event.event_type) {
     case 'phase_start':
-    case 'phase_end':
       return facts(fact('execution', event.phase_execution_id))
+    case 'phase_end':
+      return facts(fact('outcome', event.status), fact('execution', event.phase_execution_id))
     case 'edge_start':
       return facts(transition(), fact('branch', event.branch_index))
     case 'edge_end':

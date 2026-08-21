@@ -66,21 +66,36 @@ function eventRunId(traceEvent: TraceEventInput, payload: CallbackEvent): string
 /**
  * The one answer to "how does this run stand".
  *
- * The sealed run record wins over the streamed event where both exist: the
- * stream reports how the worker stopped (`interrupted`), the record states
- * what that stop WAS (`cancelled` vs `paused`) — the record is the canonical
- * seal the rest of Studio quotes. With no record verdict, the last streamed
- * `run_ended` decides (a resumed run ends more than once; only the final end
- * describes the state the reader is looking at). With neither, it is running.
+ * Three channels, ranked by how much each one can know:
+ *
+ * 1. The sealed run record. It carries the full status vocabulary, so only it
+ *    separates `cancelled` from `paused`; it is the canonical seal the rest of
+ *    Studio quotes.
+ * 2. The gate the backend published when the run went terminal — the same step
+ *    that wrote the record, so it speaks with the record's authority, just in
+ *    coarser words. It exists as a channel because the record can fail to
+ *    arrive: the read-back is an HTTP round trip, and when it errored there
+ *    used to be nothing left and every derived status stayed `running` forever
+ *    (ledger N5). The caller translates the gate's outcome; see
+ *    `runVerdictFromGateOutcome`.
+ * 3. The last streamed `run_ended`. It only knows the worker stopped, not what
+ *    the stop WAS — and a resumed run ends more than once, so the final end is
+ *    the one describing what the reader is looking at.
+ *
+ * None of the three: running.
  */
 export function runVerdict(
   events: readonly TraceEventInput[] | null | undefined,
   metadata?: RunMetadata | null,
   runId?: string | null,
+  gateVerdict?: RunVerdict | null,
 ): RunVerdict {
   const recorded = metadata?.status
   if (recorded && recorded !== "running") {
     return recorded
+  }
+  if (gateVerdict && gateVerdict !== "running") {
+    return gateVerdict
   }
   let fromEvents: RunVerdict | null = null
   for (const traceEvent of events ?? []) {
@@ -161,13 +176,14 @@ function isPausedEvent(type: string, status: string | null | undefined): boolean
  *
  * The run's verdict then closes out whatever is still marked running: the run
  * owns "is anything executing", and its verdict reaches here even when the
- * stream died before a `run_ended` frame — the sealed record (`metadata`) is
- * the second channel (铁律 above).
+ * stream died before a `run_ended` frame — the sealed record (`metadata`) and
+ * the terminal gate (`gateVerdict`) are the other two channels (铁律 above).
  */
 export function deriveNodeStatuses(
   events: readonly TraceEventInput[] | null | undefined,
   runId?: string | null,
   metadata?: RunMetadata | null,
+  gateVerdict?: RunVerdict | null,
 ): Record<string, SkillNodeStatus> {
   const statuses: Record<string, SkillNodeStatus> = {}
   if (!events) return statuses
@@ -189,7 +205,7 @@ export function deriveNodeStatuses(
       statuses[phasePath] = "success"
     }
   }
-  const verdict = runVerdict(events, metadata, runId)
+  const verdict = runVerdict(events, metadata, runId, gateVerdict)
   if (verdict !== "running") {
     for (const [phasePath, status] of Object.entries(statuses)) {
       if (status === "running") statuses[phasePath] = NODE_STATUS_AT_RUN_END[verdict]

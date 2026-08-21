@@ -228,15 +228,29 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 
 ### F6. Run Status Projection(状态投影 SSOT,2026-08-13 决议 D7)
 
-- 机制: 前端模块 `utils/run-status-projection` 是把 `(事件流, run 记录)` 折叠成一切
-  派生运行状态的**唯一出口**——画布节点灯、trace 步骤行、顶条/run 列表徽章全部消费它,
-  不允许第二份推导逻辑。裁决函数 `runVerdict(events, metadata)`:落章的 run 记录终态
-  优先(流只知道 worker 停了,记录才知道那次停是 cancelled 还是 paused),其次取最后
-  一条流式 `run_ended`(resumed run 结束多次,只有最后一次描述读者所见),两者皆无 = running。
-  第二真相通道的来源:`run_ended` 后的终态回读、以及 stop/pause 请求返回的 canonical
-  记录快照(成功写返回权威快照,属 SSOT 读取原则允许的 revalidation 触发)。
+- 机制: 前端模块 `utils/run-status-projection` 是把 `(事件流, run 记录, 终态 gate)` 折叠成
+  一切派生运行状态的**唯一出口**——画布节点灯、trace 步骤行、顶条/run 列表徽章全部消费它,
+  不允许第二份推导逻辑。裁决函数 `runVerdict(events, metadata, runId, gateVerdict)` 按
+  **三条通道排序**,顺序就是各通道能知道多少:
+  1. **落章的 run 记录**(`metadata.status`)。只有它带全套状态词汇,因而只有它分得清
+     cancelled 与 paused;它是 Studio 其他地方引用的权威封章。
+  2. **后端发布的终态 gate**(`gateVerdict`)。它由**写记录的同一步**发出,所以带着记录的
+     权威,只是措辞更粗(pass/fail/paused/stopped)。它必须**单独成为一条通道**,因为
+     记录会**送不到**:回读是一次 HTTP 往返,它失败时若没有第四个答案,一切派生状态就
+     永久停在 running(台账 N5)。gate 词表到 verdict 词表的翻译只写一处:
+     `components/studio/gate-state.ts` 的 `runVerdictFromGateOutcome`(`pass→success`、
+     `stopped→cancelled`),**禁止**把 gate 的词直接塞进决定节点徽标的那个槽。
+  3. **最后一条流式 `run_ended`**。它只知道 worker 停了,不知道那次停**是什么**;
+     resumed run 结束多次,只有最后一次描述读者当下所见。
+
+  三条皆无 = running。第二真相通道(记录)的来源:`run_ended` 后的终态回读、以及
+  stop/pause 请求返回的 canonical 记录快照(成功写返回权威快照,属 SSOT 读取原则允许的
+  revalidation 触发)。
 - **铁律: run 到终态 ⇒ 任何派生状态不得为 running。** 缺结束帧(worker 被杀、流先死)
-  不是「永远转圈」的理由——记录终态本身就是最后的裁决输入。
+  不是「永远转圈」的理由——记录终态本身就是最后的裁决输入,而**记录回读失败也不是**:
+  gate 已经说了这次 run 怎么结束的,画布与 run 列表行都落在那同一个答案上。回读只补它
+  独有的东西(token 汇总、报告路径、归档状态),补不到就照实说「run 结束了,详情读不出来」,
+  **不把「读不到详情」说成「还在跑」**。
 - 消费组件「状态 → 显示效果」对照表(各自用测试锁死):
   - **画布节点**(`NODE_STATUS_AT_RUN_END`,`run-status-projection.test.ts` 锁):
     verdict success → 节点 success;failed → error;cancelled → paused(用户止损不是节点失败);
@@ -256,11 +270,14 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
   `buildTraceSteps` 无闭合输入两处旧推导(B8)。
 - 原话/来源: `docs/design/2026-08-13-trace-goes-glass-box-decision.md` §D7;
   `01_workflows/04_run-and-verify.md:106` 与 `01_workflows/05_debugging.md:25` 把派生归属 trace。
-- 测试: `run-status-projection.test.ts`(裁决优先级 + 铁律 + 节点闭合表)、
+- 测试: `run-status-projection.test.ts`(三通道优先级 + 铁律 + 节点闭合表)、
   `run-status-projection.derived.test.ts`(迁移的逐事件派生回归)、
+  `gate-state.test.ts`(效果带上 gate 判词 + 词表翻译)、
+  `Workspace.test.tsx`(记录回读失败时画布仍收敛、run 行同步、文案不谎报在跑)、
+  `useRunHistory.test.ts`(`projectRunStatus` 只动状态)、
   `trace-steps.test.ts`(severed)、`TraceStepRow.test.tsx`(三态视觉)、
   `run-status-mark.test.ts`(徽章表)、`trace-outcome.test.ts`(结论门槛)。
-- Status: live(2026-08-14 落地)。
+- Status: live(2026-08-14 落地;2026-08-21 补第三条通道)。
 - 归属: capability `trace-observability`; capabilities `run-execution`, `debug-resume`; region `canvas` + `timeline`.
 
 ### F7. LLM Fallback Visibility

@@ -99,6 +99,7 @@ export function deriveEdgeStatuses(
   events: readonly TraceEventInput[] | null | undefined,
   runId?: string | null,
   metadata?: RunMetadata | null,
+  gateVerdict?: RunVerdict | null,
 ): Record<string, EdgeRunStatus> {
   const statuses: Record<string, EdgeRunStatus> = {}
   if (!events) return statuses
@@ -113,7 +114,7 @@ export function deriveEdgeStatuses(
       statuses[edgeId] = opening ? "running" : "done"
     }
   }
-  const verdict = runVerdict(events, metadata, runId)
+  const verdict = runVerdict(events, metadata, runId, gateVerdict)
   if (verdict !== "running") {
     for (const [edgeId, status] of Object.entries(statuses)) {
       if (status === "running") statuses[edgeId] = EDGE_STATUS_AT_RUN_END[verdict]

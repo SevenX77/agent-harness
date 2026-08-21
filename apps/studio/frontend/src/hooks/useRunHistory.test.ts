@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunMetadata, TokensMetrics } from '@/api/types'
-import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, projectRunMetadata, runOutcomeFeedback } from './useRunHistory'
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, projectRunMetadata, projectRunStatus, runOutcomeFeedback } from './useRunHistory'
 
 // N6 #2 (history-auto-refresh): when a run reaches run_ended the backend has
 // autocommitted a new "Auto run" snapshot, so the Local History list must be
@@ -237,5 +237,41 @@ describe('projectRunMetadata', () => {
 
     expect(next?.runs.map((item) => item.run_id)).toEqual(['run-b', 'run-a'])
     expect(next?.total).toBe(2)
+  })
+})
+
+// Ledger N5: the terminal gate states how the run ended, and the list row must
+// settle on that same answer even when the record read-back — which carries the
+// numbers and the report path — fails.
+describe('projectRunStatus', () => {
+  const list = (status: RunMetadata['status']) => ({
+    total: 1,
+    runs: [
+      {
+        run_id: 'run-1',
+        status,
+        started_at: '2026-08-21T05:50:17-07:00',
+        metrics: null,
+        input_summary: null,
+      } as RunMetadata,
+    ],
+  })
+
+  it('closes an open row without touching anything else about it', () => {
+    const before = list('running')
+    const after = projectRunStatus(before, 'run-1', 'failed')
+
+    expect(after?.runs[0].status).toBe('failed')
+    expect(after?.runs[0].started_at).toBe(before.runs[0].started_at)
+    expect(after?.total).toBe(1)
+  })
+
+  it('does not invent a list when the server list has not loaded yet', () => {
+    expect(projectRunStatus(undefined, 'run-1', 'failed')).toBeUndefined()
+  })
+
+  it('leaves the list alone for a run it has never heard of', () => {
+    const before = list('running')
+    expect(projectRunStatus(before, 'run-other', 'failed')).toEqual(before)
   })
 })

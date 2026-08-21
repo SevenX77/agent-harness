@@ -1,5 +1,6 @@
 import type { ResumeRunOptions } from "@/api/client"
 import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
+import type { RunVerdict } from "@/utils/run-status-projection"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
@@ -78,6 +79,8 @@ interface PanelsProps {
    * historical view passes, so both views build their terminal entry alike.
    */
   traceLiveMetadata?: RunMetadata | null
+  /** How the terminal gate said this run ended — `runVerdict`'s second channel. */
+  traceGateVerdict?: RunVerdict | null
   onResumeRun?: () => void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
@@ -138,6 +141,7 @@ export function Panels({
   traceSelectedEventId = null,
   onSelectTraceEvent,
   traceLiveMetadata = null,
+  traceGateVerdict = null,
   onResumeRun,
   onResumeNode,
   onSubmitHitlResponse,
@@ -279,6 +283,7 @@ export function Panels({
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
           metadata={traceLiveMetadata}
+          gateVerdict={traceGateVerdict}
           onResume={onResumeRun}
           hitlSubmitting={traceResumeLoading}
           onSubmitHitlResponse={onSubmitHitlResponse}

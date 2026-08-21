@@ -76,6 +76,29 @@ describe("runVerdict — the one answer to 'how does this run stand'", () => {
     expect(runVerdict(events, null)).toBe("success")
   })
 
+  // The gate that says a run ended is published by the same backend step that
+  // seals the record, and it names the outcome. It is therefore a third truth
+  // channel, ranked between the two that were already here: below the record
+  // (which distinguishes cancelled from paused with the full status vocabulary)
+  // and above the stream (which only knows the worker stopped). Without it the
+  // 铁律 has a hole — kill a worker and the record read-back can fail, leaving
+  // the stream with no run_ended and every derived status on "running" forever.
+  it("closes the run from the gate's own verdict when the record never arrived", () => {
+    const events = [event({ event_type: "phase_start", phase_name: "draft" })]
+    expect(runVerdict(events, null, "run-1", "failed")).toBe("failed")
+    expect(runVerdict(events, null, "run-1", "success")).toBe("success")
+  })
+
+  it("still prefers the sealed record over the gate", () => {
+    const events = [event({ event_type: "phase_start", phase_name: "draft" })]
+    expect(runVerdict(events, metadata("cancelled"), "run-1", "failed")).toBe("cancelled")
+  })
+
+  it("prefers the gate over the stream — the stream cannot tell a stop from a pause", () => {
+    const events = [event({ event_type: "run_ended", status: "interrupted" })]
+    expect(runVerdict(events, null, "run-1", "cancelled")).toBe("cancelled")
+  })
+
   it("ignores other runs' run_ended when scoped to a run id", () => {
     const events = [
       envelope({ event_type: "run_ended", status: "completed" }, { runId: "run-2" }),
@@ -91,6 +114,11 @@ describe("deriveNodeStatuses — 铁律: a run at a terminal state leaves nothin
     const events = [event({ event_type: "phase_start", phase_name: "draft" })]
     expect(deriveNodeStatuses(events, null, metadata("cancelled"))).toEqual({ draft: "paused" })
     expect(deriveNodeStatuses(events, null, metadata("failed"))).toEqual({ draft: "error" })
+  })
+
+  it("closes a mid-flight node from the gate verdict alone (record read-back failed)", () => {
+    const events = [event({ event_type: "phase_start", phase_name: "draft" })]
+    expect(deriveNodeStatuses(events, null, null, "failed")).toEqual({ draft: "error" })
   })
 
   it("still closes from the run_ended event as before", () => {

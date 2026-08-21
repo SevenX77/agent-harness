@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { createGateEffectFold } from "./gate-effect-fold"
-import { parseSkillGateEvent, projectGateEvent, type SkillGateEvent } from "./gate-state"
+import { parseSkillGateEvent, projectGateEvent, runVerdictFromGateOutcome, type SkillGateEvent } from "./gate-state"
 
 function event(overrides: Partial<SkillGateEvent> = {}): SkillGateEvent {
   return {
@@ -28,6 +28,7 @@ describe("a settled run announces itself the same way whether it was a run or a 
     expect(effects).toContainEqual({
       kind: "finalize-run",
       runId: "predict-2026-08-09T01-40-49_7754a5e9",
+      verdict: "success",
     })
   })
 
@@ -36,13 +37,40 @@ describe("a settled run announces itself the same way whether it was a run or a 
       event({ gate: "run", outcome: "pass", runId: "2026-08-09T01-42-54_1fd5582d" }),
     )
 
-    expect(effects).toContainEqual({ kind: "finalize-run", runId: "2026-08-09T01-42-54_1fd5582d" })
+    expect(effects).toContainEqual({ kind: "finalize-run", runId: "2026-08-09T01-42-54_1fd5582d", verdict: "success" })
   })
 
   it("finalizes a predict that failed — how it ended is still how it ended", () => {
     const { effects } = projectGateEvent(event({ gate: "predict", outcome: "fail", runId: "predict-x" }))
 
-    expect(effects).toContainEqual({ kind: "finalize-run", runId: "predict-x" })
+    expect(effects).toContainEqual({ kind: "finalize-run", runId: "predict-x", verdict: "failed" })
+  })
+
+  // The gate already knows how the run ended — the condition above reads
+  // `outcome` to exclude `started`. Sending only the run id threw that answer
+  // away and left the receiver to ask the backend for it again; when that ask
+  // failed there was nothing else to fall back on and the badge spun forever
+  // (ledger N5).
+  it("carries the verdict the gate already stated", () => {
+    const run = (outcome: SkillGateEvent["outcome"]) =>
+      projectGateEvent(event({ gate: "run", outcome, runId: "r" })).effects.find(
+        (effect) => effect.kind === "finalize-run",
+      )
+
+    expect(run("fail")).toEqual({ kind: "finalize-run", runId: "r", verdict: "failed" })
+    expect(run("stopped")).toEqual({ kind: "finalize-run", runId: "r", verdict: "cancelled" })
+    expect(run("paused")).toEqual({ kind: "finalize-run", runId: "r", verdict: "paused" })
+  })
+
+  it("translates a gate outcome into the projection's verdict vocabulary", () => {
+    // `stopped` is the user ending the run on purpose, which the projection
+    // calls `cancelled`; a bare rename here would put a word the projection
+    // does not know into the one slot that decides every node badge.
+    expect(runVerdictFromGateOutcome("pass")).toBe("success")
+    expect(runVerdictFromGateOutcome("fail")).toBe("failed")
+    expect(runVerdictFromGateOutcome("paused")).toBe("paused")
+    expect(runVerdictFromGateOutcome("stopped")).toBe("cancelled")
+    expect(runVerdictFromGateOutcome("started")).toBeNull()
   })
 
   it("does not finalize a gate that only just started", () => {

@@ -88,6 +88,8 @@ interface TracePanelProps {
    * verdict and wall time it already has and gains the rest when this arrives.
    */
   metadata?: RunMetadata | null
+  /** How the terminal gate said this run ended — `runVerdict`'s second channel. */
+  gateVerdict?: RunVerdict | null
   /** True while this panel renders the live stream (streaming indicator). */
   live?: boolean
   canCompare?: boolean
@@ -288,6 +290,7 @@ export function TracePanel({
   onBack,
   runId = null,
   metadata = null,
+  gateVerdict = null,
   live = false,
   canCompare = false,
   compareLoading = false,
@@ -333,9 +336,10 @@ export function TracePanel({
   // History views judge by the persisted metadata; a live stream judges by its
   // own events (predict root event) — no run_id prefix sniffing either way.
   const isPredict = metadata ? metadata.kind === 'predict' : isPredictTrace(traceEvents)
-  // D7: ONE verdict — stream and sealed record folded by run-status-projection —
-  // feeds the strip badge, the outcome entry, and the step list's severing.
-  const verdict = runVerdict(traceEvents, metadata)
+  // D7: ONE verdict — stream, sealed record and terminal gate folded by
+  // run-status-projection — feeds the strip badge, the outcome entry, and the
+  // step list's severing.
+  const verdict = runVerdict(traceEvents, metadata, undefined, gateVerdict)
   // D8: the run's conclusion is the last thing in its own trace. Fed the full
   // event list, not the filtered one — the ending of a run is not a search hit.
   // The outcome row sits at the END of the step list and says how the RUN

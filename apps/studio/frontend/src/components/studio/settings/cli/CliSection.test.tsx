@@ -140,7 +140,7 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
         id: "claude_auth",
         state: "broken",
         version: null,
-        detail: "token expired",
+        detail: "sign-in expired",
         account: "expired@example.com",
       },
       { id: "codex_auth", state: "ok", version: null, detail: null, account: "me@example.com" },
@@ -156,7 +156,7 @@ describe("CliSection — Open in CLI 依赖状态面板(提案 2026-08-06 PR-1)"
     expect(container.querySelector('[data-cli-account="codex_auth"]')?.textContent).toBe(
       "me@example.com",
     )
-    // token 过期的那一行同样要说出账号。
+    // 登录过期的那一行同样要说出账号。
     expect(container.querySelector('[data-cli-account="claude_auth"]')?.textContent).toBe(
       "expired@example.com",
     )

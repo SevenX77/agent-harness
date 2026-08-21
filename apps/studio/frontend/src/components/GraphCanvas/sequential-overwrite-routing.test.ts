@@ -126,22 +126,34 @@ describe('sequential overwrite routing', () => {
     })
   })
 
-  it('recovers a nested route from the diagnostic location when the file axis is truncated', () => {
-    const route = sequentialOverwriteRouteFromCompileError(
+  it('routes from the file axis alone — the message is not a location source', () => {
+    // Ledger K6. This used to read the path back out of the sentence, because
+    // the engine truncated a nested child's `file` to the child-relative part.
+    // It no longer does (measured: a conflict two subgraphs deep reports
+    // `subgraph/mid/subgraph/leaf/phases/revise/LOGIC.md`), so a message that
+    // still happens to carry a location must change nothing about the route —
+    // and a `file` the canvas cannot address must be a dead end, not a cue to
+    // start parsing prose again.
+    const withNoisyMessage = sequentialOverwriteRouteFromCompileError(
       sequentialError(
-        'phases/review/SKILL.md',
-        "D:\\repo\\skills\\story-deconstruction-v3\\subgraph\\event-timeline\\subgraph\\event-extraction\\phases\\review\\SKILL.md:1 Phase 'review' sequentially overwrites field 'events_raw' outputted by upstream phase 'aggregate'.",
+        'subgraph/event-timeline/phases/review/SKILL.md',
+        "D:\\repo\\skills\\other\\subgraph\\somewhere-else\\phases\\review\\SKILL.md:1 Phase 'review' sequentially overwrites field 'events_raw'.",
+      ),
+      '/repo/skills/story-deconstruction-v3',
+    )
+    expect(withNoisyMessage).toMatchObject({
+      phaseId: 'review',
+      subgraphPaths: ['/repo/skills/story-deconstruction-v3/subgraph/event-timeline'],
+    })
+
+    const withoutFile = sequentialOverwriteRouteFromCompileError(
+      sequentialError(
+        null,
+        "D:\\repo\\skills\\story-deconstruction-v3\\subgraph\\event-timeline\\phases\\review\\SKILL.md:1 Phase 'review' sequentially overwrites field 'events_raw'.",
       ),
       'D:\\repo\\skills\\story-deconstruction-v3',
     )
-
-    expect(route).toMatchObject({
-      phaseId: 'review',
-      subgraphPaths: [
-        'D:/repo/skills/story-deconstruction-v3/subgraph/event-timeline',
-        'D:/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
-      ],
-    })
+    expect(withoutFile).toBeNull()
   })
 
   it('finds the next subgraph node to expand by resolved path, not by node id', () => {

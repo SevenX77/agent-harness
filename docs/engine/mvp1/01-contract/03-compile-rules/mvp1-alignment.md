@@ -195,6 +195,8 @@ StateMapper 目标规则:
 
 **两个 phase 之间的冲突要报出两个 phase。** 有一类规则的主语本身就是两个 phase 的关系——同一个输出字段被串联覆盖（`[F-v3-sequential-overwrite-unauthorized]`）或被并行写入（`[F-v3-parallel-write-conflict]`）。这类诊断在常规轴之外还带 `conflicting_phase`：`source_path` 处那个 phase 的 `field_path` 字段，与 `conflicting_phase` 那个 phase 的声明相撞。`field_path` 指向**冲突的那个字段**（`io.outputs.properties.<key>`），不是解决冲突要改的那个 frontmatter 键。理由是消费方需要这两个事实（Studio 画布要把冲突画在节点上、并让作者就地授权），而校验器求值时它们本来就在手里；只写进 `message` 等于逼消费方正则解析英文句子，措辞一改就散架。单 phase 规则保持 `conflicting_phase = None`——没有第二个参与者就不许声称有。
 
+**子 skill 的诊断带着全部轴到达父 skill。** 一个 subgraph phase 会去编译它指向的子 skill；子 skill 编译失败时，父编译把子诊断当作自己的诊断重新报出来。这道接缝上**只有 `source_path` 是重新算的**——它只有相对某个被声明的 root 才有意义，而子 skill 声明的是自己的 root，所以要先还原成绝对路径，再由父编译按父 root 渲染（父画布因此拿到 `subgraph/<a>/subgraph/<b>/phases/<p>/...` 这样可直接寻址的路径）。**其余每一轴原样携带**，包括 `field_path` 与 `conflicting_phase`。这条要写成规则而不是靠人记得：接缝原先是逐字段列举复制，于是新加的结构化事实在别处都对、**唯独跨一层 subgraph 就没了**，而且没有任何东西会因此失败——`conflicting_phase` 就是这么在嵌套情形下变回 `None`、把画布逼回去读英文句子的（台账 K6）。`severity` 两者都不是：loader 只报 FATAL，这一点在 `_compile_result` 说一次，不逐条重复。
+
 TraceEventKind(例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`)不是错误码，不进入本速查表；事件协议由 observability / API 契约维护。
 
 ### 3.1 错误契约 V2(通用消费者增强，目标归 kiro)

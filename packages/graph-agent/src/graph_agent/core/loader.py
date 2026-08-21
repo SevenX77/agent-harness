@@ -1025,16 +1025,11 @@ def _validate_subgraph_io_contracts(
             )
         except SkillLoadError as exc:
             for issue in _issues_of(exc):
-                path = Path(issue.source_path) if issue.source_path else doc.path
-                if not path.is_absolute():
-                    path = (child_root if child_root is not None else skill_root) / path
                 diags.append(
-                    _Diag(
-                        path=path,
-                        line=issue.line or 1,
-                        code=issue.rule_id,
-                        message=issue.message,
-                        field_path=issue.field_path,
+                    _diag_from_child_issue(
+                        issue,
+                        fallback_path=doc.path,
+                        child_root=child_root if child_root is not None else skill_root,
                     )
                 )
             poisoned_phases.add(doc.phase_name)
@@ -1050,6 +1045,40 @@ def _validate_subgraph_io_contracts(
                     field_path="path",
                 )
             )
+
+
+def _diag_from_child_issue(issue: Any, *, fallback_path: Path, child_root: Path) -> _Diag:
+    """Carry one of a child skill's diagnostics into the parent's list.
+
+    Exactly one axis is REBUILT here — ``source_path``. It only means anything
+    against a stated root, and the child stated its own, so the child-relative
+    answer is re-rooted before the parent renders it against the parent root on
+    the way out (``_relocate_diagnostics_to_root``).
+
+    Every other axis is CARRIED, and that is the point of this function
+    existing. The seam used to name the fields it copied, which meant a
+    structured fact added to ``CompileIssue`` travelled correctly everywhere
+    except across a subgraph boundary — with nothing failing to say so.
+    ``conflicting_phase`` proved it: added so the overwrite rule could name the
+    other phase structurally, it arrived ``None`` one subgraph deep and the
+    canvas was back to reading the English sentence (ledger K6). Adding a field
+    to ``CompileIssue`` now means deciding here which of the two it is;
+    ``test_a_child_diagnostic_keeps_every_axis`` fails until it is decided.
+
+    ``severity`` is neither: the loader raises FATALs only, and says so once in
+    ``_compile_result`` rather than per diagnostic.
+    """
+    path = Path(issue.source_path) if issue.source_path else fallback_path
+    if not path.is_absolute():
+        path = child_root / path
+    return _Diag(
+        path=path,
+        line=issue.line or 1,
+        code=issue.rule_id,
+        message=issue.message,
+        field_path=issue.field_path,
+        conflicting_phase=issue.conflicting_phase,
+    )
 
 
 _SUBGRAPH_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

@@ -72,7 +72,7 @@ import {
   currentFileAllowsSequentialOverwrite,
   findNextSubgraphExpansionNode,
   sequentialOverwriteConflictForVisibleNode,
-  sequentialOverwriteRoutesFromNodeErrors,
+  sequentialOverwriteRoutesFromCompileErrors,
   type OverwriteConflict,
 } from './sequential-overwrite-routing'
 import {
@@ -151,8 +151,14 @@ interface GraphCanvasProps {
     target?: ChildSaveTarget,
   ) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
-  /** Manual compile errors only. Used for node-anchored authoring confirmations. */
-  sequentialOverwriteErrorsByNodeId?: Record<string, CompileError[]>
+  /**
+   * The manual compile pass's diagnostics, as the list the pass produced.
+   *
+   * Not a per-node projection: routing an overwrite conflict to the node that
+   * would do the overwriting needs the subgraph chain in the diagnostic's own
+   * path, and a child skill's phase belongs to no ROOT node at all (ledger N6).
+   */
+  manualCompileErrors?: readonly CompileError[]
   /** Full node-error projection (manual compile + lint + data gap). Used only for node badges. */
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
@@ -696,7 +702,7 @@ export function GraphCanvas({
   onDisconnectConnection,
   onReconnectConnection,
   statusByNodeId,
-  sequentialOverwriteErrorsByNodeId,
+  manualCompileErrors,
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
@@ -1282,13 +1288,9 @@ export function GraphCanvas({
   }, [drilledPath, loadChildGraph])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
   const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
-  const safeSequentialOverwriteErrorsByNodeId = useMemo(
-    () => sequentialOverwriteErrorsByNodeId ?? {},
-    [sequentialOverwriteErrorsByNodeId],
-  )
   const sequentialOverwriteRoutes = useMemo(
-    () => sequentialOverwriteRoutesFromNodeErrors(safeSequentialOverwriteErrorsByNodeId, workspaceRoot ?? null),
-    [safeSequentialOverwriteErrorsByNodeId, workspaceRoot],
+    () => sequentialOverwriteRoutesFromCompileErrors(manualCompileErrors ?? [], workspaceRoot ?? null),
+    [manualCompileErrors, workspaceRoot],
   )
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
   const safeErrorMessageByNodeId = useMemo(() => errorMessageByNodeId ?? {}, [errorMessageByNodeId])

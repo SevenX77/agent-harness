@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
       connect: { source: string; target: string },
     ) => Promise<void> | void
     compileErrorsByNodeId?: Record<string, unknown[]>
-    sequentialOverwriteErrorsByNodeId?: Record<string, unknown[]>
+    manualCompileErrors?: unknown[]
     statusByNodeId?: Record<string, string>
   },
   centerActionBarProps: null as null | {
@@ -794,7 +794,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace(LINT_SEQUENTIAL_OVERWRITE_FIXTURE_SKILL_ID)
 
     expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.review).toHaveLength(1)
-    expect(mocks.graphCanvasProps?.sequentialOverwriteErrorsByNodeId).toEqual({})
+    expect(mocks.graphCanvasProps?.manualCompileErrors).toEqual([])
   })
 
   it('projects first-screen Studio preflight lint onto the Input boundary without pressing Compile', () => {

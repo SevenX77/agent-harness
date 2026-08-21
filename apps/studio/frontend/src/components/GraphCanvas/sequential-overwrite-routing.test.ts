@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompileError, SkillDetail } from '@/api/types'
 import type { SkillGraphNode } from '@/components/nodes'
+import { compileErrorsByNode } from '@/components/studio/node-compile-errors'
 import { subgraphPreviewChildNodeId } from './subgraph-expansion'
 import {
   currentFileAllowsSequentialOverwrite,
@@ -8,6 +9,7 @@ import {
   sequentialOverwriteConflictForVisibleNode,
   findNextSubgraphExpansionNode,
   sequentialOverwriteRouteFromCompileError,
+  sequentialOverwriteRoutesFromCompileErrors,
 } from './sequential-overwrite-routing'
 
 function sequentialError(file: string | null, message?: string): CompileError {
@@ -154,6 +156,44 @@ describe('sequential overwrite routing', () => {
       'D:\\repo\\skills\\story-deconstruction-v3',
     )
     expect(withoutFile).toBeNull()
+  })
+
+  it('routes the diagnostics themselves, not the node buckets a diagnostic may not fit in', () => {
+    // Ledger N6, measured on the real app: a conflict inside a child skill
+    // arrives with every axis the canvas needs (engine PR #946), and the canvas
+    // still did nothing — because it was handed the NODE projection, and that
+    // projection asks which ROOT node owns the file. A child skill's phase has
+    // no root node; `diagnostic-paths.ts` rules exactly that, and it is right
+    // for node badges. Routing wants the other thing: the subgraph chain that
+    // leads to the preview child, which is in the path itself. So the routing
+    // input is the diagnostic list.
+    const nested = sequentialError('subgraph/event-timeline/subgraph/event-extraction/phases/review/SKILL.md')
+
+    expect(Object.values(compileErrorsByNode([nested])).flat()).toEqual([])
+    expect(sequentialOverwriteRoutesFromCompileErrors([nested], '/repo/skills/story-deconstruction-v3')).toMatchObject([
+      {
+        phaseId: 'review',
+        subgraphPaths: [
+          '/repo/skills/story-deconstruction-v3/subgraph/event-timeline',
+          '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+        ],
+      },
+    ])
+  })
+
+  it('keeps one route per conflicting phase and ignores diagnostics of other kinds', () => {
+    const unrelated: CompileError = {
+      ...sequentialError('phases/review/LOGIC.md'),
+      error_code: 'F-v3-graph-dataflow-source-missing',
+    }
+    const duplicated = sequentialError('phases/review/LOGIC.md')
+
+    const routes = sequentialOverwriteRoutesFromCompileErrors(
+      [unrelated, duplicated, { ...duplicated }],
+      '/repo/skills/story-deconstruction-v3',
+    )
+
+    expect(routes.map((route) => route.phaseId)).toEqual(['review'])
   })
 
   it('finds the next subgraph node to expand by resolved path, not by node id', () => {

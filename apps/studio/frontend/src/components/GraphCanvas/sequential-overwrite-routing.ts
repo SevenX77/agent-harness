@@ -87,22 +87,34 @@ export function sequentialOverwriteRouteFromCompileError(
   }
 }
 
-export function sequentialOverwriteRoutesFromNodeErrors(
-  errorsByNode: Record<string, readonly CompileError[]>,
+/**
+ * The overwrite conflicts a compile pass found, as routes the canvas can draw.
+ *
+ * The input is the diagnostic list, deliberately — not the per-node projection
+ * the badges use. That projection answers "which ROOT node owns this file",
+ * and a phase inside a child skill answers it with `null` by design
+ * (`studio/diagnostic-paths.ts`): the root phase hosting the child is named by
+ * its own `SUBGRAPH.md`, so the child's path cannot name it. Routing asks a
+ * different question — which chain of subgraphs leads to the preview child
+ * that should show the conflict — and the path answers that one itself. Reading
+ * routes out of the node buckets meant every nested conflict was dropped before
+ * it got here, which is exactly the case this whole module exists for (ledger
+ * N6, measured 2026-08-21 on a two-level fixture).
+ */
+export function sequentialOverwriteRoutesFromCompileErrors(
+  errors: readonly CompileError[],
   workspaceRoot: string | null | undefined,
 ): SequentialOverwriteRoute[] {
   const routes: SequentialOverwriteRoute[] = []
   const seen = new Set<string>()
 
-  for (const errors of Object.values(errorsByNode)) {
-    for (const error of errors) {
-      const route = sequentialOverwriteRouteFromCompileError(error, workspaceRoot)
-      if (!route) continue
-      const key = `${route.subgraphPaths.join('\0')}\0${route.phaseId}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      routes.push(route)
-    }
+  for (const error of errors) {
+    const route = sequentialOverwriteRouteFromCompileError(error, workspaceRoot)
+    if (!route) continue
+    const key = `${route.subgraphPaths.join('\0')}\0${route.phaseId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    routes.push(route)
   }
 
   return routes

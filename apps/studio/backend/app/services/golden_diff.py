@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -213,21 +214,47 @@ def plan_golden_seed_for_run(skill_id: str, run_id: str) -> GoldenSeedPlan:
         "locked": False,
         "cases": case_records,
     }
+    files = [
+        GoldenBaselineFile(
+            path=_workspace_golden_path(baseline_id, BASELINE_FILENAME),
+            content=json.dumps(baseline_payload, ensure_ascii=False, sort_keys=True),
+        ),
+        *(
+            _build_case_file(baseline_id, target.node_id, node_outputs[target.node_id], source_run_id=run_id)
+            for target in targets
+        ),
+    ]
     return GoldenSeedPlan(
         baseline_id=baseline_id,
         baseline_ref=_workspace_golden_path(baseline_id, BASELINE_FILENAME),
         seeded=targets,
-        files=[
-            GoldenBaselineFile(
-                path=_workspace_golden_path(baseline_id, BASELINE_FILENAME),
-                content=json.dumps(baseline_payload, ensure_ascii=False, sort_keys=True),
-            ),
-            *(
-                _build_case_file(baseline_id, target.node_id, node_outputs[target.node_id], source_run_id=run_id)
-                for target in targets
-            ),
-        ],
+        files=[_with_expected_hash(baseline_dir, baseline_id, file) for file in files],
     )
+
+
+def _with_expected_hash(baseline_dir: Path, baseline_id: str, file: GoldenBaselineFile) -> GoldenBaselineFile:
+    """Stamp a plan file with the content it is replacing, or None when it creates one.
+
+    Seeding writes into the baseline the skill already lives on, so most of its files
+    already exist — unlike a fresh baseline, whose every file is new. The writer needs
+    that difference stated per file, not assumed (ledger K1).
+    """
+    target = baseline_dir / _relative_workspace_golden_path(baseline_id, file.path)
+    try:
+        current = target.read_text(encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return file
+    return file.model_copy(update={"expected_hash": workspace_text_hash(current)})
+
+
+def workspace_text_hash(content: str) -> str:
+    """sha256 over LF-normalized text — the same value the Rust writer computes.
+
+    Mirrors ``workspace_text_hash`` in ``apps/studio/tauri/src/native_fs.rs``; the two
+    sides must agree or every optimistic-lock write would look like a conflict.
+    """
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _live_baseline_for_skill(skill_id: str) -> GoldenBaseline | None:

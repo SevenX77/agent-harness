@@ -34,10 +34,22 @@ class GoldenBaseline(BaseModel):
 
 
 class GoldenBaselineFile(BaseModel):
+    """One file a plan tells the writer to produce, and what it expects to replace.
+
+    The desktop writer is the Rust native-fs layer, which is the sole writer of skill
+    files; it needs to know whether this path is being created or replaced. ``None``
+    means the plan saw nothing at that path, so creating it must fail if something
+    appeared meanwhile. A hash means the plan read that exact content and is replacing
+    it, so a write must fail if it changed meanwhile — the optimistic lock the rest of
+    the workspace already uses. The value is sha256 over the file's LF-normalized text,
+    matching ``workspace_text_hash`` in ``apps/studio/tauri/src/native_fs.rs``.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     path: str
     content: str
+    expected_hash: str | None = None
 
 
 class GoldenCaseContent(BaseModel):

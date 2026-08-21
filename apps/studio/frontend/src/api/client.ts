@@ -15,6 +15,7 @@ import type {
   GitHistoryItem,
   GoldenBaseline,
   GoldenBaselineContent,
+  GoldenBaselineFile,
   GoldenBaselinePlan,
   GoldenSeedPlan,
   JsonObject,
@@ -375,6 +376,30 @@ export function wsUrl(path: string): string {
 }
 
 /**
+ * Write the files a backend plan authoritatively produced.
+ *
+ * One definition on purpose: the seeding path was written by copying this loop out of
+ * {@link saveGoldenBaseline}, and the copy kept `createIfAbsent` while losing the
+ * precondition that made it valid — a fresh baseline gets a new directory, so every
+ * file is new, whereas seeding fills the baseline the skill already lives on, whose
+ * files already exist. The native writer then refused every replacement (ledger K1).
+ * Each file now states its own case: a hash means "replace exactly this", null means
+ * "create, and fail if something appeared meanwhile".
+ */
+async function applyPlanFiles(targetRoot: string, files: GoldenBaselineFile[]): Promise<void> {
+  for (const file of files) {
+    const expectedHash = file.expected_hash ?? null
+    await writeWorkspaceFile(
+      targetRoot,
+      file.path,
+      file.content,
+      expectedHash,
+      expectedHash === null ? { createIfAbsent: true } : {},
+    )
+  }
+}
+
+/**
  * N4 atom #30: the predict endpoint returns the PredictDiagnosticExport (is_predict /
  * status / phases / path_diff). The caller reads which AGENT nodes ran from `phases`
  * (a phase is recorded only on completion) to drive the golden 🟡 logic-OK state.
@@ -408,15 +433,7 @@ export async function saveGoldenBaseline(
     const response = await api.post<GoldenBaselinePlan>(`/skills/${apiSkillId}/golden/plan`, goldenRequest)
     const plan = response.data
     const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
-    for (const file of plan.files) {
-      await writeWorkspaceFile(
-        targetRoot,
-        file.path,
-        file.content,
-        null,
-        { createIfAbsent: true },
-      )
-    }
+    await applyPlanFiles(targetRoot, plan.files)
     return plan.baseline
   }
   const response = await api.post<GoldenBaseline>(
@@ -443,9 +460,7 @@ export async function seedGoldenFromRun(
     const response = await api.post<GoldenSeedPlan>(`/skills/${apiSkillId}/golden/seed/plan`, seedRequest)
     const plan = response.data
     const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
-    for (const file of plan.files) {
-      await writeWorkspaceFile(targetRoot, file.path, file.content, null, { createIfAbsent: true })
-    }
+    await applyPlanFiles(targetRoot, plan.files)
     return plan
   }
   const response = await api.post<GoldenSeedPlan>(

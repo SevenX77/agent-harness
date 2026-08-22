@@ -45,6 +45,38 @@ function roleTestResultBadge(status: RoleTestStatus | null): Omit<RoleTestStatus
   return { label: "Untested", variant: "secondary" }
 }
 
+/** How much of a fallback chain answered, out of what was asked. */
+export interface ChainReach {
+  answered: number
+  total: number
+}
+
+export function chainReachFromResult(result: RoleTestResponse): ChainReach {
+  const routes = result.model_groups.flatMap((group) => group.provider_results)
+  return {
+    answered: routes.filter((route) => route.status === "ok").length,
+    total: routes.length,
+  }
+}
+
+/**
+ * The one line a Test result leads with.
+ *
+ * A partly-answering chain needs the count: the detail lines below name only
+ * the routes that failed, so a bare verdict leaves the reader looking at four
+ * errors with nothing to say that twelve other routes answered.
+ */
+export function chainReachSummary(status: RoleTestStatus, reach: ChainReach): string {
+  if (status === "ok") return "Test passed"
+  if (status === "warning") {
+    if (reach.answered < reach.total) {
+      return `Answered on ${reach.answered} of ${reach.total} routes`
+    }
+    return "Needs Attention"
+  }
+  return "Test failed"
+}
+
 export function roleTestDetailsFromResult(result: RoleTestResponse): string[] {
   return uniqueDetails([
     ...result.warnings.map((warning) => warningDetail(warning)),

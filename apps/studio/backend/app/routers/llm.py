@@ -1866,7 +1866,6 @@ async def _run_role_test_targets(
 ) -> dict[str, Any]:
     model_groups: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, Any]] = []
-    aggregate_status = "ok"
 
     async def run_target(target: RoleTestTarget) -> dict[str, Any]:
         if on_provider_status is not None:
@@ -1897,7 +1896,6 @@ async def _run_role_test_targets(
     ):
         if provider_result["warnings"]:
             warnings.extend(provider_result["warnings"])
-        aggregate_status = _merge_role_test_status(aggregate_status, provider_result)
         canonical_id = str(target.report_entry.get("canonical_id") or target.route.canonical_id)
         identity = project_model_identity(
             route=target.route,
@@ -1915,7 +1913,7 @@ async def _run_role_test_targets(
         group["provider_results"].append(provider_result)
     return {
         "role_name": role_name,
-        "status": aggregate_status,
+        "status": _chain_test_status(provider_results),
         "warnings": warnings,
         "model_groups": list(model_groups.values()),
     }
@@ -5084,14 +5082,32 @@ def _role_test_entries(
     ]
 
 
-def _merge_role_test_status(current: str, provider_result: dict[str, Any]) -> str:
-    if current == "blocked" or provider_result["status"] == "blocked":
-        return "blocked"
-    if current == "failed" or provider_result["status"] == "failed":
+def _chain_test_status(provider_results: Sequence[dict[str, Any]]) -> str:
+    """The verdict on a fallback chain, read off the whole chain at once.
+
+    A chain exists so that a dead link is survivable, so this cannot be a
+    pairwise fold over the links: whether one failure condemns the chain
+    depends on what the OTHER links did, which a fold has already forgotten.
+    One answering route means the chain serves calls — the failures are still
+    reported, as a warning rather than as a verdict of unusable.
+    """
+    if not provider_results:
+        # No route to test is not the same as every route passing.
         return "failed"
-    if current == "warning" or provider_result["warnings"]:
+
+    answered = [result for result in provider_results if result["status"] == "ok"]
+    if not answered:
+        # Nothing answered: name the account-level reason when there is one,
+        # because that is the reason the reader can act on.
+        if any(result["status"] == "blocked" for result in provider_results):
+            return "blocked"
+        return "failed"
+
+    if len(answered) < len(provider_results):
         return "warning"
-    return current
+    if any(result["warnings"] for result in provider_results):
+        return "warning"
+    return "ok"
 
 
 def _provider_model_projection(

@@ -11,6 +11,8 @@ import {
   assistantMessageAfterEvent,
   buildCopilotSendPayload,
   flushDeltaQueue,
+  recordedAttachments,
+  turnCarriesSomething,
   visibleCopilotSocketError,
 } from './useCopilot'
 
@@ -215,6 +217,47 @@ describe('buildCopilotSendPayload', () => {
       user_message: 'hello',
       session_id: 'session-1',
     })
+  })
+})
+
+describe('turnCarriesSomething', () => {
+  const image = { kind: 'image', media_type: 'image/png', data: 'aGVsbG8=', name: 'shot.png' } as const
+
+  it('sends a turn that is only words', () => {
+    expect(turnCarriesSomething('why does this fail?', [])).toBe(true)
+  })
+
+  it('sends a turn that is only a picture', () => {
+    // "这里哪儿不对?" is often the screenshot itself; demanding text would grey
+    // out send on the most common way to ask (COPILOT_ASSIST-11).
+    expect(turnCarriesSomething('', [image])).toBe(true)
+  })
+
+  it('refuses a turn that carries neither', () => {
+    expect(turnCarriesSomething('   \n  ', [])).toBe(false)
+  })
+})
+
+describe('recordedAttachments', () => {
+  it('records what the turn carried without keeping the bytes', () => {
+    // The session file is rewritten on every message; base64 image data in it
+    // would grow the transcript by megabytes per turn for no reader's benefit.
+    const record = recordedAttachments([
+      { kind: 'image', media_type: 'image/png', data: 'aGVsbG8=', name: 'shot.png' },
+    ])
+    expect(record).toEqual([{ mediaType: 'image/png', name: 'shot.png', byteSize: 5 }])
+    expect(JSON.stringify(record)).not.toContain('aGVsbG8=')
+  })
+
+  it('names an unnamed paste by nothing rather than by a guess', () => {
+    expect(recordedAttachments([
+      { kind: 'image', media_type: 'image/jpeg', data: 'aGVsbG8=' },
+    ])).toEqual([{ mediaType: 'image/jpeg', name: undefined, byteSize: 5 }])
+  })
+
+  it('is absent, not empty, when the turn carried no image', () => {
+    expect(recordedAttachments([])).toBeUndefined()
+    expect(recordedAttachments(undefined)).toBeUndefined()
   })
 })
 

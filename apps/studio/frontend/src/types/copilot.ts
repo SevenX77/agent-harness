@@ -134,6 +134,14 @@ export type CopilotEvent =
   | CopilotErrorEvent
   | CopilotUnknownEvent
 
+/** An image a past turn carried, described rather than kept: the transcript
+ * says what went with the question without storing the bytes again. */
+export interface CopilotAttachmentRecord {
+  mediaType: CopilotImageAttachment['media_type']
+  name?: string
+  byteSize: number
+}
+
 export interface CopilotMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -141,6 +149,8 @@ export interface CopilotMessage {
   events: CopilotEvent[]
   status: CopilotEventStatus
   createdAt: number
+  /** Present only on a user turn that attached images. */
+  attachments?: CopilotAttachmentRecord[]
 }
 
 /**

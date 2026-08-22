@@ -2,12 +2,13 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, ChevronDown, CircleAlert, History, ImagePlus, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ChevronDown, CircleAlert, History, Image as ImageIcon, ImagePlus, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
 import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData } from '../../api/llm'
 import type { CopilotController, CopilotJudgeContext } from '../../hooks/useCopilot'
+import { turnCarriesSomething } from '../../hooks/useCopilot'
 import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-derivation'
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
@@ -79,7 +80,30 @@ function ChatMessageItemBase({ message, skillId, workspaceRoot, onFileChanged }:
       <Message align="end" data-copilot-message-role="user">
         <MessageContent>
           <Bubble variant="muted" align="end" className="text-sm">
-            <BubbleContent>{message.content}</BubbleContent>
+            <BubbleContent>
+              {message.attachments?.length ? (
+                // The bytes are gone by now (only descriptors are kept), so the
+                // turn names its images rather than showing them again. Without
+                // this a picture-only question leaves an empty bubble behind and
+                // the transcript no longer says what was asked.
+                <ul data-message-attachments="" className="mb-1 flex flex-wrap gap-1">
+                  {message.attachments.map((attachment, index) => (
+                    <li
+                      key={`${attachment.name ?? 'image'}-${index}`}
+                      data-message-attachment={attachment.name ?? 'image'}
+                      className="inline-flex items-center gap-1 rounded-sm border bg-background/60 px-1.5 py-0.5 text-xs text-muted-foreground"
+                    >
+                      <ImageIcon className="size-3" aria-hidden />
+                      <span className="max-w-[10rem] truncate text-foreground">
+                        {attachment.name ?? t('composer.attachments.unnamed')}
+                      </span>
+                      <span>{formatAttachmentSize(attachment.byteSize)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {message.content}
+            </BubbleContent>
           </Bubble>
         </MessageContent>
       </Message>
@@ -881,13 +905,13 @@ export function CopilotPanel({
   }
 
   /** Something to send: words, or a picture, or both. */
-  const canSend =
-    (draft.text.trim().length > 0 || attachments.length > 0) && copilot.connectionStatus === 'open'
+  // An image with no words is a real ask ("what is wrong here?"), so the turn
+  // is empty only when both are — a rule the socket layer owns and this button
+  // reads, rather than restating.
+  const canSend = turnCarriesSomething(draft.text, attachments) && copilot.connectionStatus === 'open'
 
   async function sendDraft() {
-    // An image with no words is a real ask ("what is wrong here?"), so the
-    // turn is empty only when BOTH are.
-    if ((!draft.text.trim() && attachments.length === 0) || copilot.connectionStatus !== 'open') {
+    if (!canSend) {
       return
     }
     const activeJudgeContext = nextDraftJudgeContext(draft.text, draftJudgeContext, { skillId, view, judgeRefs })

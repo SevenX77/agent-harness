@@ -14,6 +14,8 @@ import type {
   CopilotThinkingDeltaEvent,
 } from '../types/copilot'
 import { normalizeCopilotEvent, readToolApprovalExpiry } from '../types/copilot'
+import type { CopilotAttachmentRecord } from '../types/copilot'
+import { decodedByteLength } from '../components/copilot/composer/attachment-intake'
 import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
@@ -98,6 +100,41 @@ export function buildCopilotSendPayload(
     payload.attachments = options.attachments
   }
   return payload
+}
+
+/**
+ * Whether this turn is worth delivering.
+ *
+ * The single authority on the question, shared by the send button, the send
+ * handler and the socket write — three places that each used to decide it
+ * alone, which is how the composer came to light a send button for a turn the
+ * socket layer then silently dropped.
+ */
+export function turnCarriesSomething(
+  content: string,
+  attachments: CopilotImageAttachment[] = [],
+): boolean {
+  return content.trim().length > 0 || attachments.length > 0
+}
+
+/**
+ * What the transcript remembers about the images a turn carried.
+ *
+ * Descriptors only: the session file is rewritten in full on every message, so
+ * keeping the base64 would add megabytes per turn to a file no reader ever
+ * wants the bytes from — the image itself has already reached the model.
+ */
+export function recordedAttachments(
+  attachments: CopilotImageAttachment[] | undefined,
+): CopilotAttachmentRecord[] | undefined {
+  if (!attachments?.length) {
+    return undefined
+  }
+  return attachments.map((attachment) => ({
+    mediaType: attachment.media_type,
+    name: attachment.name,
+    byteSize: decodedByteLength(attachment.data),
+  }))
 }
 
 function createMessage(role: CopilotMessage['role'], content: string, status: CopilotMessage['status']): CopilotMessage {
@@ -334,14 +371,21 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     options: Omit<CopilotSendOptions, 'workspaceRoot'> = {},
   ) => {
     const trimmed = content.trim()
-    if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+    if (
+      !turnCarriesSomething(trimmed, options.attachments)
+      || !socketRef.current
+      || socketRef.current.readyState !== WebSocket.OPEN
+    ) {
       return false
     }
 
     const sessionId = copilotStore.ensureActiveSession()
     assistantMessageIdRef.current = null
     pendingQuerySessionsRef.current.push(sessionId)
-    void copilotStore.appendMessage(createMessage('user', trimmed, 'success'), sessionId)
+    void copilotStore.appendMessage(
+      { ...createMessage('user', trimmed, 'success'), attachments: recordedAttachments(options.attachments) },
+      sessionId,
+    )
     socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, sessionId, { ...options, workspaceRoot })))
     setIsStreaming(true)
     return true

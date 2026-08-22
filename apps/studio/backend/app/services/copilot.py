@@ -1042,7 +1042,9 @@ def _turn_message_with_attachments(
     """
     if not attachments:
         return None
-    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    # A picture-only turn has no text to send, and the provider rejects a text
+    # block that holds none — so the block is present only when it says something.
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}] if prompt.strip() else []
     content.extend(
         {
             "type": "image",

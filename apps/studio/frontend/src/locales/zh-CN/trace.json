@@ -34,6 +34,8 @@
     "placeholder": "搜索轨迹事件",
     "filtersOn_other": "已开启 {{count}} 个筛选",
     "filtersTooltip_other": "有 {{count}} 个筛选正在收窄这条轨迹 —— 点进搜索框即可修改",
+    "matchCount_other": "{{count}} 条步骤",
+    "matchCountTooltip_other": "取景后列表里剩 {{count}} 条步骤，其余是被收起，不是消失",
     "clear": "清空搜索"
   },
   "filter": {

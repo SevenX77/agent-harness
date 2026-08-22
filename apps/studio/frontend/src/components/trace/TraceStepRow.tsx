@@ -32,6 +32,7 @@ import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
 import { EventTypeBadge } from './EventTypeBadge'
 import { TraceText } from './TraceText'
+import { TraceMark } from './trace-mark-term'
 import {
   factLabelText,
   factValueText,
@@ -149,7 +150,7 @@ export function TraceStepRow({
           {tokens ? (
             <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
               <Hash className="h-3 w-3" />
-              {tokens}
+              <TraceMark text={tokens} />
             </span>
           ) : null}
           {modelName ? (
@@ -159,7 +160,7 @@ export function TraceStepRow({
               className="flex max-w-[180px] items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs text-muted-foreground"
             >
               <Cpu className="h-3 w-3 shrink-0" />
-              <span className="truncate">{modelName}</span>
+              <span className="truncate"><TraceMark text={modelName} /></span>
             </span>
           ) : null}
           {mockedSource ? (
@@ -170,7 +171,7 @@ export function TraceStepRow({
         </div>
         {headline === '' ? null : (
           <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-foreground/80">
-            {headline}
+            <TraceMark text={headline} />
           </p>
         )}
         {ownRouteDecision ? <RouteDecisionBlock details={ownRouteDecision} severity={severity} /> : null}
@@ -215,7 +216,7 @@ function ToolHeadline({ step }: { step: TraceStep }) {
       ) : (
         <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
       )}
-      <span className="font-medium text-foreground">{headline}</span>
+      <span className="font-medium text-foreground"><TraceMark text={headline} /></span>
       {duration ? (
         <span className="text-muted-foreground">{duration}</span>
       ) : null}
@@ -531,7 +532,7 @@ function RouteDecisionBlock({
           <span className="font-normal text-muted-foreground">{t('route.endpoint', { id: details.endpointId })}</span>
         ) : null}
         {details.protocol ? (
-          <span className="font-normal text-muted-foreground">{details.protocol}</span>
+          <span className="font-normal text-muted-foreground"><TraceMark text={details.protocol} /></span>
         ) : null}
         {details.statusCode !== null ? (
           <span className="font-normal text-muted-foreground">{t('route.http', { status: details.statusCode })}</span>
@@ -539,13 +540,13 @@ function RouteDecisionBlock({
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground">
         <span className="rounded border border-border bg-background px-1.5 py-0.5">
-          {details.providerModelId ?? details.routeId ?? t('route.unknown')}
+          <TraceMark text={details.providerModelId ?? details.routeId ?? t('route.unknown')} />
         </span>
         {details.decision === 'fell_back' ? (
           <>
             <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
             <span className="rounded border border-border bg-background px-1.5 py-0.5">
-              {details.nextRouteId ?? t('route.unknown')}
+              <TraceMark text={details.nextRouteId ?? t('route.unknown')} />
             </span>
           </>
         ) : null}
@@ -566,7 +567,7 @@ function RouteDecisionBlock({
         </p>
       ) : null}
       {details.reason ? (
-        <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground">{details.reason}</p>
+        <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground"><TraceMark text={details.reason} /></p>
       ) : null}
     </div>
   )
@@ -627,7 +628,7 @@ function MachineryBody({
             return (
               <div key={item.label} className="flex min-w-0 items-baseline gap-1.5">
                 <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{factLabelText(item, t)}</dt>
-                <dd className="min-w-0 truncate font-mono text-foreground" title={value}>{value}</dd>
+                <dd className="min-w-0 truncate font-mono text-foreground" title={value}><TraceMark text={value} /></dd>
               </div>
             )
           })}
@@ -638,7 +639,7 @@ function MachineryBody({
           {narration.details.map((line, position) => (
             <li key={`detail-${position}`} className="flex gap-2 text-foreground/90">
               <span className="font-mono text-muted-foreground">{position + 1}.</span>
-              <span className="whitespace-pre-wrap">{line}</span>
+              <span className="whitespace-pre-wrap"><TraceMark text={line} /></span>
             </li>
           ))}
         </ol>
@@ -651,7 +652,7 @@ function MachineryBody({
               className="flex gap-2 rounded border border-destructive-border/60 bg-background px-2 py-1 text-destructive"
             >
               <span className="font-mono text-destructive/70">#{position + 1}</span>
-              <span className="whitespace-pre-wrap">{reason}</span>
+              <span className="whitespace-pre-wrap"><TraceMark text={reason} /></span>
             </li>
           ))}
         </ol>
@@ -700,7 +701,7 @@ function CallSettingsBlock({
         {severity === 'normal' ? <Cpu className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
         {t('settings.title')}
         {details.providerModelId ? (
-          <span className="font-normal text-muted-foreground">{details.providerModelId}</span>
+          <span className="font-normal text-muted-foreground"><TraceMark text={details.providerModelId} /></span>
         ) : null}
       </div>
       <ul className="mt-1.5 space-y-1">
@@ -709,9 +710,9 @@ function CallSettingsBlock({
             key={outcome.setting}
             className="flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground"
           >
-            <span className="text-muted-foreground">{outcome.setting}</span>
+            <span className="text-muted-foreground"><TraceMark text={outcome.setting} /></span>
             <span className="rounded border border-border bg-background px-1.5 py-0.5">
-              {outcome.requested === null ? '—' : String(outcome.requested)}
+              <TraceMark text={outcome.requested === null ? '—' : String(outcome.requested)} />
             </span>
             <ArrowRight className={`h-3 w-3 shrink-0 ${tone.arrow}`} />
             {/* A setting that did not run as asked is the whole reason this
@@ -721,7 +722,7 @@ function CallSettingsBlock({
               {t(`settings.${outcome.verdict}`)}
             </span>
             {outcome.reason ? (
-              <span className="font-sans text-muted-foreground">{outcome.reason}</span>
+              <span className="font-sans text-muted-foreground"><TraceMark text={outcome.reason} /></span>
             ) : null}
           </li>
         ))}

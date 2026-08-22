@@ -97,6 +97,8 @@ describe('TracePanel 取景 (ledger T8)', () => {
     container.querySelector('[data-trace-step-count]')?.getAttribute('data-trace-step-count'),
   )
   const outcomeShown = () => container.querySelector('[data-trace-outcome]') !== null
+  const matchCountLabel = () =>
+    container.querySelector('[data-trace-match-count]')?.getAttribute('data-trace-match-count') ?? null
 
   function type(value: string) {
     const input = searchBox()
@@ -149,6 +151,51 @@ describe('TracePanel 取景 (ledger T8)', () => {
 
     type('')
     expect(outcomeShown()).toBe(true)
+  })
+
+  // Ledger T8's remaining item: 取景 has to be readable, not just correct.
+  // A narrowed list answers "these rows are left" but not "why this row" or
+  // "how much did I just hide" — and both answers are already in hand at the
+  // moment the narrowing runs.
+  it('marks the term inside the rows it kept', () => {
+    render()
+    type('deepseek')
+
+    const marks = Array.from(container.querySelectorAll('mark'))
+    expect(marks.length).toBeGreaterThan(0)
+    for (const mark of marks) {
+      expect(mark.textContent?.toLowerCase()).toBe('deepseek')
+    }
+  })
+
+  it('leaves no mark behind once the search is cleared', () => {
+    render()
+    type('deepseek')
+    expect(container.querySelector('mark')).not.toBeNull()
+
+    type('')
+
+    expect(container.querySelector('mark')).toBeNull()
+  })
+
+  it('says how many steps are left, and that is the number of steps it is showing', () => {
+    // The count describes THIS list, so it is read off the same array the list
+    // renders — not computed a second time. F3's 2026-08-20 rule: a count that
+    // cannot be found by looking is worse than no count.
+    render()
+    expect(matchCountLabel()).toBeNull()
+
+    type('deepseek')
+
+    expect(matchCountLabel()).toBe(String(stepCount()))
+  })
+
+  it('reports zero rather than going silent when nothing matched', () => {
+    render()
+    type('nothing matches this')
+
+    expect(stepCount()).toBe(0)
+    expect(matchCountLabel()).toBe('0')
   })
 
   it('a hit in the closing half brings its opening half with it', () => {

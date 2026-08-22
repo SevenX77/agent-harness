@@ -1,4 +1,6 @@
+import { MarkedText } from '../ui/marked-text'
 import type { TraceSeverity } from '../../utils/trace'
+import { useTraceMarkTerm } from './trace-mark-term'
 
 interface EventTypeBadgeProps {
   eventType: string
@@ -27,9 +29,12 @@ function severityPill(severity: TraceSeverity): string | null {
 
 export function EventTypeBadge({ eventType, severity }: EventTypeBadgeProps) {
   const pill = severityPill(severity)
+  // The search matches this exact string (`eventSearchText` puts `event_type`
+  // in first), so it is one of the places a hit can be explained from.
+  const markTerm = useTraceMarkTerm()
   return (
     <span className={`font-mono text-xs font-medium ${pill ?? 'text-muted-foreground'}`}>
-      {eventType}
+      <MarkedText text={eventType} term={markTerm} />
     </span>
   )
 }

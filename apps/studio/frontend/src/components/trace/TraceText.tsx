@@ -4,6 +4,7 @@ import type { FileOpenRequest } from '../studio/file-types'
 import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 import { TextWell } from '../ui/text-well'
 import { useTraceCopy } from './trace-copy'
+import { useTraceMarkTerm } from './trace-mark-term'
 
 /**
  * Full view opens where every other document opens — the workspace editor, as
@@ -38,9 +39,15 @@ export function TraceText({
 }) {
   const t = useTraceCopy()
   const onFileOpen = useOptionalWorkspaceContext()?.onFileOpen
+  // The search matches payload VALUES, and most of them are only visible in
+  // here. Marking the headline alone would leave those hits sitting on a row
+  // with nothing on it to explain them — F13's own criterion for what is worse
+  // than no hit at all. The well is where the reason for such a hit lives.
+  const markTerm = useTraceMarkTerm()
   return (
     <TextWell
       text={text}
+      markTerm={markTerm}
       autoFollow={autoFollow}
       className={className}
       overflowAction={onFileOpen ? (

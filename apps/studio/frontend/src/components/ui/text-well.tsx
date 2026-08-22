@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { cn } from '@/lib/utils'
+import { MarkedText } from './marked-text'
 
 /**
  * The ONE long-text surface (decision 2026-08-14, superseding the 5/20-line
@@ -11,11 +12,14 @@ import { cn } from '@/lib/utils'
  */
 export function TextWell({
   text,
+  markTerm = '',
   autoFollow = false,
   overflowAction,
   className,
 }: {
   text: string
+  /** A term to mark wherever it occurs in the text. Empty marks nothing. */
+  markTerm?: string
   /** Keep the newest lines in view while the text is still streaming. */
   autoFollow?: boolean
   /** Rendered under the well once the text overflows it (e.g. a full-view link). */
@@ -43,7 +47,7 @@ export function TextWell({
           className,
         )}
       >
-        {text}
+        <MarkedText text={text} term={markTerm} />
       </pre>
       {overflowing && overflowAction ? <div className="mt-1">{overflowAction}</div> : null}
     </>

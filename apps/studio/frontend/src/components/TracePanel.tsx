@@ -36,6 +36,7 @@ import { TraceFilterRow } from './trace/TraceFilterRow'
 import { TraceSearchBar } from './trace/TraceSearchBar'
 import { useRunDeltas } from '../hooks/useRunDeltas'
 import { TraceEventList } from './trace/TraceEventList'
+import { TraceMarkTermProvider } from './trace/trace-mark-term'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 import { useTraceCopy } from './trace/trace-copy'
 
@@ -504,6 +505,7 @@ export function TracePanel({
             value={narrowing.searchTerm}
             onChange={narrowing.setSearchTerm}
             activeFilterCount={activeFilterCount}
+            matchCount={narrowing.isNarrowed ? narrowing.narrowedSteps.length : null}
           />
           <TraceFilterRow
             phases={narrowing.phases}
@@ -523,16 +525,21 @@ export function TracePanel({
         ) : null}
       </div>
       <div className="min-h-0 flex-1 p-4 pb-0">
-        <TraceEventList
-          steps={narrowing.narrowedSteps}
-          selectedEventId={selectedEventId}
-          followStream={live}
-          streamKey={runId}
-          focusPhase={focusPhase}
-          outcome={outcome}
-          onSelectEvent={onSelectEvent}
-          deltas={deltas}
-        />
+        {/* Every row below matched the term the reader typed; the term is
+            offered to the surfaces that can show WHERE, so a hit is never a row
+            with nothing on it to explain itself. */}
+        <TraceMarkTermProvider value={narrowing.searchTerm}>
+          <TraceEventList
+            steps={narrowing.narrowedSteps}
+            selectedEventId={selectedEventId}
+            followStream={live}
+            streamKey={runId}
+            focusPhase={focusPhase}
+            outcome={outcome}
+            onSelectEvent={onSelectEvent}
+            deltas={deltas}
+          />
+        </TraceMarkTermProvider>
       </div>
     </div>
   )

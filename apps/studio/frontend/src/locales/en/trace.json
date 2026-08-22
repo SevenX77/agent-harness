@@ -39,6 +39,10 @@
     "filtersOn_other": "{{count}} filters on",
     "filtersTooltip_one": "{{count}} filter is narrowing this trace — focus the search box to change it",
     "filtersTooltip_other": "{{count}} filters are narrowing this trace — focus the search box to change them",
+    "matchCount_one": "{{count}} step",
+    "matchCount_other": "{{count}} steps",
+    "matchCountTooltip_one": "Narrowing leaves {{count}} step in view; the rest are hidden, not gone",
+    "matchCountTooltip_other": "Narrowing leaves {{count}} steps in view; the rest are hidden, not gone",
     "clear": "Clear search"
   },
   "filter": {

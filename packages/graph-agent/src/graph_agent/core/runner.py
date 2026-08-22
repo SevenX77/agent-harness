@@ -536,11 +536,11 @@ def run_skill(
                 _run_metrics(spend, wall_time=wall_time),
                 wall_time_sec=wall_time,
             ),
-            # The trace sink creates and truncates ``trace.jsonl`` the moment it
-            # opens, so the file's presence is the honest answer to "did this
-            # run leave a trace": a run rejected before the graph was assembled
-            # never opened one, and pointing at a path that holds nothing would
-            # be worse than admitting there is nothing to read.
+            # The trace sink creates ``trace.jsonl`` the moment it opens, so the
+            # file's presence is the honest answer to "did this run leave a
+            # trace": a run rejected before the graph was assembled never opened
+            # one, and pointing at a path that holds nothing would be worse than
+            # admitting there is nothing to read.
             trace_path=trace_file if trace_file.exists() else None,
             error=exc.payload or make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
             started_at=started_at,
@@ -607,7 +607,10 @@ def resume_skill(
     )
 
     trace_output = runs_root(workspace_root) / run_id
-    spend = _RunSpendLedger()
+    # Continuing a run, not starting one: the ledger opens with what the run has
+    # already spent, so `metrics.json` keeps describing the same run its trace
+    # and its report describe.
+    spend = _RunSpendLedger.continuing(trace_output / TRACE_FILENAME)
     event_sink = _prepare_v030_event_sink(
         trace_output=trace_output,
         event_subscriber=event_subscriber,
@@ -783,9 +786,12 @@ def resume_skill(
         run_id=run_id,
         skill_id=skill_id,
         context=final_context,
-        # A resumed run counts what the resumed segment spent, which is exactly
-        # what its ``trace.jsonl`` holds — the sink truncates the file on open,
-        # so the two describe the same segment (OB10).
+        # A resumed run counts what the WHOLE run spent, which is exactly what
+        # its ``trace.jsonl`` holds — neither is reset by a continuation, so the
+        # two describe the same run (OB10). ``wall_time_sec`` is the odd one
+        # out and stays this segment's: it is the runner's own measurement
+        # rather than a total over events, so it never took part in that
+        # agreement.
         metrics=WorkflowMetrics.from_mapping(
             _run_metrics(spend, wall_time=wall_time),
             wall_time_sec=wall_time,

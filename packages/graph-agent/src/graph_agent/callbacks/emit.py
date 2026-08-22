@@ -17,11 +17,22 @@ logger = logging.getLogger(__name__)
 
 
 class _TraceJsonlSink:
+    """Where one run's events are written down, for as long as the run lasts.
+
+    The file is created on open — its presence is what says a sink was opened
+    for this run — but never cleared. It used to be truncated here, which is
+    the behaviour of something that believes it is starting a run; a run
+    stopped at a breakpoint and continued opens a second sink over the SAME
+    directory, and the first segment's record was wiped every time. Nothing
+    else can be in that file to clear: it lives in ``runs/<run_id>/``, so
+    whatever is already there was written by this same run.
+    """
+
     def __init__(self, trace_dir: str | Path) -> None:
         self.trace_dir = Path(trace_dir)
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.trace_dir / TRACE_FILENAME
-        self.path.write_text("", encoding="utf-8")
+        self.path.touch(exist_ok=True)
         self._lock = RLock()
 
     def emit(self, event: Any) -> None:
@@ -59,6 +70,41 @@ class _RunSpendLedger:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self._lock = RLock()
+
+    @classmethod
+    def continuing(cls, trace_path: Path) -> _RunSpendLedger:
+        """A ledger opened with what this run has already spent.
+
+        A run that stopped at a breakpoint and was continued is ONE run, so its
+        total is the sum over all of its ``llm_call`` events — not over the ones
+        the latest segment happened to make. Its own trace is where those are
+        written down, and re-reading them is the same aggregation ``report.md``
+        performs, which is what keeps the two agreeing across a resume as well
+        as within one segment.
+
+        This is not the reconstruction the class docstring rejects. That one
+        re-derives spend from whichever messages or graph state SURVIVED, and
+        is lossy by nature; these are the run's own call records, written as
+        each call happened, and nothing ever removes a line from them.
+
+        Missing file = a run that has spent nothing yet, which is the honest
+        reading: the sink creates the trace when the run opens it.
+        """
+        ledger = cls()
+        if not trace_path.exists():
+            return ledger
+        for line in trace_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict) or event.get("event_type") != "llm_call":
+                continue
+            ledger.total_input_tokens += int(event.get("input_tokens") or 0)
+            ledger.total_output_tokens += int(event.get("output_tokens") or 0)
+        return ledger
 
     def emit(self, event: Any) -> None:
         if getattr(event, "event_type", None) != "llm_call":

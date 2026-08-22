@@ -1067,6 +1067,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // E3 entry①: the trace asks for a golden to be DESIGNED for one node. The panel
   // consumes the request and clears it, so a re-render cannot replay it.
   const [goldenDesignRequest, setGoldenDesignRequest] = useState<{ nodeId: string; label?: string } | null>(null)
+  // F6 entry ①: the skill was created to be planned out, so the wizard starts on
+  // it the moment it opens. Same consume-and-clear shape as the golden request —
+  // an intent, not a mode, so a re-render cannot replay it.
+  const [skillWizardRequest, setSkillWizardRequest] = useState<{ skillId: string } | null>(null)
   const handleDesignGolden = useCallback(
     (node: { id: string; label?: string }) => {
       setGoldenDesignRequest({ nodeId: node.id, label: node.label })
@@ -3024,6 +3028,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         completedRunId={completedRunId}
         goldenDesignRequest={goldenDesignRequest}
         onGoldenDesignRequestHandled={() => setGoldenDesignRequest(null)}
+        skillWizardRequest={skillWizardRequest}
+        onSkillWizardRequestHandled={() => setSkillWizardRequest(null)}
         onJudgePrepared={setCopilotJudgeResult}
         onFileChanged={handleCopilotFileChanged}
         onCollapse={() => startMorph("close", fabPosition)}
@@ -3081,7 +3087,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           <ResizablePanel id="canvas" defaultSize="100%" minSize="30%">
             <div className="relative size-full" style={currentSkillId ? workspaceOverlayStyle : undefined}>
               {currentSkillId === null ? (
-                <WelcomePage onSelectSkill={onSelectSkill} />
+                <WelcomePage
+                  onSelectSkill={onSelectSkill}
+                  onSkillWizardRequested={(newSkillId) => {
+                    setSkillWizardRequest({ skillId: newSkillId })
+                    // Opened directly rather than through the morph, for the same
+                    // reason the golden request is: there is no FAB to grow out of.
+                    setCopilotOpen(true)
+                  }}
+                />
               ) : (
                 <>
                   <div

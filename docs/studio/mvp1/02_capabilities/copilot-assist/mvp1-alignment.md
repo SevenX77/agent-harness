@@ -217,12 +217,38 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **归属**：Write/Edit 自写归 region [[copilot]] / `copilot-assist`；Studio 自有写入仍归 platform [[native-fs]]。
 
 ### F6 建技能向导
-- **机制**：copilot-SDK 调一个**独立 brainstorming graph skill**(graph 背景知识 + skill-spec 渐进暴露 + template few-shot)对话设计新 skill(问需求→定 io schema→生成骨架)；产出落盘归 [[skill-workspace]] + [[native-fs]]。
-- **决策+动机**：**实现 = 独立 brainstorming graph skill(保留 D5)**(与 F3"copilot 自身=SDK"不矛盾：向导是它调的工具型 skill，要结构化、模板可独立迭代)。**两入口**(新建 skill 时可选 + chat 说"帮我建个 X")。区别默认新建(模板文件夹 logic→agent，不调 copilot，D-1-4)。
-- **原话**：实现「独立 brainstorming graph skill(D5)」/ 触发「都要」/(D5)「Copilot 对话式建技能, 需要一个类似brainstorming的skill, 加入graph_skill背景知识+skill spec(渐进式暴露)+各种template few shot模版」
-- **status**：D5 graph skill 待建 = target。
-- **测试点**：两入口都进向导；产出合 FROZEN 骨架(GRAPH.md+logic/agent)可直接编译。
-- **归属**：engine(brainstorming graph skill 工件)；copilot-assist 调 + [[skill-workspace]] 落盘。
+- **机制**：copilot **自己**主持向导对话(问需求 → 定 root io schema → 生成骨架 → 当场编译),
+  依据是一份随包发布的 **brainstorming 技能资产**(`app/agents/skills/brainstorming/`:graph 背景知识
+  按需引 KB、skill-spec 渐进暴露、几份 template few-shot);产出落盘归 [[skill-workspace]] + [[native-fs]]。
+- **决策+动机**：**两入口**(新建 skill 时可选 + chat 说"帮我建个 X")与**产出判据**(合 FROZEN 骨架、
+  可直接编译)都不变;**变的只有「谁来主持这段对话」**。
+  **原方案是「copilot-SDK 调一个独立 brainstorming *graph* skill」,2026-08-22 实施时判定不成立**,
+  两条证据,都不是成本问题而是**做不出来**:
+  1. **它没有地方可住**。桌面 app 打包的资源只有 `vendor/**/*`
+     (`apps/studio/tauri/tauri.conf.json` 的 `bundle.resources`),仓里也不再有 bundled skill 根
+     ——bundled skill 在 **#377「bundled 脱主仓」**里被特意移走了。一个 graph skill 必须**先作为
+     skill 装在用户机器上**才跑得起来,所以这条路要先重新造一套「随 app 发布 + 首次运行安装 +
+     写进 skill_index」的分发子系统,而那正是上一轮刚拆掉的东西。
+  2. **它在需要它的那一刻还跑不起来**。graph skill 的 agent 相位要经 gateway 解析 **LLM role**;
+     而向导要服务的正是**刚点下 New Skill、一个 role 都还没配**的人。copilot 用的是自己的凭据,
+     不受这个 bootstrap 影响——**这正是它该主持这段对话的原因**,不是权宜。
+  与 F3「copilot 自身 = SDK」一致:向导是**它的对话脚本**,不是它调的外部工件。原方案想要的
+  「结构化、模板可独立迭代」由**技能资产文件**照样满足——`SKILL.md` 独立于代码迭代,
+  改它不用改一行 Python。
+  **这份资产挂在 MoirAI 名下**(`agent-skill-map.json` 的 `moirai` 行),不走三女神派工:
+  copilot.py 里那条「整池给她会让派工失去理由」的注释针对的是**专家的设计技能**
+  (给她 `agent-prompt-design`,她每次都会自己干而不派 Clotho);向导是**前台的流程脚本**,
+  流程内部该派 Clotho 做领域分析/图设计时照派不误。
+  区别默认新建(模板文件夹 logic→agent,不调 copilot,D-1-4):New Skill 对话框给**两个动作**,
+  默认那个原样保留。
+- **原话**：触发「都要」/(D5)「Copilot 对话式建技能, 需要一个类似brainstorming的skill,
+  加入graph_skill背景知识+skill spec(渐进式暴露)+各种template few shot模版」
+  ——原话说的是「一个类似 brainstorming 的 skill」,没有指定它必须是 graph skill;
+  「graph skill」是上一轮设计写下的实现选择,本轮按上述两条证据改判。
+- **status**：live(2026-08-22)。
+- **测试点**：两入口都进向导;产出合 FROZEN 骨架(GRAPH.md+logic/agent)可直接编译;
+  默认新建那条路不受影响(不开 copilot、直接铺模板)。
+- **归属**：copilot-assist 拥有向导资产与两个入口;产出落盘 [[skill-workspace]] + [[native-fs]]。
 
 ### F7 judge / 打磨 / commit-msg + 分析 bar（跨能力载体）
 - **机制**：judge(artifact vs golden 打分+评述)/打磨/commit-msg 都在 copilot 对话里跑，**数据流归别处**(judge·打磨→[[golden-eval]]，commit-msg→[[publish]])，copilot 只渲染。**分析 bar**：predict/run 跑完 → copilot 输入框上方**瞬时弹窗**「是否自动分析」(样式参考 PM 贴图细长 bar) → 确认 → 无 golden 节点自动写 golden(有的不动) → **确认/忽略后消失**。

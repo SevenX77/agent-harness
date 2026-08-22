@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen, Sparkles } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Input } from '../ui/input'
@@ -18,6 +18,9 @@ interface NewSkillDialogProps {
   newSkillError: string | null
   creating: boolean
   onSubmit: (event?: FormEvent) => void
+  /** F6 entry ①: create the folder, then hand the empty skill to the wizard
+   *  instead of leaving the person on a canvas of starter files. */
+  onSubmitWithWizard: () => void
 }
 
 export function NewSkillDialog({
@@ -32,8 +35,10 @@ export function NewSkillDialog({
   newSkillError,
   creating,
   onSubmit,
+  onSubmitWithWizard,
 }: NewSkillDialogProps) {
   const currentParentDirectory = parentDirectory ?? defaultParentDirectory ?? ''
+  const nameMissing = !newSkillName.trim()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -42,7 +47,8 @@ export function NewSkillDialog({
           <DialogHeader>
             <DialogTitle>New skill</DialogTitle>
             <DialogDescription>
-              Creates a local skill folder with starter files.
+              Create the folder with starter files, or plan the skill out first and
+              let the folder follow from that.
             </DialogDescription>
           </DialogHeader>
           <div className="my-4 space-y-4">
@@ -95,7 +101,16 @@ export function NewSkillDialog({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={creating || !newSkillName.trim()}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onSubmitWithWizard}
+              disabled={creating || nameMissing}
+            >
+              <Sparkles />
+              Plan it together
+            </Button>
+            <Button type="submit" disabled={creating || nameMissing}>
               {creating ? 'Creating' : 'Create'}
             </Button>
           </DialogFooter>

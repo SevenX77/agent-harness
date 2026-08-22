@@ -847,11 +847,13 @@ def build_options(
         # 场景技能白名单:只启用随包物化进 workspace/.claude/skills 的技能
         # (SDK 会自动配好 Skill 工具,types.py skills 文档)。MoirAI 只拿她在
         # agent-skill-map.json 里的那一行,与 CLI 路同源(lib.rs 的
-        # skills_for_agent(&map, "moirai")),规格 R5.3「默认映射:moirai=
-        # moirai-intro」。整池给她会让派工失去理由:身上挂着 agent-prompt-design
-        # 的 MoirAI,按 roles/moirai.md 的分配判据「不完美契合就自己干」,
-        # 每次都该自己干——2026-08-15 实测纯 prompt 设计题连跑 5 次零派工。
-        # 物化仍是全量:三位女神在同一 workspace 里跑,她们的技能得在盘上。
+        # skills_for_agent(&map, "moirai"))。整池给她会让派工失去理由:身上挂着
+        # agent-prompt-design 的 MoirAI,按 roles/moirai.md 的分配判据「不完美
+        # 契合就自己干」,每次都该自己干——2026-08-15 实测纯 prompt 设计题连跑
+        # 5 次零派工。她那一行现在有两条,判据是「这是前台的活还是专家的活」:
+        # moirai-intro 与 brainstorming(建技能向导,F6)都是**她自己主持的流程**,
+        # 流程内部该派 Clotho 做领域分析 / 图设计时照派不误;专家的设计技能仍然
+        # 不给她。物化仍是全量:三位女神在同一 workspace 里跑,她们的技能得在盘上。
         skills = agent_assets.load_skill_map()["moirai"]
         mcp_servers = build_copilot_mcp_servers(skill_binding)
         agents = _goddess_agent_definitions()

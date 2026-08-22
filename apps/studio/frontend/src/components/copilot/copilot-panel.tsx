@@ -10,6 +10,7 @@ import { getRegistry, getRoles, putRoles, type RegistryResponse, type RolesData 
 import type { CopilotController, CopilotJudgeContext } from '../../hooks/useCopilot'
 import { turnCarriesSomething } from '../../hooks/useCopilot'
 import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-derivation'
+import { buildSkillWizardDraft } from './skill-wizard-draft'
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotImageAttachment, CopilotMessage } from '../../types/copilot'
@@ -320,6 +321,10 @@ interface CopilotPanelProps {
    * every render that happens to keep the prop.
    */
   goldenDesignRequest?: { nodeId: string; label?: string } | null
+  /** F6 entry ①: a skill was just created to be planned out rather than
+   *  templated. Consumed once, then cleared by the owner. */
+  skillWizardRequest?: { skillId: string } | null
+  onSkillWizardRequestHandled?: () => void
   onGoldenDesignRequestHandled?: () => void
   onJudgePrepared?: (refs: CopilotJudgeResponse) => void
   // F5/DEF-025: a copilot edit hit disk — reload the editor buffer + recompile.
@@ -515,6 +520,8 @@ export function CopilotPanel({
   judgeRefs = null,
   completedRunId = null,
   goldenDesignRequest = null,
+  skillWizardRequest = null,
+  onSkillWizardRequestHandled,
   onGoldenDesignRequestHandled,
   onJudgePrepared,
   onFileChanged,
@@ -615,6 +622,19 @@ export function CopilotPanel({
     )
     onGoldenDesignRequestHandled?.()
   }, [goldenDesignRequest, copilot, onGoldenDesignRequestHandled])
+
+  // F6 entry ①: the New Skill dialog's "Plan it together" lands here. A new
+  // session for the same reason the golden request opens one — this is the
+  // skill's founding conversation, and appending it to whatever was open would
+  // bury it.
+  useEffect(() => {
+    if (!skillWizardRequest) {
+      return
+    }
+    copilot.newSession()
+    composerRef.current?.setText(buildSkillWizardDraft({ skillId: skillWizardRequest.skillId }))
+    onSkillWizardRequestHandled?.()
+  }, [skillWizardRequest, copilot, onSkillWizardRequestHandled])
 
   const refreshRegistry = useCallback((options: { force?: boolean } = {}) => {
     getRegistry(options)

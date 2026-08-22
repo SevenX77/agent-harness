@@ -151,6 +151,14 @@ class RunMetadata(BaseModel):
     # Timeline F1: predict attempts sit in the same run list as real runs and
     # are told apart by this field alone (PM: predict 行仅用 icon 区分).
     kind: Literal["run", "predict"] = "run"
+    # Whether finishing this run archives the skill. It is a property of what
+    # the run IS — an ordinary run leaves an "Auto run" snapshot, a compare
+    # side-run or an artifact replay must never commit whatever the user
+    # happened to change while it ran — so it is written down WITH the run
+    # rather than held only by the sidecar that spawned it. A sidecar that
+    # takes a paused run over (see `RunManager.take_over_paused_run`) would
+    # otherwise have to guess, and both guesses are wrong for someone.
+    auto_commit: bool = False
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
     git_status: Literal["committed", "unchanged", "locked", "failed", "no_git"] | None = None

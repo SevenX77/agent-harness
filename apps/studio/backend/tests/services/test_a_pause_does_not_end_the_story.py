@@ -71,7 +71,6 @@ def _record(run_dir: Path, worker_says: dict[str, Any]) -> RunRecord:
         run_dir=run_dir,
         process=_WorkerThatExited(),
         process_queue=process_queue,
-        auto_commit=False,
     )
 
 
@@ -116,7 +115,7 @@ async def test_a_stopped_runs_next_events_reach_the_same_watchers(
     record.subscribers.append(watcher)
     await _drain(manager, record)
 
-    observe = manager.observe_resumed_run(RUN_ID)
+    observe = manager.observe_resumed_run(RUN_ID, skill_id=SKILL)
     assert observe is not None
     observe({"event_type": "phase_start", "phase_name": "beta", "run_id": RUN_ID})
 

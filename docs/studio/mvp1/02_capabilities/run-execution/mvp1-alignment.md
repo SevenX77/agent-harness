@@ -454,6 +454,36 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     而根本没有问题可答——**正是本决策加 `reason` 要防的那件事**。判据只认显式的
     `reason === "breakpoint"`;**没写 reason 的旧 trace 仍然按 HITL 处理**,因为两种错
     不对称:把断点当问题只是多一个没人用的框,把真问题当断点会让人永远等不到那个框。
+  - **停住的 run 谁来接手:谁续跑它、谁看着它,谁就在这里持有它。**(2026-08-22 真机走查补)
+    上一条(「一次停顿不结束这个 run 的事件流」)保住的是**内存里那条记录**的流,而记录只
+    活在起这个 run 的那个进程里,进程一没它就没了。**关掉 app 再打开、对着一个停住的 run
+    按 Resume**,走的就是另一条路:磁盘上这个 run 往前跑了一个相位、正确地结束了,而屏幕上
+    什么都没动,直到再重开一次 app。原因是 `observe_resumed_run` 找不到记录就返回 `None`
+    (事件无处可送),`record_resume_result` 也因为没有记录而不发 gate(结束无人知晓)。
+    **`stop_run` 早就学会了只凭 run 目录结束一个本 sidecar 没起过的 run**(台账 C1 ④),
+    因为**结束是一次写**;而**续跑不是**——它会**产出**:跑的时候有事件,结束时有结局,
+    而「一个 run 的流和它的观众」正是记录这个东西存在的意义。所以续跑或观看一个停住的 run
+    时,本 sidecar **从那份持久产物把记录重建出来接手它**——借的是进程监督器(systemd /
+    容器运行时)**重新接管一个不是自己拉起来的服务**、而不是再起一个的做法;**拒绝**照搬
+    的部分是「连 worker 一起接管」:这里根本没有 worker 可接(续跑就跑在这次请求里),
+    所以记录里那两个进程槽位**留空**,而不是塞一个能被误当成进程去发信号的替身。只有
+    `paused` 会被接手:跑完的 run 不会再写一个字,`running` 的属于正握着它的那一方。
+  - **「这个 run 会不会归档 skill」跟着 run 走,不跟着 sidecar 走。** 接手时这件事必须
+    有答案,而它原本只存在内存记录里,于是接手方只能猜——**两个猜法都会错在某个人身上**:
+    把一次旁路实验当正式 run 去归档,会把用户在它跑的时候改的东西一并提交;把正式 run 当
+    旁路,快照就悄悄不出现。它本来就是「这个 run **是什么**」的属性(旧注释原话:a
+    property of what the run IS),所以**写进 run 自己的 metadata**,默认取**不归档**那
+    一侧(错向这边只是少一份快照,错向另一边会动用户的工作区),由 `start_run` 这唯一一处
+    普通 run 显式声明 `auto_commit=True`。记录里那份重复的同名字段一并删掉——同一个事实
+    只留一个权威(SSOT)。
+  - **「顺便问一下」的查找要有总答案,run 这一侧同样适用。**(2026-08-22 CI 补)接手前
+    得先问「这里有没有这个 run、它是不是停着的」,而 `_metadata_for` / `run_dir_for` 都是
+    **会抛 404 的**查找(skill 没打开就 `SKILL_NOT_FOUND`,run 不在就
+    `RESUME_CHECKPOINT_NOT_FOUND`)。拿它们去问,等于让**顺便问的一句**把整个 resume 端点
+    变成 404,盖掉调用方真正该看到的 `state.*` 运行时状态错误——和 `opened_skill_dir` 那条
+    是同一个错误的第二次。所以同一次查找在这里也出两种形状:`_metadata_for` /
+    `run_dir_for` 给「请求是**关于**这个 run 的」调用方,`_recorded_metadata` /
+    `_run_dir_if_here` 给「只是**问问**有没有」的调用方。
   - **「停住了」不等于「在问你」,`status` 字段说的是前者。**(2026-08-22 真机走查补)
     上一条(「停在断点上不是有人在问你问题」)按 `reason` 排掉了断点停顿,而弹出答题框的
     根本不是那个停顿事件——是续跑写进同一条流里的**审计记录**
@@ -516,6 +546,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   `apps/studio/backend/tests/services/test_a_pause_does_not_end_the_story.py`
   (停住的 run 不关流、不清空看的人、下一段事件送得到同一批看的人、终局仍然关流、
   worker 无声死亡也关流、再停一次还是不关);
+  `apps/studio/backend/tests/services/test_a_paused_run_can_be_taken_over.py`
+  (没起过的停住 run 被接手、接手后的结束会广播、跑完的不接手、归档与否从 metadata 读、
+  看一个停住的 run 不会被告知「没了」、看一个跑完的仍然收尾);
   前端 `src/utils/a-stop-is-not-an-ending.test.ts`(`run_ended` 按 status 判终局,
   没写 status 的算终局)、
   `src/components/studio/a-breakpoint-is-not-a-question.test.ts`(断点停不弹答题框、

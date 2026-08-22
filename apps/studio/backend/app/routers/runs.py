@@ -359,7 +359,7 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
         # artifact, so a skill this Studio does not hold open means no marks,
         # not a dead resume.
         payload["pause_before"] = breakpoints_for_skill(skill_id)
-        observer = run_manager.observe_resumed_run(run_id)
+        observer = run_manager.observe_resumed_run(run_id, skill_id=skill_id)
         if observer is not None:
             payload["event_subscriber"] = _resume_event_subscriber(observer)
         result = adapter.resume(payload)

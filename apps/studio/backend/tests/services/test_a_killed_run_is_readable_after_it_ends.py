@@ -77,7 +77,6 @@ def _run_record(run_dir: Path) -> RunRecord:
         run_dir=run_dir,
         process=_KilledWorker(),
         process_queue=queue.Queue(),
-        auto_commit=False,
     )
 
 

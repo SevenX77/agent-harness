@@ -268,15 +268,15 @@ def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
             status="running",
             started_at=datetime(2026, 6, 18, tzinfo=UTC),
             input_summary="topic=old",
+            # A resumed ordinary run archives on success like any other; this
+            # file is about the audit event, so it keeps that unchanged rather
+            # than quietly testing a run that behaves differently from a real one.
+            auto_commit=True,
         ),
         skill_id="text-segmentation",
         run_dir=run_dir,
         process=FakeProcess(),
         process_queue=SimpleNamespace(),
-        # A resumed ordinary run archives on success like any other; this file
-        # is about the audit event, so it keeps that unchanged rather than
-        # quietly testing a run that behaves differently from a real one.
-        auto_commit=True,
     )
     record.subscribers.append(subscriber)
     run_manager._runs[run_id] = record

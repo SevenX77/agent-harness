@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Response, status
@@ -25,11 +26,28 @@ from app.models.runs import (
     RunDetail,
     RunListResponse,
     RunMetadata,
+    RunPausePoint,
     RunRequest,
     TokensMetrics,
 )
+from app.services.breakpoints import breakpoints_for_skill
 from app.services.predictor import PredictArtifactError, PredictDeadlockError, predictor_service
 from app.services.run_manager import run_manager
+
+
+def _resume_event_subscriber(observe: Callable[[dict[str, Any]], None]) -> Callable[[Any], None]:
+    """Adapt the engine's callback objects to the plain dicts the run record takes.
+
+    Same shape the worker uses (`_queue_event_subscriber`), minus the process
+    queue: a resume runs the engine here, so the events can go straight to the
+    record.
+    """
+
+    def emit(event: Any) -> None:
+        observe(event.model_dump(mode="json") if hasattr(event, "model_dump") else dict(event))
+
+    return emit
+
 
 router = APIRouter(prefix="/api/skills/{skill_id}/runs", tags=["runs"])
 batch_router = APIRouter(prefix="/api/batch", tags=["batch"])
@@ -319,7 +337,7 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
 
     adapter = build_engine_adapter()
     try:
-        payload = {
+        payload: dict[str, Any] = {
             "skill_id": skill_id,
             "run_id": run_id,
             "context_overrides": request.context_overrides,
@@ -335,6 +353,15 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
             payload["resume_to_node_id"] = request.resume_to_node_id
         if request.human_response is not None:
             payload["human_response"] = request.human_response
+        # The same two things the first run is given: which phases to stop
+        # before, and somewhere to send what happens (RUN_EXECUTION-16). The
+        # marks are CONSULTED, never required: this run continues from its own
+        # artifact, so a skill this Studio does not hold open means no marks,
+        # not a dead resume.
+        payload["pause_before"] = breakpoints_for_skill(skill_id)
+        observer = run_manager.observe_resumed_run(run_id)
+        if observer is not None:
+            payload["event_subscriber"] = _resume_event_subscriber(observer)
         result = adapter.resume(payload)
     except StudioAdapterError as exc:
         if exc.error_code.startswith("state."):
@@ -344,6 +371,7 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
             f"Resume failed: {exc.error_payload.get('detail', str(exc))}",
             exc.error_payload,
         ) from exc
+    paused_at = result.get("paused_at")
     metadata = RunMetadata(
         run_id=result["run_id"],
         status=result["status"],
@@ -351,6 +379,9 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
         input_summary=result.get("input_summary"),
         metrics=_tokens_metrics_payload(result.get("metrics")),
         git_status=result.get("git_status"),
+        # A resume can land on the NEXT breakpoint, and dropping this here made
+        # that run say "paused" without saying where.
+        paused_at=RunPausePoint.model_validate(paused_at) if paused_at else None,
     )
     return await run_manager.record_resume_result(
         skill_id=skill_id,

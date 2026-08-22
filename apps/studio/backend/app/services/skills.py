@@ -1140,16 +1140,25 @@ async def delete_skill(
     await metadata.remove_skill_index_entry(skill_id)
 
 
+def _is_safe_skill_id_segment(skill_id: str) -> bool:
+    """Whether this id can name a directory at all, asked without raising.
+
+    Same question as :func:`_validate_skill_id_segment`, for the callers whose
+    answer to "no" is an empty result rather than a rejected request.
+    """
+    return bool(
+        skill_id
+        and Path(skill_id).name == skill_id
+        and skill_id not in {".", ".."}
+        and "/" not in skill_id
+        and "\\" not in skill_id
+        and _SAFE_SKILL_ID_RE.fullmatch(skill_id)
+    )
+
+
 def _validate_skill_id_segment(skill_id: str) -> str:
     segment = Path(skill_id).name
-    if (
-        not skill_id
-        or segment != skill_id
-        or skill_id in {".", ".."}
-        or "/" in skill_id
-        or "\\" in skill_id
-        or not _SAFE_SKILL_ID_RE.fullmatch(skill_id)
-    ):
+    if not _is_safe_skill_id_segment(skill_id):
         response = error_response(
             error_code="INVALID_SKILL_ID",
             http_status=400,
@@ -1433,15 +1442,32 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
     )
 
 
-# codeql[py/path-injection] skill_id is converted to safe_skill_id by _validate_skill_id_segment before path joins.
+# codeql[py/path-injection] skill_id is only joined into a path after _is_safe_skill_id_segment.
+def opened_skill_dir(skill_id: str) -> Path | None:
+    """The directory this Studio has open under that id, or None if it has none.
+
+    The same lookup as :func:`resolve_skill_dir`, differing only in what "no"
+    means to the caller. A request ABOUT a skill cannot proceed without its
+    directory, so that one raises. A caller merely CONSULTING it — a resume
+    asking which breakpoints stand on a skill it is not running from — needs the
+    question to have an answer either way, or an absent skill turns into a
+    failure of whatever it was consulted for.
+    """
+    if not _is_safe_skill_id_segment(skill_id):
+        return None
+    indexed = _sync_skill_index_entry(skill_id)
+    if not indexed:
+        return None
+    skill_dir = Path(indexed["absolute_path"])
+    return skill_dir if skill_dir.exists() else None
+
+
 def resolve_skill_dir(skill_id: str) -> Path:
     """Resolve a skill id through the opened-skill absolute path index."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
-    indexed = _sync_skill_index_entry(safe_skill_id)
-    if indexed:
-        skill_dir = Path(indexed["absolute_path"])
-        if skill_dir.exists():
-            return skill_dir
+    skill_dir = opened_skill_dir(safe_skill_id)
+    if skill_dir is not None:
+        return skill_dir
 
     raise standard_http_exception(
         "SKILL_NOT_FOUND",

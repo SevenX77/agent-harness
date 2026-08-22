@@ -60,6 +60,10 @@ def test_resume_endpoint_delegates_to_configured_engine_adapter_resume(
             "run_id": "run-123",
             "context_overrides": {"draft": "manual"},
             "human_input": "continue from checkpoint",
+            # A resume is compiled fresh, so it has to be told the breakpoints
+            # again or it runs straight through every remaining one
+            # (RUN_EXECUTION-16). Empty here because this skill has none set.
+            "pause_before": [],
         }
     ]
     assert response.json()["metrics"] == {
@@ -116,6 +120,7 @@ def test_resume_endpoint_forwards_checkpoint_selector_and_structured_human_respo
             "context_overrides": {"draft": "manual"},
             "human_input": None,
             "human_response": {"content": "approved", "tool_call_id": "tool-1"},
+            "pause_before": [],
         }
     ]
 
@@ -235,6 +240,7 @@ def test_resume_validity_maps_non_state_adapter_error_to_structured_422(
 def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
     client: TestClient,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     import app.core.adapters.transport_factory as transport_factory
     from app.models.runs import RunMetadata
@@ -249,6 +255,13 @@ def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
         def is_alive(self) -> bool:
             return False
 
+    # A run dir with the real shape (<skill>/.workspace/runs/<run_id>), because a
+    # resume that reaches the end now closes the run out the same way any other
+    # ending does — sealing walks up two levels for the artifact store, and a
+    # made-up path sent that at the filesystem root.
+    run_dir = tmp_path / "text-segmentation" / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True)
+
     record = RunRecord(
         metadata=RunMetadata(
             run_id=run_id,
@@ -257,7 +270,7 @@ def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
             input_summary="topic=old",
         ),
         skill_id="text-segmentation",
-        run_dir=Path("/tmp/run-resume-audit"),
+        run_dir=run_dir,
         process=FakeProcess(),
         process_queue=SimpleNamespace(),
         # A resumed ordinary run archives on success like any other; this file

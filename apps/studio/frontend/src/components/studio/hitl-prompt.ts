@@ -70,8 +70,25 @@ function pendingToolCallsField(value: unknown): PendingHitlToolCall[] {
   })
 }
 
-/** Whether a single trace event represents a HitL pause / clarification request. */
-export function isHitlEvent(eventType: string, status: string | undefined): boolean {
+/**
+ * Whether a single trace event represents a HitL pause / clarification request.
+ *
+ * A run stopped at a BREAKPOINT is not one: nobody asked anything, and the
+ * reader only has to say "go on". Shown as a prompt it puts up "HUMAN INPUT
+ * REQUIRED" and an answer box over a question that does not exist — which is
+ * what the real window did before `reason` was read here.
+ *
+ * The reason is read, never inferred from a missing question: an ask whose
+ * question failed to parse looks identical, and hiding a real one is the worse
+ * of the two mistakes. So only an explicit `breakpoint` is excluded; an
+ * unlabelled stop is still treated as a prompt (RUN_EXECUTION-16).
+ */
+export function isHitlEvent(
+  eventType: string,
+  status: string | undefined,
+  reason?: string | null,
+): boolean {
+  if (reason === 'breakpoint') return false
   if (eventType === 'interrupted' || eventType === 'hitl' || eventType === 'human_input_required') return true
   if (eventType === 'pause' || eventType === 'paused') return true
   if (eventType.includes('hitl') || eventType.includes('interrupt')) return true
@@ -84,7 +101,7 @@ export function latestHitlPrompt(events: readonly EventEnvelope[]): PendingHitlP
     const event = events[index]
     const payload = envelopePayload(event)
     const eventType = event.event_type || payload.event_type || ''
-    if (!isHitlEvent(eventType, payload.status)) continue
+    if (!isHitlEvent(eventType, payload.status, stringField(payload.reason))) continue
     const toolCallId = stringField(payload.tool_call_id) ?? stringField(payload.pending_tool_call_id)
     const pendingToolCalls = pendingToolCallsField(payload.pending_tool_calls)
     return {

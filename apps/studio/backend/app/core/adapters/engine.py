@@ -10,6 +10,7 @@ import shutil
 import uuid
 import zipfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import unquote, urlparse
@@ -822,6 +823,34 @@ def _file_uri_to_path(ref: str) -> Path:
     return Path(url2pathname(unquote(raw_path)))
 
 
+@dataclass(frozen=True)
+class ResumeOutcome:
+    """How a resumed segment ended, in the host's own three-valued vocabulary.
+
+    Split out of the adapter because it is a pure reading of the engine's
+    result, and because the two-valued version it replaces
+    (``"success" if res.success else "failed"``) is the same mistake the worker
+    made: a run that stopped at the NEXT breakpoint is neither a success nor a
+    failure, and calling it either loses the fact that it can be continued.
+    """
+
+    status: str
+    paused_at: dict[str, str] | None
+
+
+def resume_outcome(res: Any) -> ResumeOutcome:
+    paused_at = getattr(res, "paused_at", None)
+    if paused_at is None:
+        return ResumeOutcome(status="success" if res.success else "failed", paused_at=None)
+    if hasattr(paused_at, "model_dump"):
+        paused_at = paused_at.model_dump(mode="json")
+    # The engine says "phase"; Studio's canvas says "node"; same name.
+    return ResumeOutcome(
+        status="paused",
+        paused_at={"node_id": str(paused_at["phase_name"]), "reason": str(paused_at["reason"])},
+    )
+
+
 class EngineAdapter:
     def __init__(
         self,
@@ -1171,18 +1200,23 @@ class EngineAdapter:
                 human_response=human_response,
                 skill_resolver=self._build_studio_skill_resolver(),
                 llm_provider=self._build_engine_llm_provider(),
+                event_subscriber=payload.get("event_subscriber"),
+                pause_before=frozenset(payload.get("pause_before") or ()),
             )
             from datetime import UTC, datetime
 
             raw_metrics = _jsonable(res.metrics)
             snapshot_metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
+            outcome = resume_outcome(res)
             result = {
                 "run_id": run_id,
-                "status": "success" if res.success else "failed",
+                "status": outcome.status,
                 "started_at": (res.started_at or datetime.now(UTC)).isoformat(),
                 "input_summary": "resumed",
                 "metrics": _tokens_metrics_payload(snapshot_metrics),
             }
+            if outcome.paused_at is not None:
+                result["paused_at"] = outcome.paused_at
             next_state = dict(restored_state)
             next_state.update(
                 {

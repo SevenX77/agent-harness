@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.runtime_config import read_runtime_config, update_breakpoints_payload
+from app.services.skills import opened_skill_dir
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,20 @@ class BreakpointWriteResult:
 
 def read_breakpoints(skill_dir: Path) -> list[str]:
     return breakpoints_from_runtime_config(read_runtime_config(skill_dir))
+
+
+def breakpoints_for_skill(skill_id: str) -> list[str]:
+    """The marks standing on this skill right now, named by id instead of path.
+
+    Total on purpose. A run is continued from its own frozen artifact and its
+    runtime-state snapshot — never from the live skill directory — so a skill
+    this Studio does not hold open is not an error to whoever is asking: it is a
+    skill on which nobody could have set a mark. Resolving the directory the
+    raising way instead answered 404 SKILL_NOT_FOUND for such a resume, burying
+    the runtime-state error the caller actually had to see.
+    """
+    skill_dir = opened_skill_dir(skill_id)
+    return [] if skill_dir is None else read_breakpoints(skill_dir)
 
 
 def breakpoints_from_runtime_config(config: dict[str, Any]) -> list[str]:

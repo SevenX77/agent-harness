@@ -194,7 +194,21 @@ export function outputBoundaryStatus(
   if (verdict !== "running" && (seen === "running" || seen === "idle")) {
     return NODE_STATUS_AT_RUN_END[verdict]
   }
-  return seen
+  return boundaryStatusOf(seen)
+}
+
+/**
+ * The same state, said in words a BOUNDARY can be in.
+ *
+ * A breakpoint is set on a phase; the Output endpoint is not a phase and nobody
+ * can set one on it. Inheriting the word made the endpoint read `Breakpoint`,
+ * which claims something untrue about it — what is actually true is the general
+ * fact underneath: nothing arrived and nothing is executing. The edge table
+ * already collapses it the same way (`buildEdges`: `breakpoint: 'paused'`), so
+ * this is that rule reaching the endpoint the edges lead to.
+ */
+function boundaryStatusOf(status: SkillNodeStatus): SkillNodeStatus {
+  return status === "breakpoint" ? "paused" : status
 }
 
 /** Which phase state wins when the endpoint has several producers — worst first. */

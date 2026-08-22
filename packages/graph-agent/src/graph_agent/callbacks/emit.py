@@ -121,6 +121,43 @@ class _RunSpendLedger:
             }
 
 
+def elapsed_before(trace_path: Path) -> float:
+    """How long this run had already executed when its last segment ended.
+
+    The companion of ``_RunSpendLedger.continuing``, for the other total a
+    continuation has to open with. A run stopped at a breakpoint and continued
+    is ONE run, so "how long did it take" is the sum over its segments — and
+    the wait in between is a person thinking, not the run working, which is
+    why it is a sum over segments rather than the span from first start to
+    final finish.
+
+    The value is read back rather than recomputed because every ending already
+    writes it: each segment's ``run_ended`` carries the run's total AS OF that
+    ending, so the latest one IS the sum so far. That also makes this a
+    running total rather than a term — summing the endings would count the
+    first segment once per continuation.
+
+    Missing file, or no ending in it, both mean the same thing: this run has
+    not finished a segment yet, so there is nothing to carry.
+    """
+    if not trace_path.exists():
+        return 0.0
+    carried = 0.0
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("event_type") != "run_ended":
+            continue
+        seconds = event.get("wall_time_seconds")
+        if isinstance(seconds, (int, float)):
+            carried = float(seconds)
+    return carried
+
+
 class _SubscriberSink:
     def __init__(self, subscriber: Callable[[Any], None]) -> None:
         self._subscriber = subscriber

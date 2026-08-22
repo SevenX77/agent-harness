@@ -545,9 +545,21 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     (`_RunSpendLedger.continuing`,从它自己的 trace 里读 `llm_call`)。这不是 ledger
     文档里拒绝的那种「事后重算」——那种是从**幸存下来的**消息/图状态里倒推,天生会漏;
     这里读的是这个 run 自己在每次调用发生时写下的记录,没有任何东西会删掉其中一行。
-    **`wall_time_sec` 是唯一的例外,仍然只说这一段**:它是 runner 自己掐的表,不是对
-    事件求和得来的,本来就没参与那条「构造上一致」的约定。整个 run 的耗时该怎么记,
-    是另一件事,单独立账。
+    **`wall_time_sec` 一开始被留在外面,2026-08-22 补上(台账 E21)**:它只说最后那一段,
+    于是一次「跑一分钟 → 停在断点上过夜 → 续跑四秒」的 run,run 列表里写着四秒,而同一次
+    run 的 trace 与账说的是全程。 **口径写在这里,因为这个数字离开口径就没有意义**:它记
+    的是这个 run **执行了多久**,按段求和;断点上等着的那段不算,因为那是**人在想**,不是
+    run 在跑——算进去会让同一个 skill 的两次 run 不可比(一次隔夜、一次隔十秒,数字差出
+    几个数量级,而两次干的活一样多)。只有一段的 run 因此完全不变,这是保守的那一读。
+    **来源仍是这个 run 自己的 trace**,和账同一个办法:每一段的 `run_ended` 写下的本来就是
+    **截至这次收尾、这个 run 的总时长**,所以续跑开钟时读回最后那一条再往上加自己这一段
+    (`callbacks/emit.py` 的 `elapsed_before`,`_RunSpendLedger.continuing` 的同伴);读最后
+    一条而不是把各条相加,因为它们是**running total 而不是项**,相加会让第一段被数很多遍。
+    **拒绝第二个持久化来源**——把上一段的耗时另写进一个跟着 run 走的字段:同一个事实两处
+    记载,正是这一串修复在收敛掉的东西。 **实现上是把钟的原点往回拨,而不是在每个出口处
+    加一项**:`resume_skill` 有三个出口(停在下一个断点、跑完、崩在编译或执行里),原点拨
+    过之后 `time.monotonic() - clock_origin` 在三处都是 run 的总时长,不存在「忘了加」的
+    那个出口。
   - **边界节点不能带「断点」这个词。**(2026-08-22 真机走查补)Output 端点按「产出它的
     相位里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
     可断点是设在**相位**上的,端点不是相位,谁也没法在它上面设断点。端点上成立的是
@@ -575,7 +587,10 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   适配器交回的是一段而不是一个 run)
   + 引擎 `packages/graph-agent/tests/callbacks/test_a_run_has_one_trace.py`
   (续跑不抹掉前一段的 trace、没写过事件也留下 trace 文件、续跑的账从这个 run 已花掉的
-  开始算、头一次开跑从零起算);
+  开始算、头一次开跑从零起算)
+  + 引擎 `packages/graph-agent/tests/callbacks/test_a_run_has_one_clock.py`
+  (头一次开跑的钟从零起、第一段里还没有可承接的收尾、续跑开钟读回上一段的收尾、
+  多段时读最后一条而不是把各条相加、崩在编译上的那个出口照样报 run 的钟);
   前端——`src/utils/a-run-that-stopped-says-where.test.ts`(reason 决定节点是
   `breakpoint` 还是 `paused`,收尾判据不覆盖已停住的节点)、
   `src/components/nodes/a-node-carrying-a-breakpoint-shows-it.test.tsx`(空板子上也带标记)、

@@ -46,6 +46,7 @@ from graph_agent.callbacks.emit import (
     _safe_emit_event,
     _SubscriberSink,
     _TraceJsonlSink,
+    elapsed_before,
 )
 from graph_agent.callbacks.events import (
     CallbackEvent,
@@ -598,7 +599,6 @@ def resume_skill(
 
     resolver = skill_resolver or default_local_resolver_for_skill(skill_path)
     started_at = datetime.now(UTC)
-    started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
     skill_id = (
         skill_path_obj.parent.name
@@ -611,6 +611,14 @@ def resume_skill(
     # already spent, so `metrics.json` keeps describing the same run its trace
     # and its report describe.
     spend = _RunSpendLedger.continuing(trace_output / TRACE_FILENAME)
+    # The clock is continued the same way, and for the same reason: a run that
+    # stopped at a breakpoint and was continued is ONE run, so "how long did it
+    # take" is how long the run EXECUTED — the wait in between is a person
+    # thinking, not the run working. Carrying it as a backdated ORIGIN rather
+    # than a term added at each exit means ``time.monotonic() - clock_origin``
+    # is the run's total at every ending below, including inside the helper
+    # that reports a crash, so no exit can be the one that forgot to add it.
+    clock_origin = time.monotonic() - elapsed_before(trace_output / TRACE_FILENAME)
     event_sink = _prepare_v030_event_sink(
         trace_output=trace_output,
         event_subscriber=event_subscriber,
@@ -716,7 +724,7 @@ def resume_skill(
             trace_path=event_sink.trace_path,
             spend=spend,
             started_at=started_at,
-            started_monotonic=started_monotonic,
+            clock_origin=clock_origin,
         )
         _write_workflow_result_artifacts(
             trace_output,
@@ -742,7 +750,7 @@ def resume_skill(
         else None
     )
     if paused_at is not None:
-        wall_time = round(time.monotonic() - started_monotonic, 3)
+        wall_time = round(time.monotonic() - clock_origin, 3)
         final_context = _business_context_from_graph_result(result)
         _emit_v030_paused_run(
             event_sink,
@@ -769,7 +777,7 @@ def resume_skill(
         )
 
     # Step 7: Successful path execution metrics & context extraction
-    wall_time = round(time.monotonic() - started_monotonic, 3)
+    wall_time = round(time.monotonic() - clock_origin, 3)
     final_context = _finalize_successful_v030_run(
         result,
         compiled=compiled,
@@ -788,10 +796,11 @@ def resume_skill(
         context=final_context,
         # A resumed run counts what the WHOLE run spent, which is exactly what
         # its ``trace.jsonl`` holds — neither is reset by a continuation, so the
-        # two describe the same run (OB10). ``wall_time_sec`` is the odd one
-        # out and stays this segment's: it is the runner's own measurement
-        # rather than a total over events, so it never took part in that
-        # agreement.
+        # two describe the same run (OB10). ``wall_time_sec`` says the same
+        # thing about the same run: the clock was opened with what the earlier
+        # segments already ran, read back out of those segments' own endings,
+        # so there is one number and one place it comes from rather than a
+        # second persisted tally to drift against.
         metrics=WorkflowMetrics.from_mapping(
             _run_metrics(spend, wall_time=wall_time),
             wall_time_sec=wall_time,
@@ -2180,9 +2189,15 @@ def _resume_failed_result(
     trace_path: Path | None,
     spend: _RunSpendLedger,
     started_at: datetime,
-    started_monotonic: float,
+    clock_origin: float,
 ) -> WorkflowResult:
-    wall_time = round(time.monotonic() - started_monotonic, 3)
+    """The dead result of a resume, counting the run rather than the segment.
+
+    ``clock_origin`` is the caller's run clock, already backdated by what the
+    run ran before this segment, so a crash reports the same kind of number
+    every other exit of the same run reports.
+    """
+    wall_time = round(time.monotonic() - clock_origin, 3)
     return WorkflowResult(
         success=False,
         run_id=run_id,

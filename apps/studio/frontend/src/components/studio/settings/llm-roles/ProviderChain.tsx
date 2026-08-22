@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/item"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { distinguishingRouteLabels, type RouteLabelInput } from "@/lib/route-labels"
 import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import type { MaterializationReportEntry, ProviderModelOption, RolesData } from "@/api/llm"
 import { appendProviderToModel, removeProviderFromRole, reorderProviderInRole } from "../role-utils"
@@ -74,7 +75,7 @@ export const ProviderChain = memo(function ProviderChain({
   const providerModels = providerModelsByRouteId ?? EMPTY_PROVIDER_MODELS_BY_ROUTE_ID
   const roleFits = roleFitByRouteId ?? EMPTY_ROLE_FIT_BY_ROUTE_ID
   const visibleProviderEntries = useMemo(
-    () => collapseProviderEntries(providers, data, providerModels),
+    () => chainEntries(providers, data, providerModels),
     [data, providerModels, providers],
   )
   const providerItems = useMemo(
@@ -85,21 +86,25 @@ export const ProviderChain = memo(function ProviderChain({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const visibleProviderKeys = useMemo(() => new Set(
-    visibleProviderEntries.map((entry) => providerDisplayKey(data, entry.providerCode, providerModels)),
-  ), [data, providerModels, visibleProviderEntries])
+  // Everything not already in the chain is offerable — one entry per ROUTE,
+  // named the same way the chain names them. Offering one per provider name
+  // made the other transports of that provider unreachable: not in the chain,
+  // and not in the menu that adds to it.
+  const appendableEntries = useMemo(
+    () => chainEntries(
+      appendableProviderCodes.filter((providerCode) => !providers.includes(providerCode)),
+      data,
+      providerModels,
+    ),
+    [appendableProviderCodes, data, providerModels, providers],
+  )
   const visibleAppendableProviderCodes = useMemo(
-    () => collapseAppendableProviderCodes(appendableProviderCodes, data, providerModels, visibleProviderKeys),
-    [appendableProviderCodes, data, providerModels, visibleProviderKeys],
+    () => appendableEntries.map((entry) => entry.providerCode),
+    [appendableEntries],
   )
   const providerLabels = useMemo(
-    () => Object.fromEntries(
-      visibleAppendableProviderCodes.map((providerCode) => [
-        providerCode,
-        data.providers[providerCode]?.name ?? providerCode,
-      ]),
-    ),
-    [data.providers, visibleAppendableProviderCodes],
+    () => Object.fromEntries(appendableEntries.map((entry) => [entry.providerCode, entry.label])),
+    [appendableEntries],
   )
 
   function handleDragEnd(event: DragEndEvent) {
@@ -129,6 +134,7 @@ export const ProviderChain = memo(function ProviderChain({
               roleName={roleName}
               modelCode={modelCode}
               providerCode={entry.providerCode}
+              providerLabel={entry.label}
               index={index}
               rawIndex={entry.rawIndex}
               providerModel={providerModels.get(entry.providerCode)}
@@ -154,6 +160,7 @@ const ProviderTag = memo(function ProviderTag({
   roleName,
   modelCode,
   providerCode,
+  providerLabel,
   index,
   rawIndex,
   providerModel,
@@ -166,6 +173,8 @@ const ProviderTag = memo(function ProviderTag({
   roleName: string
   modelCode: string
   providerCode: string
+  /** What this entry is called — enough to tell it from its provider's others. */
+  providerLabel: string
   index: number
   rawIndex: number
   providerModel?: ProviderModelOption
@@ -173,7 +182,7 @@ const ProviderTag = memo(function ProviderTag({
   testStatus?: RoleChainStatusMap[string]
   onChange: (next: RolesData) => void
 }) {
-  const providerName = data.providers[providerCode]?.name ?? ""
+  const providerName = providerLabel
   const roleRouteStatus = deriveRoleRouteStatus({
     providerModel,
     roleFitEntry,
@@ -321,75 +330,62 @@ function providerItemId(providerCode: string, index: number): string {
   return `${providerCode}:${index}`
 }
 
-type ProviderEntry = {
+export type ProviderChainEntry = {
   providerCode: string
   rawIndex: number
+  label: string
 }
 
-function collapseProviderEntries(
+/**
+ * The chain, as it is: one entry per configured route, in the order it runs them.
+ *
+ * Every route, because the chain IS the configuration —「聚合只发生在**展示**层，
+ * 配置与执行永远面向 route 全集」(00_settings-ux-spec.md §2.1). The version this
+ * replaced kept the best-ranked entry per provider NAME and hid the rest, so a
+ * role配置 with four Qiniu transports showed one row and the gateway tried four.
+ *
+ * The order is the chain's own, never regrouped by provider: it is what the
+ * gateway will do, and a list that reordered it would be describing a different
+ * run. Routes of one provider are 相邻 because that is how they are written in
+ * (`role-utils.ts::defaultProviderModelsForGroup`) — that adjacency is the
+ * 「provider 内部的 fallback 子序」, and it stays true until the reader drags one
+ * elsewhere, which is their decision to make.
+ */
+export function chainEntries(
   providers: string[],
   data: RolesData,
   providerModels: ReadonlyMap<string, ProviderModelOption>,
-): ProviderEntry[] {
-  const byLabel = new Map<string, ProviderEntry>()
-  providers.forEach((providerCode, rawIndex) => {
-    const entry = { providerCode, rawIndex }
-    const key = providerDisplayKey(data, providerCode, providerModels)
-    const previous = byLabel.get(key)
-    if (!previous || compareProviderEntries(entry, previous, providerModels) < 0) {
-      byLabel.set(key, entry)
-    }
-  })
-  return [...byLabel.values()].sort((left, right) => left.rawIndex - right.rawIndex)
+): ProviderChainEntry[] {
+  const labels = distinguishingRouteLabels(
+    providers.map((providerCode) => routeLabelInput(providerCode, data, providerModels)),
+  )
+  return providers.map((providerCode, rawIndex) => ({
+    providerCode,
+    rawIndex,
+    label: labels.get(providerCode) ?? providerCode,
+  }))
 }
 
-function collapseAppendableProviderCodes(
-  providerCodes: string[],
-  data: RolesData,
-  providerModels: ReadonlyMap<string, ProviderModelOption>,
-  takenKeys: ReadonlySet<string>,
-): string[] {
-  const byLabel = new Map<string, ProviderEntry>()
-  providerCodes.forEach((providerCode, rawIndex) => {
-    const key = providerDisplayKey(data, providerCode, providerModels)
-    if (takenKeys.has(key)) return
-    const entry = { providerCode, rawIndex }
-    const previous = byLabel.get(key)
-    if (!previous || compareProviderEntries(entry, previous, providerModels) < 0) {
-      byLabel.set(key, entry)
-    }
-  })
-  return [...byLabel.values()]
-    .sort((left, right) => left.rawIndex - right.rawIndex)
-    .map((entry) => entry.providerCode)
-}
-
-function compareProviderEntries(
-  left: ProviderEntry,
-  right: ProviderEntry,
-  providerModels: ReadonlyMap<string, ProviderModelOption>,
-): number {
-  return providerUiStateRank(providerModels.get(left.providerCode)?.ui_state) -
-    providerUiStateRank(providerModels.get(right.providerCode)?.ui_state) ||
-    left.rawIndex - right.rawIndex ||
-    left.providerCode.localeCompare(right.providerCode)
-}
-
-function providerDisplayKey(
-  data: RolesData,
+/**
+ * What one chain entry is called, before the list decides how much of it to say.
+ *
+ * The role's own `providers[code].name` wins over the registry's label: it is
+ * what the role wrote down when the route was added, and the chain is the role's
+ * record. An entry the registry no longer lists still gets named — by its route
+ * id, which is the one thing it always has.
+ */
+function routeLabelInput(
   providerCode: string,
+  data: RolesData,
   providerModels: ReadonlyMap<string, ProviderModelOption>,
-): string {
-  const label = data.providers[providerCode]?.name ?? providerModels.get(providerCode)?.provider_label ?? providerCode
-  return label.trim().toLowerCase() || providerCode
-}
-
-function providerUiStateRank(state: ProviderModelOption["ui_state"] | undefined): number {
-  if (state === "ready") return 0
-  if (state === "historical_ready") return 1
-  if (state === "untested") return 2
-  if (state === "cooling_down") return 3
-  if (state === "failed") return 4
-  if (state === "off") return 5
-  return 2
+): RouteLabelInput {
+  const providerModel = providerModels.get(providerCode)
+  return {
+    route_id: providerCode,
+    endpoint_id: providerModel?.endpoint_id ?? null,
+    provider_label: data.providers[providerCode]?.name ?? providerModel?.provider_label ?? "",
+    provider_model_id: providerModel?.provider_model_id ?? "",
+    base_url: providerModel?.base_url ?? null,
+    protocol: providerModel?.protocol ?? null,
+  }
 }

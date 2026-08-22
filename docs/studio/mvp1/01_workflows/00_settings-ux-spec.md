@@ -169,6 +169,16 @@
   投影里根本没有这两样，所以**任何**界面都不可能说清一条 route 是哪一条——这是先修的那一层。
 - **弃用区按 route 一行一条**：它每一行都带自己的 re-probe 按钮（本节「弃用区」一条），而 re-probe
   作用在一条 route 上。把同名的几条折叠掉，等于让被折叠的那几条**永远无法被捞回来**。
+- **拖入与链本身（补记 2026-08-21，同一批）**：上面「拖入 role 面板」两条落地时，「provider 内部的
+  fallback 子序」这句话在**一条单序列**里只能有一个意思——**相邻**。所以：拖入时按 provider 分块
+  写入（`role-utils.ts::defaultProviderModelsForGroup`），一个 provider 的全部 transport 连续落在
+  一起、块内按状态排序、块之间按各自最好的那条排序；链本身则**原样显示这个顺序**，一条 route 一个
+  卡片（`ProviderChain.tsx::chainEntries`），**不按 provider 重新分组**——链的顺序就是网关将要依次
+  尝试的顺序，把它重排来显示等于在描述另一次执行。此前 `collapseProviderEntries` 按 provider 名只
+  留排序最优的一条,于是读者配了四条 Qiniu、屏幕上一条、网关跑四条。同理，`Add provider` 菜单里
+  **一条 route 一项**：按名字折叠会让同 provider 的其余 transport 既不在链里、也不在能加进链的
+  菜单里,从此不可达。
+
 
 
 **failed vs cooling_down vs disabled（PM #10「needs_setup 是什么」的最终裁定，定义留底）**：三个「不能直接用」的状态正交，别混。**取消原 `needs_setup` 灰态——它本质是 `failed` 的一个 reason（配置缺口），并入 failed 显红**：

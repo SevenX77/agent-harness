@@ -543,19 +543,45 @@ export function modelSupportsThinking(model: ModelInfo): boolean {
   )
 }
 
+/**
+ * The routes a dropped model group contributes to the role's chain, in order.
+ *
+ * EVERY route, not the best one per provider name (00_settings-ux-spec.md §2.1:
+ * 「拖入 role 面板：落下时把该 provider 的**全部** transport route 写入 role 配置」).
+ * The version this replaced kept one per provider label, so dropping a model a
+ * provider serves over four transports configured one of them — and which one
+ * was neither visible nor choosable, which is the 反例 that rule names.
+ *
+ * The order is by PROVIDER first: one provider's routes arrive as a contiguous
+ * run, best route first, and the providers themselves are ordered by their best
+ * route. That run IS 「provider 内部的 fallback 子序」 — the chain is ONE ordered
+ * sequence, so a sub-sequence can only be a run of neighbours. Sorting by state
+ * across the whole group instead would interleave providers, and then the chain
+ * would show four unrelated-looking rows where the reader configured one
+ * provider with four ways in.
+ */
 function defaultProviderModelsForGroup(modelGroup: ModelGroup): ModelGroup["provider_models"] {
-  const sortedProviderModels = [...modelGroup.provider_models].sort((left, right) => (
+  const byProviderLabel = new Map<string, ModelGroup["provider_models"]>()
+  for (const providerModel of modelGroup.provider_models) {
+    const key = providerModelDisplayKey(providerModel)
+    byProviderLabel.set(key, [...(byProviderLabel.get(key) ?? []), providerModel])
+  }
+  return [...byProviderLabel.values()]
+    .map((routes) => [...routes].sort(compareProviderModels))
+    .sort((left, right) => compareProviderModels(left[0], right[0]))
+    .flat()
+}
+
+function compareProviderModels(
+  left: ModelGroup["provider_models"][number],
+  right: ModelGroup["provider_models"][number],
+): number {
+  return (
     providerStateRank(left.ui_state) - providerStateRank(right.ui_state) ||
     providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
     left.provider_label.localeCompare(right.provider_label, undefined, { numeric: true, sensitivity: "base" }) ||
     left.route_id.localeCompare(right.route_id)
-  ))
-  const byProviderLabel = new Map<string, ModelGroup["provider_models"][number]>()
-  for (const providerModel of sortedProviderModels) {
-    const key = providerModelDisplayKey(providerModel)
-    if (!byProviderLabel.has(key)) byProviderLabel.set(key, providerModel)
-  }
-  return [...byProviderLabel.values()]
+  )
 }
 
 function providerModelDisplayKey(providerModel: ModelGroup["provider_models"][number]): string {

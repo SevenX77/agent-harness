@@ -258,7 +258,7 @@ describe("LlmRolesTab controls", () => {
     expect(validateRolesDraft(next)).toBeNull()
   })
 
-  it("adds only the best route for each provider label when a model spans duplicate endpoints", () => {
+  it("adds every transport a provider serves the model over, in one contiguous run", () => {
     const duplicatedProviderGroup: ModelGroup = {
       ...modelGroups[0],
       canonical_id: "deepseek-v4-flash",
@@ -294,11 +294,18 @@ describe("LlmRolesTab controls", () => {
 
     const next = appendModelGroupToRole(rolesData, "copilot_chat", duplicatedProviderGroup)
 
+    // 「拖入 role 面板：落下时把该 provider 的**全部** transport route 写入 role
+    // 配置」(00_settings-ux-spec.md §2.1). The version this replaced kept one
+    // route per provider label, so dropping a model that a provider serves over
+    // four transports configured ONE of them — and which one was neither
+    // visible nor choosable. The same provider's routes land next to each other,
+    // which is what makes them read as that provider's own fallback run.
     expect(next.roles.copilot_chat.models["deepseek-v4-flash"].providers).toEqual([
       "qiniu-openai:deepseek-v4-flash",
+      "qiniu-anthropic:deepseek-v4-flash",
       "ark-official:deepseek-v4-flash",
     ])
-    expect(next.models["deepseek-v4-flash"].providers).not.toHaveProperty("qiniu-anthropic:deepseek-v4-flash")
+    expect(next.models["deepseek-v4-flash"].providers).toHaveProperty("qiniu-anthropic:deepseek-v4-flash")
   })
 
   it("returns a drop error when a model group has no provider routes", () => {

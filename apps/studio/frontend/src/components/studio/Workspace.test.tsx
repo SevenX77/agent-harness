@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => ({
     onResumeRun?: () => Promise<void> | void
     traceCanCompare?: boolean
     traceCanResume?: boolean
+    // Ledger L2③: which candidate the strip marks active, so a test can ask
+    // whether that is the same one the trace is showing.
+    activeCandidateId?: string | null
   },
   graphCanvasProps: null as null | {
     skillId?: string | null
@@ -416,6 +419,7 @@ vi.mock('./Panels', () => ({
     onResumeRun?: () => Promise<void> | void
     traceCanCompare?: boolean
     traceCanResume?: boolean
+    activeCandidateId?: string | null
   }) => {
     mocks.panelsProps = props
     return <aside data-testid="panels" />
@@ -2251,6 +2255,60 @@ describe('Workspace run_ended history wiring (integration)', () => {
     expect(toastMocks.error).not.toHaveBeenCalledWith(
       expect.stringContaining('Run the skill first'),
     )
+  })
+
+  // Ledger L2③, found on the real window 2026-08-21: starting a compare marked
+  // the first candidate's tab active while the trace under it still showed the
+  // base run. Clicking that already-"selected" tab changed what was on screen —
+  // proof the strip and the trace were answering "which candidate am I looking
+  // at" differently. Marking a candidate active and showing it have to be ONE
+  // act, or they are free to disagree.
+  it('shows the candidate whose tab it marks active, from the moment compare starts', async () => {
+    mocks.startNodeCompareRun.mockResolvedValue({
+      compare_group_id: 'grp-1',
+      node_id: 'draft',
+      base_run_id: 'older-run',
+      runs: [
+        {
+          candidate_id: 'cand-a',
+          label: 'candidate a',
+          metadata: runDetailWithGitStatus('compare-a', 'committed').metadata,
+        },
+        {
+          candidate_id: 'cand-b',
+          label: 'candidate b',
+          metadata: runDetailWithGitStatus('compare-b', 'committed').metadata,
+        },
+      ],
+    })
+
+    await viewOlderRunFromHistory()
+    await act(async () => {
+      await mocks.panelsProps?.onStartNodeCompare?.('draft')
+    })
+
+    expect(mocks.panelsProps?.activeCandidateId).toBe('cand-a')
+    expect(mocks.goldenDiffCalls.at(-1)?.runId).toBe('compare-a')
+  })
+
+  it('leaves nothing marked active when a compare group comes back empty', async () => {
+    // No candidate is a real answer to "which one am I looking at", and it has
+    // to stay the same answer on both sides: an active id pointing at a run
+    // that is not in the group is the same disagreement in another shape.
+    mocks.startNodeCompareRun.mockResolvedValue({
+      compare_group_id: 'grp-2',
+      node_id: 'draft',
+      base_run_id: 'older-run',
+      runs: [],
+    })
+
+    await viewOlderRunFromHistory()
+    await act(async () => {
+      await mocks.panelsProps?.onStartNodeCompare?.('draft')
+    })
+
+    expect(mocks.panelsProps?.activeCandidateId).toBeNull()
+    expect(mocks.goldenDiffCalls.at(-1)?.runId).toBe('older-run')
   })
 
   it('resumes the run the trace is showing, not whichever run is live', async () => {

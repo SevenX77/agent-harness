@@ -2523,18 +2523,35 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [clearCopilotJudgeResult, currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId, projectRun])
 
-  // Switch the visible candidate: re-point the trace stream at that candidate's
-  // spawned run (the per-candidate run id from the real compare group).
-  const handleSelectCandidate = useCallback(
-    (candidateId: string) => {
-      const target = compareRuns.find((run) => run.candidate_id === candidateId)
-      if (!target) return
-      setCompareCandidateId(candidateId)
+  // Show one candidate: mark its tab active AND point the trace at that
+  // candidate's spawned run, in one act.
+  //
+  // The two used to be separable, and they drifted apart the moment a compare
+  // started: the group's first candidate was marked active while the trace under
+  // it still showed the base run, so clicking an already-"selected" tab changed
+  // what was on screen (ledger L2③, seen on the real window 2026-08-21). "Which
+  // candidate am I looking at" had two answers. Marking without showing is now
+  // unreachable — this is the only writer of `compareCandidateId`.
+  //
+  // The runs to look in are passed rather than read from state, because the
+  // first caller has them before React has committed them.
+  const showCandidate = useCallback(
+    (runs: CompareCandidateRun[], candidateId: string | null) => {
+      const target = runs.find((run) => run.candidate_id === candidateId)
+      if (!target) {
+        setCompareCandidateId(null)
+        return
+      }
+      setCompareCandidateId(target.candidate_id)
       clearCopilotJudgeResult()
       setRunId(target.metadata.run_id)
       setViewedTrace({ source: "live" })
     },
-    [compareRuns, clearCopilotJudgeResult],
+    [clearCopilotJudgeResult],
+  )
+  const handleSelectCandidate = useCallback(
+    (candidateId: string) => showCandidate(compareRuns, candidateId),
+    [compareRuns, showCandidate],
   )
 
   // viewed-run model (fix A): open one run's trace from the run list. The live
@@ -2582,12 +2599,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         const group = await startNodeCompareRun(currentSkillId, viewedRunId, nodeId)
         setCompareGroupId(group.compare_group_id)
         setCompareRuns(group.runs)
-        setCompareCandidateId(group.runs[0]?.candidate_id ?? null)
+        showCandidate(group.runs, group.runs[0]?.candidate_id ?? null)
       } catch (error) {
         toast.error(`Could not start model compare: ${errorMessage(error)}`)
       }
     },
-    [currentSkillId, viewedRunId],
+    [currentSkillId, showCandidate, viewedRunId],
   )
 
   // Poll the compare group while any candidate is still running so the tabs reflect

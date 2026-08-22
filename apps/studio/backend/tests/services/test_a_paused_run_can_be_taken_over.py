@@ -103,16 +103,14 @@ def test_a_taken_over_run_announces_its_ending(
     monkeypatch.setattr(run_manager_module, "publish_skill_gate", capture)
     manager.observe_resumed_run(RUN_ID, skill_id=SKILL)
 
-    from app.models.runs import ResumeReq
+    from app.models.runs import ResumeReport, ResumeReq
 
     asyncio.run(
         manager.record_resume_result(
             skill_id=SKILL,
             run_id=RUN_ID,
             request=ResumeReq(),
-            metadata=RunMetadata(
-                run_id=RUN_ID, status="success", started_at="2026-08-22T00:00:00+00:00"
-            ),
+            report=ResumeReport(status="success"),
         )
     )
 

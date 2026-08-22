@@ -288,6 +288,25 @@ class ResumeReq(BaseModel):
     human_response: dict[str, Any] | None = None
 
 
+class ResumeReport(BaseModel):
+    """What one resumed segment did to the run — the only things a resume knows.
+
+    Deliberately NOT a `RunMetadata`. Building a whole run record out of the
+    resume's answer reset every field the answer did not mention: the run's
+    start time became the resume's, its input summary became the word
+    "resumed", its artifact identity vanished (patched back by hand, three
+    fields at a time), and `auto_commit` followed the moment it moved onto the
+    metadata. How it ended, what it spent and where it stopped are what a
+    segment can speak for; the run is the run.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: RunStatus
+    metrics: TokensMetrics | None = None
+    paused_at: RunPausePoint | None = None
+
+
 class ResumeValidityReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

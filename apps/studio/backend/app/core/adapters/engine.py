@@ -851,6 +851,26 @@ def resume_outcome(res: Any) -> ResumeOutcome:
     )
 
 
+def resume_result(*, run_id: str, res: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    """What one resumed segment reports: how it ended, what it spent, where it stopped.
+
+    Nothing here describes the RUN — not when it started, not what it was given.
+    Those two used to ride along (``started_at`` off the resume's own clock and a
+    literal ``input_summary="resumed"``), and the host wrote the whole thing over
+    the run's record, so a resumed run claimed it had begun at the resume and had
+    been given the word "resumed" (problem ledger C1 ③).
+    """
+    outcome = resume_outcome(res)
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "status": outcome.status,
+        "metrics": _tokens_metrics_payload(metrics),
+    }
+    if outcome.paused_at is not None:
+        payload["paused_at"] = outcome.paused_at
+    return payload
+
+
 class EngineAdapter:
     def __init__(
         self,
@@ -1203,26 +1223,17 @@ class EngineAdapter:
                 event_subscriber=payload.get("event_subscriber"),
                 pause_before=frozenset(payload.get("pause_before") or ()),
             )
-            from datetime import UTC, datetime
-
             raw_metrics = _jsonable(res.metrics)
             snapshot_metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
-            outcome = resume_outcome(res)
-            result = {
-                "run_id": run_id,
-                "status": outcome.status,
-                "started_at": (res.started_at or datetime.now(UTC)).isoformat(),
-                "input_summary": "resumed",
-                "metrics": _tokens_metrics_payload(snapshot_metrics),
-            }
-            if outcome.paused_at is not None:
-                result["paused_at"] = outcome.paused_at
+            result = resume_result(run_id=run_id, res=res, metrics=snapshot_metrics)
             next_state = dict(restored_state)
+            # `input_summary` is deliberately not touched: the restored state
+            # already carries what the RUN was given, and a segment has no
+            # better answer than the one already there.
             next_state.update(
                 {
                     "status": result["status"],
                     "metrics": snapshot_metrics,
-                    "input_summary": result["input_summary"],
                 }
             )
             latest_checkpoint_state = _runtime_state_latest_checkpoint_state(

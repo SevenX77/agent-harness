@@ -161,7 +161,7 @@ async def test_a_resumed_run_that_stops_again_keeps_the_stream_open(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A second stop is a stop like the first: there can be a third segment."""
-    from app.models.runs import ResumeReq
+    from app.models.runs import ResumeReport, ResumeReq
 
     manager = _manager(monkeypatch)
     watcher: asyncio.Queue[Any] = asyncio.Queue()
@@ -178,10 +178,8 @@ async def test_a_resumed_run_that_stops_again_keeps_the_stream_open(
         skill_id=SKILL,
         run_id=RUN_ID,
         request=ResumeReq(),
-        metadata=RunMetadata(
-            run_id=RUN_ID,
+        report=ResumeReport(
             status="paused",
-            started_at="2026-08-22T00:00:00+00:00",
             paused_at=RunPausePoint(node_id="gamma", reason="breakpoint"),
         ),
     )

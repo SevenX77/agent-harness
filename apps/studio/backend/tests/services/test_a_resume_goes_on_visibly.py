@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from app.models.runs import ResumeReq, RunMetadata, RunPausePoint
+from app.models.runs import ResumeReport, ResumeReq, RunMetadata, RunPausePoint
 from app.services import run_manager as run_manager_module
 from app.services.run_manager import RunManager, RunRecord
 from fastapi.testclient import TestClient
@@ -82,13 +82,9 @@ def _manager(monkeypatch: pytest.MonkeyPatch) -> RunManager:
     return manager
 
 
-def _finished(**overrides: Any) -> RunMetadata:
-    return RunMetadata(
-        run_id=RUN_ID,
-        status="success",
-        started_at="2026-08-22T00:00:00+00:00",
-        **overrides,
-    )
+def _finished(**overrides: Any) -> ResumeReport:
+    """What a segment that ran to the end reports back."""
+    return ResumeReport(status="success", **overrides)
 
 
 @pytest.mark.anyio
@@ -108,7 +104,7 @@ async def test_a_resumed_run_announces_that_it_ended(
     manager._runs[RUN_ID] = record
 
     await manager.record_resume_result(
-        skill_id=SKILL, run_id=RUN_ID, request=ResumeReq(), metadata=_finished()
+        skill_id=SKILL, run_id=RUN_ID, request=ResumeReq(), report=_finished()
     )
 
     assert [entry["outcome"] for entry in published] == ["pass"]
@@ -136,7 +132,7 @@ async def test_a_resume_that_stops_again_says_so_rather_than_saying_it_passed(
         paused_at=RunPausePoint(node_id="gamma", reason="breakpoint"),
     )
     result = await manager.record_resume_result(
-        skill_id=SKILL, run_id=RUN_ID, request=ResumeReq(), metadata=stopped_again
+        skill_id=SKILL, run_id=RUN_ID, request=ResumeReq(), report=stopped_again
     )
 
     assert result.paused_at is not None
@@ -165,7 +161,7 @@ async def test_a_resumed_runs_events_reach_whoever_is_watching_it(
     subscriber({"event_type": "phase_end", "phase_name": "beta", "run_id": RUN_ID})
 
     await manager.record_resume_result(
-        skill_id=SKILL, run_id=RUN_ID, request=ResumeReq(), metadata=_finished()
+        skill_id=SKILL, run_id=RUN_ID, request=ResumeReq(), report=_finished()
     )
 
     delivered = []
@@ -206,10 +202,8 @@ async def test_a_resumed_run_that_stopped_again_is_not_sealed(
         skill_id=SKILL,
         run_id=RUN_ID,
         request=ResumeReq(),
-        metadata=RunMetadata(
-            run_id=RUN_ID,
+        report=ResumeReport(
             status="paused",
-            started_at="2026-08-22T00:00:00+00:00",
             paused_at=RunPausePoint(node_id="gamma", reason="breakpoint"),
         ),
     )

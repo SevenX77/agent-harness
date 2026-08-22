@@ -191,6 +191,23 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 决策(高亮的匹配规则必须与收窄的**同一条**): 大小写不敏感 + 字面子串,不是正则——
   `narrowTraceSteps` 两边都 `toLowerCase()` 后 `includes`。两边不同就会长出两种病:
   命中了却一处没标(读者看不出理由),或标在没命中的地方(读者看到一个不存在的理由)。
+- 决策(值被印在本 app 写的句子里时,只标值、绝不标句子)(补记 2026-08-21,同批真机点验): 上面
+  「只标逐字打印的值」这一条落地时漏了一整类位置——**值并不总是单独成行**。`endpoint: {{id}}`、
+  `HTTP {{status}}`、`Loaded — {{path}}`、`Wrapped — {{source}}`、`Sent — {{role}}`、
+  `answered: {{answer}}`、`This build has no reading for {{eventType}}` 这七句都是「本 app 写的框
+  + 一个逐字的值」,当时整句原样输出,于是**值再怎么命中也标不出来**。真机实测(179 步的 run,
+  搜 `ark-official`):留下 **27 条**步骤、屏幕上只有 **6 处**高亮,其余 21 条即使展开也一处没有——
+  那 6 处全部来自行标题(`Answered by ark-official:...`,真实 route id 天然含 endpoint id),
+  而**真正被搜的那一行 `endpoint: ark-official` 从头到尾没标过**。这正是 F13 判据
+  「一个看不出理由的命中,比没有命中更坏」所指的那一档。
+  修法是把「标哪里」的粒度从**整串**降到**串里的一段**:`ui/marked-text.tsx` 增
+  `splitOnTermWithin(text, value, term)` 与 `MarkedValue`,只在 `value` 落在 `text` 里的那一段内
+  施加 F13 的同一条匹配规则,段外一律不标;trace 侧经 `TraceMarkValue` 分发。
+  **不把 i18n key 拆成「标签 + 值」两条**:那会把词序焊死在英语上(某些语言值在前),而这里需要的
+  信息只是「成品句子里哪一段是引用」,句子本身仍旧整条交给 i18n 生成。
+  `value` 在句子里找不到时(某个译文没写插值)整句不标——译文的措辞归 i18n 管,凭猜画一道高亮
+  比不画更坏,与本条主旨同源。只认**第一处** `value`:这些框各自只插值一次;真出现重复,标出一处
+  已足以让读者看出理由,而挑哪一处会变成又一次猜测。
 - 决策(词用 context 送到叶子,不逐层当 prop 传): 命中可能出现在行标题、事件类型,或展开后
   十三个 well 里的任意一个;中间那些组件与"搜索"毫无关系,给它们每个加一个自己不读的参数,
   是把一件无关的知识铺满整棵树。`TraceMarkTermProvider` 挂在列表外面一层(`TracePanel`),
@@ -204,10 +221,15 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - 原话/来源: 问题台账 T8 十一条行为里的「无高亮无命中计数无跳转」一条(其余十条见 F13);
   F3 2026-08-20 修订「长在列表里的、以及承诺『点开就能看到』的可操作计数,一律跟随范围……
   一个点开找不到的计数比没有计数更坏」。
-- 测试: `components/ui/marked-text.test.tsx` 六条(空词与无命中都还原成一段纯文本、每一处命中都标、
-  大小写不敏感、词在首尾不产生空段、词按字面而非正则);`components/TracePanel.narrowing.test.tsx`
-  四条**客户端真渲染**(标出来的每一处都正好是读者敲的那个词、清空搜索后一处 `<mark>` 都不剩、
-  计数等于列表自己报的步骤数、零命中报 0 而不是隐藏)。前两条在改前实测为红。
+- 测试: `components/ui/marked-text.test.tsx` 十一条(前六条同上;新增五条钉 `splitOnTermWithin` /
+  `MarkedValue`:标在值里、值即整句、值缺席或为空则整句不标、组件只在值内出 `<mark>`、
+  词打不中值时整句纯文本);`components/trace/TraceStepRow.markValue.test.tsx` 四条钉**缺陷的真实形状**
+  ——一条 `llm_call` 步骤挂着 route 判定 verdict(它的行标题讲的是这次调用,不含 endpoint id,
+  正是真机上那 21 条不标的行),搜 endpoint id 要出高亮、搜它的一截也要出、搜 `end`(只落在本 app
+  写的 `endpoint:` 标签上)必须一处都不出、状态码这种数字值同样要标;
+  `components/TracePanel.narrowing.test.tsx` 四条**客户端真渲染**(标出来的每一处都正好是读者敲的
+  那个词、清空搜索后一处 `<mark>` 都不剩、计数等于列表自己报的步骤数、零命中报 0 而不是隐藏)。
+  改前把两个 endpoint 出口与 http 出口分别改回旧写法,对应断言实测为红。
 - Status: live(2026-08-21)。
 - 归属: capability `trace-observability`; region `timeline`.
 

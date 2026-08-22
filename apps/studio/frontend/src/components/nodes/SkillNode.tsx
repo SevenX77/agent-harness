@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Bot, Briefcase, Code, ListTree, Minus, Network, Pause, Plus, ShieldCheck, ShieldHalf } from 'lucide-react'
+import { AlertTriangle, Bot, Briefcase, CircleDot, Code, ListTree, Minus, Network, Pause, Plus, ShieldCheck, ShieldHalf } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
 import { CONFLICT_ICON_CLASS, CONFLICT_TITLE, CONFLICT_VERB } from '@/components/studio/conflict-vocabulary'
@@ -111,6 +111,25 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                 this run, so it is carried by the shield glyph alone — colour on
                 the canvas is reserved for severity (decision 2026-08-08 D2). */}
             <NodeCompileErrorBadge errors={compileErrors} scope="node" />
+            {/* A filled dot beside the line is what every debugger has used for
+                a breakpoint since gdb's front-ends (VS Code, IntelliJ, Chrome
+                DevTools all draw one), so it needs no legend. Glyph only, no
+                colour: on this canvas colour is reserved for severity (decision
+                2026-08-08 D2), and a breakpoint is a choice, not a problem. */}
+            {data.hasBreakpoint ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    data-node-breakpoint="set"
+                    aria-label={t('node.breakpointSet')}
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
+                  >
+                    <CircleDot className="size-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('node.breakpointSet')}</TooltipContent>
+              </Tooltip>
+            ) : null}
             {hasGolden ? (
               <Tooltip>
                 <TooltipTrigger asChild>

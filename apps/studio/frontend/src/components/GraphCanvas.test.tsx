@@ -909,6 +909,49 @@ describe('GraphCanvas', () => {
     expect(onDeletePhase).toHaveBeenCalledWith('draft')
   })
 
+  it('offers to stop before a node, and to stop stopping', () => {
+    // Set and clear are the same act with the answer flipped, so they are one
+    // menu entry that says which way it goes — not two entries where one is
+    // always inert (F10 「节点菜单能设/清断点」).
+    const onToggleBreakpoint = vi.fn()
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        nodeMenuPhaseId="draft"
+        onToggleBreakpoint={onToggleBreakpoint}
+      />,
+    )
+
+    contextMenuItems.find((item) => item.label === 'Stop before this node')?.onSelect?.()
+
+    expect(onToggleBreakpoint).toHaveBeenCalledWith('draft', true)
+  })
+
+  it('offers to clear the breakpoint on a node that already has one', () => {
+    const onToggleBreakpoint = vi.fn()
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        nodeMenuPhaseId="draft"
+        nodeMenuHasBreakpoint
+        onToggleBreakpoint={onToggleBreakpoint}
+      />,
+    )
+
+    contextMenuItems.find((item) => item.label === 'Stop stopping before this node')?.onSelect?.()
+
+    expect(onToggleBreakpoint).toHaveBeenCalledWith('draft', false)
+  })
+
+  it('offers no breakpoint entry when the right-click was not on a node', () => {
+    const onToggleBreakpoint = vi.fn()
+    renderToStaticMarkup(
+      <CanvasContextMenuContent edgeMenuConnection={null} onToggleBreakpoint={onToggleBreakpoint} />,
+    )
+
+    expect(contextMenuItems.some((item) => item.label === 'Stop before this node')).toBe(false)
+  })
+
   it('enables reconnectable edges on the canvas', () => {
     renderToStaticMarkup(
       <GraphCanvas

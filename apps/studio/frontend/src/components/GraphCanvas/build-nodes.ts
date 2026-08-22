@@ -257,6 +257,7 @@ export function buildNodes(
   goldenStateByNodeId: Record<string, GoldenNodeState> = {},
   agentSteps: AgentStepsInputs = {},
   workspaceRoot: string | null = null,
+  breakpointNodeIds: ReadonlySet<string> = new Set(),
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
@@ -301,6 +302,7 @@ export function buildNodes(
         activity: run.activityByNodeId?.[phase.name],
         compileErrors: compileErrorsByNodeId[phase.name] ?? [],
         goldenState: goldenStateByNodeId[phase.name],
+        hasBreakpoint: breakpointNodeIds.has(phase.name),
         // N5 atom #3: gray this node when it is in the resume's affected-downstream set.
         isDirtyDownstream: agentSteps.dirtyDownstreamNodeIds?.has(phase.name) ?? false,
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),

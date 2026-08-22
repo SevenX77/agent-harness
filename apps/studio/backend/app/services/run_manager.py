@@ -55,9 +55,11 @@ from app.models.runs import (
     RunError,
     RunListResponse,
     RunMetadata,
+    RunPausePoint,
     RunRequest,
     TokensMetrics,
 )
+from app.services.breakpoints import breakpoints_from_runtime_config
 from app.services.gate_events import GateOutcome, publish_skill_gate
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.predict_gate import require_passing_predict
@@ -255,15 +257,43 @@ def _execute_run_in_worker(
             "inputs": inputs,
         }
         if runtime_config is not None:
-            run_payload["execution_context"] = {"runtime_config": runtime_config}
+            run_payload["execution_context"] = {
+                "runtime_config": runtime_config,
+                # The engine is told "stop before these phases" in its own
+                # words; it never reads the workspace file (RUN_EXECUTION-16).
+                "pause_before": breakpoints_from_runtime_config(runtime_config),
+            }
         if adapter.transport == "in_process":
             run_payload["event_subscriber"] = emit_to_queue
         result = adapter.run_artifact(run_payload)
         metrics = _result_metrics(result)
         metrics.setdefault("wall_time_sec", _result_wall_time(result, started))
         final_context = _result_context(result)
+        pause_point = _result_pause_point(result)
         # P0#3 (handshake audit §5.3): never report fake success — honor RunResult.success.
-        if _result_success(result):
+        if pause_point is not None:
+            # A run that stopped produced neither an outcome nor a failure, so it
+            # is persisted as itself: what it got so far, and where it stopped.
+            metrics_payload = {"status": "paused", **metrics}
+            _persist_run_artifacts(
+                skill_id,
+                run_dir,
+                input_data=inputs,
+                final_context=final_context,
+                metrics=metrics_payload,
+                status="paused",
+                artifact_ref=art_ref,
+                result=result,
+            )
+            process_queue.put(
+                {
+                    "type": "status",
+                    "status": "paused",
+                    "metrics": metrics,
+                    "paused_at": pause_point.model_dump(mode="json"),
+                },
+            )
+        elif _result_success(result):
             metrics_payload = {"status": "success", **metrics}
             _persist_run_artifacts(
                 skill_id,
@@ -271,6 +301,7 @@ def _execute_run_in_worker(
                 input_data=inputs,
                 final_context=final_context,
                 metrics=metrics_payload,
+                status="success",
                 result=result,
                 artifact_ref=art_ref,
             )
@@ -284,6 +315,7 @@ def _execute_run_in_worker(
                 input_data=inputs,
                 final_context=final_context,
                 metrics=metrics_payload,
+                status="failed",
                 result=result,
                 artifact_ref=art_ref,
             )
@@ -305,6 +337,7 @@ def _execute_run_in_worker(
             input_data=inputs,
             final_context={},
             metrics=metrics_payload,
+            status="failed",
             result={
                 "success": False,
                 "context": {},
@@ -356,6 +389,31 @@ def _result_wall_time(result: Any, started: float) -> float:
     if isinstance(value, int | float):
         return float(value)
     return round(time.monotonic() - started, 3)
+
+
+def _result_pause_point(result: Any) -> RunPausePoint | None:
+    """Where the engine stopped, when it stopped instead of finishing.
+
+    Asked BEFORE ``_result_success``, and that order is the whole point: the
+    engine's interrupted path returns a plain dict with no ``success`` key, and
+    an absent answer counts as yes down there. Every run that stopped to ask a
+    human was therefore filed as a finished one — the breakpoint work only made
+    a second way to reach a bug that was already there.
+    """
+    if _artifact_error_result_payload(result) is not None:
+        return None
+    if isinstance(result, dict):
+        paused_at = result.get("paused_at")
+    else:
+        paused_at = getattr(result, "paused_at", None)
+    if paused_at is None:
+        return None
+    if hasattr(paused_at, "model_dump"):
+        paused_at = paused_at.model_dump(mode="json")
+    if not isinstance(paused_at, dict):
+        return None
+    # The engine says "phase"; the canvas says "node"; they are the same name.
+    return RunPausePoint(node_id=str(paused_at["phase_name"]), reason=paused_at["reason"])
 
 
 def _result_success(result: Any) -> bool:
@@ -497,14 +555,21 @@ def _persist_run_artifacts(
     input_data: dict[str, Any] | None = None,
     final_context: dict[str, Any],
     metrics: dict[str, Any],
+    status: str,
     result: Any,
     artifact_ref: dict[str, Any] | None = None,
 ) -> None:
+    """File what a run produced under the verdict its caller reached.
+
+    The verdict is passed in rather than re-derived: the caller has already
+    decided it, and a second derivation here is a second place that has to learn
+    about every way a run can end — which is how ``paused`` would have silently
+    filed itself as ``success``.
+    """
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
     store.begin_run(run_dir.name, metadata=_artifact_store_metadata("run_manager", artifact_ref))
-    status = "success" if _result_success(result) else "failed"
     trace_ref = f"{skill_id}/runs/{run_dir.name}/trace.jsonl"
     node_outputs = _result_node_outputs(result, final_context)
     object_payloads: dict[str, bytes] = {
@@ -1257,15 +1322,32 @@ class RunManager:
         # `abandoned` — which the status check above rejects.
         record = self._runs[run_id]
         self._terminate_worker(record)
-        metadata = record.metadata.model_copy(update={"status": "paused"})
+        # No pause point: killing the worker stops it wherever it happens to be,
+        # which is not a place the run can name.
+        return await self._record_paused_run(record, record.metadata.model_copy(update={"status": "paused"}))
+
+    async def _record_paused_run(self, record: RunRecord, metadata: RunMetadata) -> RunMetadata:
+        """Write down that a run is waiting rather than over.
+
+        Deliberately NOT ``_finalize_terminal_run``: that seals the run
+        directory, and sealing says "nothing more will be written here" about a
+        run that is going to be written to again the moment it continues. The
+        auto-commit and the report hang off the seal for the same reason — both
+        describe a finished run.
+
+        One place, because both ways a run pauses end identically. The user's
+        Pause button ends the worker; a breakpoint lets the engine end it
+        itself. What is left behind — a checkpoint, a record saying ``paused``,
+        and a gate telling the surfaces so — is the same either way.
+        """
         record.metadata = metadata
         _write_run_metadata(record.run_dir, metadata)
-        await self._save_run_metadata(skill_id, metadata)
+        await self._save_run_metadata(record.skill_id, metadata)
         await publish_skill_gate(
-            skill_id=skill_id,
+            skill_id=record.skill_id,
             gate="run",
             outcome=self._GATE_OUTCOME_BY_RUN_STATUS[metadata.status],
-            run_id=run_id,
+            run_id=metadata.run_id,
         )
         return metadata
 
@@ -1543,14 +1625,22 @@ class RunManager:
                 for watcher in record.delta_watchers:
                     watcher.offer(frame)
             elif message_type == "status":
-                status: Literal["success", "failed"] = "success" if message.get("status") == "success" else "failed"
+                reported = message.get("status")
+                # Three endings, because a run that stopped part-way is neither
+                # of the other two — and reading it as either loses the fact
+                # that it can be continued.
+                status: Literal["success", "failed", "paused"] = (
+                    reported if reported in {"success", "paused"} else "failed"
+                )
                 metrics = _tokens_metrics(message.get("metrics"))
                 raw_error = message.get("error") if status == "failed" else None
+                pause_point = message.get("paused_at") if status == "paused" else None
                 terminal_metadata = record.metadata.model_copy(
                     update={
                         "status": status,
                         "metrics": metrics,
                         "error": RunError.model_validate(_run_error(raw_error)) if raw_error else None,
+                        "paused_at": RunPausePoint.model_validate(pause_point) if pause_point else None,
                     }
                 )
                 break
@@ -1560,7 +1650,10 @@ class RunManager:
             status_from_exit: Literal["success", "failed"] = "success" if exitcode == 0 else "failed"
             terminal_metadata = record.metadata.model_copy(update={"status": status_from_exit})
         if terminal_metadata is not None:
-            await self._finalize_terminal_run(record, terminal_metadata)
+            if terminal_metadata.status == "paused":
+                await self._record_paused_run(record, terminal_metadata)
+            else:
+                await self._finalize_terminal_run(record, terminal_metadata)
         await record.ws_queue.put(None)
         for subscriber in list(record.subscribers):
             await subscriber.put(None)

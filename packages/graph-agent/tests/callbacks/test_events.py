@@ -136,7 +136,7 @@ _MIN_CTOR: dict[type, dict] = {
         "wall_time_seconds": 12.3,
     },
     # Tier 2 — HITL sync
-    InterruptedEvent: {"phase_name": "p", "thread_id": "t1"},
+    InterruptedEvent: {"phase_name": "p", "thread_id": "t1", "reason": "awaiting_human"},
     ResumedEvent: {"thread_id": "t1", "human_input": "yes"},
     AgentLoopIterationEvent: {"phase_name": "p", "iteration": 1},
 }
@@ -196,6 +196,7 @@ def test_resume_related_events_carry_checkpoint_identity() -> None:
     interrupted = InterruptedEvent(
         phase_name="review",
         thread_id="thread-1",
+        reason="awaiting_human",
         checkpoint_id="cp-1",
         checkpoint_ns="",
         namespace="",

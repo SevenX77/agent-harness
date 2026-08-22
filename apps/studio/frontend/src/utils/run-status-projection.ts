@@ -182,6 +182,22 @@ function isPausedEvent(type: string, status: string | null | undefined): boolean
 }
 
 /**
+ * Which kind of stop a pausing event describes.
+ *
+ * `breakpoint` is the reader's own stopping point, and the phase it names has
+ * NOT run — `interrupt_before` halts on the way in — so the card must say
+ * "stopped here", not "did this". Anything else is a run with nothing
+ * executing, which is all `paused` claims.
+ *
+ * Read from `InterruptedEvent.reason`, never inferred: a stop with no question
+ * in it is equally a human-in-the-loop stop whose question failed to parse
+ * (RUN_EXECUTION-16).
+ */
+function stoppedNodeStatus(event: CallbackEvent): SkillNodeStatus {
+  return (event as { reason?: unknown }).reason === "breakpoint" ? "breakpoint" : "paused"
+}
+
+/**
  * Derive the per-node status map from an ordered trace event stream, keyed by
  * PHASE PATH (`phase-path.ts`) — so a phase executing inside an expanded
  * subgraph gets its own light instead of the container's, and two subgraphs
@@ -215,7 +231,7 @@ export function deriveNodeStatuses(
     if (isFailureEvent(event)) {
       statuses[phasePath] = "error"
     } else if (isPausedEvent(type, event.status)) {
-      statuses[phasePath] = "paused"
+      statuses[phasePath] = stoppedNodeStatus(event)
     } else if (type === "phase_start") {
       statuses[phasePath] = "running"
     } else if (type === "phase_end") {

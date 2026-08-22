@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
+import i18n from "@/i18n"
 import useSWR from "swr"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -27,7 +28,7 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, pauseRun, serializeSkillGraph, startNodeCompareRun, stopRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { clearBreakpoint, compileSkill, fetcher, getCompareGroup, getResumeValidity, getRunDetail, getSkillDetail, putRuntimeArtifacts, resolveRunInput, pauseRun, serializeSkillGraph, setBreakpoint, startNodeCompareRun, stopRun, writeSkillFile, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, EngineErrorPayload, EventEnvelope, GoldenBaseline, GraphTopologyItem, LintResult, PredictDiagnosticExport, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
@@ -2458,6 +2459,39 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return "idle"
   }, [compileStages, lintTick])
 
+  // The one replica of "which nodes this skill stops before": the runtime
+  // config the canvas already holds, revalidated by the precise
+  // `runtime_config_changed` event this write publishes (SSOT 读取原则).
+  const breakpointNodeIds = useMemo(
+    () => new Set(runtimeConfig?.breakpoints ?? []),
+    [runtimeConfig?.breakpoints],
+  )
+
+  const handleToggleBreakpoint = useCallback(async (phaseId: string, next: boolean) => {
+    if (!currentSkillId) return
+    const stageBefore = deriveBuildStage(currentSkillId)
+    try {
+      const written = next
+        ? await setBreakpoint(currentSkillId, phaseId)
+        : await clearBreakpoint(currentSkillId, phaseId)
+      // Fold the canonical answer in rather than refetch: the write already
+      // said what the set became.
+      await mutateRuntimeConfig(
+        (current) => (current ? { ...current, breakpoints: written.node_ids } : current),
+        { revalidate: false },
+      )
+      // `interrupt_before` is a COMPILE-time argument, so a run already in
+      // flight was built without this breakpoint and will not stop at it
+      // (RUN_EXECUTION-16). Say so, rather than leave the user waiting at a
+      // mark that cannot fire.
+      if (stageBefore === "running") {
+        toast.info(i18n.t("toast.breakpointNextRun", { ns: "canvas" }))
+      }
+    } catch (error) {
+      toast.error(errorMessage(error))
+    }
+  }, [currentSkillId, deriveBuildStage, mutateRuntimeConfig])
+
   const handlePredict = useCallback(async () => {
     if (!currentSkillId) return
     const targetSkillId = currentSkillId
@@ -3084,6 +3118,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       manualCompileErrors={manualCompileErrors}
                       compileErrorsByNodeId={compileErrorsByNodeId}
                       goldenStateByNodeId={goldenStateByNodeId}
+                      breakpointNodeIds={breakpointNodeIds}
+                      onToggleBreakpoint={handleToggleBreakpoint}
                       errorMessageByNodeId={errorMessageByNodeId}
                       runtimeByNodeId={runtimeByNodeId}
                       activityByNodeId={activityByNodeId}

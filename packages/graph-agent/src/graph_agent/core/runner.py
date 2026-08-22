@@ -77,7 +77,7 @@ from graph_agent.core.local_workspace_resolver import (
     LocalWorkspaceResolver,
     default_local_resolver_for_skill,
 )
-from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
+from graph_agent.core.result import PausedRunPoint, RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import BusinessData
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
@@ -586,6 +586,7 @@ def resume_skill(
     llm_provider: LLMProvider | None = None,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    pause_before: frozenset[str] = frozenset(),
 ) -> RunResult:
     """Resume a previously interrupted skill run from a checkpoint."""
     workspace_root = _validate_workspace_dir(workspace_dir)
@@ -662,6 +663,7 @@ def resume_skill(
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
             runtime_config=runtime_config,
+            pause_before=pause_before,
         )
         graph = assembled.graph
         _validate_resume_node_ids(compiled, from_phase, resume_from_node_id, resume_to_node_id)
@@ -728,6 +730,40 @@ def resume_skill(
             )
         )
         return failed_result
+
+    # A resume can land on the next breakpoint just as a first run can, and this
+    # path used to walk straight into the successful-run finalizer either way.
+    paused_at = (
+        _breakpoint_pause_point(graph, invoke_config, checkpointer=active_checkpointer)
+        if pause_before
+        else None
+    )
+    if paused_at is not None:
+        wall_time = round(time.monotonic() - started_monotonic, 3)
+        final_context = _business_context_from_graph_result(result)
+        _emit_v030_paused_run(
+            event_sink,
+            run_id=run_id,
+            paused_at=paused_at,
+            final_context=final_context,
+            wall_time=wall_time,
+        )
+        return WorkflowResult(
+            success=False,
+            run_id=run_id,
+            skill_id=skill_id,
+            context=final_context,
+            metrics=WorkflowMetrics.from_mapping(
+                _run_metrics(spend, wall_time=wall_time),
+                wall_time_sec=wall_time,
+            ),
+            trace_path=event_sink.trace_path,
+            error=None,
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            wall_time_sec=wall_time,
+            paused_at=paused_at,
+        )
 
     # Step 7: Successful path execution metrics & context extraction
     wall_time = round(time.monotonic() - started_monotonic, 3)
@@ -965,6 +1001,14 @@ def _artifact_skill_resolver(
     return LocalWorkspaceResolver(search_paths=[artifact_root, artifact_root.parent])
 
 
+def _requested_pause_before(execution_context: dict[str, Any]) -> frozenset[str]:
+    """The phases this run was asked to stop before, from the adapter request."""
+    requested = execution_context.get("pause_before")
+    if not isinstance(requested, list | tuple | set | frozenset):
+        return frozenset()
+    return frozenset(str(name) for name in requested if str(name).strip())
+
+
 def _run_compiled_artifact_graph(
     request: RunArtifactRequest,
     *,
@@ -992,6 +1036,10 @@ def _run_compiled_artifact_graph(
     runtime_config = request.execution_context.get("runtime_config")
     if not isinstance(runtime_config, dict):
         runtime_config = None
+    # Named on its own rather than dug out of ``runtime_config``: the engine's
+    # business is "stop before these phases", not the shape of the host's
+    # workspace file (RUN_EXECUTION-16).
+    pause_before = _requested_pause_before(request.execution_context)
     checkpointer_spec = request.execution_context.get("checkpointer_spec")
     if checkpointer_spec is None:
         checkpointer_spec = request.execution_context.get("checkpointer")
@@ -1013,6 +1061,7 @@ def _run_compiled_artifact_graph(
             checkpointer_spec=checkpointer_spec or "auto",
             runtime_config=runtime_config,
             spend=spend,
+            pause_before=pause_before,
             **request.inputs,
         )
     except Exception as exc:
@@ -1054,8 +1103,14 @@ def _run_compiled_artifact_graph(
         _write_workflow_result_artifacts(run_dir, failed_result)
         return failed_result
     wall_time = float(raw.get("wall_time_sec", 0.0))
+    # A run that stopped part-way is not a failure and is not a finish; saying
+    # ``success=True`` here is what let a stopped run reach the host as a
+    # completed one (RUN_EXECUTION-16).
+    raw_paused_at = raw.get("paused_at")
+    paused_at = PausedRunPoint.model_validate(raw_paused_at) if raw_paused_at else None
     workflow_result = WorkflowResult(
-        success=True,
+        success=paused_at is None,
+        paused_at=paused_at,
         run_id=str(raw.get("run_id") or run_id),
         skill_id=artifact_root.name,
         context=dict(raw.get("context", {})),
@@ -1934,6 +1989,77 @@ def _run_metrics(spend: _RunSpendLedger, *, wall_time: float) -> dict[str, Any]:
     return metrics
 
 
+def _breakpoint_pause_point(
+    graph: Any,
+    config: dict[str, Any],
+    *,
+    checkpointer: Any,
+) -> PausedRunPoint | None:
+    """Where the graph stopped short of the end, with nothing having asked.
+
+    ``next`` names the tasks the graph is ABOUT to run, so a non-empty one means
+    this invocation did not reach the end. Callers check for a human's question
+    first; what is left over is a stop the reader asked for.
+
+    Without a checkpointer there is nothing to continue FROM, so such a run
+    cannot be paused and is not asked — predict runs this way, and asking anyway
+    is an error rather than an answer ("No checkpointer set").
+    """
+    if checkpointer is None:
+        return None
+    # Ask the thread where it stands NOW, not the checkpoint the caller pinned:
+    # a resume config names the checkpoint it started from, and that snapshot's
+    # ``next`` is whatever was about to run back then — which is every resumed
+    # run, finished or not.
+    thread_id = dict(config.get("configurable") or {}).get("thread_id")
+    if thread_id is None:
+        return None
+    state = graph.get_state({"configurable": {"thread_id": thread_id}})
+    pending = tuple(getattr(state, "next", ()) or ())
+    if not pending:
+        return None
+    configurable = dict((getattr(state, "config", None) or {}).get("configurable", {}))
+    return PausedRunPoint(
+        phase_name=str(pending[0]),
+        reason="breakpoint",
+        checkpoint_id=configurable.get("checkpoint_id"),
+        checkpoint_ns=configurable.get("checkpoint_ns"),
+    )
+
+
+def _emit_v030_paused_run(
+    event_sink: Any,
+    *,
+    run_id: str,
+    paused_at: PausedRunPoint,
+    final_context: dict[str, Any],
+    wall_time: float,
+) -> None:
+    """Report a run that stopped at a breakpoint: same ending as a question, no question."""
+    _emit_v030_event(
+        event_sink,
+        InterruptedEvent(
+            phase_name=paused_at.phase_name,
+            thread_id=run_id,
+            reason="breakpoint",
+            checkpoint_id=paused_at.checkpoint_id,
+            checkpoint_ns=paused_at.checkpoint_ns,
+            namespace=paused_at.checkpoint_ns,
+            ns=paused_at.checkpoint_ns,
+        ),
+    )
+    _emit_v030_event(
+        event_sink,
+        RunEndedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            status="interrupted",
+            final_context=_v030_phase_context(final_context),
+            wall_time_seconds=wall_time,
+        ),
+    )
+
+
 def _emit_v030_interrupted_run(
     event_sink: Any,
     *,
@@ -1947,6 +2073,7 @@ def _emit_v030_interrupted_run(
         InterruptedEvent(
             phase_name=hitl.phase_name,
             thread_id=run_id,
+            reason="awaiting_human",
             checkpoint_id=hitl.checkpoint_id,
             checkpoint_ns=hitl.checkpoint_ns,
             namespace=hitl.checkpoint_ns,
@@ -2207,6 +2334,7 @@ def _run_v030_skill_dict(
     unattended: bool = False,
     persist_declared_outputs: bool = True,
     spend: _RunSpendLedger | None = None,
+    pause_before: frozenset[str] = frozenset(),
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph.
@@ -2267,6 +2395,7 @@ def _run_v030_skill_dict(
             checkpointer=active_checkpointer,
             runtime_config=runtime_config,
             predict_context=predict_context,
+            pause_before=pause_before,
         )
         graph = assembled.graph
 
@@ -2291,21 +2420,42 @@ def _run_v030_skill_dict(
         )
 
         # Step 4.3: Invoke the LangGraph compiled StateGraph natively passing the thread_id
-        result = graph.invoke(
-            initial_state,
-            config={"configurable": {"thread_id": run_id}},
-        )
+        run_config: dict[str, Any] = {"configurable": {"thread_id": run_id}}
+        result = graph.invoke(initial_state, config=run_config)
         hitl_interrupt = _find_hitl_interrupt_checkpoint(active_checkpointer, run_id, result)
-        if hitl_interrupt is not None:
+        paused_at = (
+            PausedRunPoint(
+                phase_name=hitl_interrupt.phase_name,
+                reason="awaiting_human",
+                checkpoint_id=hitl_interrupt.checkpoint_id,
+                checkpoint_ns=hitl_interrupt.checkpoint_ns,
+            )
+            if hitl_interrupt is not None
+            else (
+                _breakpoint_pause_point(graph, run_config, checkpointer=active_checkpointer)
+                if pause_before
+                else None
+            )
+        )
+        if paused_at is not None:
             wall_time = round(time.time() - t0, 3)
             final_context = _business_context_from_graph_result(result)
-            _emit_v030_interrupted_run(
-                event_sink,
-                run_id=run_id,
-                hitl=hitl_interrupt,
-                final_context=final_context,
-                wall_time=wall_time,
-            )
+            if hitl_interrupt is not None:
+                _emit_v030_interrupted_run(
+                    event_sink,
+                    run_id=run_id,
+                    hitl=hitl_interrupt,
+                    final_context=final_context,
+                    wall_time=wall_time,
+                )
+            else:
+                _emit_v030_paused_run(
+                    event_sink,
+                    run_id=run_id,
+                    paused_at=paused_at,
+                    final_context=final_context,
+                    wall_time=wall_time,
+                )
             saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
             return {
                 "run_id": run_id,
@@ -2314,6 +2464,10 @@ def _run_v030_skill_dict(
                 "trace_path": saved_trace_path,
                 "run_dir": str(trace_output),
                 "wall_time_sec": wall_time,
+                # Without this the host reads a stopped run as a finished one:
+                # its only question was ``success``, and an absent answer counts
+                # as yes (``run_manager._result_success``).
+                "paused_at": paused_at.model_dump(mode="json"),
             }
     except Exception:
         wall_time = round(time.time() - t0, 3)

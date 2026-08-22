@@ -20,6 +20,7 @@ import type {
   GoldenSeedPlan,
   JsonObject,
   NodeLlmParams,
+  BreakpointList,
   NodeLlmParamsMap,
   PredictDiagnosticExport,
   PublishResult,
@@ -964,6 +965,31 @@ export async function putNodeLlmParams(
     })
   }
   nodeLlmParamsRequests.delete(skillId)
+  return response.data
+}
+
+/**
+ * Stop before this node from the next run on, or stop doing so.
+ * PUT / DELETE `/skills/{id}/nodes/{node_id}/breakpoint`.
+ *
+ * Writes only. Breakpoints are READ off `runtime_config`, which the canvas
+ * already holds — a separate read here would be a second replica of one truth,
+ * free to disagree with the first (SSOT 读取原则). Both writes answer with the
+ * whole canonical list so the caller never computes what the set became.
+ */
+export async function setBreakpoint(skillId: string, nodeId: string): Promise<BreakpointList> {
+  return writeBreakpoint(skillId, nodeId, true)
+}
+
+export async function clearBreakpoint(skillId: string, nodeId: string): Promise<BreakpointList> {
+  return writeBreakpoint(skillId, nodeId, false)
+}
+
+async function writeBreakpoint(skillId: string, nodeId: string, present: boolean): Promise<BreakpointList> {
+  const path = `/skills/${skillId}/nodes/${encodeURIComponent(nodeId)}/breakpoint`
+  const response = present
+    ? await api.put<BreakpointList>(path)
+    : await api.delete<BreakpointList>(path)
   return response.data
 }
 

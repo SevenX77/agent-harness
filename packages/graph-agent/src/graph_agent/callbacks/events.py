@@ -719,7 +719,10 @@ class AgentExitDecisionEvent(_EventBase):
 
 
 class InterruptedEvent(_EventBase):
-    """Fired when an agent middleware suspends execution awaiting HITL input.
+    """Fired when execution suspends at a phase it can be continued from.
+
+    Two causes reach here: a phase asking a human something, and a breakpoint
+    the reader set on that phase. ``reason`` says which.
 
     Tier 2 (T-B11). Complements :func:`GraphAgentHarness.get_thread_status`:
     the query surface lets Studio *ask* "is this thread paused?"; this
@@ -731,6 +734,12 @@ class InterruptedEvent(_EventBase):
     event_type: Literal["interrupted"] = "interrupted"
     phase_name: str
     thread_id: str
+    #: Why execution stopped here. ``awaiting_human`` needs an answer before the
+    #: run can go on; ``breakpoint`` is the reader's own stopping point and only
+    #: needs the word to continue. The two ask different things of the reader, so
+    #: neither may be inferred from whether ``question`` came out empty — an
+    #: unparsed question would then read as a breakpoint.
+    reason: Literal["awaiting_human", "breakpoint"]
     checkpoint_id: str | None = None
     checkpoint_ns: str | None = None
     namespace: str | None = None

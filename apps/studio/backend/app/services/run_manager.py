@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1725,6 +1725,45 @@ class RunManager:
         metadata_store = self._metadata_store()
         await metadata_store.save_run_metadata(config.DEFAULT_USER_ID, skill_id, metadata)
 
+    def observe_resumed_run(self, run_id: str) -> Callable[[dict[str, Any]], None] | None:
+        """A sink for the events a resumed segment emits, or None if nobody is watching.
+
+        A resume executes the engine inside the request rather than in a worker,
+        so there is no process queue to carry its events — and without a sink
+        they reached the trace file and nothing else. The live view is built
+        from events, so a segment that emits none is invisible however
+        correctly it ran: press Resume and the canvas keeps showing the moment
+        the run stopped (problem ledger C1 ③).
+
+        The events queue as they arrive and are read when the request returns —
+        the engine call is synchronous on the event loop, so nothing drains
+        until it finishes. Delivering them as they happen would mean moving that
+        call off the loop, which is a separate change with its own risks; this
+        one is about the canvas converging at all.
+
+        Returns None when this sidecar holds no record for the run — another
+        sidecar's paused run can still be resumed, and there is simply nobody
+        here to show it to. Inventing a queue for that case would be a second
+        place the run's events live.
+        """
+        record = self._runs.get(run_id)
+        if record is None:
+            return None
+
+        def observe(raw_event: dict[str, Any]) -> None:
+            event = _event_envelope_from_callback(
+                raw_event,
+                run_id=record.metadata.run_id,
+                seq=len(record.events) + 1,
+            )
+            record.events.append(event)
+            event_json = event.model_dump(mode="json")
+            record.ws_queue.put_nowait(event_json)
+            for subscriber in list(record.subscribers):
+                subscriber.put_nowait(event_json)
+
+        return observe
+
     async def record_resume_result(
         self,
         *,
@@ -1751,6 +1790,14 @@ class RunManager:
             for subscriber in list(record.subscribers):
                 await subscriber.put(event_json)
             if metadata.status != "running":
+                # However it ended, say so where the surfaces are listening. A
+                # resume used to end in silence: the run gate that every other
+                # ending publishes was never sent, so the canvas held the
+                # picture it had when the run stopped — by then a lie.
+                if metadata.status == "paused":
+                    metadata = await self._record_paused_run(record, metadata)
+                else:
+                    await self._finalize_terminal_run(record, metadata)
                 await record.ws_queue.put(None)
                 for subscriber in list(record.subscribers):
                     await subscriber.put(None)

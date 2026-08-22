@@ -417,6 +417,34 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     继续写;auto-commit 与 report 都挂在封盘后面,都是在描述一个跑完的 run。所以它走
     的是 Pause 按钮那条路的同一个出口(`_record_paused_run`:写 metadata、存档、发
     `paused` gate,不封盘),两种暂停留下的现场因此完全一样——区别只在**谁喊的停**。
+  - **续跑要重新被告知断点,而且要能再停一次。**(2026-08-22 真机走查补)resume 是
+    **重新编译一次图**,`interrupt_before` 是编译期参数,所以不把断点集合再传一遍,
+    续跑就是一张**没有任何断点**的图,会一路冲过剩下每一个断点。同理,续跑撞上下一个
+    断点时,它的结局仍然是「停住了,还能接着跑」——而 Studio 这一侧原本在出口处把
+    引擎的三档又压回两档(`"success" if res.success else "failed"`),于是那种停被记成
+    **失败**。这和 worker 那个洞是同一个形状,修法也一样:出口先问「停在哪」,再问成败。
+  - **续跑必须被看见:它的事件要送到看的人手上,它的结束要广播。**(2026-08-22 真机
+    走查补)首跑跑在 worker 里,事件经进程队列送到 run 的实时流;**续跑跑在 HTTP 请求
+    里**,原本既没有 event subscriber(事件只落进 trace 文件),`record_resume_result`
+    也从不发那条 run gate。于是按下 Resume 之后,磁盘上的 run 已经跑完,而画布还停在
+    它停下来那一刻的样子,直到你重开 app。实时视图是**由事件搭出来的**,所以一段不发
+    事件的执行无论跑得多正确都是不可见的。修法:resume 端点向 run 记录要一个 sink
+    (`observe_resumed_run`),把这段的事件塞进同一条实时流;结束时按结局走
+    `_record_paused_run` 或 `_finalize_terminal_run`,两者都会发 gate。**代价照实写**:
+    引擎调用同步跑在事件循环上,所以这些事件是**请求返回时一次性到达**,不是边跑边到;
+    要边跑边到就得把这次调用挪出事件循环,那是另一件事、另一份风险,这里不做。
+  - **停在断点上不是「有人在问你问题」。**(2026-08-22 真机走查补)`hitl-prompt.ts` 原本
+    见到任何 `interrupted` 就当作 HITL,取不到 `question` 就自己补一句 "Run paused for
+    human input.",于是断点停下来时画布弹出「HUMAN INPUT REQUIRED」和一个答题框,
+    而根本没有问题可答——**正是本决策加 `reason` 要防的那件事**。判据只认显式的
+    `reason === "breakpoint"`;**没写 reason 的旧 trace 仍然按 HITL 处理**,因为两种错
+    不对称:把断点当问题只是多一个没人用的框,把真问题当断点会让人永远等不到那个框。
+  - **边界节点不能带「断点」这个词。**(2026-08-22 真机走查补)Output 端点按「产出它的
+    相位里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
+    可断点是设在**相位**上的,端点不是相位,谁也没法在它上面设断点。端点上成立的是
+    底下那句更一般的话:**没有东西到达,也没有东西在执行**,那就是 `paused`。边的状态
+    表早就这么收(`buildEdges` 的 `breakpoint: 'paused'`),这一步只是让同一条规则走到
+    边所通向的那个端点。
   - **整图 iterate 的 skill 直接拒绝断点。** graph 级 `iterate` 是「整张图每个 item 跑
     一遍」,而且那些轮次是由 iterate wrapper 自己驱动的:停在某一轮里既报不出去也
     续不回来,而「停在相位 X 之前」也说不清是哪个 item 的 X。`assemble_graph` 在收到
@@ -439,6 +467,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   `src/components/GraphCanvas.test.tsx`(节点菜单一条目双向、非节点右键不出现)、
   `src/api/a-breakpoint-write-answers-with-the-whole-list.test.ts`(只写不读)。
   底栏 Resume + Stop 由 F7 既有实现直接覆盖(`center-action-bar.tsx` 的 `paused` 分支)。
+  **续跑一侧(2026-08-22 补)**:`apps/studio/backend/tests/services/test_a_resume_goes_on_visibly.py`
+  (续跑结束会广播 gate、再撞上断点报 `paused` 而不是通过、这段的事件到得了看的人手上、
+  没有本地记录时没人可送、再停一次不封盘、三档结局在出引擎时不被压回两档);
+  前端 `src/components/studio/a-breakpoint-is-not-a-question.test.ts`(断点停不弹答题框、
+  不遮住更早的真问题、真问题即使问句为空仍然是问题、没写 reason 的旧 trace 仍按问题处理)、
+  `src/utils/a-boundary-cannot-carry-a-breakpoint.test.ts`(端点说 `paused` 不说 `breakpoint`)。
 - Status: target-design(2026-08-21 立)。
 - 归属: capability `run-execution`(owner);platform `engine`(停顿机制);
   region `canvas` · `center-action-bar`(引)。

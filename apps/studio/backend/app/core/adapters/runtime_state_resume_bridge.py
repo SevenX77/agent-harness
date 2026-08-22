@@ -18,6 +18,8 @@ def resume_restored_runtime_state(
     human_response: dict[str, Any] | None,
     skill_resolver: Any,
     llm_provider: Any,
+    event_subscriber: Any = None,
+    pause_before: frozenset[str] = frozenset(),
 ) -> Any:
     import graph_agent
 
@@ -34,4 +36,8 @@ def resume_restored_runtime_state(
         human_response=human_response,
         skill_resolver=skill_resolver,
         llm_provider=llm_provider,
+        event_subscriber=event_subscriber,
+        # Without these the continued run is compiled with no breakpoints at
+        # all and blows through every remaining one (RUN_EXECUTION-16).
+        pause_before=pause_before,
     )

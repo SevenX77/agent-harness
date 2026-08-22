@@ -60,6 +60,10 @@ def test_resume_endpoint_delegates_to_configured_engine_adapter_resume(
             "run_id": "run-123",
             "context_overrides": {"draft": "manual"},
             "human_input": "continue from checkpoint",
+            # A resume is compiled fresh, so it has to be told the breakpoints
+            # again or it runs straight through every remaining one
+            # (RUN_EXECUTION-16). Empty here because this skill has none set.
+            "pause_before": [],
         }
     ]
     assert response.json()["metrics"] == {
@@ -116,6 +120,7 @@ def test_resume_endpoint_forwards_checkpoint_selector_and_structured_human_respo
             "context_overrides": {"draft": "manual"},
             "human_input": None,
             "human_response": {"content": "approved", "tool_call_id": "tool-1"},
+            "pause_before": [],
         }
     ]
 

@@ -335,6 +335,7 @@
         "profileCapabilities": "Profile capabilities: {{capabilities}}",
         "profileCapabilitiesNotVerified": "Profile capabilities: Not verified yet",
         "toolProtocol": "Tool protocol: {{status}}",
+        "toolProtocolVerified": "verified by probe",
         "toolProtocolSupported": "supported",
         "toolProtocolNotListed": "not listed by backend",
         "sdks": "SDKs: {{n}}",

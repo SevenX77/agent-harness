@@ -335,6 +335,7 @@
         "profileCapabilities": "档案能力：{{capabilities}}",
         "profileCapabilitiesNotVerified": "档案能力：尚未验证",
         "toolProtocol": "工具协议：{{status}}",
+        "toolProtocolVerified": "已实测",
         "toolProtocolSupported": "支持",
         "toolProtocolNotListed": "后端未列出",
         "sdks": "SDK：{{n}}",

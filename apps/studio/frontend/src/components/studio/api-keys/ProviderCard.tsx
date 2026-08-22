@@ -571,7 +571,13 @@ export type EndpointSummary = {
   methodIds: string[]
   requestMapperIds: string[]
   profileCapabilities: string[]
-  toolProtocol: "supported" | "not_listed"
+  /**
+   * Three readings, not two. `supported` is a claim — some catalog or protocol
+   * document says this takes tools. `verified` is a measurement: a route here
+   * was watched calling one (gateway T3). A reader deciding whether to hand
+   * this endpoint an agent phase needs those apart.
+   */
+  toolProtocol: "verified" | "supported" | "not_listed"
 }
 
 function AvailableEndpointSummary({
@@ -758,9 +764,11 @@ export function endpointTooltipLines(
 ): string[] {
   const inputBaseUrl = endpoint.baseUrl || i18n.t("apiKeys.card.tooltip.notSet")
   const runtimeBaseUrl = endpoint.runtimeBaseUrl || endpoint.baseUrl || ""
-  const toolProtocolStatus = endpoint.toolProtocol === "supported"
-    ? i18n.t("apiKeys.card.tooltip.toolProtocolSupported")
-    : i18n.t("apiKeys.card.tooltip.toolProtocolNotListed")
+  const toolProtocolStatus = endpoint.toolProtocol === "verified"
+    ? i18n.t("apiKeys.card.tooltip.toolProtocolVerified")
+    : endpoint.toolProtocol === "supported"
+      ? i18n.t("apiKeys.card.tooltip.toolProtocolSupported")
+      : i18n.t("apiKeys.card.tooltip.toolProtocolNotListed")
   const lines = [
     i18n.t("apiKeys.card.tooltip.provider", { label: endpoint.label }),
     i18n.t("apiKeys.card.tooltip.endpoint", { id: endpoint.id }),
@@ -836,7 +844,7 @@ function endpointHostLabel(value: string): string {
   }
 }
 
-function endpointProfileSummary(models: ModelInfo[]): Pick<
+export function endpointProfileSummary(models: ModelInfo[]): Pick<
   EndpointSummary,
   "profileCount" | "methodIds" | "requestMapperIds" | "profileCapabilities" | "toolProtocol"
 > {
@@ -845,11 +853,18 @@ function endpointProfileSummary(models: ModelInfo[]): Pick<
   const capabilities: string[] = []
   let profileCount = 0
   let toolProtocolSupported = false
+  let toolProtocolMeasured = false
 
   for (const model of models) {
     methods.push(...modelCapabilityStringArray(model, "verified_methods"))
     if (modelCapabilityBoolean(model, "tool_protocol")) {
       toolProtocolSupported = true
+      // An endpoint-level lower bound, unioned over its models the same way
+      // `methodIds` is: one model watched calling a tool is a fact about this
+      // endpoint that a sibling's silence does not take back.
+      if (modelCapabilitySource(model, "tool_protocol") === "probed_verified") {
+        toolProtocolMeasured = true
+      }
     }
 
     for (const profile of modelVerifiedProfiles(model)) {
@@ -871,7 +886,11 @@ function endpointProfileSummary(models: ModelInfo[]): Pick<
     methodIds: uniqueSortedStrings(methods),
     requestMapperIds: uniqueSortedStrings(requestMappers),
     profileCapabilities: uniqueSortedStrings(capabilities),
-    toolProtocol: toolProtocolSupported ? "supported" : "not_listed",
+    toolProtocol: toolProtocolMeasured
+      ? "verified"
+      : toolProtocolSupported
+        ? "supported"
+        : "not_listed",
   }
 }
 
@@ -1358,6 +1377,16 @@ function modelCapabilityStringArray(model: ModelInfo, key: string): string[] {
 
 function modelCapabilityBoolean(model: ModelInfo, key: string): boolean {
   return modelCapabilityValue(model, key) === true
+}
+
+/** Where a capability's value came from, when the record says. */
+function modelCapabilitySource(model: ModelInfo, key: string): string | null {
+  const record = model.capabilities?.[key]
+  if (record && typeof record === "object" && !Array.isArray(record) && "source" in record) {
+    const source = (record as { source?: unknown }).source
+    return typeof source === "string" ? source : null
+  }
+  return null
 }
 
 function modelCapabilityNumber(model: ModelInfo, key: string): number | null {

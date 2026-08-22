@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+from binascii import Error as BinasciiError
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CopilotMention(BaseModel):
@@ -30,6 +32,20 @@ class CopilotMention(BaseModel):
     label: str = Field(min_length=1)
 
 
+# How many bytes of image one turn may carry, before base64 (COPILOT_ASSIST-11 ②).
+#
+# The whole turn — sentence, mentions and images — leaves in ONE WebSocket
+# frame, and uvicorn caps a frame at 16 MiB (`ws_max_size`, default
+# `16 * 1024 * 1024`). Going over is not an error the user gets to read: the
+# connection is closed and the message disappears. Base64 inflates bytes by 4/3,
+# so 8 MB of image encodes to about 10.7 MiB and leaves the sentence and its
+# mentions room inside the frame.
+#
+# The composer refuses at this same number when a file is PICKED, which is where
+# the user can still do something about it; a test asserts the two agree.
+TURN_IMAGE_BUDGET_BYTES = 8 * 1024 * 1024
+
+
 class CopilotImageAttachment(BaseModel):
     """An image the user attached, carried by value with the message.
 
@@ -45,6 +61,25 @@ class CopilotImageAttachment(BaseModel):
     # Base64, as the Anthropic image content block wants it.
     data: str = Field(min_length=1)
     name: str | None = None
+
+    @field_validator("data")
+    @classmethod
+    def _must_decode(cls, value: str) -> str:
+        """Refuse here rather than inside the provider SDK.
+
+        `data` is handed to the model as an image content block. A string that
+        does not decode fails somewhere the user cannot be told about it, so the
+        boundary is where it has to die.
+        """
+        try:
+            base64.b64decode(value, validate=True)
+        except (BinasciiError, ValueError) as exc:
+            raise ValueError("data must be base64") from exc
+        return value
+
+    def decoded_size(self) -> int:
+        """How many bytes this image actually is."""
+        return len(base64.b64decode(self.data, validate=True))
 
 
 class CopilotWsRequestPayload(BaseModel):
@@ -72,6 +107,22 @@ class CopilotWsRequestPayload(BaseModel):
     # Structured Golden-owned judge facts prepared before sending a Copilot Judge
     # chat turn. These are prompt context, not opaque refs hidden in prose.
     judge_context: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _images_fit_in_one_frame(self) -> CopilotWsRequestPayload:
+        """The turn's images together must fit the frame that carries them.
+
+        Per turn, not per image: the sentence, the mentions and every image go
+        out in one WebSocket message, so two pictures that each fit can still
+        sink the turn between them (COPILOT_ASSIST-11 ②).
+        """
+        total = sum(attachment.decoded_size() for attachment in self.attachments)
+        if total > TURN_IMAGE_BUDGET_BYTES:
+            raise ValueError(
+                f"attachments total {total} bytes, over this turn's "
+                f"{TURN_IMAGE_BUDGET_BYTES}-byte image budget"
+            )
+        return self
 
 
 class CopilotEventBase(BaseModel):

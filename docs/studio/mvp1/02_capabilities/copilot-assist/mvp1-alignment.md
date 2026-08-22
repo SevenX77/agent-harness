@@ -45,7 +45,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **机制**：① 显式 @ → 输入框弹 MentionMenu(files/phases/dots/errors/trace，键盘导航，模糊过滤 <50ms)；② 只有用户在 composer 中选择/保留的 @mention 随本次 Copilot 消息发送；③ 禁止点画布节点/dot/文件后自动把对象送给 Copilot，禁止隐式 view/选中/dirty buffer 后台同步；④ 后端 resolver 只处理当前 WS 消息 payload 中的显式 mentions/attachments/judge context；⑤ 发送后**第一条**回显本轮实际注入清单。
 - **决策+动机**：**composer = 输入框内联彩色 pill**(需 tiptap 类富文本，react-mentions overlay 渲染不了真 DOM pill)；**dot=黑板**(对齐 trace 走查，取代旧 @edge_context 边语义)；**上下文回显插在 agent 开跑前、第一条**(可折叠、点开看实际内容/文档，反 hidden prompt magic，与 F1"不省略"一套)。
 - **原话**：「输入框内联彩色 pill」/「能否插入在 agent 开始任务的前面... user输入完按发送后, 第一条弹出的就是这个信息, 可折叠, 可查看具体内容或文档」
-- **status**：线上契约、后端 resolver 与 composer 的 ①②③ 均已 live——composer 是一台 ProseMirror(tiptap)编辑器,键入 `@` 弹 MentionMenu(五类、模糊过滤、键盘导航),选中落成一枚带 `(kind, ref, label)` 的原子 pill,发送时 pill 变成正文里的 `@label` 加 `mentions[]` 里的一条身份(COPILOT_ASSIST-10 ①);resolver 按 COPILOT_ASSIST-8 分「读正文」与「只给引用」两类,⑤ 的回显逐条说明每一条实际变成了什么。**仍欠**:附图入口(`attachments[]` 的契约与后端已 live,composer 里还没有那个入口)= target(问题台账 CP1)。
+- **status**：线上契约、后端 resolver 与 composer 的 ①②③ 均已 live——composer 是一台 ProseMirror(tiptap)编辑器,键入 `@` 弹 MentionMenu(五类、模糊过滤、键盘导航),选中落成一枚带 `(kind, ref, label)` 的原子 pill,发送时 pill 变成正文里的 `@label` 加 `mentions[]` 里的一条身份(COPILOT_ASSIST-10 ①);resolver 按 COPILOT_ASSIST-8 分「读正文」与「只给引用」两类,⑤ 的回显逐条说明每一条实际变成了什么。附图入口按 COPILOT_ASSIST-11 落地:剪贴板粘贴与一颗附图按钮两个入口,输入框上方逐张显示缩略图与体积、可逐张移除,一轮图片总量 8 MB(前端在挑选那一刻拒、后端在边界再拒,两处同一个数由测试钉住),超限或类型不在四种之内当场点名拒收、绝不悄悄压缩。**F4 全部五条已 live。**
 - **测试点**：输入 `@plan`→菜单过滤高亮、选中成内联 pill 可删；点击画布节点/dot/文件本身不触发后端 Copilot 请求；发送消息时 payload 只包含 composer 内显式 mentions；发送后第一条=注入清单点开看内容；大工程菜单 <50ms / 超 150K 截断告警。
 - **归属**：region [[copilot]](菜单/pill/回显)；可提名对象来自 [[canvas]]/[[editor]]/[[timeline]]，但提名只由 composer 内显式选择触发。
 - **决策 COPILOT_ASSIST-8(一次提名是用户挑出来的一个东西,不是一段被猜出来的上下文;2026-08-20 立,问题台账 CP1)**:
@@ -127,6 +127,36 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
     唯一会歧义的情形——同名的一个文件和一个相位——由 pill 的 hover title `kind · ref` 消歧。
     **设计源这条措辞据此订正**:两份文档只有一份能对,而针对颜色语义、带判据和实证的那一份
     更专门,所以 §2.2 赢,F4 的「彩色」按其本意读作「与正文可区分」。
+- **决策 COPILOT_ASSIST-11(一张图怎么进来、多大算太大、太大时说什么;2026-08-21 立,问题台账 CP1)**:
+  COPILOT_ASSIST-8 已定死附件在线上的形状(`kind: "image"` + `media_type` + base64 `data` +
+  可选 `name`),并说清了它**按值走**的理由——图片在工作区里没有一个改天还找得到的地址。
+  这条补上它在**界面上**和**边界上**的三件事。
+  - **① 两个入口,都由用户显式动手:composer 里粘贴,和一颗附图按钮**。COPILOT_ASSIST-8 已经
+    写明来源是「剪贴板或文件对话框」,这里把两者都做出来。按钮用 `<input type="file">` 而不是
+    Tauri 原生对话框:原生对话框返回的是一条**路径**,而附件要的是**字节**,再绕一次 Rust 读盘
+    只是把「按值」这件事重新变成一次解引用;`<input type="file">` 在 Tauri webview 里同样弹
+    系统对话框,却直接给到 `File`。**这不与 D12 冲突**:D12 约束的是「谁能往磁盘上**写** skill
+    文件」,附图是读一个工作区之外的文件,不产生任何写入。
+  - **② 一轮的图片总量上限 8 MB(解码后字节),超了当场拒收,并说出它有多大**。
+    这个数不是拍脑袋:整条消息(正文 + `mentions[]` + `attachments[]`)装在**一个 WebSocket
+    帧**里发出去,而 uvicorn 的帧上限 `ws_max_size` 默认是 16 MiB
+    (`.venv/Lib/site-packages/uvicorn/config.py:189`,`16 * 1024 * 1024`)——**超限不是报错,
+    是连接被掐掉、这条消息无声消失**,用户看不到任何解释。base64 把字节撑成 4/3,8 MB 图片
+    编码后约 10.7 MiB,给正文和提名留出充裕余量。
+    **只设一轮总量,不另设单张上限**:总量已经把「一张巨图」挡住了,再加一条单张规则不多挡任何
+    东西,只多一句要解释的话。
+  - **③ 太大就拒收,绝不悄悄压缩**。自动降采样看起来体贴,实际是**把用户交上来的证据换掉**——
+    他截图给 copilot 看的可能正是某个一像素的错位。这与 F4 ⑤「回显说的必须是实际注入的」、
+    与 COPILOT_ASSIST-8「解析失败当场说,不静默丢」是同一条纪律:**屏幕上说的,必须是真的发生的**。
+    同理,`media_type` 不在那四种之内的文件当场拒收并点名它是什么类型,不猜、不改扩展名。
+  - **④ 上限由后端拥有,前端照着做,并有门禁钉住两边是同一个数**。真正的边界是后端
+    (`CopilotWsRequestPayload` 校验一轮总量,不合格立刻拒),因为一条规矩不能指望客户端记得守;
+    但只让后端拒,用户要**打完整条消息、按下发送**才知道图太大,而那时他已经没得选。所以前端在
+    **挑选那一刻**用同一个数拒收。两处各写一个常量本来就是两份真相,所以加一条后端测试去读前端
+    那个 TS 常量、断言两个数字相等——把「两份拷贝」变成「一份真相加一面被检查的镜子」,
+    与本仓已有的文档哈希锁、颜色语言扫描是同一套手法。
+  - **⑤ 屏幕上看得见自己附了什么**:每张图在输入框上方是一枚缩略图卡片,带文件名、体积和一个
+    移除控件;发送成功后清空。理由同 F4 ⑤ 的回显:**用户必须能在按下发送之前看清这一轮到底带了什么**。
 
 ### F5 Copilot 自写 + diff 气泡 + Bash 审批
 - **机制**：MVP1 明确允许 Copilot SDK `Read/Write/Edit` 在当前 workspace/cwd/add_dirs 范围内自行读写文件；Studio 不要求把 Write/Edit 拦成 Rust 写入或 `patch_proposed` 才算合规。工具事件仍要回显，能拿到前后内容时展示 diff 气泡 / Open Compare；写后 compile/predict/run 使用磁盘上的最新结果。Bash 命令仍逐条审批卡(human-in-the-loop)，因为 Bash 可执行任意 shell 与重定向写入。
@@ -230,6 +260,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 | COPILOT_ASSIST-9 | 挂起自己过期要落到那张卡上 | 单元 `copilot-session-persistence`；**为什么**：超时只发一条泛型 `error`,说不出是哪一张卡,于是每张卡都继续停在「Waiting for approval.」、按钮照样可点,而背后的任务早已停了 |
 | COPILOT_ASSIST-8 | 一次提名的身份是 `(kind, ref)`,由前端给出 | 单元 `copilot-assist` F4；**为什么**：让后端拿显示名反查,等于把「用户挑了哪一个」变成一次模糊匹配,正是 F4 ③ 禁的 |
 | COPILOT_ASSIST-10 | 提名在屏幕上/正文里/菜单里各长什么样 | 单元 `copilot-assist` F4；**为什么**：8 只定死了它在线上的形状,没说 pill 在 `user_message` 里留下什么、同一个对象提两次算几次、菜单装不下时怎么说 |
+| COPILOT_ASSIST-11 | 一张图怎么进来、多大算太大 | 单元 `copilot-assist` F4；**为什么**：整条消息装在一个 WebSocket 帧里,超过 uvicorn 默认的 16 MiB 不是报错而是连接被掉、消息无声消失 |
 | COPILOT_ASSIST-5 | 会话身份契约（2026-08-15 用户裁决） | 单元 `copilot-session-persistence`；**为什么**：每个前端会话标签对应一条**独立的后端 SDK 对话**，会话身份必须显式进契约——此前 New chat 只换前端视图，报文无 session 标识，后端按 skill 只存一条 SDK 对话，生成中新建标签发的消息被注入正在跑的对话（2026-08-15 实测缺陷）。目标契约：① ws 报文必带 `session_id`（前端标签的 session id，缺失即边界拒绝）；② 后端 SDK client 缓存键 = (skill, **session**, model, provider, credential, workspace)，不同标签绝不共享对话；③ 流式事件按**发起查询的会话**归属渲染，与"当前激活标签"无关，切标签不串流；④ 关闭标签经 `POST /api/skills/{skill_id}/copilot/session-close` 结束对应后端 client（每 client 一个 CLI 子进程，不关则漏资源）；⑤ ws 断连仍重置该 skill 全部会话、一条连接内查询仍串行（单活跃查询不变式不变，审批/中断继续按 skill 键） |
 
 ## 6. 测试关键点

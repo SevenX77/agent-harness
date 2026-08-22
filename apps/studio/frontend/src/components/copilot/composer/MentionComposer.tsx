@@ -14,6 +14,7 @@ import Suggestion from '@tiptap/suggestion'
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 
 import { isComposerSendKey } from './composer-keys'
+import { imageFilesFromClipboard } from './read-images'
 import type { ComposerValue } from './composer-document'
 import { MENTION_NODE_NAME, composerValueFromDoc } from './composer-document'
 import { MentionMenu } from './MentionMenu'
@@ -39,6 +40,14 @@ export interface MentionComposerProps {
   placeholder: string
   onChange: (value: ComposerValue) => void
   onSend: () => void
+  /**
+   * Images pasted into the box (COPILOT_ASSIST-11 ①).
+   *
+   * Handed UP rather than handled here: whether an image can ride along is a
+   * property of the whole turn — the budget is shared with the ones attached
+   * through the button — and the turn is the panel's to know about.
+   */
+  onImagesPasted?: (files: File[]) => void
 }
 
 interface MenuAnchor {
@@ -63,7 +72,7 @@ const SEND_PRIORITY = 150
 const LINE_BREAK = '\n'
 
 export const MentionComposer = forwardRef<MentionComposerHandle, MentionComposerProps>(
-  function MentionComposer({ candidates, placeholder, onChange, onSend }, ref) {
+  function MentionComposer({ candidates, placeholder, onChange, onSend, onImagesPasted }, ref) {
     // The extensions are built once — rebuilding them would tear down and
     // recreate the editor, losing the caret and any in-flight IME composition.
     // Everything that changes between renders is read through a ref instead.
@@ -73,6 +82,8 @@ export const MentionComposer = forwardRef<MentionComposerHandle, MentionComposer
     onChangeRef.current = onChange
     const onSendRef = useRef(onSend)
     onSendRef.current = onSend
+    const onImagesPastedRef = useRef(onImagesPasted)
+    onImagesPastedRef.current = onImagesPasted
 
     const flatRef = useRef<MentionCandidate[]>([])
     const commandRef = useRef<((candidate: MentionCandidate) => void) | null>(null)
@@ -248,6 +259,16 @@ export const MentionComposer = forwardRef<MentionComposerHandle, MentionComposer
       extensions,
       onUpdate: ({ editor: instance }) => publishRef.current(instance),
       editorProps: {
+        // A pasted screenshot is the commonest way an image reaches a chat, and
+        // it arrives as files on the clipboard rather than as text. Returning
+        // true stops ProseMirror from also pasting the clipboard's text
+        // fallback (some apps put a file NAME there).
+        handlePaste: (_view, event) => {
+          const images = imageFilesFromClipboard(event.clipboardData)
+          if (images.length === 0) return false
+          onImagesPastedRef.current?.(images)
+          return true
+        },
         attributes: {
           class:
             'min-h-[60px] max-h-[160px] w-full overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed outline-none',

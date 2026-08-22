@@ -3427,7 +3427,23 @@ async def _measure_whether_this_route_calls_tools(
     route = credentials.provider_routes.get(route_id)
     if route is None or route.status != "verified":
         return
-    result = await _probe_route_tool_loop_atom(endpoint, route)
+    try:
+        result = await _probe_route_tool_loop_atom(endpoint, route)
+    except Exception as exc:  # noqa: BLE001 — an extra must not void the answer
+        # The reader asked "does this route work", and by now that question has
+        # an answer. This measurement rides on top of it, so its failure can
+        # only cost itself: degrade to "not measured", say why in the log.
+        # Measured 2026-08-21 — a `google_genai` route in an environment without
+        # the optional client raises while the probe model is being BUILT, i.e.
+        # before `probe_route_tool_loop` has a call to turn into a status, and
+        # the whole verified result went out as a 500. Same rule and same shape
+        # as `_preferred_route_call_method_id` above.
+        logger.warning(
+            "phase=route-tool-loop-probe route_id=%s degraded=true reason=%s",
+            route_id,
+            exc,
+        )
+        return
     if not result.called_the_tool:
         return
     _record_measured_capabilities(

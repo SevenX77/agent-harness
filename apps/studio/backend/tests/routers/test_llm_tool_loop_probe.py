@@ -192,3 +192,36 @@ def test_a_route_that_failed_its_generation_probe_is_never_asked_about_tools(
     client.post("/api/llm/routes/vendor:worker/probe")
 
     assert asked == []
+
+
+def test_a_measurement_that_blows_up_does_not_take_the_answer_with_it(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The reader asked "does this route work". T3 is an extra asked afterwards.
+
+    Measured 2026-08-21: on a `google_genai` route in an environment without the
+    optional `langchain-google-genai` client, building the probe model raises
+    `ImportError` — and because the raise happened after the generation probe had
+    already answered `ok`, the whole request 500'd and the answer the reader
+    actually asked for was thrown away with it.
+
+    Same rule, same file, same shape as `_preferred_route_call_method_id`
+    (`llm.py`): an extra projection that fails degrades to "not measured" and
+    says so in the log; it never voids the response it was riding on.
+    """
+    _seed(tmp_path, monkeypatch)
+    _generation_answers_ok(monkeypatch)
+
+    async def explode(endpoint: ProviderEndpoint, route: ProviderRoute) -> RouteToolLoopResult:
+        del endpoint, route
+        raise ImportError("google_genai routes require the graph-agent-gateway[google] extra")
+
+    monkeypatch.setattr(llm_router, "_gateway_probe_route_tool_loop", explode)
+
+    response = client.post("/api/llm/routes/vendor:worker/probe")
+
+    assert response.status_code == 200, response.text
+    assert load_credentials().provider_routes["vendor:worker"].status == "verified"
+    assert "tool_protocol" not in load_credentials().provider_routes["vendor:worker"].capabilities

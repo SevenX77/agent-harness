@@ -8,6 +8,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,6 +31,7 @@ for path in (STUDIO_BACKEND, SRC_CORE, GRAPH_AGENT_SRC, GRAPH_AGENT_GATEWAY_SRC)
 from app.core import config  # noqa: E402
 from app.core.backends import clear_backend_caches  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.routers import llm as llm_router  # noqa: E402
 from app.services.run_manager import run_manager  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -106,6 +108,42 @@ def _community_catalog_neutralized_in_tests(
     clear_backend_caches()
     yield
     clear_backend_caches()
+
+
+@pytest.fixture(autouse=True)
+def _tool_loop_probe_not_attempted_in_tests(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep the tool-loop probe off the network during tests.
+
+    Verifying one route now also asks whether it can call a tool, and that
+    question is TWO real requests through the production client
+    (`probing/tool_loop.py`). Every existing route-probe test that stubs only
+    the generation probe would otherwise still reach for a live client — slow
+    where the client builds, and an ImportError where the protocol's optional
+    client is not installed. Same treatment and same reason as the community
+    catalog above: the default test state makes no call, and tests that
+    exercise the path opt back in by patching this seam themselves
+    (`routers/test_llm_tool_loop_probe.py`).
+
+    The stand-in answers "asked, saw no tool call", which records nothing —
+    a test that does not stub this seam sees the same state as before it existed.
+    """
+
+    async def not_asked(endpoint: Any, route: Any) -> Any:
+        from graph_agent_gateway.probing import RouteToolLoopResult
+
+        return RouteToolLoopResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend=llm_router._provider_backend_for_endpoint(endpoint),
+            base_url=llm_router._endpoint_probe_base_url(endpoint),
+            model_id=route.provider_model_id,
+            status="ok",
+            reach="answered_without_calling",
+        )
+
+    monkeypatch.setattr(llm_router, "_gateway_probe_route_tool_loop", not_asked)
+    yield
 
 
 @pytest.fixture

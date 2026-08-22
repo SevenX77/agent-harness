@@ -83,7 +83,13 @@ import { hashConflictPayloadFromSaveError } from "../save-conflicts"
 import { mergeSaveStatuses } from "../settings/save-status-merge"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
-import { roleTestDetailsFromResult, roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
+import {
+  chainReachFromResult,
+  chainReachSummary,
+  roleTestDetailsFromResult,
+  roleTestStatusBadge,
+  type RoleTestStatusInput,
+} from "./role-test-status"
 import {
   applyPhaseFrontmatterForm,
   parsePhaseFrontmatter,
@@ -3237,15 +3243,9 @@ async function runCompareCandidateTest(
 function compareTestResultFromRoleTest(result: RoleTestResponse): LlmCompareTestResult {
   return {
     status: result.status,
-    summary: compareTestSummary(result.status),
+    summary: chainReachSummary(result.status, chainReachFromResult(result)),
     details: roleTestDetailsFromResult(result),
   }
-}
-
-function compareTestSummary(status: RoleTestStatus): string {
-  if (status === "ok") return "Test passed"
-  if (status === "warning") return "Needs Attention"
-  return "Test failed"
 }
 
 function compareStatusToRouteStatus(state: LlmCompareTestState | undefined): RoleRouteStatus | null {

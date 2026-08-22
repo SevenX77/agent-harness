@@ -40,8 +40,11 @@ def test_completed_graph_agent_role_test_persists_result(
     assert persisted is not None
     assert persisted["role_name"] == "analyst"
     assert persisted["result"]["role_name"] == "analyst"
-    # An empty target list aggregates to the default "ok" status.
-    assert persisted["status"] == "ok"
+    # What this test is about is that a completed job's result is persisted at
+    # all. The status it carries here follows from the chain rule: no route
+    # answered, because there was no route to ask — and that is not the same
+    # thing as every route passing (00_settings-ux-spec.md, role 测试批量).
+    assert persisted["status"] == "failed"
 
 
 def test_persist_completed_role_test_result_writes_through(

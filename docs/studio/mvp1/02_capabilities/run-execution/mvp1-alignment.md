@@ -454,6 +454,16 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     而根本没有问题可答——**正是本决策加 `reason` 要防的那件事**。判据只认显式的
     `reason === "breakpoint"`;**没写 reason 的旧 trace 仍然按 HITL 处理**,因为两种错
     不对称:把断点当问题只是多一个没人用的框,把真问题当断点会让人永远等不到那个框。
+  - **「停住了」不等于「在问你」,`status` 字段说的是前者。**(2026-08-22 真机走查补)
+    上一条(「停在断点上不是有人在问你问题」)按 `reason` 排掉了断点停顿,而弹出答题框的
+    根本不是那个停顿事件——是续跑写进同一条流里的**审计记录**
+    (`resume_applied`,payload 带着这次续跑的结果 `status: "paused"`),
+    而判据的最后一行是 `status === 'paused'`。**那个字段说的是 run 的状态**(没有东西在
+    执行、还能继续),「被人问住了」只是通向这个状态的其中一条路;拿它当「有人在问你」,
+    等于任何一条捎带这个状态的记录都会变成一个问题。所以判据里删掉它:只有**事件自己说
+    它在问**才算——hitl 类事件类型,或 `status === 'waiting_for_human'`(这一条是用词说的,
+    不是推断的)。**这不与「不许靠 question 为空来判断」冲突**:那条讲的是**真问句缺失时
+    不能反推**,这条讲的是**运行状态不能正推**,两条都指向同一句话——问不问人,只认显式的说法。
   - **一次停顿不结束这个 run 的事件流。**(2026-08-22 真机走查补,C1 ③ 收官)上一条
     (「续跑必须被看见」)给续跑装了事件出口,而**出口接的是一条已经关掉的管道**:worker
     在停顿时退出,drain 循环随之结束,并像收尾一个跑完的 run 那样往流里塞终止哨兵、清空
@@ -510,6 +520,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   没写 status 的算终局)、
   `src/components/studio/a-breakpoint-is-not-a-question.test.ts`(断点停不弹答题框、
   不遮住更早的真问题、真问题即使问句为空仍然是问题、没写 reason 的旧 trace 仍按问题处理)、
+  `src/components/studio/a-record-of-a-resume-is-not-a-question.test.ts`
+  (续跑的审计记录三种结局都不弹答题框、不遮住更早的真问题、`status: paused` 不算问、
+  `waiting_for_human` 仍算问)、
   `src/utils/a-boundary-cannot-carry-a-breakpoint.test.ts`(端点说 `paused` 不说 `breakpoint`)。
 - Status: target-design(2026-08-21 立)。
 - 归属: capability `run-execution`(owner);platform `engine`(停顿机制);

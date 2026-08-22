@@ -82,6 +82,13 @@ function pendingToolCallsField(value: unknown): PendingHitlToolCall[] {
  * question failed to parse looks identical, and hiding a real one is the worse
  * of the two mistakes. So only an explicit `breakpoint` is excluded; an
  * unlabelled stop is still treated as a prompt (RUN_EXECUTION-16).
+ *
+ * A `paused` STATUS is not one either, whatever the event is. The status names
+ * the run's state — nothing is executing and it can continue — and being asked
+ * something is only one of the ways to get there. Accepting it put the prompt
+ * up over the resume's own audit record (`resume_applied`, carrying the
+ * resulting `status: "paused"`), which asks nothing of anybody.
+ * `waiting_for_human` stays, because that one says it in words.
  */
 export function isHitlEvent(
   eventType: string,
@@ -92,7 +99,7 @@ export function isHitlEvent(
   if (eventType === 'interrupted' || eventType === 'hitl' || eventType === 'human_input_required') return true
   if (eventType === 'pause' || eventType === 'paused') return true
   if (eventType.includes('hitl') || eventType.includes('interrupt')) return true
-  return status === 'paused' || status === 'waiting_for_human'
+  return status === 'waiting_for_human'
 }
 
 /** Scan the stream backwards and project the most recent HitL pause prompt. */

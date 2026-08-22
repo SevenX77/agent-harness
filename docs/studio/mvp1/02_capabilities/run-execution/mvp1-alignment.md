@@ -454,6 +454,23 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     而根本没有问题可答——**正是本决策加 `reason` 要防的那件事**。判据只认显式的
     `reason === "breakpoint"`;**没写 reason 的旧 trace 仍然按 HITL 处理**,因为两种错
     不对称:把断点当问题只是多一个没人用的框,把真问题当断点会让人永远等不到那个框。
+  - **一次停顿不结束这个 run 的事件流。**(2026-08-22 真机走查补,C1 ③ 收官)上一条
+    (「续跑必须被看见」)给续跑装了事件出口,而**出口接的是一条已经关掉的管道**:worker
+    在停顿时退出,drain 循环随之结束,并像收尾一个跑完的 run 那样往流里塞终止哨兵、清空
+    所有订阅者。可是**续跑写的是同一个 run 的后文**——同一个 run id、同一批看的人。
+    在停顿处结束事件流,和把停顿归档成跑完是同一个错误换到下一层:**流属于 run,而 run
+    还没结束**。判据因此和结局的词表对齐:只有终局(成功/失败/被取消/worker 无声死亡)
+    才关流;停顿保持打开,等下一段。
+  - **`run_ended` 得读它的 `status`,不能只看事件名。** 引擎在 `graph.invoke` 返回时发
+    `run_ended`,而一个停住的 run **也会返回**,所以光凭事件名分不出「结束了」和「停住了」。
+    引擎本来就说清了:`RunEndedEvent.status` 是 `completed | crashed | interrupted`
+    (`callbacks/events.py`),前端 `RUN_ENDED_EVENT_VERDICT` 也早把 `interrupted` 映成
+    `paused`——只是**判断「这个 run 完了吗」的那两处根本没去读**(`useRunStream` 的终局
+    闸门、F7 copilot 分析条)。于是停住的 run 被判成跑完:socket 不再重连,分析条邀请你
+    分析一段还没跑的活。修法是把这个判断收成**一处**(`endsTheRun`),走与 verdict 同一张
+    表,两边不可能再各说各话。**没写 status 的旧 `run_ended` 算结束**:把停顿误判成结束会
+    冻住实时视图,把结束误判成停顿会让 socket 无限重连重放整份日志,而停顿从字段存在起
+    就一直写着 `interrupted`。
   - **边界节点不能带「断点」这个词。**(2026-08-22 真机走查补)Output 端点按「产出它的
     相位里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
     可断点是设在**相位**上的,端点不是相位,谁也没法在它上面设断点。端点上成立的是
@@ -486,7 +503,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   (续跑结束会广播 gate、再撞上断点报 `paused` 而不是通过、这段的事件到得了看的人手上、
   没有本地记录时没人可送、再停一次不封盘、三档结局在出引擎时不被压回两档、
   没打开的 skill 上「没有断点」而不是报错、读断点读不到也不许盖掉运行时状态错误);
-  前端 `src/components/studio/a-breakpoint-is-not-a-question.test.ts`(断点停不弹答题框、
+  `apps/studio/backend/tests/services/test_a_pause_does_not_end_the_story.py`
+  (停住的 run 不关流、不清空看的人、下一段事件送得到同一批看的人、终局仍然关流、
+  worker 无声死亡也关流、再停一次还是不关);
+  前端 `src/utils/a-stop-is-not-an-ending.test.ts`(`run_ended` 按 status 判终局,
+  没写 status 的算终局)、
+  `src/components/studio/a-breakpoint-is-not-a-question.test.ts`(断点停不弹答题框、
   不遮住更早的真问题、真问题即使问句为空仍然是问题、没写 reason 的旧 trace 仍按问题处理)、
   `src/utils/a-boundary-cannot-carry-a-breakpoint.test.ts`(端点说 `paused` 不说 `breakpoint`)。
 - Status: target-design(2026-08-21 立)。

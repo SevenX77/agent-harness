@@ -47,6 +47,7 @@ from claude_agent_sdk.types import (
     HookMatcher,
     McpServerConfig,
     ResultMessage,
+    SettingSource,
     StreamEvent,
     SystemPromptPreset,
     TextBlock,
@@ -833,6 +834,7 @@ def build_options(
     add_dirs: list[str | Path] = [str(path) for _label, path in _mounted_doc_dirs()]
     permission_mode: Literal["default", "acceptEdits"]
     skills: list[str]
+    setting_sources: list[SettingSource]
     mcp_servers: dict[str, McpServerConfig]
     agents: dict[str, AgentDefinition] | None
     hooks: dict[HookEvent, list[HookMatcher]] | None = None
@@ -855,6 +857,18 @@ def build_options(
         # 流程内部该派 Clotho 做领域分析 / 图设计时照派不误;专家的设计技能仍然
         # 不给她。物化仍是全量:三位女神在同一 workspace 里跑,她们的技能得在盘上。
         skills = agent_assets.load_skill_map()["moirai"]
+        # 名单只是**过滤器**,不是开关:`skills` 决定模型可以叫哪些**已发现**的
+        # 技能,而"发现"来自 `project` 这个配置面——它才是让 CLI 去读
+        # `<cwd>/.claude/skills/` 的那一项(SDK `subprocess_cli.py`
+        # `_apply_skills_defaults`:`setting_sources` 为 None 时它自动补
+        # `["user", "project"]`,显式传空列表则原样照传)。这里显式只要
+        # `project`:`user` 会把开发机的 `~/.claude` 拉进来,那正是当初写空列表
+        # 要挡的漂移,而 `project` 指的是**本次打开的 skill 工作区**——
+        # `_materialize_copilot_skills` 刚把随包技能池写进它的 `.claude/skills/`。
+        # 空列表把两件事一起关掉了:2026-08-22 真机实测,MoirAI 被点名跑
+        # brainstorming 时答"这个技能在我当前的可用技能列表里不存在(报
+        # Unknown skill)",而那一刻 SKILL.md 就躺在同一个工作区里。
+        setting_sources = ["project"]
         mcp_servers = build_copilot_mcp_servers(skill_binding)
         agents = _goddess_agent_definitions()
         # R8.3: 执行类(Bash/PowerShell)强制 "ask"(压掉 CLI 沙箱自动放行),
@@ -874,7 +888,9 @@ def build_options(
         allowed_tools = _ALLOWED_TOOLS.copy()
         permission_mode = "acceptEdits"
         # SDK probe 路要确定性输出,压掉技能 / MCP / subagents(R6.6 裸配置)。
+        # 一个技能都不开,就没有什么要被发现,配置面可以整个关掉。
         skills = []
+        setting_sources = []
         mcp_servers = {}
         agents = None
     return ClaudeAgentOptions(
@@ -893,9 +909,10 @@ def build_options(
         # 纯字符串会整体替换基座,是已定谳的缺陷用法);当前请求显式携带的上下文
         # 走每轮 turn prompt,见 _prompt_with_turn_context。
         system_prompt=_session_system_prompt(),
-        # SDK 隔离模式:不加载开发机 ~/.claude 等文件系统配置,copilot 行为不随
-        # 宿主机个人配置漂移;MCP 只认显式传入的(当前为空)。
-        setting_sources=[],
+        # 配置面按会话种类分(理由写在上面赋值处):聊天会话只开 `project`,
+        # 探针会话一项不开。两种都不含 `user`,copilot 行为不随宿主机个人配置
+        # 漂移;MCP 一律只认显式传入的。
+        setting_sources=setting_sources,
         strict_mcp_config=True,
         skills=skills,
         mcp_servers=mcp_servers,

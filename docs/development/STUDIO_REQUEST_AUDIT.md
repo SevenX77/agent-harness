@@ -101,6 +101,7 @@ BACKEND DELETE /api/llm/roles/{role_name}
 BACKEND DELETE /api/llm/routes/{route_id}
 BACKEND DELETE /api/skills/{skill_id}
 BACKEND DELETE /api/skills/{skill_id}/golden/{golden_id}
+BACKEND DELETE /api/skills/{skill_id}/nodes/{node_id}/breakpoint
 BACKEND DELETE /api/skills/{skill_id}/runs/{run_id}
 BACKEND DELETE /api/skills/{skill_id}/test_inputs/{input_id}
 BACKEND GET /api/_debug/value-error
@@ -210,6 +211,7 @@ BACKEND PUT /api/media/providers/{provider_id}/credential
 BACKEND PUT /api/settings
 BACKEND PUT /api/skills/{skill_id}
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts
+BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/breakpoint
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params
 BACKEND WS /api/skills/{skill_id}/copilot/ws
@@ -335,6 +337,7 @@ BACKEND DELETE /api/llm/roles/{role_name} | ok | specific | Explicit role delete
 BACKEND DELETE /api/llm/routes/{route_id} | ok | specific | Explicit route delete command; backend rejects referenced routes and otherwise returns the joined canonical RegistryResponse.
 BACKEND DELETE /api/skills/{skill_id} | ok | specific | Explicit skill delete command; service tests cover index removal/path safety and it is not a lifecycle refresh path.
 BACKEND DELETE /api/skills/{skill_id}/golden/{golden_id} | ok | specific | Explicit golden baseline delete command; guarded by browser-fallback/native-writer boundary tests and returns no broad truth refresh.
+BACKEND DELETE /api/skills/{skill_id}/nodes/{node_id}/breakpoint | ok | specific | Explicit canvas command to stop stopping before one node; clearing one never set is side-effect-free, a real change returns the whole canonical list and publishes precise runtime_config_changed(dataset=breakpoints, node_id).
 BACKEND DELETE /api/skills/{skill_id}/runs/{run_id} | ok | specific | Explicit Timeline delete command; route deletes one run id and the frontend projects that deletion without refetching run history.
 BACKEND DELETE /api/skills/{skill_id}/test_inputs/{input_id} | ok | specific | Explicit Test Inputs delete command; route removes one input id and frontend projection clears only the affected cached list/selection.
 BACKEND GET /api/_debug/value-error | internal | none | Backend-owned infrastructure endpoint; not a UI revalidation trigger.
@@ -444,6 +447,7 @@ BACKEND PUT /api/media/providers/{provider_id}/credential | ok | specific | Expl
 BACKEND PUT /api/settings | ok | specific | Explicit app-settings save command; unchanged snapshots are side-effect-free, changed snapshots return the canonical AppSettings response and publish a precise settings_changed event.
 BACKEND PUT /api/skills/{skill_id} | ok | specific | Explicit skill metadata update; returns canonical SkillDetail for the edited skill.
 BACKEND PUT /api/skills/{skill_id}/runtime-config/artifacts | ok | specific | Runtime artifact writes are explicit output-config saves and return the canonical runtime_config snapshot.
+BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/breakpoint | ok | specific | Explicit canvas command to stop before one node; setting one already set is side-effect-free, a real change returns the whole canonical list and publishes precise runtime_config_changed(dataset=breakpoints, node_id).
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/compare-candidates | ok | specific | Explicit Properties compare-candidates save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=compare_candidates, node_id).
 BACKEND PUT /api/skills/{skill_id}/nodes/{node_id}/node-llm-params | ok | specific | Explicit Properties node-LLM-params save; no-op writes are side-effect-free, changed writes return the node snapshot and publish precise runtime_config_changed(dataset=node_llm_params, node_id).
 BACKEND WS /api/skills/{skill_id}/copilot/ws | ok | specific | Scoped Copilot user-message stream; future @mentions must travel in this message payload, not via background context POST.

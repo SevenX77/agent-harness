@@ -8,7 +8,9 @@
     "disconnect": "断开连接",
     "deleteNode": "删除节点",
     "deleteShortcut": "Del",
-    "addNode": "添加节点"
+    "addNode": "添加节点",
+    "setBreakpoint": "跑到这里之前先停下",
+    "clearBreakpoint": "不再停在这里"
   },
   "phaseKind": {
     "skill": "Agent 相位",
@@ -64,6 +66,7 @@
   },
   "node": {
     "goldenCaptured": "已录 golden",
+    "breakpointSet": "跑到这个节点之前会先停下",
     "logicOk": "Logic 正常（predict 跑过，还没有 golden）",
     "activity": "节点动态",
     "subgraphProgress": "子图进度",
@@ -83,6 +86,7 @@
     "viewInferred": "点开看这条路径上推断出的字段"
   },
   "toast": {
+    "breakpointNextRun": "这次已经在跑了，断点从下一次开始生效。",
     "sequentialOverwriteUnresolved": "顺序覆盖还没解决。编译前先调整这个节点，或者允许覆盖。",
     "childSubgraphNotReady": "步骤没能保存：子图还没准备好",
     "subgraphReadOnly": "这个子图是只读的。先 fork 到你的工作区再编辑。",

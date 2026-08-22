@@ -148,6 +148,12 @@ export interface RuntimeConfig {
     }
   }
   llm?: Record<string, unknown>
+  /**
+   * Node ids this skill stops before, sorted. Set from the canvas, applied by
+   * the next run (RUN_EXECUTION-16). Read from here rather than from an
+   * endpoint of its own: this document is the one replica the canvas holds.
+   */
+  breakpoints?: string[]
   artifacts: RuntimeArtifactRow[]
   updated_at?: string
   fingerprint?: string
@@ -404,6 +410,16 @@ export interface NodeLlmParams {
 /** GET response: node id -> its param overrides (only nodes with overrides). */
 export interface NodeLlmParamsMap {
   nodes: Record<string, NodeLlmParams>
+}
+
+/**
+ * Which nodes a skill stops before, sorted.
+ *
+ * Always the whole list, never a delta: a caller told only about the node it
+ * just touched would have to keep its own copy of the rest.
+ */
+export interface BreakpointList {
+  node_ids: string[]
 }
 
 /** PR2: one candidate's isolated single-node side-run inside a compare group. */

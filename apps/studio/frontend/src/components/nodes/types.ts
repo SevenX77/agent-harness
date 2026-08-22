@@ -108,6 +108,17 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
    */
   goldenState?: GoldenNodeState
   /**
+   * True when the user has set a breakpoint on this node: from the next run on,
+   * the run stops before this phase executes.
+   *
+   * A STANDING choice about the skill, which is why it is its own field rather
+   * than a `status` value. `status: 'breakpoint'` says what one run did; this
+   * says what every run from now on will do, and it is true on an idle board
+   * where no run has happened at all. Stored server-side in
+   * `.workspace/runtime_config.json` (RUN_EXECUTION-16).
+   */
+  hasBreakpoint?: boolean
+  /**
    * N5 atom #3 (dirty-downstream-graying, spec F3): true when this node is in the
    * `affected_downstream` set the resume-validity endpoint returned for the node
    * the user is resuming from — i.e. an upstream edit made this downstream node's

@@ -7,6 +7,7 @@ def test_hitl_events_expose_checkpoint_and_namespace_contract() -> None:
     interrupted = InterruptedEvent(
         phase_name="main",
         thread_id="run-1",
+        reason="awaiting_human",
         checkpoint_id="cp-1",
         checkpoint_ns="agent:main",
         namespace="agent:main",

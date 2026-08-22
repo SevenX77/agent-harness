@@ -24,6 +24,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.middleware import configure_cors
 from app.routers import (
     audit,
+    breakpoints,
     compare,
     compare_candidates,
     copilot,
@@ -186,6 +187,7 @@ def create_app() -> FastAPI:
     studio_app.include_router(compare.router)
     studio_app.include_router(compare_candidates.router)
     studio_app.include_router(node_llm_params.router)
+    studio_app.include_router(breakpoints.router)
     studio_app.include_router(runtime_config.router)
     studio_app.include_router(copilot.router)
     studio_app.include_router(llm.router)

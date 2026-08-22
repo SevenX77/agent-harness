@@ -219,6 +219,7 @@ def assemble_graph(
     checkpointer: Any = None,
     predict_context: Any = None,
     runtime_config: dict[str, Any] | None = None,
+    pause_before: frozenset[str] = frozenset(),
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> CompiledStateGraph:
@@ -283,7 +284,26 @@ def assemble_graph(
         builder.add_edge(phase_id, END)
         edges.append((phase_id, "END"))
 
-    graph: Any = builder.compile(checkpointer=checkpointer)
+    # A breakpoint is an outside observation of the run, so it is expressed
+    # where the graph is built rather than as a check each phase performs on
+    # itself — a phase that had to consult the breakpoint set would take a
+    # different code path depending on whether it was being watched.
+    if pause_before and compiled.manifest.iterate is not None:
+        # A graph-level iterate runs the WHOLE dag once per item, and the
+        # wrapper below drives those rounds itself: a stop inside one round is
+        # neither reported outward nor resumable from outside, and "before
+        # phase X" would not say which item's X. Refusing is the honest answer;
+        # accepting would hand back a breakpoint that silently never fires.
+        raise ValueError(
+            "cannot stop before "
+            + ", ".join(sorted(pause_before))
+            + ": this skill iterates over its whole graph, so a stopping point "
+            "does not name one round of it"
+        )
+    graph: Any = builder.compile(
+        checkpointer=checkpointer,
+        interrupt_before=sorted(pause_before) or None,
+    )
     if compiled.manifest.iterate is not None:
         graph = _GraphIterateRuntime(
             graph=graph,

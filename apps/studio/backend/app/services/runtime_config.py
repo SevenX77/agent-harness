@@ -49,6 +49,11 @@ def default_runtime_config() -> dict[str, Any]:
             "compare_candidates": {"nodes": {}},
             "custom_params": {"nodes": {}},
         },
+        # Node ids this skill stops before, sorted. A run-time choice about the
+        # skill, so it sits with the other run-time choices and travels to the
+        # worker in the same snapshot — which is also how a run records the
+        # breakpoints that were actually in force for it.
+        "breakpoints": [],
         "artifacts": [],
     }
 
@@ -203,6 +208,12 @@ def update_compare_candidates_payload(
     config = read_runtime_config(skill_dir)
     llm = _dict_slot(config, "llm")
     llm["compare_candidates"] = {"nodes": {node: payload for node, payload in sorted(nodes.items())}}
+    return write_runtime_config(skill_dir, config)
+
+
+def update_breakpoints_payload(skill_dir: Path, node_ids: list[str]) -> dict[str, Any]:
+    config = read_runtime_config(skill_dir)
+    config["breakpoints"] = sorted(set(node_ids))
     return write_runtime_config(skill_dir, config)
 
 

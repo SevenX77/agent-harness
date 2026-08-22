@@ -107,6 +107,21 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'review').goldenState).toBeUndefined()
   })
 
+  it('marks the nodes a breakpoint is set on, and leaves the others unmarked', () => {
+    // The mark is a standing choice about the skill, not a run outcome: it has
+    // to be on the card with no run in sight (F10 「有断点的节点带标记」).
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+    }), new Set(), () => {}, {}, {}, {}, {}, null, new Set(['review']))
+
+    expect(phaseNode(nodes, 'review').hasBreakpoint).toBe(true)
+    expect(phaseNode(nodes, 'draft').hasBreakpoint).toBe(false)
+  })
+
   it('threads a per-node error message into node data so the failed-node red light has a source', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['draft', 'review'],

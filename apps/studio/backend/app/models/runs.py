@@ -119,6 +119,29 @@ situation — someone is expected back. One word cannot mean both.
 CONCLUDED_RUN_STATUSES: frozenset[str] = frozenset({"success", "failed", "cancelled"})
 
 
+class RunPausePoint(BaseModel):
+    """Where a run stopped, when it stopped somewhere it can be continued from.
+
+    ``node_id`` is a canvas node, which is a phase name (see
+    ``routers/node_llm_params``): the surfaces draw the pause ON the node, so the
+    point has to be said in the vocabulary the canvas already uses.
+
+    ``reason`` is carried rather than inferred, because the two stops need
+    different things from the user: a breakpoint needs only "continue", while a
+    run waiting on a human needs an answer first. Neither is deducible from the
+    bare fact that the run stopped.
+
+    Absent on a run the user paused with the Pause button: that ends the worker
+    wherever it happens to be, so there is no named point to report — see
+    ``run_manager.pause_run``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    reason: Literal["awaiting_human", "breakpoint"]
+
+
 class RunMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +157,9 @@ class RunMetadata(BaseModel):
     # Set exactly when status == "failed": a failed run that cannot say why is
     # undiagnosable from the UI and from the sealed run dir alike.
     error: RunError | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Set exactly when status == "paused" AND the run stopped at a point it
+    # named itself. A pause the user asked for has no such point.
+    paused_at: RunPausePoint | None = Field(default=None, exclude_if=lambda value: value is None)
     artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
     execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)

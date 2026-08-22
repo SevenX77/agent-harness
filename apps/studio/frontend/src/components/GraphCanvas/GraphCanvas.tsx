@@ -15,7 +15,7 @@ import {
   type NodeChange,
   type ReactFlowInstance,
 } from '@xyflow/react'
-import { Trash2 } from 'lucide-react'
+import { CircleDot, Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -165,6 +165,13 @@ interface GraphCanvasProps {
   /** Full node-error projection (manual compile + lint + data gap). Used only for node badges. */
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
+  /**
+   * Nodes this skill stops before. A standing choice, not a run projection: it
+   * is true on an idle board and survives every run (RUN_EXECUTION-16).
+   */
+  breakpointNodeIds?: ReadonlySet<string>
+  /** Set (`next` true) or clear (`next` false) the breakpoint on one node. */
+  onToggleBreakpoint?: (phaseId: string, next: boolean) => Promise<void> | void
   errorMessageByNodeId?: Record<string, string>
   /** Per-node run segments (start / end) for the elapsed time on each card. */
   runtimeByNodeId?: Record<string, NodeRuntime>
@@ -708,6 +715,8 @@ export function GraphCanvas({
   manualCompileErrors,
   compileErrorsByNodeId,
   goldenStateByNodeId,
+  breakpointNodeIds,
+  onToggleBreakpoint,
   errorMessageByNodeId,
   runtimeByNodeId,
   activityByNodeId,
@@ -1296,6 +1305,7 @@ export function GraphCanvas({
     [manualCompileErrors, workspaceRoot],
   )
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
+  const safeBreakpointNodeIds = useMemo(() => breakpointNodeIds ?? EMPTY_BREAKPOINTS, [breakpointNodeIds])
   const safeErrorMessageByNodeId = useMemo(() => errorMessageByNodeId ?? {}, [errorMessageByNodeId])
   // The three run-derived maps travel to buildNodes as ONE projection (see
   // NodeRunProjection): status, failure reason and clock all describe the same
@@ -1444,8 +1454,8 @@ export function GraphCanvas({
       return buildNodesFromTopology(childNodeSkillId, childGraph.phases, childGraph.graph_topology, {}, childAgentSteps, childGraph.path)
     }
     if (isLoading && !skillDetail) return []
-    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, runProjection, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, agentStepsInputs, workspaceRoot ?? null)
-  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, isLoading, runProjection, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, skillDetail, skillId, toggleSubgraph, workspaceRoot])
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, runProjection, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, agentStepsInputs, workspaceRoot ?? null, safeBreakpointNodeIds)
+  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, isLoading, runProjection, safeBreakpointNodeIds, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, skillDetail, skillId, toggleSubgraph, workspaceRoot])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
@@ -2668,6 +2678,8 @@ export function GraphCanvas({
       <CanvasContextMenuContent
         edgeMenuConnection={edgeMenuConnection}
         nodeMenuPhaseId={nodeMenuPhaseId}
+        nodeMenuHasBreakpoint={nodeMenuPhaseId ? safeBreakpointNodeIds.has(nodeMenuPhaseId) : false}
+        onToggleBreakpoint={onToggleBreakpoint}
         canvasLocked={canvasLocked}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
@@ -2721,12 +2733,17 @@ export function GraphCanvas({
 // read one definition instead of each carrying its own copy.
 const ADD_PHASE_KINDS: readonly NewPhaseKind[] = ['skill', 'logic', 'subgraph']
 
+// One frozen empty set, so "no breakpoints" does not rebuild every node on
+// every render just by being a new object each time.
+const EMPTY_BREAKPOINTS: ReadonlySet<string> = new Set()
+
 // Display label for the canvas shortcut modifier: ⌘ on macOS, Ctrl+ elsewhere.
 const SHORTCUT_MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
 export function CanvasContextMenuContent({
   edgeMenuConnection,
   nodeMenuPhaseId,
+  nodeMenuHasBreakpoint,
   canvasLocked,
   onZoomIn,
   onZoomOut,
@@ -2735,11 +2752,13 @@ export function CanvasContextMenuContent({
   onCreatePhase,
   onDeletePhase,
   onDisconnectConnection,
+  onToggleBreakpoint,
   onCloseEdgeMenu,
   readOnly,
 }: {
   edgeMenuConnection: { source: string; target: string } | null
   nodeMenuPhaseId?: string | null
+  nodeMenuHasBreakpoint?: boolean
   canvasLocked?: boolean
   onZoomIn?: () => void
   onZoomOut?: () => void
@@ -2748,6 +2767,8 @@ export function CanvasContextMenuContent({
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onDeletePhase?: (phaseId: string) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+  /** Set (`next` true) or clear (`next` false) the breakpoint on one node. */
+  onToggleBreakpoint?: (phaseId: string, next: boolean) => Promise<void> | void
   onCloseEdgeMenu?: () => void
   readOnly?: boolean
 }) {
@@ -2779,6 +2800,20 @@ export function CanvasContextMenuContent({
         {canvasLocked ? t('menu.unlockCanvas') : t('menu.lockCanvas')}
         <ContextMenuShortcut>{SHORTCUT_MOD}L</ContextMenuShortcut>
       </ContextMenuItem>
+      {/* Setting a breakpoint is not an edit of the skill, so it is offered
+          even on a locked canvas: it changes where a run stops, not what the
+          skill is (RUN_EXECUTION-16 — breakpoints live in the workspace). */}
+      {nodeMenuPhaseId && onToggleBreakpoint ? (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onSelect={() => { void onToggleBreakpoint(nodeMenuPhaseId, !nodeMenuHasBreakpoint) }}
+          >
+            <CircleDot className="size-3.5" />
+            {nodeMenuHasBreakpoint ? t('menu.clearBreakpoint') : t('menu.setBreakpoint')}
+          </ContextMenuItem>
+        </>
+      ) : null}
       <ContextMenuSeparator />
       {edgeMenuConnection ? (
         <ContextMenuItem

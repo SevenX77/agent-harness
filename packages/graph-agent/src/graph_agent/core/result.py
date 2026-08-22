@@ -69,6 +69,27 @@ class PhaseRecord(BaseModel):
     validator_downgraded: str | None = None
 
 
+class PausedRunPoint(BaseModel):
+    """Where a run stopped, and why, when it can still be continued.
+
+    ``success`` answers "did this run produce its declared outputs", which a
+    run stopped part-way did not — but that word cannot also carry "and it can
+    go on from here", so a stopped run used to be indistinguishable from a
+    finished one to anything reading the result.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    #: The phase the run stopped BEFORE entering — it has not run yet.
+    phase_name: str
+    #: ``awaiting_human`` needs an answer before it can go on; ``breakpoint``
+    #: only needs the word to continue. Telling them apart by "is the question
+    #: empty" would confuse a breakpoint with a question that failed to parse.
+    reason: Literal["awaiting_human", "breakpoint"]
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+
+
 class RunResult(BaseModel):
     """Canonical type-safe result returned by graph_agent runs and predictions."""
 
@@ -94,6 +115,17 @@ class RunResult(BaseModel):
     diagnostics_limit: int = 100
     diagnostics_truncated: bool = False
     diagnostic_counts: dict[str, Any] = Field(default_factory=dict)
+    #: Set when the run stopped somewhere it can be continued from.
+    paused_at: PausedRunPoint | None = None
+
+    @model_validator(mode="after")
+    def _a_paused_run_did_not_finish(self) -> RunResult:
+        if self.paused_at is not None and self.success:
+            raise ValueError(
+                "a paused run cannot also be a success: it stopped before "
+                f"'{self.paused_at.phase_name}' without producing its outputs"
+            )
+        return self
 
     @model_validator(mode="after")
     def _process_diagnostics(self) -> RunResult:

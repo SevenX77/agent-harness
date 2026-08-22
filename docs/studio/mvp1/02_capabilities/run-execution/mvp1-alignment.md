@@ -350,6 +350,99 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - 归属: capability `run-execution`(owner);region `center-action-bar` · `canvas` ·
   `timeline`(引)。
 
+### F10. 一次 run 可以停在你指定的相位之前
+
+- 机制:
+  - **断点是「跑到这个相位之前先停下」**,由用户在画布上对某个相位设下,存在**该 skill 的
+    工作区**(`.workspace/runtime_config.json`)里,跨多次 run 存活。
+  - **让图停下来的是引擎**:`assemble_graph(..., pause_before=frozenset[str])` 把这些相位名
+    交给 LangGraph 的 `builder.compile(interrupt_before=[...])`。
+  - **停下来时的现场**(2026-08-21 实测):`graph.invoke(...)` 返回,
+    `graph.get_state(config).next` 是 `("b",)`——即它**将要执行而还没执行**的那个相位;
+    而 `state.interrupts` 是**空的**。再 `graph.invoke(None, config)` 一次,那个相位执行、
+    `next` 变空、run 跑完。
+  - **run 的结局是 `paused`**:它有 checkpoint、能续、还没产出最终输出。
+  - **断点命中时,那个相位一次都还没跑**——`interrupt_before` 停在进入之前,所以画布上
+    该亮的是「停在这里」,不是「这一步做完了」。
+- 决策 RUN_EXECUTION-16(一次 run 的结局里必须有「停住了,还能接着跑」这一档;
+  2026-08-21 立,问题台账 C1 ③):
+  - **引擎的 run 结果今天只有成功与失败两档,于是每一种「停」都被归档成「完」。**
+    HITL 那条路已经把这个洞暴露过:`runner.py` 检出 HITL 中断后返回的字典里**没有
+    `success` 键**,而宿主的 `_result_success`(`run_manager.py`)注释写着「Absent →
+    treat as success」,于是一次**正在等人回答**的 run 被记成 `success`。断点会踩进
+    同一个洞。所以这条决策的主语不是断点,是**结局的词表**:加上「停住了,还能接着跑」
+    这一档,断点与 HITL 都落在它上面。
+  - **两条执行路径都要判,不是只判首跑。** 首跑与 resume 在 `graph.invoke` 之后**都是
+    无条件**走「成功收尾」的,所以 resume 撞上同一个断点也会被记成跑完。判据统一成一句:
+    **`get_state(config).next` 非空 = 这一次没跑到头**;非空且带 `__interrupt__` 载荷 =
+    在等人回答,非空且没有载荷 = 停在断点上。
+  - **借 LangGraph 的静态中断,拒绝在相位内部塞动态 `interrupt()`。** 后者要求每个相位
+    自己去查一遍「我是不是断点」,于是**断点的存在与否改变了被观察者的代码路径**——
+    而断点是外部观察手段,不该改变它观察的东西。代价照实写:`interrupt_before` 是
+    **编译期**参数,所以 run 起飞之后新设的断点对**这一次**不生效,下一次才生效;
+    这一点要让用户看得见,不能让他对着一个不生效的断点等。
+  - **引擎收的是一个显式参数,不是去 `runtime_config` 里翻键。** `assemble_graph` 已经
+    收着 `runtime_config`,让它顺手读一个 `breakpoints` 键更省事——但那等于把 Studio 的
+    存储格式焊进引擎契约。引擎该知道的只有「这些相位之前停下」(显式优于隐式)。
+  - **复用 `InterruptedEvent`,并让它说出停下来的**理由**。** 它已经带着这次停顿需要的
+    全部字段(`phase_name` + checkpoint 三件套 + 可选 `question`),另造一个平行事件会让
+    每一个消费者把同一件事处理两遍。但**不能靠「`question` 是空的」来区分**:那既可能是
+    断点,也可能是一次问题没提取出来的 HITL,而这两者对用户的要求完全不同(一个要**回答**,
+    一个只要**继续**)。所以补一个显式的 `reason`(`awaiting_human` / `breakpoint`),
+    让「该做什么」是读出来的,不是猜出来的。
+  - **run 的状态沿用 `paused`,不新造一个。** 它与 Pause 按钮造出来的那个 `paused` 是
+    同一件事:有 checkpoint、能续、没产出。F7 给 `paused` 定的按钮对(Resume + Stop)
+    因此直接适用,不必发明第三对。
+  - **断点存在 skill 的工作区,不存在某一次 run 里。** 设断点发生在「还没跑」的时候,
+    而它要影响的是「接下来每一次跑」;存进 run 就意味着每跑一次重设一次。落点选
+    `.workspace/runtime_config.json`,因为那正是「Studio 知道而 skill 文件不知道」的
+    东西的既有归属(compare 候选、node params 已经住在那里)。
+  - **断点只有写接口,没有自己的读接口。** `PUT` / `DELETE
+    /api/skills/{id}/nodes/{node_id}/breakpoint`,两者都回**整份清单**(调用方不必
+    自己算集合变成了什么);读断点就是读 `runtime_config`——画布**本来就握着**那份
+    文档(`Workspace` 的 `/skills/{id}/runtime-config` SWR),而且它已经在这两个写接口
+    发出的 `runtime_config_changed` 上重新取数。再给这份文档的一个字段开一个读接口,
+    等于给同一份真相开第二个副本,而两个副本可以互相矛盾(SSOT 读取原则)。
+    注:`node-llm-params` / `compare-candidates` 确实各有一个 scoped 读接口,但它们的
+    消费者是 Properties 面板——**手上没有那份文档**;画布有,所以同样的形状在这里
+    只剩代价。
+  - **「设了断点」与「这次停在这里」是两件事,节点上分开表达。** 前者是对 skill 的
+    **常驻选择**:没有任何 run 时它也成立,一次 run 结束后它继续成立;后者是**这一次**
+    run 的结局。所以节点数据里是两个字段:`hasBreakpoint`(常驻标记,画布上一枚
+    实心点——`CircleDot`,沿用 gdb 前端以降每个调试器的画法,不需要图例;只用字形
+    不用颜色,画布上颜色留给严重程度,决策 2026-08-08 D2)与 `status: 'breakpoint'`
+    (这次停在这里,由 `InterruptedEvent.reason` 投影而来)。合成一个的话,一块空板子上
+    就没法看出下一次会停在哪。
+  - **停在断点上的 run 不封盘。** 封盘的含义是「这个 run 不会再被写了」,而它正要被
+    继续写;auto-commit 与 report 都挂在封盘后面,都是在描述一个跑完的 run。所以它走
+    的是 Pause 按钮那条路的同一个出口(`_record_paused_run`:写 metadata、存档、发
+    `paused` gate,不封盘),两种暂停留下的现场因此完全一样——区别只在**谁喊的停**。
+  - **整图 iterate 的 skill 直接拒绝断点。** graph 级 `iterate` 是「整张图每个 item 跑
+    一遍」,而且那些轮次是由 iterate wrapper 自己驱动的:停在某一轮里既报不出去也
+    续不回来,而「停在相位 X 之前」也说不清是哪个 item 的 X。`assemble_graph` 在收到
+    非空 `pause_before` 且 manifest 带 graph 级 iterate 时**当场报错**——交回一个
+    永远不会触发的断点比报错更坏(fail fast,在边界校验)。相位级 iterate 不受影响:
+    那是一个节点内部循环,停在它**之前**含义明确。
+- 原话/来源: 用户 2026-08-19「运行时观测」模块拆解(台账 C1 ③「节点级暂停缺」)。
+- 测试: 引擎——`packages/graph-agent/tests/core/test_a_graph_stops_before_the_phases_you_named.py`
+  (`pause_before` 落到 `interrupt_before`、再 invoke 一次能跨过去、没点名就一路跑完、
+  整图 iterate 拒绝断点)+ `tests/runner/test_a_run_can_stop_where_you_asked.py`
+  (`paused_at` 说出停在哪与为什么、停住的 run 不能同时自称跑完、中断事件说出是哪一种);
+  宿主——`apps/studio/backend/tests/services/test_a_run_can_stop_where_you_asked.py`
+  (带 `paused_at` 的结果不再被读成成功、worker 报 `paused` 且带上停在哪个节点、
+  停住的 run 不封盘、gate 说 `paused`、断点读写落在 `runtime_config`、传给引擎的是
+  排好序的节点名)+ `tests/routers/test_a_breakpoint_is_something_you_set_on_a_node.py`
+  (写接口回整份清单、清一个没设过的不算错、越界节点名被拒、变了才广播);
+  前端——`src/utils/a-run-that-stopped-says-where.test.ts`(reason 决定节点是
+  `breakpoint` 还是 `paused`,收尾判据不覆盖已停住的节点)、
+  `src/components/nodes/a-node-carrying-a-breakpoint-shows-it.test.tsx`(空板子上也带标记)、
+  `src/components/GraphCanvas.test.tsx`(节点菜单一条目双向、非节点右键不出现)、
+  `src/api/a-breakpoint-write-answers-with-the-whole-list.test.ts`(只写不读)。
+  底栏 Resume + Stop 由 F7 既有实现直接覆盖(`center-action-bar.tsx` 的 `paused` 分支)。
+- Status: target-design(2026-08-21 立)。
+- 归属: capability `run-execution`(owner);platform `engine`(停顿机制);
+  region `canvas` · `center-action-bar`(引)。
+
 ## 3. 接口契约
 - Entry: Run is enabled only after compile-pass and predict-pass.
 - Input: i/o panel supplies single or batch input selection.

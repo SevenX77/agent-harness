@@ -8,7 +8,9 @@
     "disconnect": "Disconnect",
     "deleteNode": "Delete node",
     "deleteShortcut": "Del",
-    "addNode": "Add node"
+    "addNode": "Add node",
+    "setBreakpoint": "Stop before this node",
+    "clearBreakpoint": "Stop stopping before this node"
   },
   "phaseKind": {
     "skill": "Agent Phase",
@@ -64,6 +66,7 @@
   },
   "node": {
     "goldenCaptured": "Golden captured",
+    "breakpointSet": "Stops before this node",
     "logicOk": "Logic OK (predict ran, no golden yet)",
     "activity": "Node activity",
     "subgraphProgress": "Subgraph progress",
@@ -83,6 +86,7 @@
     "viewInferred": "Click to view inferred fields on this path"
   },
   "toast": {
+    "breakpointNextRun": "This run is already going — the breakpoint takes effect on the next one.",
     "sequentialOverwriteUnresolved": "Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.",
     "childSubgraphNotReady": "Could not save steps: child subgraph is not ready",
     "subgraphReadOnly": "This subgraph is read-only. Fork it into your workspace to edit.",

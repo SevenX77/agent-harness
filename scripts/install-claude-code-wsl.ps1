@@ -87,8 +87,39 @@ function Invoke-Wsl {
 $PathPrefix = 'export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"; cd "$HOME"; '
 
 function Invoke-InDistro {
+  # This is the one seam where Windows text becomes a POSIX shell script, so it
+  # is where the text is made safe to be one. Two things went wrong here, both
+  # measured on this machine 2026-08-22 (ledger D1), and both silent until
+  # someone ran the installer to the end on Windows:
+  #
+  #  - **CRs.** A `.ps1` checked out on Windows has CRLF (git's
+  #    `core.autocrlf=true` is the default there, and it is what the packaging
+  #    build produces), so a here-string in it carries CRs into the payload.
+  #    bash reads `fi\r` as a word that is not `fi`: the same script exits 0
+  #    with LF and dies with `syntax error: unexpected end of file` with CRLF.
+  #  - **The hand-off itself.** Passing the script as one `bash -lc <arg>`
+  #    argument does not survive the trip through `wsl.exe` once the script
+  #    contains both spaces and quotes: it is split, and bash reports the next
+  #    fragment as `$0` (`-v: -c: line 2: unexpected EOF ...`). That is what
+  #    made the interop-hijack probe answer nothing for both provider CLIs —
+  #    with LF endings too, so it is a separate fault from the CRs.
+  #
+  # So the script is handed over as base64 and decoded inside the distro: the
+  # bytes arrive exactly as written, whatever quotes or newlines they contain.
+  # This is the shape PowerShell's own `-EncodedCommand` uses, for this exact
+  # problem; `base64` is in coreutils, and these payloads are ~1 KB, far below
+  # any command-line limit.
+  #
+  # Normalising here rather than forcing this file to LF (a `.gitattributes`
+  # rule plus a byte-level assertion) also covers payloads composed at run time
+  # out of Windows strings — the proxy step builds one out of a registry
+  # value — which no rule about this file could reach.
   param([string]$Bash, [switch]$AllowFail)
-  return Invoke-Wsl -WslArgs @("-d", $Distro, "-u", "root", "-e", "bash", "-lc", ($PathPrefix + $Bash)) -AllowFail:$AllowFail
+  $script = ($PathPrefix + $Bash) -replace "`r", ""
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($script))
+  return Invoke-Wsl -WslArgs @(
+    "-d", $Distro, "-u", "root", "-e", "bash", "-lc", "echo $encoded | base64 -d | bash"
+  ) -AllowFail:$AllowFail
 }
 
 function Test-ProviderCliInteropHijack {
@@ -135,11 +166,6 @@ fi
 printf 'MISSING\n'
 '@
   return Invoke-InDistro $bash -AllowFail
-}
-
-function ConvertTo-BashSingleQuoted {
-  param([string]$Value)
-  return "'" + ($Value -replace "'", "'`"`"'") + "'"
 }
 
 # --- Windows Timezone -> IANA lookup (subset covering the zones users are

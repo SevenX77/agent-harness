@@ -43,7 +43,7 @@ import i18n from "@/i18n"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { transportLabel } from "@/lib/route-labels"
 import { cn } from "@/lib/utils"
-import { isRedactedEndpointSecret, type CredentialsState, type ModelInfo, type ModelProbeStatus, type ProviderTestResult, type ProviderType, type ProviderUiState, type RouteStatus } from "../../../api/llm"
+import { isRedactedEndpointSecret, type CapabilityValue, type CredentialsState, type ModelInfo, type ModelProbeStatus, type ProviderTestResult, type ProviderType, type ProviderUiState, type RouteStatus } from "../../../api/llm"
 import { inferProviderType, providerCachedTestResult, providerEndpointDraftsForAction, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions } from "../settings/types"
 import { clearActiveProbeEndpoints, hasActiveProbeAtom, hasActiveProbeEndpoint, probeAtomDomKey, updateActiveProbeEndpoint } from "./active-probe-store"
@@ -1344,6 +1344,42 @@ function modelCapabilityValue(model: ModelInfo, key: string): unknown {
   return value
 }
 
+/** The capability's whole envelope — source and code, not just the value. */
+function modelCapabilityEnvelope(model: ModelInfo, key: string): CapabilityValue | null {
+  const entry = model.capabilities?.[key]
+  if (entry && typeof entry === "object" && !Array.isArray(entry) && "value" in entry) {
+    return entry as CapabilityValue
+  }
+  return null
+}
+
+/**
+ * Whether this route calls tools, and on whose word.
+ *
+ * Reads `source` and `message_code`, never `message`: the message is English
+ * prose the gateway writes for logs, and putting it on screen would hand it to
+ * a reader who asked for another language.
+ *
+ * Silent when the capability is absent. Absence means nobody measured — the
+ * gateway will not write `False`, because "saw no tool call" has two causes it
+ * cannot tell apart — and a line saying "unknown" would land on nearly every
+ * route while telling the reader nothing. This tooltip reports what is known.
+ */
+export function routeToolCallingTooltipText(model: ModelInfo): string | null {
+  const capability = modelCapabilityEnvelope(model, "tool_protocol")
+  if (!capability || capability.value !== true) return null
+  if (capability.source !== "probed_verified") {
+    return i18n.t("apiKeys.card.routeTooltip.toolsDeclared")
+  }
+  if (capability.message_code === "tool_loop_closed_the_loop") {
+    return i18n.t("apiKeys.card.routeTooltip.toolsClosedTheLoop")
+  }
+  if (capability.message_code === "tool_loop_called_the_tool") {
+    return i18n.t("apiKeys.card.routeTooltip.toolsCalledTheTool")
+  }
+  return i18n.t("apiKeys.card.routeTooltip.toolsMeasured")
+}
+
 function modelCapabilityStringArray(model: ModelInfo, key: string): string[] {
   const value = modelCapabilityValue(model, key)
   return Array.isArray(value)
@@ -1503,6 +1539,7 @@ function routeCapabilityTooltipText(model: ModelInfo): string | null {
     maxOutputTokens !== null
       ? i18n.t("apiKeys.card.routeTooltip.maxOutput", { value: formatTokenLimit(maxOutputTokens) })
       : i18n.t("apiKeys.card.routeTooltip.maxOutputNotListed"),
+    routeToolCallingTooltipText(model),
   ].filter((line): line is string => Boolean(line))
   return lines.length > 0 ? lines.join("\n") : null
 }
@@ -1625,6 +1662,8 @@ function thirdPartyModelTooltipText(model: ModelInfo, status: RouteDisplayStatus
   if (model.route_id) lines.push(i18n.t("apiKeys.card.routeTooltip.route", { id: model.route_id }))
   const message = modelProbeMessage(model)
   if (message) lines.push(i18n.t("apiKeys.card.tooltip.message", { message }))
+  const toolCalling = routeToolCallingTooltipText(model)
+  if (toolCalling) lines.push(toolCalling)
   const aggregatedRoutes = aggregateRoutesTooltipText(model)
   if (aggregatedRoutes) lines.push(aggregatedRoutes)
   const attempts = modelProbeAttemptTooltipText(model)

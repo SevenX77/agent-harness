@@ -380,7 +380,11 @@
         "maxOutputNotListed": "Max output: not listed",
         "routeTestFailed": "Route test failed: {{message}}",
         "routeTestFailedBare": "Route test failed",
-        "route": "Route: {{id}}"
+        "route": "Route: {{id}}",
+        "toolsClosedTheLoop": "Tools: called one and came back with the result",
+        "toolsCalledTheTool": "Tools: called one when asked",
+        "toolsMeasured": "Tools: measured on this route",
+        "toolsDeclared": "Tools: listed by the provider, not measured"
       },
       "deleteConfirm": {
         "title": "Delete {{displayName}}?",

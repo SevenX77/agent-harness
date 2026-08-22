@@ -21,7 +21,14 @@ export interface CapabilityValue {
   value: unknown
   source: CapabilitySource
   observed_at?: string | null
+  /** Prose for logs. Backend-authored, so never rendered to a reader as-is. */
   message?: string | null
+  /**
+   * The same fact as `message`, with an identity this app can translate.
+   * Absent unless a specific observation was made — see the gateway's
+   * `CapabilityValue` docstring.
+   */
+  message_code?: string | null
 }
 
 export interface RuntimePolicy {

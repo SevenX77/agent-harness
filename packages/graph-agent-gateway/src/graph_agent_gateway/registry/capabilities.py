@@ -338,17 +338,28 @@ def measured_tool_calling(*, closed_the_loop: bool) -> dict[str, CapabilityValue
     rule `accepted_effort_levels` follows when it returns `None`.
 
     Closing the loop cannot change the value, because the capability is a yes/no
-    about the protocol. It changes the message, which is the only place the
-    stronger observation fits and exactly what a reader deciding whether to hand
-    this route an agent phase needs to see.
+    about the protocol. It rides `message_code` instead — a token the host can
+    render in the reader's own language — with the prose message kept alongside
+    for logs. That split is what lets the stronger observation actually reach
+    the reader deciding whether to hand this route an agent phase; while it
+    lived only in the sentence below, no UI could tell the two rungs apart
+    without matching English text.
     """
+    message_code = "tool_loop_closed_the_loop" if closed_the_loop else "tool_loop_called_the_tool"
     message = (
         "Measured by giving this route a tool it needed: it called the tool and came "
         "back out of the loop carrying the result."
         if closed_the_loop
         else "Measured by giving this route a tool it needed: it called the tool."
     )
-    return {"tool_protocol": CapabilityValue(value=True, source="probed_verified", message=message)}
+    return {
+        "tool_protocol": CapabilityValue(
+            value=True,
+            source="probed_verified",
+            message=message,
+            message_code=message_code,
+        )
+    }
 
 
 def build_runtime_setting_descriptors(

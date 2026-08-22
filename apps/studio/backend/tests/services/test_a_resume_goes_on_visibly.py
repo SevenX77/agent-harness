@@ -67,7 +67,6 @@ def _record(run_dir: Path) -> RunRecord:
         run_dir=run_dir,
         process=_NoWorker(),
         process_queue=queue.Queue(),
-        auto_commit=False,
     )
 
 
@@ -160,7 +159,7 @@ async def test_a_resumed_runs_events_reach_whoever_is_watching_it(
     record = _record(tmp_path / "runs" / RUN_ID)
     manager._runs[RUN_ID] = record
 
-    subscriber = manager.observe_resumed_run(RUN_ID)
+    subscriber = manager.observe_resumed_run(RUN_ID, skill_id=SKILL)
     assert subscriber is not None
     subscriber({"event_type": "phase_start", "phase_name": "beta", "run_id": RUN_ID})
     subscriber({"event_type": "phase_end", "phase_name": "beta", "run_id": RUN_ID})
@@ -180,11 +179,12 @@ async def test_a_resumed_runs_events_reach_whoever_is_watching_it(
     assert "phase_end" in types
 
 
-def test_a_run_with_no_record_here_has_nobody_to_show_events_to() -> None:
-    """Another sidecar's paused run can still be resumed; there is simply no
-    live watcher on this side, and inventing a queue for one would be a second
-    place the run's events live."""
-    assert RunManager().observe_resumed_run("run-nobody-here") is None
+def test_a_run_that_exists_nowhere_has_nobody_to_speak_for_it() -> None:
+    """A paused run left by another sidecar IS taken over from its directory
+    (`test_a_paused_run_can_be_taken_over.py`). One with no directory either is
+    not a run at all, and inventing a record for it would be a second place a
+    run can be said to exist."""
+    assert RunManager().observe_resumed_run("run-nobody-here", skill_id=SKILL) is None
 
 
 @pytest.mark.anyio

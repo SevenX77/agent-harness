@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from app.core.adapters.atomic_file import write_text_atomically
+from app.models.runs import RunMetadata
 from app.services.run_manager import RunRecord
 from app.services.skills import latest_run_metadata, runs_dir_for
 
@@ -32,25 +33,26 @@ def test_a_published_document_has_the_same_bytes_on_every_platform(tmp_path: Pat
     assert b"\r" not in path.read_bytes()
 
 
-def test_every_spawn_states_whether_its_run_archives_the_skill() -> None:
-    """``auto_commit`` has no default, so no spawn can inherit one by accident.
+def test_whether_a_run_archives_the_skill_is_written_down_with_the_run() -> None:
+    """And it defaults to the side that cannot damage anything.
 
     A run that succeeds may commit the skill directory. Whether THIS run should
     is a property of what the run is — a real run, a predict, a compare
-    candidate — and a default silently answers it for whoever forgets to.
-    """
-    field = next(f for f in dataclasses.fields(RunRecord) if f.name == "auto_commit")
+    candidate — so it travels WITH the run rather than with the sidecar that
+    spawned it: a sidecar taking a paused run over has only the run's own
+    directory to read, and would otherwise have to guess.
 
-    assert field.default is dataclasses.MISSING
-    assert field.default_factory is dataclasses.MISSING
-    with pytest.raises(TypeError):
-        RunRecord(  # type: ignore[call-arg]
-            metadata=None,
-            skill_id="s",
-            run_dir=Path("."),
-            process=None,
-            process_queue=None,
-        )
+    The default is "no". A side experiment that wrongly commits hands itself
+    whatever the user changed while it ran; an ordinary run that wrongly does
+    not just leaves its snapshot unmade. `start_run` is the one spawn that says
+    yes (proved end to end by `test_successful_run_triggers_auto_commit`).
+    """
+    unstated = RunMetadata(run_id="r1", status="running", started_at="2026-08-22T00:00:00+00:00")
+
+    assert unstated.auto_commit is False
+    assert not any(field.name == "auto_commit" for field in dataclasses.fields(RunRecord)), (
+        "the record must not hold a second copy of a fact its metadata already states"
+    )
 
 
 def test_a_run_record_it_cannot_read_is_named_not_silently_skipped(

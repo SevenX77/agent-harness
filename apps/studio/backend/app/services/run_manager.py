@@ -69,9 +69,11 @@ from app.services.run_report import write_run_report
 from app.services.runtime_config import refresh_runtime_config, write_runtime_snapshot
 from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
 from app.services.skills import (
+    opened_skill_dir,
     predicts_dir_for,
     resolve_skill_dir,
     run_dir_for,
+    run_root_for,
     runs_dir_for,
     test_inputs_dir_for_skill,
 )
@@ -91,10 +93,6 @@ class RunRecord:
     run_dir: Path
     process: Any
     process_queue: Any
-    # Stated by every spawn, defaulted by none: whether a run archives the skill
-    # on success is a property of what the run IS, and reading it off a default
-    # is how a side experiment ends up owning someone else's edits.
-    auto_commit: bool
     ws_queue: asyncio.Queue[dict[str, Any] | None] = field(default_factory=asyncio.Queue)
     events: list[EventEnvelope] = field(default_factory=list)
     delta_watchers: list[_DeltaStream] = field(default_factory=list)
@@ -807,6 +805,9 @@ class RunManager:
             status="running",
             started_at=datetime.now(UTC),
             input_summary=_input_summary(inputs),
+            # The ordinary run, and the only kind that archives the skill when
+            # it succeeds. Every other spawn leaves this at its default.
+            auto_commit=True,
             **_metadata_artifact_fields(art_ref),
         )
         _write_run_metadata(run_dir, metadata)
@@ -845,7 +846,6 @@ class RunManager:
             run_dir=run_dir,
             process=process,
             process_queue=process_queue,
-            auto_commit=True,
         )
         self._runs[run_id] = record
         task = asyncio.create_task(self._drain_process_queue(record))
@@ -1008,10 +1008,6 @@ class RunManager:
             run_dir=run_dir,
             process=process,
             process_queue=process_queue,
-            # A candidate side-run answers "what would this model do here";
-            # it never edits the skill. Committing on its way out would hand
-            # it whatever the user happened to change while it ran.
-            auto_commit=False,
         )
         self._runs[run_id] = record
         task = asyncio.create_task(self._drain_process_queue(record))
@@ -1095,7 +1091,6 @@ class RunManager:
             run_dir=run_dir,
             process=process,
             process_queue=process_queue,
-            auto_commit=False,
         )
         self._runs[run_id] = record
         task = asyncio.create_task(self._drain_process_queue(record))
@@ -1381,7 +1376,6 @@ class RunManager:
                 skill_id=skill_id,
                 run_dir=run_dir_for(skill_id, run_id),
                 metadata=cancelled,
-                auto_commit=False,
             )
         self._terminate_worker(record)
         await self._finalize_terminal_run(record, cancelled)
@@ -1414,7 +1408,11 @@ class RunManager:
         *,
         cursor: str | None = None,
     ) -> asyncio.Queue[dict[str, Any] | None]:
-        record = self._runs.get(run_id)
+        # A paused run is going to write again the moment someone resumes it, so
+        # this sidecar takes it over and the watcher stays attached. Replaying
+        # and hanging up left the watcher reconnecting on a timer to find out —
+        # and blind to everything a resume produced until it did.
+        record = self.take_over_paused_run(skill_id, run_id)
         if record is None:
             return await self._replay_finished_run(skill_id, run_id, cursor=cursor)
         replay: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -1426,7 +1424,7 @@ class RunManager:
             return replay
         for event in events:
             await replay.put(event.model_dump(mode="json"))
-        if record.metadata.status == "running":
+        if record.metadata.status in {"running", "paused"}:
             record.subscribers.append(replay)
         else:
             await replay.put(None)
@@ -1504,21 +1502,54 @@ class RunManager:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
-    def _metadata_for(self, skill_id: str, run_id: str) -> RunMetadata:
-        _validate_run_id_segment(run_id)
+    @staticmethod
+    def _run_dir_if_here(skill_id: str, run_id: str) -> Path | None:
+        """Where this run's directory would be, or None if nothing here names it.
+
+        `run_dir_for` raises for a skill this Studio does not hold open, which is
+        right for a request ABOUT that skill and wrong for one merely asking
+        whether there is a run to take over — the resume endpoint has to report
+        the runtime-state error it actually got, not a 404 about a skill it
+        never needed to open.
+        """
+        if not _is_safe_run_id_segment(run_id):
+            return None
+        skill_dir = opened_skill_dir(skill_id)
+        if skill_dir is None:
+            return None
+        return run_root_for(skill_dir, run_id) / run_id
+
+    def _recorded_metadata(self, skill_id: str, run_id: str) -> RunMetadata | None:
+        """What this run's record or its directory says about it, if either does.
+
+        `_metadata_for` is the same lookup for callers whose request is ABOUT
+        the run and so cannot proceed without it. Callers merely asking whether
+        there is a run here — is this one paused, is there anything to take over
+        — need the question to have an answer either way.
+        """
         record = self._runs.get(run_id)
         if record is not None:
             return record.metadata
-        metadata_path = run_dir_for(skill_id, run_id) / "run_metadata.json"
+        run_dir = self._run_dir_if_here(skill_id, run_id)
+        if run_dir is None:
+            return None
+        metadata_path = run_dir / "run_metadata.json"
         if not metadata_path.exists():
+            return None
+        return self._reconciled(
+            skill_id, RunMetadata.model_validate_json(read_published_text(metadata_path))
+        )
+
+    def _metadata_for(self, skill_id: str, run_id: str) -> RunMetadata:
+        _validate_run_id_segment(run_id)
+        metadata = self._recorded_metadata(skill_id, run_id)
+        if metadata is None:
             raise standard_http_exception(
                 "RESUME_CHECKPOINT_NOT_FOUND",
                 f"Run not found: {run_id}",
                 {"skill_id": skill_id, "run_id": run_id},
             )
-        return self._reconciled(
-            skill_id, RunMetadata.model_validate_json(read_published_text(metadata_path))
-        )
+        return metadata
 
     def register_transient_predict_run(
         self,
@@ -1539,7 +1570,6 @@ class RunManager:
             run_dir=run_dir,
             process=None,
             process_queue=None,
-            auto_commit=False,
         )
         self._runs[run_id] = record
         return record
@@ -1688,7 +1718,6 @@ class RunManager:
                 skill_id=record.skill_id,
                 run_dir=record.run_dir,
                 metadata=metadata,
-                auto_commit=record.auto_commit,
             )
         finally:
             record.metadata = metadata
@@ -1699,7 +1728,6 @@ class RunManager:
         skill_id: str,
         run_dir: Path,
         metadata: RunMetadata,
-        auto_commit: bool,
     ) -> RunMetadata:
         """Close a run out on disk however it ended, and announce that it ended.
 
@@ -1719,7 +1747,7 @@ class RunManager:
             await self._copy_final_state_to_storage(run_dir)
             # The report reads the run's FINAL metadata (outcome, failure reason,
             # archive status), so it is written after that lands.
-            if metadata.status == "success" and auto_commit:
+            if metadata.status == "success" and metadata.auto_commit:
                 metadata = await self._auto_commit_successful_run(run_dir, metadata)
             _write_run_metadata(run_dir, metadata)
             await asyncio.to_thread(write_run_report, run_dir)
@@ -1737,8 +1765,51 @@ class RunManager:
         metadata_store = self._metadata_store()
         await metadata_store.save_run_metadata(config.DEFAULT_USER_ID, skill_id, metadata)
 
-    def observe_resumed_run(self, run_id: str) -> Callable[[dict[str, Any]], None] | None:
-        """A sink for the events a resumed segment emits, or None if nobody is watching.
+    def take_over_paused_run(self, skill_id: str, run_id: str) -> RunRecord | None:
+        """Hold a paused run this sidecar did not start, so it can write again.
+
+        A record lives only inside the process that spawned the run, and dies
+        with it; the run's own directory outlives both. `stop_run` already ends
+        such a run through that directory alone, because ending is a write
+        (ledger C1 ④). Resuming is not: a resumed run PRODUCES — events while it
+        runs, an ending to announce — and a record is where a run's stream and
+        its watchers live. Without one the resumed segment ran correctly and
+        invisibly, and the canvas sat on the moment it stopped until the app was
+        reopened (ledger C1 ③).
+
+        So whoever resumes or watches a paused run takes it over here, rebuilding
+        the record from the durable artifact — the move a supervisor makes when
+        it re-adopts a service it did not launch, rather than starting a second
+        one. What does NOT carry over is the worker: there is none to re-adopt,
+        and a resumed run executes inside the request, so the process slots stay
+        empty rather than holding a stand-in that could be signalled.
+
+        Returns None unless the run is paused: a finished run will write nothing
+        more, and a `running` one belongs to whoever holds it.
+        """
+        record = self._runs.get(run_id)
+        if record is not None:
+            return record
+        metadata = self._recorded_metadata(skill_id, run_id)
+        if metadata is None or metadata.status != "paused":
+            return None
+        run_dir = self._run_dir_if_here(skill_id, run_id)
+        if run_dir is None:
+            return None
+        record = RunRecord(
+            metadata=metadata,
+            skill_id=skill_id,
+            run_dir=run_dir,
+            process=None,
+            process_queue=None,
+        )
+        self._runs[run_id] = record
+        return record
+
+    def observe_resumed_run(
+        self, run_id: str, *, skill_id: str
+    ) -> Callable[[dict[str, Any]], None] | None:
+        """A sink for the events a resumed segment emits, or None if it cannot run.
 
         A resume executes the engine inside the request rather than in a worker,
         so there is no process queue to carry its events — and without a sink
@@ -1753,12 +1824,10 @@ class RunManager:
         call off the loop, which is a separate change with its own risks; this
         one is about the canvas converging at all.
 
-        Returns None when this sidecar holds no record for the run — another
-        sidecar's paused run can still be resumed, and there is simply nobody
-        here to show it to. Inventing a queue for that case would be a second
-        place the run's events live.
+        Returns None only when there is no paused run here to speak for — a
+        finished run, or one that exists nowhere.
         """
-        record = self._runs.get(run_id)
+        record = self.take_over_paused_run(skill_id, run_id)
         if record is None:
             return None
 
@@ -1908,8 +1977,19 @@ def _resume_audit_event(
     )
 
 
+def _is_safe_run_id_segment(run_id: str) -> bool:
+    """Whether this id can name a run directory at all, asked without raising."""
+    return bool(
+        run_id
+        and run_id not in {".", ".."}
+        and "/" not in run_id
+        and "\\" not in run_id
+        and _SAFE_RUN_ID_RE.fullmatch(run_id)
+    )
+
+
 def _validate_run_id_segment(run_id: str) -> None:
-    if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id or not _SAFE_RUN_ID_RE.fullmatch(run_id):
+    if not _is_safe_run_id_segment(run_id):
         response = error_response(
             error_code="INVALID_RUN_ID",
             http_status=400,

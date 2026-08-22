@@ -49,7 +49,6 @@ def _record_for(run_dir: Path, status: str) -> object:
         run_dir=run_dir,
         process=None,
         process_queue=None,
-        auto_commit=False,
     )
 
 

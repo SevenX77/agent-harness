@@ -115,7 +115,6 @@ def _run_record(run_dir: Path, message: dict[str, Any]) -> RunRecord:
         run_dir=run_dir,
         process=_FinishedWorker(),
         process_queue=process_queue,
-        auto_commit=True,
     )
 
 

@@ -45,7 +45,6 @@ def _record_with(run_dir: Path, message: dict[str, object]) -> object:
         run_dir=run_dir,
         process=_FinishedProcess(),
         process_queue=process_queue,
-        auto_commit=False,
     )
 
 

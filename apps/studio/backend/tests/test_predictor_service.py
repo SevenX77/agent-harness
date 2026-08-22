@@ -586,13 +586,18 @@ def test_query_run_trace_can_answer_for_a_finished_predict_run(
     # The seam the session actually walked into: it asked what a phase received
     # during predict, no tool could answer, and it fell back to parsing files by
     # hand — while the trace sat in the run directory the whole time.
+    from app.services import run_manager as run_manager_module
     from app.services import skills as skills_module
     from app.services.run_manager import run_manager
 
     skill_dir, seen = _predict_fixture(monkeypatch, tmp_path, success=True)
     # get_run_detail resolves the run dir through the skill registry, which this
     # fixture never populates; point it at the same directory predict wrote to.
+    # Both forms of the lookup, because a run this sidecar no longer holds is
+    # found through the non-raising one (`RunManager._run_dir_if_here`) and the
+    # rest of the read still goes through the raising one.
     monkeypatch.setattr(skills_module, "resolve_skill_dir", lambda _skill_id: skill_dir)
+    monkeypatch.setattr(run_manager_module, "opened_skill_dir", lambda _skill_id: skill_dir)
 
     PredictorService().dispatch_predict_job("skill")
 

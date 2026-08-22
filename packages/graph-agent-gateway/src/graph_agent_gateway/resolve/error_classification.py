@@ -72,6 +72,11 @@ class ErrorClassification(BaseModel):
     scope: ErrorScope
     message: str
     unclassified_default: bool = False
+    #: Seconds the provider itself asked the caller to wait before trying again,
+    #: when it said so in seconds. Read here rather than at the retry site
+    #: because this is the module that already walks an exception chain down to
+    #: the provider's response.
+    retry_after_seconds: float | None = None
 
 
 def classify_exception(exc: BaseException, *, route_id: str | None = None) -> ErrorClassification:
@@ -97,6 +102,7 @@ def classify_exception(exc: BaseException, *, route_id: str | None = None) -> Er
         scope=action.scope,
         message=action.message,
         unclassified_default=action.unclassified_default,
+        retry_after_seconds=_retry_after_seconds(exc),
     )
 
 
@@ -249,6 +255,31 @@ def _status_code(exc: BaseException) -> int | None:
         status_code = getattr(response, "status_code", None)
         if isinstance(status_code, int):
             return status_code
+    return None
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """How long the provider asked us to wait, if it said so in seconds.
+
+    RFC 9110 lets ``Retry-After`` be a delay in seconds or an HTTP date. Only
+    the delay is read: a date has to be subtracted from the client's own clock,
+    and a skewed clock turns "wait 3 seconds" into "wait an hour" or into no
+    wait at all. The policy's own backoff is the honest answer in that case —
+    it is at least a number this side chose.
+    """
+    for item in _exception_chain(exc):
+        response = getattr(item, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            continue
+        raw = headers.get("retry-after")
+        if raw is None:
+            continue
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return seconds if seconds >= 0 else None
     return None
 
 

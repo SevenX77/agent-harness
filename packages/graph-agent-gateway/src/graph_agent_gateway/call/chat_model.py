@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, NoReturn, cast
 
@@ -152,6 +153,53 @@ class _Attempt:
         return min(doubled, self.cap) if self.cap is not None else doubled
 
 
+class _RetryBudget:
+    """How many more times this route may be asked, and how long to wait first.
+
+    The anti-flap retry the provider SDKs used to do on their own, moved to the
+    layer that writes decisions down (problem ledger E22). It is the same
+    behaviour by design — bounded, only on retryable classifications, honouring
+    ``Retry-After`` — with two things it never had inside the SDK: a number the
+    gateway chose, and one ``retried_same_route`` on the trace per request that
+    actually went out.
+
+    ``max_attempts`` counts ASKS, not retries: the first ask is attempt one, so
+    a policy of two attempts allows one retry. That is the unit
+    ``StandardTerminalRetrySettings`` was written in, and the unit the backoff
+    list is validated against (one entry per gap between attempts).
+    """
+
+    def __init__(self, *, max_attempts: int, backoff_ms: Sequence[int]) -> None:
+        self._retries_left = max(0, max_attempts - 1)
+        self._backoff_ms = tuple(backoff_ms)
+        self._retries_used = 0
+
+    @classmethod
+    def for_standard_terminal(cls, runtime_policy: Any) -> _RetryBudget:
+        settings = runtime_policy.terminal_retry_policy.standard_runtime
+        return cls(max_attempts=settings.max_attempts, backoff_ms=settings.backoff_ms)
+
+    def can_retry(self) -> bool:
+        return self._retries_left > 0
+
+    def wait(self, retry_after_seconds: float | None) -> None:
+        """Spend one retry, after waiting the longer of the two schedules.
+
+        The provider's own ``Retry-After`` wins when it is longer because it is
+        the only one of the two that knows when the bucket refills; the policy's
+        backoff still applies as a floor so a provider that asks for zero does
+        not get hammered.
+        """
+        planned = self._backoff_ms[self._retries_used] / 1000 if (
+            self._retries_used < len(self._backoff_ms)
+        ) else 0.0
+        delay = max(planned, retry_after_seconds or 0.0)
+        self._retries_left -= 1
+        self._retries_used += 1
+        if delay > 0:
+            time.sleep(delay)
+
+
 class GatewayChatModel(BaseChatModel):
     """BaseChatModel adapter with explicit provider fallback control."""
 
@@ -299,7 +347,7 @@ class GatewayChatModel(BaseChatModel):
             if _is_marked_down(self.ledger, candidate, runtime_policy):
                 self._decided("skipped_circuit_open", route=candidate)
                 continue
-            retry_same_used = False
+            retries = _RetryBudget.for_standard_terminal(runtime_policy)
             refused_settings: tuple[str, ...] | None = None
             attempt = _Attempt(
                 budget=initial_budget(candidate, defaults, kwargs),
@@ -439,8 +487,7 @@ class GatewayChatModel(BaseChatModel):
                     failure["provider_status_code"] = classification.provider_status_code
                     failure["history_shape"] = _history_shape(request_messages)
                     failures.append(failure)
-                    if classification.action == "retry_same_route" and not retry_same_used:
-                        retry_same_used = True
+                    if classification.action == "retry_same_route" and retries.can_retry():
                         self._decided(
                             "retried_same_route",
                             route=candidate,
@@ -449,6 +496,7 @@ class GatewayChatModel(BaseChatModel):
                             voided_streamed_answer=attempt.streamed,
                         )
                         yield from attempt.void()
+                        retries.wait(classification.retry_after_seconds)
                         continue
                     if (
                         classification.scope == "request"

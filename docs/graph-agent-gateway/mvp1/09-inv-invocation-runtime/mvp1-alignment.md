@@ -97,7 +97,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 | **09 invoke 输出（ChatX 原生）** | ChatX `.invoke(messages)` → `AIMessage`{ `content`（**保留原始 block 结构**，含 reasoning/thinking blocks，不拍平）, `usage_metadata`（标准 input/output token 维度）, `response_metadata`（provider 自带） }。 |
 | **09 → 07（结果桥接输出）** | `ChatResult`（`_build_chat_result` 产出）：`generations[0].message` = augment 后的 `AIMessage`，`response_metadata` 注入 `{route_id, endpoint_id, model=provider_model_id, canonical_id, protocol, finish_reason, usage, effective_runtime_settings}`；`llm_output` 注入 `{token_usage, model_name, route_id, endpoint_id, canonical_id, protocol, effective_runtime_settings}`。当前字段集见 `call/chat_model.py:323-356`，MVP1 **保留同一字段集**，只把"重建全新 `AIMessage`"改成"augment ChatX 返回的 `AIMessage`"（避免覆盖 provider 自带 metadata、避免丢 content blocks）。 |
 | **usage 归属（喂观测，非本模块决策）** | 从 `AIMessage.usage_metadata` 取 token → 交 [[07-orch-fallback-circuit-probe]] 的 `LLMCircuitAndUsageLedger.record_usage`（`call/clients.py:74`）按 endpoint 累计。维度对齐见 §8 待办 1。 |
-| **错误 / retry（非本模块决策）** | ChatX 自身瞬时重试（429/5xx/连接，有界）保留在 ChatX 内（F2）；跨 route fallback、异常分类、截断升级重试均在 07 编排层。本模块只保证 ChatX 抛出的异常能被 07 的 `classify_exception` 正确分类（见 §6）。 |
+| **错误 / retry（非本模块决策）** | 同 route 防抖动重试（429/5xx/连接，有界）在 07 编排层做，传输层一律 `max_retries=0`（2026-08-22 换层，理由见 07 F4 与本页 F2 段）；跨 route fallback、异常分类、截断升级重试同样在 07。本模块只保证 ChatX 抛出的异常能被 07 的 `classify_exception` 正确分类（见 §6）。 |
 | **归属 / 稳定性** | `ResolvedRoute`/`AIMessage` 字段权威源 = [[04-orch-registry-schema]]（`registry/schema.py`）/ LangChain；`call_method_id` 的运行时解释由 `registry/call_methods.json` + `registry/call_methods.py` 负责；`request_mapper_id` 仍是普通 chat/generic path 的请求映射字段。 |
 
 ## 4. 设计决策基础(用户原话)
@@ -106,7 +106,9 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 > **D2 编排 / 调用分离**（PM 原话，verbatim）："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么" → 本模块就是「调用」端：输入一条 `ResolvedRoute` + messages，输出 `AIMessage` / 结果（copilot 走 `claude_agent_sdk` 自己调，不归 gateway 调；gateway 只输出编排结果）。此决策与 [[07-orch-fallback-circuit-probe]]、[[10-inv-route-chat-model-factory]]、[[11-inv-provider-profiles]] 共享（重复留底防 drift）。
 
-> **F2 防抖动重试保留**（PM 原话，verbatim）："和Claude sdk copilot一样的问题, 防抖动重试可以留" → ChatX 的有界瞬时重试（429/5xx/连接，对 429 尊重 Retry-After、不对 400/401 重试）保留，不设 `max_retries=0`；它天然是「同 route 防抖动重试」，与网关「跨 route fallback」两层不冲突。要钉死的是：重试耗尽后异常仍能被 `classify_exception` 正确分类（确定性单测，见 §6）。
+> **F2 防抖动重试保留**（PM 原话，verbatim）："和Claude sdk copilot一样的问题, 防抖动重试可以留" → 有界的同 route 防抖动重试（429/5xx/连接，尊重 Retry-After、不对 400/401 重试）保留，与网关「跨 route fallback」两层不冲突。要钉死的是：重试耗尽后异常仍能被 `classify_exception` 正确分类（确定性单测，见 §6）。
+>
+> **2026-08-22 换层（PM 裁决不变，实现层换人）**：这一层重试改由 07 的 `GatewayChatModel` 自己做，传输层四种 protocol 一律 `max_retries=0`。当年选择「留在 ChatX 内、不设 0」写下的理由是「当前代码反而没有同-route 重试」——**这个前提已经消失**：07 的 route 循环遇到 `retry_same_route` 分类早就会重试同一条路由。留着 ChatX 那一层的结果是**两层重试，其中一层记不进账**：网关记的是决定，SDK 内部的重试不是它的决定，于是 trace 上只剩一条 `answered`，而 wire 上发了三个请求（实测见问题台账 E22）。次数与等待改读 `terminal_retry_policy.standard_runtime`，`Retry-After` 由 `classify_exception` 一并读出，PM 要求的每一条性质都在，只是换到了数得清的那一层。
 
 > **通用判据（gateway = 富能力可复用网关）**（README §2）："换一个完全不同的应用装上 gateway，这个能力还原样能用吗？能 → 公共（gateway）。" → "拿一条 route 真正调模型"是任何调模型 app 的刚需，故本模块纯 ③b 公共。
 

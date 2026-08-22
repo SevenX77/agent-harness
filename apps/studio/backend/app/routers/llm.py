@@ -37,6 +37,7 @@ from app.core.adapters.gateway import (
     ResolvedRoute,
     ResourceTerminalError,
     RouteProbeResult,
+    RouteToolLoopResult,
     RuntimeSettings,
     VerifiedProfile,
     accepted_effort_levels,
@@ -50,6 +51,7 @@ from app.core.adapters.gateway import (
     lint_role_routes,
     measured_effort_capability,
     measured_image_input,
+    measured_tool_calling,
     normalize_model_group_key,
     normalize_route_capabilities,
     project_model_group_identity,
@@ -69,6 +71,9 @@ from app.core.adapters.gateway import (
 )
 from app.core.adapters.gateway import (
     probe_provider_route as _gateway_test_provider_route_request,
+)
+from app.core.adapters.gateway import (
+    probe_route_tool_loop as _gateway_probe_route_tool_loop_request,
 )
 from app.core.adapters.gateway import (
     provider_backend_for_endpoint as _gateway_provider_backend_for_endpoint,
@@ -3338,6 +3343,7 @@ async def _force_probe_route(
             }
         )
         await _measure_what_only_asking_settles(credentials, endpoint, (route.route_id,))
+        await _measure_whether_this_route_calls_tools(credentials, endpoint, route.route_id)
         updated = credentials.provider_routes[route.route_id]
         save_credentials(credentials)
         _health_store().clear_circuit(scope="route", scope_id=route.route_id)
@@ -3394,6 +3400,41 @@ async def _probed_route_capabilities(
         return capabilities
     capabilities[_EFFORT_CAPABILITY_KEY] = measured_effort_capability(measured)
     return capabilities
+
+
+async def _measure_whether_this_route_calls_tools(
+    credentials: LLMCredentialsFile,
+    endpoint: ProviderEndpoint,
+    route_id: str,
+) -> None:
+    """Ask a just-verified route whether it can run an agent, and record the answer.
+
+    "Does this route work" has a different answer for an agent phase than for a
+    plain generation: every agent loop binds tools and reads a tool call back,
+    and a route can pass the generation probe while being useless to one.
+
+    Only on THIS path — the forced probe of one named route — and deliberately
+    not inside `_measure_what_only_asking_settles`, which the bulk "test models"
+    flow also runs. T3 is the deepest rung of the ladder (two real requests,
+    against T1's one GET), so its cost stays bounded by one deliberate click on
+    one route rather than multiplied by however many models an endpoint lists.
+
+    A refusal is not recorded, and the gateway's `measured_tool_calling` says
+    why: "no tool call" cannot tell a protocol without tools apart from a model
+    that chose prose, and a capability that quietly shrinks is worse than one
+    left unmeasured.
+    """
+    route = credentials.provider_routes.get(route_id)
+    if route is None or route.status != "verified":
+        return
+    result = await _probe_route_tool_loop_atom(endpoint, route)
+    if not result.called_the_tool:
+        return
+    _record_measured_capabilities(
+        credentials,
+        route_id,
+        measured=dict(measured_tool_calling(closed_the_loop=result.closed_the_loop)),
+    )
 
 
 async def _measure_what_only_asking_settles(
@@ -6355,6 +6396,31 @@ async def _probe_route_generation_atom(
         )
     finally:
         await _publish_llm_probe_active(endpoint.endpoint_id, ())
+
+
+async def _probe_route_tool_loop_atom(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+) -> RouteToolLoopResult:
+    """Ask this route the tool question, with Studio's own two rules around it.
+
+    Same seam as the generation atom: the gateway knows what to ask and what an
+    answer means; Studio owns whether it may ask right now and how it tells the
+    UI it is asking. Skipping the probe-active bracket would leave the frontend
+    with a route that goes quiet for two round trips and no reason on screen.
+    """
+    await _publish_llm_probe_active(endpoint.endpoint_id, (route.provider_model_id,))
+    try:
+        return await _gateway_probe_route_tool_loop(endpoint, route)
+    finally:
+        await _publish_llm_probe_active(endpoint.endpoint_id, ())
+
+
+async def _gateway_probe_route_tool_loop(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+) -> RouteToolLoopResult:
+    return await _gateway_probe_route_tool_loop_request(endpoint, route)
 
 
 async def _probe_model_generation_atom(

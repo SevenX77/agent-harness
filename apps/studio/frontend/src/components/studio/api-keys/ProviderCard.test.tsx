@@ -10,6 +10,7 @@ import {
   apiKeyInputType,
   copyAvailableModelId,
   endpointTagIsTestable,
+  endpointProfileSummary,
   endpointTooltipLines,
   modelRouteIds,
   representativeProviderUiState,
@@ -2653,9 +2654,65 @@ describe("endpointTooltipLines protocol_unsupported guidance", () => {
     expect(joined).not.toContain("use its")
   })
 
+  // Ledger L6 / gateway T3. `tool_protocol` used to have exactly two readings —
+  // some catalog or protocol document claims tools, or nothing does — and a
+  // route that has been WATCHED calling a tool is a third, stronger fact. A
+  // reader deciding whether to hand this endpoint an agent phase is exactly who
+  // needs to tell a measurement apart from a claim, so the line says which.
+  it("says a tool protocol was measured, not merely listed", () => {
+    const measured = makeEndpointSummary({ toolProtocol: "verified" })
+    const claimed = makeEndpointSummary({ toolProtocol: "supported" })
+
+    const measuredLine = endpointTooltipLines(measured, []).find((line) => /Tool protocol/.test(line))
+    const claimedLine = endpointTooltipLines(claimed, []).find((line) => /Tool protocol/.test(line))
+
+    expect(measuredLine).toBeDefined()
+    expect(claimedLine).toBeDefined()
+    expect(measuredLine).not.toBe(claimedLine)
+    expect(measuredLine).toMatch(/verified/i)
+  })
+
   it("adds no guidance line for a verified cell", () => {
     const verified = makeEndpointSummary({ status: "ok" })
     const joined = endpointTooltipLines(verified, []).join(" ")
     expect(joined).not.toContain("does not serve")
+  })
+})
+
+describe("endpointProfileSummary tool protocol (ledger L6 / gateway T3)", () => {
+  function model(capabilities: Record<string, unknown>): ModelInfo {
+    return { id: "m", name: "m", capabilities } as unknown as ModelInfo
+  }
+
+  it("reports a probed tool call as verified, above any document claim", () => {
+    const summary = endpointProfileSummary([
+      model({ tool_protocol: { value: true, source: "probed_verified" } }),
+    ])
+
+    expect(summary.toolProtocol).toBe("verified")
+  })
+
+  it("keeps a document claim as merely supported", () => {
+    const summary = endpointProfileSummary([
+      model({ tool_protocol: { value: true, source: "api_list" } }),
+    ])
+
+    expect(summary.toolProtocol).toBe("supported")
+  })
+
+  it("lets one measured model carry the endpoint past its unmeasured siblings", () => {
+    // The summary is an endpoint-level lower bound over its models — the same
+    // way `methodIds` unions across them. One model watched calling a tool is a
+    // fact about this endpoint that no sibling's silence takes back.
+    const summary = endpointProfileSummary([
+      model({ tool_protocol: { value: true, source: "api_list" } }),
+      model({ tool_protocol: { value: true, source: "probed_verified" } }),
+    ])
+
+    expect(summary.toolProtocol).toBe("verified")
+  })
+
+  it("reports nothing listed when no model claims or shows tools", () => {
+    expect(endpointProfileSummary([model({})]).toolProtocol).toBe("not_listed")
   })
 })

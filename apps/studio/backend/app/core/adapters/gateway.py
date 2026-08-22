@@ -33,6 +33,12 @@ from graph_agent_gateway.probing import (
     RouteProbeResult as RouteProbeResult,
 )
 from graph_agent_gateway.probing import (
+    RouteToolLoopResult as RouteToolLoopResult,
+)
+from graph_agent_gateway.probing import (
+    ToolLoopReach as ToolLoopReach,
+)
+from graph_agent_gateway.probing import (
     accepted_effort_levels as accepted_effort_levels,
 )
 from graph_agent_gateway.probing import (
@@ -52,6 +58,9 @@ from graph_agent_gateway.probing import (
 )
 from graph_agent_gateway.probing import (
     probe_provider_route as probe_provider_route,
+)
+from graph_agent_gateway.probing import (
+    probe_route_tool_loop as probe_route_tool_loop,
 )
 from graph_agent_gateway.registry import (
     COMMUNITY_PROVENANCE as COMMUNITY_PROVENANCE,
@@ -180,6 +189,9 @@ from graph_agent_gateway.registry import (
 )
 from graph_agent_gateway.registry import (
     measured_image_input as measured_image_input,
+)
+from graph_agent_gateway.registry import (
+    measured_tool_calling as measured_tool_calling,
 )
 from graph_agent_gateway.registry import (
     merge_evidence_library as merge_evidence_library,

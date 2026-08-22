@@ -6480,7 +6480,7 @@ mod tests {
         // sits in front of (lib.rs claude_master_cmd doc).
         assert!(!config.contains("--dangerously-skip-permissions"));
         assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
-        assert!(config.contains("skills = [\"moirai-intro\"]"));
+        assert!(config.contains("skills = [\"moirai-intro\", \"brainstorming\"]"));
         assert!(!config.contains("--continue"));
         assert!(!config.contains("/remote-control"));
         assert!(!config.contains("[agents.studio]"));
@@ -6547,7 +6547,7 @@ mod tests {
             "Codex master must raise codex_apps MCP startup timeout above Codex's 30s default"
         );
         assert!(config.contains(MOIRAI_MASTER_REPORT_PROMPT));
-        assert!(config.contains("skills = [\"moirai-intro\"]"));
+        assert!(config.contains("skills = [\"moirai-intro\", \"brainstorming\"]"));
         assert!(config.contains("[agents.clotho]"));
         assert!(config
             .contains("skills = [\"domain-analysis\", \"graph-design\", \"agent-prompt-design\"]"));

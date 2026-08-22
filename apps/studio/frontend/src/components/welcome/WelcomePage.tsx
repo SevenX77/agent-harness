@@ -47,6 +47,10 @@ export const ACTION_MENU_CLASSNAME = 'w-48'
 
 interface WelcomePageProps {
   onSelectSkill: (skillId: string) => void
+  /** F6 entry ①: the new skill was created to be planned out, not to be
+   *  handed over as a folder of starter files. Fired after the skill is open
+   *  so the workspace it lands in can start the wizard on it. */
+  onSkillWizardRequested?: (skillId: string) => void
 }
 
 interface CreateSkillPayload {
@@ -151,7 +155,7 @@ export function formatImportSkillError(error: unknown): string {
   return errorMessage(error)
 }
 
-export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
+export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePageProps) {
   const [openingFolder, setOpeningFolder] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newSkillOpen, setNewSkillOpen] = useState(false)
@@ -238,7 +242,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     toast.success(`Removed "${workspace.displayName}" from recent`)
   }
 
-  const submitNewSkill = async (event?: FormEvent) => {
+  const submitNewSkill = async (event?: FormEvent, options: { withWizard?: boolean } = {}) => {
     event?.preventDefault()
     const trimmed = newSkillName.trim()
     if (!trimmed) {
@@ -257,6 +261,11 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
       const result = await createSkillWorkspace(newSkillParentDirectory ?? '', skillId)
       setNewSkillOpen(false)
       await openSkill(result.root, trimmed, result.skillId)
+      // After the skill is open, so the wizard starts in the workspace it is
+      // about rather than against whatever was on screen a moment earlier.
+      if (options.withWizard) {
+        onSkillWizardRequested?.(result.skillId)
+      }
     } catch (error) {
       setNewSkillError(formatCreateSkillError(error, skillId))
     } finally {
@@ -474,6 +483,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         newSkillError={newSkillError}
         creating={creating}
         onSubmit={submitNewSkill}
+        onSubmitWithWizard={() => { void submitNewSkill(undefined, { withWizard: true }) }}
       />
     </div>
   )

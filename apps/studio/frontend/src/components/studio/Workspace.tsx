@@ -51,7 +51,7 @@ import {
   type SkillGateEvent,
 } from "./gate-state"
 import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@/utils/edge-status-projection"
-import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
+import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, endsTheRun, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
@@ -741,10 +741,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const runStream = useRunStream(skillId, runId)
   const isViewingHistory = viewedTrace?.source === "history"
-  // F7: a finished run (run_ended in the stream) drives the copilot analysis bar.
-  const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
-    ? runId
-    : null
+  // F7: a finished run (run_ended in the stream) drives the copilot analysis
+  // bar. A run that merely STOPPED has not finished — offering to analyse it
+  // would be offering to analyse work that has not happened yet.
+  const completedRunId = runStream.events.some(endsTheRun) ? runId : null
   // The run the BACKEND has finished finalizing, which is a strictly later thing
   // than the engine's `run_ended`. Between the two the backend still auto-commits
   // the skill, writes the run metadata and writes `report.md`; a reader that

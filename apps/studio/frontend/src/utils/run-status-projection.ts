@@ -45,6 +45,27 @@ const RUN_ENDED_EVENT_VERDICT: Readonly<Record<string, RunVerdict>> = {
 }
 
 /**
+ * Whether this event ends the RUN, rather than ending one segment of it.
+ *
+ * `run_ended` fires whenever the engine returns, and a run that stopped at a
+ * breakpoint or a question also returns — so the event alone cannot answer
+ * this, and the two readers that asked it alone (the stream's terminal guard,
+ * the copilot analysis bar) read a stopped run as a finished one. It has said
+ * which of the three it was since it was written; the answer is to READ the
+ * status, through the same table the verdict uses so they cannot disagree.
+ *
+ * An ending that does not say how it ended counts as an ending: mistaking a
+ * stop for an ending freezes the live view, mistaking an ending for a stop
+ * leaves a socket reconnecting and replaying the log forever, and a stop has
+ * spelled itself `interrupted` for as long as the field has existed.
+ */
+export function endsTheRun(event: TraceEventInput): boolean {
+  const payload = callbackPayload(event)
+  if (payload.event_type !== "run_ended") return false
+  return RUN_ENDED_EVENT_VERDICT[String(payload.status ?? "completed")] !== "paused"
+}
+
+/**
  * The registered close table for canvas nodes (D7 对照表): what a node still
  * marked running becomes when the run's verdict says nothing is executing.
  * `cancelled` closes to paused, not error — the node did not fail, the user

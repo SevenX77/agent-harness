@@ -1649,11 +1649,25 @@ class RunManager:
             exitcode = getattr(record.process, "exitcode", None)
             status_from_exit: Literal["success", "failed"] = "success" if exitcode == 0 else "failed"
             terminal_metadata = record.metadata.model_copy(update={"status": status_from_exit})
+        stopped = terminal_metadata is not None and terminal_metadata.status == "paused"
         if terminal_metadata is not None:
-            if terminal_metadata.status == "paused":
+            if stopped:
                 await self._record_paused_run(record, terminal_metadata)
             else:
                 await self._finalize_terminal_run(record, terminal_metadata)
+        if not stopped:
+            # A stopped run keeps its stream: continuing it writes more of the
+            # SAME run's story, to these same watchers, under this same run id.
+            # Closing here left the resume's events pouring into a pipe nobody
+            # was reading, so the canvas sat on the moment the run stopped
+            # however correctly the run went on (problem ledger C1 ③). The
+            # worker being gone is not the run being over.
+            await self._close_run_stream(record)
+        with contextlib.suppress(Exception):
+            record.process.join(timeout=0)
+
+    async def _close_run_stream(self, record: RunRecord) -> None:
+        """Tell everyone watching that this run will write nothing more."""
         await record.ws_queue.put(None)
         for subscriber in list(record.subscribers):
             await subscriber.put(None)
@@ -1661,8 +1675,6 @@ class RunManager:
         for watcher in record.delta_watchers:
             watcher.close()
         record.delta_watchers.clear()
-        with contextlib.suppress(Exception):
-            record.process.join(timeout=0)
 
     async def _finalize_terminal_run(self, record: RunRecord, metadata: RunMetadata) -> None:
         # The record is what every reader asks for the run's status, and it is
@@ -1795,13 +1807,12 @@ class RunManager:
                 # ending publishes was never sent, so the canvas held the
                 # picture it had when the run stopped — by then a lie.
                 if metadata.status == "paused":
+                    # Stopped again, so again not over: a third segment can
+                    # follow, and it needs these same watchers.
                     metadata = await self._record_paused_run(record, metadata)
                 else:
                     await self._finalize_terminal_run(record, metadata)
-                await record.ws_queue.put(None)
-                for subscriber in list(record.subscribers):
-                    await subscriber.put(None)
-                record.subscribers.clear()
+                    await self._close_run_stream(record)
             return metadata
 
         run_dir = run_dir_for(skill_id, run_id)

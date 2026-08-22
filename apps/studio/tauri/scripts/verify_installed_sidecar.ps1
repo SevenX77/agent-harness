@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Installs the freshly built Windows package and proves the installed app finds
-  its Python sidecar inside its own install directory.
+  the files it resolves at runtime inside its own install directory.
 
 .DESCRIPTION
   A Tauri release build that is missing its resources does not fail loudly. When
@@ -13,9 +13,10 @@
   for a user who has no `D:\coding\agent-harness\...` directory.
 
   Building an installer therefore proves nothing on its own. This script closes
-  that gap by installing the artifact and asserting the sidecar's three pieces —
-  the interpreter, the vendored site-packages, and the backend — all resolve to
-  paths UNDER the install directory. It is the difference between "the bundler
+  that gap by installing the artifact and asserting that everything the app
+  resolves from its resource root — the sidecar's interpreter, vendored
+  site-packages and backend, plus the one-click CLI installer script — lands
+  UNDER the install directory. It is the difference between "the bundler
   produced a file" and "the file installs a working app".
 
   The install target is passed explicitly with NSIS's `/D=`, into a throwaway
@@ -83,10 +84,23 @@ Write-Host "Installed: $($exe.Name)"
 # subdirectory (that is a macOS `.app` shape). Getting this wrong is not a
 # theoretical risk: the first version of this script looked under `resources\`,
 # found nothing, and reported a perfectly good package as broken.
+#
+# The fourth entry is not the sidecar's. The one-click CLI installer button
+# resolves ITS script the same way — `cli_installer_script()` in
+# apps/studio/tauri/src/lib.rs looks under
+# `<resource root>/vendor/resources/scripts/` — and it fails differently from
+# the other three: a missing sidecar is an app that will not start, while a
+# missing installer script leaves a button on screen that is guaranteed to
+# answer `installer script missing at ...` the moment anyone presses it. That
+# was every packaged build for an unknown length of time, and nothing in this
+# check could see it, because the check only ever asked about the sidecar
+# (ledger D1). What both questions have in common is the one this script
+# exists to ask: does the INSTALLED app find the files it resolves at runtime.
 $required = [ordered]@{
     'python interpreter'     = Join-Path $installDir 'vendor\python\x86_64-pc-windows-msvc\python.exe'
     'vendored site-packages' = Join-Path $installDir 'vendor\site-packages'
     'vendored backend'       = Join-Path $installDir 'vendor\backend'
+    'CLI installer script'   = Join-Path $installDir 'vendor\resources\scripts\install-claude-code-wsl.ps1'
 }
 
 $missing = @()

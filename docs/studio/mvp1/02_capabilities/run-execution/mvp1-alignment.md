@@ -511,6 +511,23 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     表,两边不可能再各说各话。**没写 status 的旧 `run_ended` 算结束**:把停顿误判成结束会
     冻住实时视图,把结束误判成停顿会让 socket 无限重连重放整份日志,而停顿从字段存在起
     就一直写着 `interrupted`。
+  - **续跑只说这一段做了什么,不重发这个 run 的档案。**(2026-08-22 真机走查补,
+    C1 ③ 收官)一次续跑结束后读那次 run 的 `run_metadata.json`,里面写着
+    `auto_commit: false`(它明明是一次会归档的普通 run)、`input_summary: "resumed"`
+    (它明明是被喂了一段文本)、`started_at` 是最后一次续跑的钟点(它明明一小时前就
+    开跑了)。三条是**同一个错**:resume 端点拿适配器的回答**新造了一整份
+    `RunMetadata`**,于是**那份回答没提到的每个字段一律回落到默认值**。这个错早被发现
+    过一次,当时的修法是**逐字段手工搬回**(`_preserve_resume_artifact_identity` 搬了
+    `artifact_ref` / `source_map_ref` / `execution_fingerprint` 三个),而这种清单**每
+    给模型加一个字段就得跟着加一行**,`auto_commit` 一挂上去就成了第四个牺牲者。
+    正确的划界是问**一段续跑到底知道什么**:它知道自己怎么收的场、花了多少、停在哪
+    (`ResumeReport` 三个字段),它**不知道**这个 run 什么时候开的跑、被喂了什么、
+    是不是要归档——那些是 **run 的属性,不是这一段的属性**。所以续跑的结果是
+    **叠加到 run 自己那份档案上**,不是替换它;适配器那边同样只交回这三样,不再顺手
+    带上 `started_at` 和字面量 `input_summary: "resumed"`。`paused_at` 是唯一会被
+    **清掉**的字段:报告不点名新的停靠点,就说明这一段跨过了原来那个,档案再挂着它
+    等于说一个跑完的 run 还在某处等人。另外,**封盘决定 `git_status`**,所以回给调用
+    方的是封盘**之后**的那份记录,不是交进去的那份。
   - **边界节点不能带「断点」这个词。**(2026-08-22 真机走查补)Output 端点按「产出它的
     相位里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
     可断点是设在**相位**上的,端点不是相位,谁也没法在它上面设断点。端点上成立的是
@@ -532,7 +549,10 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   (带 `paused_at` 的结果不再被读成成功、worker 报 `paused` 且带上停在哪个节点、
   停住的 run 不封盘、gate 说 `paused`、断点读写落在 `runtime_config`、传给引擎的是
   排好序的节点名)+ `tests/routers/test_a_breakpoint_is_something_you_set_on_a_node.py`
-  (写接口回整份清单、清一个没设过的不算错、越界节点名被拒、变了才广播);
+  (写接口回整份清单、清一个没设过的不算错、越界节点名被拒、变了才广播)
+  + `tests/services/test_a_resume_reports_what_changed.py`(续跑不动它没在说的字段、
+  只说它知道的三样、跨过去了就不再挂着停靠点、本机没记录的 run 走盘上那份档案、
+  适配器交回的是一段而不是一个 run);
   前端——`src/utils/a-run-that-stopped-says-where.test.ts`(reason 决定节点是
   `breakpoint` 还是 `paused`,收尾判据不覆盖已停住的节点)、
   `src/components/nodes/a-node-carrying-a-breakpoint-shows-it.test.tsx`(空板子上也带标记)、

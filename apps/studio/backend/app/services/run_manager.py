@@ -50,6 +50,7 @@ from app.models.runs import (
     CompareCandidateRun,
     CompareRunGroupResponse,
     CompareRunResponse,
+    ResumeReport,
     ResumeReq,
     RunDetail,
     RunError,
@@ -1851,11 +1852,20 @@ class RunManager:
         skill_id: str,
         run_id: str,
         request: ResumeReq,
-        metadata: RunMetadata,
+        report: ResumeReport,
     ) -> RunMetadata:
+        """Apply what one resumed segment did to the run it belongs to.
+
+        The report is applied ONTO the run's own record rather than replacing
+        it. Rebuilding a whole `RunMetadata` out of the resume's answer reset
+        every field that answer did not mention — the run's start time, its
+        input summary, its artifact identity, and whether it archives — which
+        was noticed once and patched three fields at a time until the next
+        field was added and quietly fell off (problem ledger C1 ③).
+        """
         record = self._runs.get(run_id)
         if record is not None:
-            metadata = _preserve_resume_artifact_identity(record.metadata, metadata)
+            metadata = _resumed(record.metadata, report)
             record.metadata = metadata
             _write_run_metadata(record.run_dir, metadata)
             await self._save_run_metadata(skill_id, metadata)
@@ -1882,12 +1892,26 @@ class RunManager:
                 else:
                     await self._finalize_terminal_run(record, metadata)
                     await self._close_run_stream(record)
+                    # Sealing is what decides `git_status`, so the answer to the
+                    # caller is the record as it stands AFTER it, not the one
+                    # handed in before.
+                    metadata = record.metadata
             return metadata
 
-        run_dir = run_dir_for(skill_id, run_id)
-        if run_dir.exists():
-            _write_run_metadata(run_dir, metadata)
-            await self._save_run_metadata(skill_id, metadata)
+        # Nothing held here, but the run's own directory still holds its record,
+        # and that record — not a fresh one built out of the segment's answer —
+        # is what the report updates.
+        existing = self._recorded_metadata(skill_id, run_id)
+        run_dir = self._run_dir_if_here(skill_id, run_id)
+        if existing is None or run_dir is None or not run_dir.exists():
+            raise standard_http_exception(
+                "RESUME_CHECKPOINT_NOT_FOUND",
+                f"Run not found: {run_id}",
+                {"skill_id": skill_id, "run_id": run_id},
+            )
+        metadata = _resumed(existing, report)
+        _write_run_metadata(run_dir, metadata)
+        await self._save_run_metadata(skill_id, metadata)
         return metadata
 
     async def _copy_final_state_to_storage(self, run_dir: Path) -> None:
@@ -1938,12 +1962,19 @@ def _runtime_inputs_from_request(request: RunRequest) -> dict[str, Any]:
     return dict(request.input_data or {})
 
 
-def _preserve_resume_artifact_identity(existing: RunMetadata, resumed: RunMetadata) -> RunMetadata:
-    updates: dict[str, Any] = {}
-    for field_name in ("artifact_ref", "source_map_ref", "execution_fingerprint"):
-        if getattr(resumed, field_name) is None and getattr(existing, field_name) is not None:
-            updates[field_name] = getattr(existing, field_name)
-    return resumed.model_copy(update=updates) if updates else resumed
+def _resumed(metadata: RunMetadata, report: ResumeReport) -> RunMetadata:
+    """The run, as it stands after one resumed segment reported in.
+
+    `paused_at` is cleared unless the report names a new stopping point: a run
+    that went past where it stopped must not keep saying it is waiting there.
+    """
+    return metadata.model_copy(
+        update={
+            "status": report.status,
+            "metrics": report.metrics if report.metrics is not None else metadata.metrics,
+            "paused_at": report.paused_at,
+        }
+    )
 
 
 def _resume_audit_event(

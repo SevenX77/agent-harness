@@ -20,6 +20,7 @@ from app.models.runs import (
     NodeCompareRunRequest,
     PredictDiagnosticExport,
     PredictRunRequest,
+    ResumeReport,
     ResumeReq,
     ResumeValidityReq,
     ResumeValidityResponse,
@@ -372,13 +373,9 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
             exc.error_payload,
         ) from exc
     paused_at = result.get("paused_at")
-    metadata = RunMetadata(
-        run_id=result["run_id"],
+    report = ResumeReport(
         status=result["status"],
-        started_at=result["started_at"],
-        input_summary=result.get("input_summary"),
         metrics=_tokens_metrics_payload(result.get("metrics")),
-        git_status=result.get("git_status"),
         # A resume can land on the NEXT breakpoint, and dropping this here made
         # that run say "paused" without saying where.
         paused_at=RunPausePoint.model_validate(paused_at) if paused_at else None,
@@ -387,7 +384,7 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
         skill_id=skill_id,
         run_id=run_id,
         request=request,
-        metadata=metadata,
+        report=report,
     )
 
 

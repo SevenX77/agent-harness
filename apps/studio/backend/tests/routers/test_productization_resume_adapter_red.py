@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,29 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
+
+
+def _run_this_studio_holds(skills_dir: Path, run_id: str, skill_id: str = "text-segmentation") -> Path:
+    """Give the Studio a real record of the run being resumed.
+
+    The endpoint answers with the RUN, updated by what the resumed segment
+    reported — so a run this Studio has no record of has no answer. Faking the
+    adapter says the engine can continue it; it does not conjure a run here.
+    """
+    run_dir = skills_dir / skill_id / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_metadata.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "status": "paused",
+                "started_at": "2026-06-17T00:00:00+00:00",
+                "input_summary": "text=hello",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return run_dir
 
 
 def test_resume_endpoint_is_no_longer_not_implemented(client: TestClient) -> None:
@@ -22,10 +46,12 @@ def test_resume_endpoint_is_no_longer_not_implemented(client: TestClient) -> Non
 
 def test_resume_endpoint_delegates_to_configured_engine_adapter_resume(
     client: TestClient,
+    studio_roots: tuple[Path, Path],
     monkeypatch,
 ) -> None:
     import app.core.adapters.transport_factory as transport_factory
 
+    _run_this_studio_holds(studio_roots[0], "run-123")
     calls: list[dict[str, Any]] = []
 
     class FakeAdapter:
@@ -53,7 +79,10 @@ def test_resume_endpoint_delegates_to_configured_engine_adapter_resume(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
+    # The run is taken over before the resume, so the engine is also handed
+    # somewhere to send what happens; the callable itself is not comparable.
+    assert calls[0].pop("event_subscriber", None) is not None
     assert calls == [
         {
             "skill_id": "text-segmentation",
@@ -77,6 +106,7 @@ def test_resume_endpoint_delegates_to_configured_engine_adapter_resume(
 
 def test_resume_endpoint_forwards_checkpoint_selector_and_structured_human_response(
     client: TestClient,
+    studio_roots: tuple[Path, Path],
     monkeypatch,
 ) -> None:
     import app.core.adapters.transport_factory as transport_factory
@@ -94,6 +124,7 @@ def test_resume_endpoint_forwards_checkpoint_selector_and_structured_human_respo
                 "metrics": {},
             }
 
+    _run_this_studio_holds(studio_roots[0], "run-123")
     monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
 
     response = client.post(
@@ -108,7 +139,8 @@ def test_resume_endpoint_forwards_checkpoint_selector_and_structured_human_respo
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
+    assert calls[0].pop("event_subscriber", None) is not None
     assert calls == [
         {
             "skill_id": "text-segmentation",
@@ -353,6 +385,7 @@ def test_resume_endpoint_maps_state_release_failed_to_retryable_conflict(
 
 def test_resume_endpoint_accepts_real_engine_resume_wall_time_metrics(
     client: TestClient,
+    studio_roots: tuple[Path, Path],
     monkeypatch,
 ) -> None:
     import graph_agent
@@ -361,6 +394,7 @@ def test_resume_endpoint_accepts_real_engine_resume_wall_time_metrics(
 
     storage_root = config.WORKSPACES_DIR / "default"
     run_id = "run-real-engine-metrics"
+    _run_this_studio_holds(studio_roots[0], run_id)
     artifact_ref = _store_artifact_zip(storage_root, artifact_id="text-segmentation", marker="snapshot")
     checkpointer_path = (
         storage_root
@@ -425,6 +459,7 @@ def test_resume_endpoint_accepts_real_engine_resume_wall_time_metrics(
 
 def test_engine_resume_uses_snapshot_artifact_ref_instead_of_recompiling_current_skill(
     client: TestClient,
+    studio_roots: tuple[Path, Path],
     monkeypatch,
 ) -> None:
     import graph_agent
@@ -434,6 +469,7 @@ def test_engine_resume_uses_snapshot_artifact_ref_instead_of_recompiling_current
 
     storage_root = config.WORKSPACES_DIR / "default"
     run_id = "run-snapshot-artifact"
+    _run_this_studio_holds(studio_roots[0], run_id)
     artifact_ref = _store_artifact_zip(storage_root, artifact_id="text-segmentation", marker="original-artifact")
     checkpointer_path = (
         storage_root

@@ -1889,6 +1889,7 @@ async def _run_role_test_targets(
         return provider_result
 
     provider_results = await asyncio.gather(*(run_target(target) for target in targets))
+    await _measure_whether_these_routes_call_tools(targets, provider_results)
     for target, provider_result in zip(
         targets,
         provider_results,
@@ -1963,6 +1964,47 @@ async def _run_role_test_job_impl(
         message="Role test completed.",
         result=result,
     )
+
+
+async def _measure_whether_these_routes_call_tools(
+    targets: list[RoleTestTarget],
+    provider_results: list[dict[str, Any]],
+) -> None:
+    """Ask the routes this role test just verified whether they can run an agent.
+
+    The probing decision doc puts T3 here — "角色 Test 不是新原子,它是『拿一组已
+    fit 的设置跑 T2 深度 0(**将来加 T3**)』"
+    (`docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md`) — and
+    a role is exactly who the answer is for: every agent phase this role serves
+    will bind tools and read a tool call back.
+
+    It obeys the same cost rule as the single-route probe: T3 may only ride a
+    path whose set of routes THE USER picked. A role's chain is that; the bulk
+    "test models" path is not, which is why `_measure_what_only_asking_settles`
+    still does not ask.
+
+    Only routes that just answered `ok` are asked — measuring tools on a route
+    that could not answer at all would be asking the second question before the
+    first. One load and one save around the whole set, because these run
+    concurrently and each writes a different route's entry.
+    """
+    answered = [
+        target
+        for target, provider_result in zip(targets, provider_results, strict=True)
+        if provider_result["status"] == "ok"
+    ]
+    if not answered:
+        return
+    credentials = load_credentials()
+    await asyncio.gather(
+        *(
+            _measure_whether_this_route_calls_tools(
+                credentials, target.endpoint, target.route.route_id
+            )
+            for target in answered
+        )
+    )
+    save_credentials(credentials)
 
 
 def _role_test_provider_progress(
@@ -3419,11 +3461,13 @@ async def _measure_whether_this_route_calls_tools(
     plain generation: every agent loop binds tools and reads a tool call back,
     and a route can pass the generation probe while being useless to one.
 
-    Only on THIS path — the forced probe of one named route — and deliberately
-    not inside `_measure_what_only_asking_settles`, which the bulk "test models"
+    Called from the two paths whose set of routes THE USER picked: the forced
+    probe of one named route, and a role test over the chain that role was
+    configured with (`_measure_whether_these_routes_call_tools`). Deliberately
+    NOT from `_measure_what_only_asking_settles`, which the bulk "test models"
     flow also runs. T3 is the deepest rung of the ladder (two real requests,
-    against T1's one GET), so its cost stays bounded by one deliberate click on
-    one route rather than multiplied by however many models an endpoint lists.
+    against T1's one GET), so its cost stays bounded by a set someone chose
+    rather than multiplied by however many models an endpoint happens to list.
 
     A refusal is not recorded, and the gateway's `measured_tool_calling` says
     why: "no tool call" cannot tell a protocol without tools apart from a model

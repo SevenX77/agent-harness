@@ -124,6 +124,28 @@ backward compatibility"。全文 39 行,只做改名转发。项目铁律是没�
 **不属于测试能力的**:角色 Test 不是新原子,它是"拿一组已 fit 的设置跑 T2 深度 0(将来加 T3)";
 B7 那个不发请求就写证据的分支删除。
 
+**「将来」到了(补记 2026-08-21,问题台账 L6)**:上面那句「将来加 T3」已落地,角色 Test 现在
+在每条被测路由答完 T2 之后顺带问一次 T3,结果写回该路由的 `tool_protocol` 能力
+(`llm.py::_measure_whether_these_routes_call_tools`)。
+
+- **为什么归到角色 Test 而不是另造一颗按钮**:一条路由能不能跑 agent,恰恰是**角色**这个层面
+  要回答的问题——这个角色服务的每一个 agent 相位都会 `bind_tools` 再读回一次 tool call。
+- **代价这一关是怎么过的**:T3 是梯子最深的一级(两次真实请求,对比 T1 的一次 GET),所以立的
+  规矩是**它只能搭在「路由集合由用户自己挑定」的路径上**。角色的 fallback chain 正是这样一个
+  集合;而 bulk「test models」那条路的集合是某个端点碰巧列出多少个模型,不是任何人挑的——所以
+  `_measure_what_only_asking_settles` **至今不问**,这是同一条规矩的结果,不是它的例外。
+  实际墙钟代价也比看上去小:`_run_role_test_targets` 用 `asyncio.gather` 并发跑整条链,
+  所以总时长是**最慢的那一条**而不是各条之和,而角色 Test 本身是带逐路由进度的后台 job
+  (`/roles/{name}/test-jobs`),用户看着每条路由依次亮起,不是干等一个转圈。
+- **一条的失败不牵连其余**:T3 是 T2 之后的**附加**一问,任何一条抛异常都只降级成「这条没测」
+  并记一行日志(`_measure_whether_this_route_calls_tools` 的 guard,问题台账 L6 / PR #975),
+  既不让整个 job 失败,也不丢掉同一批里其他路由已经测出来的结果。
+- **只问答出 `ok` 的那些**:一条连 T2 都答不上来的路由,先问它会不会调工具是把第二个问题问在
+  第一个问题前面。
+- **copilot 角色早就是这样**:`role_kind == "copilot"` 的测试走
+  `_start_copilot_sdk_test_job`,注释原话「发真工具调用、验 spawn/env/tool loop」——
+  也就是说「角色 Test 验工具闭环」在本仓已有先例,这次只是把它补齐到 graph-agent 角色的路由上。
+
 ### D2. 方言唯一实现,生产与探测共用
 
 新增 `dialect/` 域:每家 provider 一个 adapter,只回答两件事——**怎么把一次调用意图拼成这家的请求**、

@@ -95,3 +95,19 @@ def test_an_attached_image_becomes_an_image_content_block() -> None:
 def test_a_turn_without_images_is_sent_as_plain_text() -> None:
     """The SDK takes a bare string; wrapping every turn in blocks would be noise."""
     assert copilot_service._turn_message_with_attachments("hello", []) is None
+
+
+def test_an_image_alone_travels_without_an_empty_text_block() -> None:
+    """A picture with no question attached is still a turn.
+
+    The provider rejects a text block that holds no text, so a turn whose only
+    content is the image must carry the image alone rather than an empty string
+    in front of it.
+    """
+    message = copilot_service._turn_message_with_attachments(
+        "",
+        [CopilotImageAttachment(media_type="image/png", data=_ONE_PIXEL_PNG, name="shot.png")],
+    )
+
+    content = message["message"]["content"]
+    assert [block["type"] for block in content] == ["image"]

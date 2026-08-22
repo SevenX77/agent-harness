@@ -46,7 +46,11 @@ vi.mock('../../api/llm', () => ({
   putRoles: vi.fn(),
 }))
 
-vi.mock('../../hooks/useCopilot', () => ({
+// Only the hook is faked — the pure rules it exports (what makes a turn worth
+// sending) stay real, so the panel is tested against the same rule the socket
+// layer applies rather than against a stub that agrees with it by default.
+vi.mock('../../hooks/useCopilot', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../hooks/useCopilot')>()),
   useCopilot: mocks.useCopilot,
 }))
 
@@ -1284,9 +1288,9 @@ describe('what a turn carries out of the composer', () => {
     composerSeam.onImagesPasted = null
   })
 
-  async function mountPanel() {
+  async function mountPanel(messages: CopilotMessage[] = []) {
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-    const copilot = copilotState()
+    const copilot = copilotState({ messages })
     mocks.useCopilot.mockReturnValue(copilot)
     // The fixture is the same partial controller the rest of this file uses; the
     // panel only reads the fields it sets.
@@ -1354,6 +1358,27 @@ describe('what a turn carries out of the composer', () => {
     await act(async () => composerSeam.onSend?.())
 
     expect(copilot.sendMessage).toHaveBeenCalledTimes(1)
+    await act(async () => root.unmount())
+  })
+
+  it('leaves the pictures it carried on the turn that carried them', async () => {
+    // Without this a picture-only question is a blank bubble in the history:
+    // the bytes are deliberately not kept, so the turn has to say what went.
+    const { root, container } = await mountPanel([
+      {
+        id: 'user-1',
+        role: 'user',
+        content: '',
+        events: [],
+        status: 'success',
+        createdAt: 0,
+        attachments: [{ mediaType: 'image/png', name: 'only.png', byteSize: 2048 }],
+      },
+    ])
+
+    const chip = container.querySelector('[data-message-attachment="only.png"]')
+    expect(chip?.textContent).toContain('only.png')
+    expect(chip?.textContent).toContain('2 KB')
     await act(async () => root.unmount())
   })
 

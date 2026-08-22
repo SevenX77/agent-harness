@@ -676,6 +676,12 @@ fi"#;
 /// 登录界面的 pty 包装器(决议 docs/design/2026-08-12-login-console-clipboard-keys.md):
 /// 扫描登录命令的输出,第一条 https URL 出现时经剪贴板桥自动复制;`c` 重新复制
 /// 最近一条 URL,`v` 把 Windows 剪贴板注入命令输入(粘 OAuth code)。
+/// **两个键要先让人知道**:提示原本挂在"第一条 URL 被复制"那一刻,于是**一条 URL
+/// 都不吐的登录**(设备码要粘、或者一上来就问你要 token)里,用户永远不会知道
+/// `v` 存在——而那正是最需要 `v` 的一种。所以提示改成开场就打:控制台上一有东西
+/// (CLI 的第一段输出,或者它沉默地停在提示符上一秒)就打一次。代价照实写:TUI
+/// 重绘可以把它擦掉,这一点与既有的复制提示同一条通道、同一个限度,没有更强的
+/// 保证可给(台账 P3)。
 /// 判定规则:**孤立按键即命令**——单字节 c/v 且 60ms 内无后续字节。粘贴突发、
 /// 转义序列(终端对 TUI 查询的应答)都是多字节读,天然透传。曾经还叠过一层
 /// 「输入行为空」判定,真机首用即翻车:claude 登录是 Ink TUI,终端应答
@@ -719,13 +725,20 @@ class State:
     urls = []
     copy_seq = 0
     paste_seq = 0
+    hinted = False
+
+def hint_keys():
+    if State.hinted:
+        return
+    State.hinted = True
+    notice('press c to copy the sign-in link, v to paste the code')
 
 def copy_url(url):
     State.copy_seq += 1
     bridge_write('copy.txt', url)
     bridge_write('copy.seq', str(State.copy_seq).encode())
     if State.copy_seq == 1:
-        notice('sign-in link copied - press c to re-copy, v to paste the code')
+        notice('sign-in link copied')
 
 def paste_clipboard(master):
     State.paste_seq += 1
@@ -773,10 +786,17 @@ def main():
     tail = b''
     copied_first = False
     last_beat = 0.0
+    opened_at = time.monotonic()
     while True:
         if time.monotonic() - last_beat > 2.0:
             bridge_write('alive', str(int(time.time())).encode())
             last_beat = time.monotonic()
+        # A login that never prints a link still wants `v` — a device code is
+        # pasted, not clicked. So the keys are announced once the console has
+        # something on it, whether that is the CLI's first output or a second
+        # of it sitting at a prompt, rather than only alongside a URL.
+        if not State.hinted and time.monotonic() - opened_at > 1.0:
+            hint_keys()
         try:
             ready = select.select(fds, [], [], 0.2)[0]
         except (OSError, ValueError):
@@ -789,6 +809,7 @@ def main():
             if not data:
                 break
             os.write(1, data)
+            hint_keys()
             tail = (tail + data)[-8192:]
             for match in URL.finditer(OSC_CSI.sub(b' ', tail)):
                 url = match.group(0).rstrip(b'.,);')
@@ -5790,6 +5811,18 @@ mod tests {
         assert!(bare.contains("if ! claude auth login; then"));
     }
 
+    /// The wrapper tests drive the real Python wrapper, so they only run where
+    /// there is a python3 to run it with (Windows has neither that combination
+    /// nor a pty — same policy as the gate's sh tests).
+    #[cfg(unix)]
+    fn python3_available() -> bool {
+        Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    }
+
     fn login_bridge_test_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir()
             .join(format!("studio-login-bridge-test-{tag}-{}", std::process::id()));
@@ -5880,12 +5913,7 @@ mod tests {
     #[test]
     fn test_login_wrapper_copies_urls_and_pastes_clipboard() {
         use std::io::{Read, Write};
-        if !Command::new("python3")
-            .arg("--version")
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false)
-        {
+        if !python3_available() {
             return;
         }
         let dir = login_bridge_test_dir("wrapper");
@@ -5958,6 +5986,11 @@ mod tests {
             false
         };
         assert!(
+            wait_for("press c to copy the sign-in link, v to paste the code"),
+            "控制台一开场就要说清有哪两个键;输出: {}",
+            collected.lock().unwrap()
+        );
+        assert!(
             wait_for("sign-in link copied"),
             "URL 出现后必须自动复制并打确认行;输出: {}",
             collected.lock().unwrap()
@@ -5995,6 +6028,123 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(dir.join("done").is_file(), "包装器退出时必须写 done 收尾");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 台账 P3 —— 一条 URL 都不吐的登录里,两个键仍然要被说出来。
+    /// 设备码流程正是这种:要粘的是 code,没有可点的链接,而提示原本挂在
+    /// 「第一条 URL 被复制」上,于是最需要 `v` 的那一次反而没人告诉你有 `v`。
+    #[cfg(unix)]
+    #[test]
+    fn test_login_wrapper_announces_the_keys_even_without_a_link() {
+        use std::io::{Read, Write};
+        if !python3_available() {
+            return;
+        }
+        let dir = login_bridge_test_dir("wrapper-hint");
+        let wrapper_path = dir.join("wrapper.py");
+        std::fs::write(&wrapper_path, LOGIN_CONSOLE_WRAPPER_PY).unwrap();
+        let mut child = Command::new("python3")
+            .arg(&wrapper_path)
+            .arg(&dir)
+            .arg("--")
+            // No link, no output at all: the CLI is sitting there waiting for
+            // the code to be pasted in.
+            .args(["sh", "-c", "read line; printf 'GOT:%s\\n' \"$line\""])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("wrapper spawns");
+        let mut stdout = child.stdout.take().unwrap();
+        let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = collected.clone();
+        let reader = std::thread::spawn(move || {
+            let mut buffer = [0u8; 1024];
+            while let Ok(n) = stdout.read(&mut buffer) {
+                if n == 0 {
+                    break;
+                }
+                sink.lock().unwrap().push_str(&String::from_utf8_lossy(&buffer[..n]));
+            }
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut announced = false;
+        while Instant::now() < deadline && !announced {
+            announced = collected
+                .lock()
+                .unwrap()
+                .contains("press c to copy the sign-in link, v to paste the code");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(announced, "没有链接时也要报出两个键;输出: {}", collected.lock().unwrap());
+
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(b"\r").unwrap();
+        stdin.flush().unwrap();
+        child.wait().expect("wrapper exits");
+        reader.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 台账 P3 —— `c` 重新复制最近一条链接。自动复制发生在链接出现的那一刻,
+    /// 而用户往往是在别处点错、回来才想再要一次,所以它必须是一个能反复按的键,
+    /// 不是一次性的开场动作。
+    #[cfg(unix)]
+    #[test]
+    fn test_login_wrapper_recopies_the_last_link_on_c() {
+        use std::io::Write;
+        if !python3_available() {
+            return;
+        }
+        let dir = login_bridge_test_dir("wrapper-recopy");
+        let wrapper_path = dir.join("wrapper.py");
+        std::fs::write(&wrapper_path, LOGIN_CONSOLE_WRAPPER_PY).unwrap();
+        let mut child = Command::new("python3")
+            .arg(&wrapper_path)
+            .arg(&dir)
+            .arg("--")
+            .args([
+                "sh",
+                "-c",
+                "printf 'visit https://example.com/authz?x=1 to continue\\n'; read line",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("wrapper spawns");
+
+        let seq_is = |want: &str| -> bool {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline {
+                if std::fs::read_to_string(dir.join("copy.seq"))
+                    .map(|seq| seq.trim() == want)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            false
+        };
+        assert!(seq_is("1"), "链接出现时自动复制一次");
+
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(b"c").unwrap();
+        stdin.flush().unwrap();
+        assert!(seq_is("2"), "按 c 必须再复制一次,而不是被当作打字透传给 CLI");
+        assert!(
+            std::fs::read_to_string(dir.join("copy.txt"))
+                .unwrap_or_default()
+                .contains("https://example.com/authz?x=1"),
+            "重新复制的仍然是最近那一条链接"
+        );
+
+        stdin.write_all(b"\r").unwrap();
+        stdin.flush().unwrap();
+        child.wait().expect("wrapper exits");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

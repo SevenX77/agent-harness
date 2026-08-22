@@ -528,6 +528,26 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     **清掉**的字段:报告不点名新的停靠点,就说明这一段跨过了原来那个,档案再挂着它
     等于说一个跑完的 run 还在某处等人。另外,**封盘决定 `git_status`**,所以回给调用
     方的是封盘**之后**的那份记录,不是交进去的那份。
+  - **一次 run 的 trace 和它的账,都属于这个 run,不属于某一段。**(2026-08-22 真机
+    走查补,C1 ③ 收官)读一次「停在断点 → 续跑 → 跑完」的 run 的 `trace.jsonl`:里面
+    **只有第二段**。断点之前跑过的那些相位——包括产出了续跑所依赖的那份上下文的那个
+    相位——一个字都没有。原因是写 trace 的水槽**一打开就把文件清空**
+    (`callbacks/emit.py` 的 `_TraceJsonlSink.__init__`),而 `resume_skill` 会为**同一个
+    run 目录**再开一个水槽。清空是「我在开始一次 run」的动作;续跑不是新的 run:同一个
+    run id、同一个目录、同一批读的人。这和「续跑不重发 run 的档案」是同一个错落到下一层。
+    **也没有别的东西可清**:`trace.jsonl` 就住在 `runs/<run_id>/` 里,里面已有的每一行都是
+    这个 run 自己写的,清空防的是一个不存在的「上一个 run 的残留」。所以水槽**只创建、
+    不清空**(文件存在仍然表示「这个 run 开过 trace」)。 **连带必须一起改的是账**:
+    `metrics.json` 引的是 `_RunSpendLedger`,而 `report.md` 是把 `trace.jsonl` 里的
+    `llm_call` 重新加一遍——引擎自己写着这两者「agree by construction」
+    (`core/runner.py` `_run_metrics` 注释)。trace 一变成整个 run 的,账再从零起算就会
+    让同一次 run 的两份产物对不上。所以续跑的账**开账时先读回这个 run 已经花掉的**
+    (`_RunSpendLedger.continuing`,从它自己的 trace 里读 `llm_call`)。这不是 ledger
+    文档里拒绝的那种「事后重算」——那种是从**幸存下来的**消息/图状态里倒推,天生会漏;
+    这里读的是这个 run 自己在每次调用发生时写下的记录,没有任何东西会删掉其中一行。
+    **`wall_time_sec` 是唯一的例外,仍然只说这一段**:它是 runner 自己掐的表,不是对
+    事件求和得来的,本来就没参与那条「构造上一致」的约定。整个 run 的耗时该怎么记,
+    是另一件事,单独立账。
   - **边界节点不能带「断点」这个词。**(2026-08-22 真机走查补)Output 端点按「产出它的
     相位里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
     可断点是设在**相位**上的,端点不是相位,谁也没法在它上面设断点。端点上成立的是
@@ -552,7 +572,10 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   (写接口回整份清单、清一个没设过的不算错、越界节点名被拒、变了才广播)
   + `tests/services/test_a_resume_reports_what_changed.py`(续跑不动它没在说的字段、
   只说它知道的三样、跨过去了就不再挂着停靠点、本机没记录的 run 走盘上那份档案、
-  适配器交回的是一段而不是一个 run);
+  适配器交回的是一段而不是一个 run)
+  + 引擎 `packages/graph-agent/tests/callbacks/test_a_run_has_one_trace.py`
+  (续跑不抹掉前一段的 trace、没写过事件也留下 trace 文件、续跑的账从这个 run 已花掉的
+  开始算、头一次开跑从零起算);
   前端——`src/utils/a-run-that-stopped-says-where.test.ts`(reason 决定节点是
   `breakpoint` 还是 `paused`,收尾判据不覆盖已停住的节点)、
   `src/components/nodes/a-node-carrying-a-breakpoint-shows-it.test.tsx`(空板子上也带标记)、

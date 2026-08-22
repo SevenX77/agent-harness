@@ -1218,7 +1218,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("Claude Sonnet 4.6 Thinking")
   })
 
-  it("collapses duplicate endpoint routes to one provider label in the model library", () => {
+  it("aggregates same-named endpoint routes into one chip that says how many, and which", () => {
     const duplicateEndpointGroups: ModelGroup[] = [{
       ...modelGroups[0],
       canonical_id: "deepseek-v4-flash",
@@ -1255,9 +1255,52 @@ describe("LlmRolesTab controls", () => {
 
     const [entry] = buildAvailableModelGroups(duplicateEndpointGroups)[0].models
 
-    expect(entry.providers.map((provider) => `${provider.label}:${provider.state}:${provider.id}`)).toEqual([
-      "Qiniu OpenAI:ready:qiniu-openai:deepseek-v4-flash",
-      "Ark Official:untested:ark-official:deepseek-v4-flash",
+    // One chip per provider name, and the chip's own state is the best of its
+    // members — "can this model be reached here".
+    expect(entry.providers.map((chip) => `${chip.label}:${chip.state}:${chip.members.length}`)).toEqual([
+      "Qiniu OpenAI:ready:2",
+      "Ark Official:untested:1",
+    ])
+    // 真聚合，不是丢弃 (settings-ux §2.1): the sibling route is still THERE, with
+    // its own state. The version this replaced kept the best-sorted route and
+    // dropped the rest, so nobody knew the second Qiniu route existed.
+    expect(entry.providers[0].members.map((member) => `${member.id}:${member.state}`)).toEqual([
+      "qiniu-openai:deepseek-v4-flash:ready",
+      "qiniu-anthropic:deepseek-v4-flash:untested",
+    ])
+  })
+
+  it("keeps every deprecated route as its own row, because each is re-probed on its own", () => {
+    const deprecatedSiblings: ModelGroup[] = [{
+      ...modelGroups[0],
+      canonical_id: "deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
+      section_label: "deepseek",
+      provider_models: [
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-openai:deepseek-v4-flash",
+          endpoint_id: "qiniu-openai",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "off",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-anthropic:deepseek-v4-flash",
+          endpoint_id: "qiniu-anthropic",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "off",
+        },
+      ],
+    }]
+
+    const [entry] = buildAvailableModelGroups(deprecatedSiblings)[0].models
+
+    expect(entry.deprecatedProviders.map((provider) => provider.id)).toEqual([
+      "qiniu-anthropic:deepseek-v4-flash",
+      "qiniu-openai:deepseek-v4-flash",
     ])
   })
 

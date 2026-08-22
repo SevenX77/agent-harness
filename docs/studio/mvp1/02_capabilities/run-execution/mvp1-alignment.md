@@ -106,6 +106,12 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - 决策(被看的那次 run 拥有它旁边的每个动作): trace 能显示的 run 有两种——正在跑的那次,和从历史里点开的那次。**旁边的动作一律作用在「此刻显示的这次」上**:Compare to golden、Promote、节点 model compare、四条 Resume(整跑 / HITL 应答 / 边上下文 / 从某节点)全部读同一个来源。**Pause 与 Stop 是例外,并且例外有理由**:它们作用的是**还在跑的那个 worker**,而只有 live run 有 worker,所以它们问的本来就是另一个问题。分开之前,「我在看哪次 run」有两个答案:一个是 trace 自己算出来的,一个是「哪次 run 是活的」;于是看着旧 run 按 Resume 会去续**另一次** run,Compare to golden 量的是**另一次** run,而节点 compare 直接拒绝说「先跑一次」——明明屏幕上就摆着一次跑完的 run。
 - 决策(候选页签属于 compare 组,不属于它下面那条 trace): 一个节点的 Compare LLMs 会为每个候选各起一次单节点 side-run,读者靠**候选页签**在它们之间移动。这排页签的前提只有一句——**存在一个 compare 组**——句子里没有「有一次 live run」,所以它由 **trace 区域**渲染,live trace / 历史 trace / 运行历史列表三种主体之上各一次。此前它住在 live 那一支里,于是上面那条决策刚打开的路当场又被堵死:**从历史 run 发起的对比跑完了,却一个页签都没有**,组存在而不可达。这与 CP4 的 `Design golden` 是同一条规则的两次发作,通则已固化在 `FRONTEND_UI_SPEC.md` §2.9b。**页签本身不区分候选跑完没跑完**:side-run 一被派出去页签就在,读者可以在某个候选还空着的时候切过去看。
 - 决策(标记一个候选为当前 = 显示它,是同一个动作): 页签排上「哪个候选是当前」和 trace 区域「正在放哪条 run」必须由**同一次调用**同时写下。二者可分开写的时候它们就分开了:对比一发起,组里第一个候选的页签被标成当前,而下面的 trace 还停在**基线那条 run** 上,读者点一下这个「已经选中」的页签,屏幕才换内容——「我在看哪个候选」有了两个答案(问题台账 L2③,2026-08-21 真机走查实测)。修法不是在发起处补一句「顺便也换 trace」,那只是把两条写法凑巧对齐;而是让**只存在一个写入口**(`Workspace.tsx::showCandidate`),标记而不显示从此不可表示。它接收的候选清单由调用方传入而不是从 state 里读——发起对比的那一次,React 还没提交这批 side-run。
+- 决策(候选选的是一条 route,所以下拉里每一行必须指得出是哪一条): `Add compare LLM` 的 Endpoint
+  下拉是**执行面**——挑中的那一行就是这次候选 side-run 要跑的路由。所以它的标签规则不是本文档自己
+  的一条,而是 `01_workflows/00_settings-ux-spec.md` §2.1 那条(2026-08-21 补记「同一条规则适用于
+  任何『把 route 列出来让人挑』的界面」)在这一屏的应用:标签取自同一处投影
+  `lib/route-labels.ts::distinguishingRouteLabels`,**这里不另立一套写法**。实测起因见问题台账 L6:
+  一个模型 17 个选项、`Qiniu` 出现 7 次,选哪一行是掷骰子。
 - 测试: completed/failed runs appear; detail drawer can replay with same input; delete removes a run row;从历史点开一次 run 之后,golden diff 绑定的是它、节点 compare 发给后端的 base run 是它、Resume 续的是它(`Workspace.test.tsx` 三条,均在修复前实证会红);候选页签在**历史 trace 之上**、在**运行历史列表之上**、在 live trace 之上都出现,没有 compare 组时一个都不出现(`Panels.trace-mount.test.tsx` 四条,前两条在修复前实证会红——**打在区域上而不是组件上**,组件级的三条另在 `CompareCandidateTabs.test.tsx`)。
 - Status: history live, detail drawer orphan;被看的 run 拥有旁边动作 = live;候选页签归 compare 组 = live。
 - 归属: region `timeline`, `local-history`; capability `run-execution`.

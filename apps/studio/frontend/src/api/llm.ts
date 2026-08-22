@@ -104,6 +104,14 @@ export interface ProviderModelOption {
   endpoint_id?: string | null
   provider_label: string
   provider_kind: ProviderKind
+  /**
+   * The transport this route runs over. Present because `provider_label` does
+   * NOT identify a route — one provider name covers several base URLs and
+   * protocols, and a list showing only the name shows the same row N times
+   * (settings-ux §2.1「tooltip 列出每条 transport（URL × 协议 × 各自 6 态）」).
+   */
+  base_url?: string | null
+  protocol?: ProviderType | null
   provider_model_id: string
   model_type?: string | null
   capability_family?: string | null

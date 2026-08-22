@@ -25,7 +25,8 @@ import {
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { probeRoute, type ModelGroup, type ProviderUiState } from "@/api/llm"
+import { probeRoute, type ModelGroup, type ProviderType, type ProviderUiState } from "@/api/llm"
+import { transportLabel } from "@/lib/route-labels"
 import { copyCredentialValue } from "@/components/studio/api-keys/ProviderCard"
 import { IconTooltip } from "./IconTooltip"
 import { ThinkingBadge } from "./RoleBadges"
@@ -40,15 +41,45 @@ export interface AvailableModelProvider {
   providerModelId: string
   retryAt?: string | null
   reasonCode?: string | null
+  /** The transport this route runs over — what tells two same-named routes apart. */
+  baseUrl?: string | null
+  protocol?: ProviderType | null
+}
+
+/**
+ * One provider name in the model card, standing for every route under it.
+ *
+ * 真聚合，不是丢弃 (settings-ux §2.1): the chip is allowed to say one name for
+ * four routes, but it has to SAY it is four, and say which four. The version
+ * this replaced kept the best-sorted route and dropped its siblings silently —
+ * the named 反例 of that rule (2026-07-02: GLM 5.1 had four verified Qiniu
+ * routes and the card showed one, so nobody knew the other three existed).
+ */
+export interface AvailableModelProviderChip {
+  /** The provider name, normalized — what the members were grouped by. */
+  key: string
+  label: string
+  /**
+   * The best state among the members: the chip answers "can this model be
+   * reached through this provider", and one working route is enough for that.
+   * Which route is which state is in the tooltip, never averaged away.
+   */
+  state: ProviderUiState
+  /** Every route the chip stands for, best first. Never empty. */
+  members: AvailableModelProvider[]
 }
 
 export interface AvailableModelEntry {
   id: string
   label: string
   section: string
-  /** Active (draggable) provider rows: every ui_state except "off". */
-  providers: AvailableModelProvider[]
-  /** #35(b): off/disabled routes, surfaced in a collapsible "Deprecated" section. */
+  /** Active (draggable) provider chips: every ui_state except "off". */
+  providers: AvailableModelProviderChip[]
+  /**
+   * #35(b): off/disabled routes, surfaced in a collapsible "Deprecated" section.
+   * One row per ROUTE, not per provider name — each row carries its own
+   * re-probe button, and a route nobody can see is a route nobody can revive.
+   */
   deprecatedProviders: AvailableModelProvider[]
   thinking: boolean
 }
@@ -387,7 +418,7 @@ function ProviderLabelBadges({
   expanded,
   onNavigateToApiKeys,
 }: {
-  providers: AvailableModelProvider[]
+  providers: AvailableModelProviderChip[]
   expanded: boolean
   onNavigateToApiKeys?: () => void
 }) {
@@ -398,21 +429,24 @@ function ProviderLabelBadges({
   const visibleProviders = expanded ? providers : providers.slice(0, collapsedProviderLabelLimit)
   const hiddenProviders = expanded ? [] : providers.slice(visibleProviders.length)
   const hiddenProviderCount = hiddenProviders.length
-  const hiddenProviderState = dominantProviderState(hiddenProviders)
+  const hiddenProviderState = dominantProviderState(hiddenProviders.flatMap((chip) => chip.members))
 
   return (
     <div className="flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden">
-      {visibleProviders.map((provider) => {
-        const stateLabel = providerVisibleStateLabel(provider.state)
-        const showConfigure = provider.state === "failed" && provider.reasonCode === "missing_config"
+      {visibleProviders.map((chip) => {
+        const provider = chip.members[0]
+        const stateLabel = providerVisibleStateLabel(chip.state)
+        const showConfigure = chip.state === "failed" && provider.reasonCode === "missing_config"
         return (
-          <span key={provider.id} className="inline-flex min-w-0 max-w-full items-center gap-1">
+          <span key={chip.key} className="inline-flex min-w-0 max-w-full items-center gap-1">
+            <IconTooltip label={providerChipTooltip(chip)}>
             <Tag
-              variant={providerStateTagVariant(provider.state)}
+              variant={providerStateTagVariant(chip.state)}
               size="xs"
               data-available-model-provider-label="true"
-              data-provider-state={provider.state}
-              aria-label={providerStateAriaLabel(provider)}
+              data-provider-state={chip.state}
+              data-provider-member-count={chip.members.length}
+              aria-label={providerChipTooltip(chip)}
               className={cn(
                 "min-w-0 max-w-full shrink justify-start font-sans",
                 expanded ? "h-auto min-h-5 whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
@@ -421,7 +455,12 @@ function ProviderLabelBadges({
               {/* Narrow sidebar: the state text ellipsizes first (higher shrink),
                   then the provider name — the pill border never gets hard-clipped
                   at the card edge. */}
-              <span className={expanded ? undefined : "min-w-0 truncate"}>{provider.label}</span>
+              <span className={expanded ? undefined : "min-w-0 truncate"}>{chip.label}</span>
+              {chip.members.length > 1 ? (
+                <span data-provider-member-count-text="true" className="text-[0.5625rem] font-semibold opacity-80">
+                  ×{chip.members.length}
+                </span>
+              ) : null}
               {stateLabel ? (
                 <span
                   data-provider-state-text="true"
@@ -434,6 +473,7 @@ function ProviderLabelBadges({
                 </span>
               ) : null}
             </Tag>
+            </IconTooltip>
             {showConfigure ? (
               <Button
                 type="button"
@@ -441,7 +481,7 @@ function ProviderLabelBadges({
                 size="xs"
                 data-available-model-provider-configure="true"
                 data-provider-reason-code={provider.reasonCode ?? undefined}
-                aria-label={`Configure ${provider.label} in API Keys`}
+                aria-label={`Configure ${chip.label} in API Keys`}
                 className="h-5 gap-1 px-1.5 text-[0.5625rem]"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
@@ -558,6 +598,8 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
         .map((providerModel) => ({
           id: providerModel.route_id,
           label: providerModel.provider_label,
+          baseUrl: providerModel.base_url,
+          protocol: providerModel.protocol,
           state: providerModel.ui_state,
           detail: providerModel.ui_detail,
           providerModelId: providerModel.provider_model_id,
@@ -571,8 +613,8 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
         section: group.section_label,
         // #35(b): off/disabled routes move into the collapsible "Deprecated"
         // section; all other 6-state routes stay in the draggable provider row.
-        providers: collapseDuplicateProviderLabels(allProviders.filter((provider) => provider.state !== "off")),
-        deprecatedProviders: collapseDuplicateProviderLabels(allProviders.filter((provider) => provider.state === "off")),
+        providers: providerChips(allProviders.filter((provider) => provider.state !== "off")),
+        deprecatedProviders: allProviders.filter((provider) => provider.state === "off"),
         thinking: group.capability_summary.thinking === "supported" ||
           group.capability_summary.thinking === "mixed" ||
           group.provider_models.some((providerModel) => Boolean(
@@ -596,16 +638,19 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
     .map(([section, sectionModels]) => ({ section, models: sectionModels }))
 }
 
-function collapseDuplicateProviderLabels(providers: AvailableModelProvider[]): AvailableModelProvider[] {
+/** Group the routes by provider name, keeping every one of them. */
+export function providerChips(providers: AvailableModelProvider[]): AvailableModelProviderChip[] {
   const byLabel = new Map<string, AvailableModelProvider[]>()
   for (const provider of providers) {
     const key = providerDisplayKey(provider.label, provider.id)
     byLabel.set(key, [...(byLabel.get(key) ?? []), provider])
   }
-  return [...byLabel.values()]
-    .map((duplicates) => [...duplicates].sort(compareAvailableModelProviders)[0])
-    .filter((provider): provider is AvailableModelProvider => Boolean(provider))
-    .sort(compareAvailableModelProviders)
+  return [...byLabel.entries()]
+    .map(([key, members]) => {
+      const sorted = [...members].sort(compareAvailableModelProviders)
+      return { key, label: sorted[0].label, state: sorted[0].state, members: sorted }
+    })
+    .sort((left, right) => compareAvailableModelProviders(left.members[0], right.members[0]))
 }
 
 export function filterAvailableModelGroups(
@@ -625,7 +670,10 @@ export function filterAvailableModelGroups(
         sectionMatches ||
         matchesSearchText(model.label, normalizedQuery, compactQuery, queryTokens) ||
         matchesSearchText(model.id, normalizedQuery, compactQuery, queryTokens) ||
-        [...model.providers, ...model.deprecatedProviders].some((provider) => (
+        [
+          ...model.providers.flatMap((chip) => chip.members),
+          ...model.deprecatedProviders,
+        ].some((provider) => (
           matchesSearchText(provider.label, normalizedQuery, compactQuery, queryTokens) ||
           matchesSearchText(provider.id, normalizedQuery, compactQuery, queryTokens) ||
           matchesSearchText(provider.providerModelId, normalizedQuery, compactQuery, queryTokens)
@@ -721,6 +769,23 @@ function providerStateAriaLabel(provider: AvailableModelProvider): string {
   return provider.state === "ready"
     ? `${provider.label} available`
     : `${provider.label} ${providerStateLabel(provider.state)}`
+}
+
+/**
+ * What one chip says when you ask it: the name, how many routes, and each of
+ * them by transport and state.
+ *
+ * §2.1 asks for exactly this list —「tooltip 列出每条 transport（URL × 协议 ×
+ * 各自 6 态）」— because the count alone raises the question it does not answer.
+ */
+function providerChipTooltip(chip: AvailableModelProviderChip): string {
+  if (chip.members.length === 1) return providerStateAriaLabel(chip.members[0])
+  const head = `${chip.label} — ${chip.members.length} endpoints`
+  const lines = chip.members.map((member) => {
+    const transport = transportLabel(member.protocol, member.baseUrl ?? member.id)
+    return `${transport}: ${providerStateLabel(member.state)}`
+  })
+  return [head, ...lines].join("\n")
 }
 
 function dominantProviderState(providers: AvailableModelProvider[]): ProviderUiState {

@@ -3142,6 +3142,12 @@ def _provider_model_option(
         "endpoint_id": endpoint.endpoint_id,
         "provider_label": endpoint.display_name,
         "provider_kind": endpoint.provider_kind,
+        # The transport, because the label alone does not identify a route: one
+        # provider name routinely covers several base URLs and protocols, and a
+        # surface listing them by name shows the same row N times (settings-ux
+        # §2.1「tooltip 列出每条 transport（URL × 协议 × 各自 6 态）」).
+        "base_url": endpoint.base_url,
+        "protocol": endpoint.protocol,
         "provider_model_id": route.provider_model_id,
         "model_type": model_type,
         "capability_family": capability_family,

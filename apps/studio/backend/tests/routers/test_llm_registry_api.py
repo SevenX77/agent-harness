@@ -844,6 +844,7 @@ def test_registry_response_enriches_existing_official_route_capabilities(
         "source": "provider_doc",
         "observed_at": None,
         "message": None,
+        "message_code": None,
     }
     assert "https://docs.anthropic.com/en/docs/build-with-claude/vision" in claude_caps[
         "input_modalities_source_urls"
@@ -1432,6 +1433,7 @@ def test_registry_model_group_exposes_thinking_capability_from_verified_profile(
         "source": "probed_verified",
         "observed_at": None,
         "message": None,
+        "message_code": None,
     }
 
 

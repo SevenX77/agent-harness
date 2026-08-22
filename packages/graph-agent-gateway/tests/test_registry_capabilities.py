@@ -253,22 +253,40 @@ def test_one_observed_tool_call_verifies_the_tool_protocol() -> None:
     assert measured["tool_protocol"].source == "probed_verified"
 
 
-def test_a_closed_loop_says_so_in_the_message_it_leaves_behind() -> None:
+def test_a_closed_loop_says_so_in_a_code_a_reader_can_be_shown() -> None:
     """Both rungs verify the protocol; only one of them saw the route come back.
 
     The value cannot carry the difference — the capability is a yes/no about the
-    protocol — so the message is the only place the stronger observation can be
-    recorded, and a reader deciding whether to trust this route with an agent
-    phase is exactly who needs it.
+    protocol — but a prose message cannot carry it to a READER: whoever renders
+    this capability would have to substring-match an English sentence, and would
+    then show that English to someone who asked for another language. So the
+    distinction rides a `message_code`, the same shape the studio error contract
+    already uses (`error_code` decides what a reader is shown, `message` is for
+    logs). This is also what the ladder was for: `ToolLoopReach` exists so that
+    "how far did it get" is a value, not a turn of phrase.
     """
     from graph_agent_gateway.registry import measured_tool_calling
 
-    called = measured_tool_calling(closed_the_loop=False)["tool_protocol"].message
-    closed = measured_tool_calling(closed_the_loop=True)["tool_protocol"].message
+    called = measured_tool_calling(closed_the_loop=False)["tool_protocol"]
+    closed = measured_tool_calling(closed_the_loop=True)["tool_protocol"]
 
-    assert called != closed
-    assert called is not None
-    assert closed is not None
+    assert called.message_code == "tool_loop_called_the_tool"
+    assert closed.message_code == "tool_loop_closed_the_loop"
+    # The message stays, and stays different — it is what a log reader sees.
+    assert called.message != closed.message
+    assert called.message is not None
+    assert closed.message is not None
+
+
+def test_a_capability_nobody_measured_carries_no_code() -> None:
+    """`message_code` names a specific observation, so it is absent by default.
+
+    A code that defaulted to something would make every documented capability
+    claim to be an observation nobody made.
+    """
+    from graph_agent_gateway.registry import CapabilityValue
+
+    assert CapabilityValue(value=True, source="provider_doc").message_code is None
 
 
 def _profile(**overrides: object) -> object:

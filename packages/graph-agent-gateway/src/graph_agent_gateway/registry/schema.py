@@ -76,7 +76,20 @@ def _validate_slug(value: str, field_name: str) -> str:
 
 
 class CapabilityValue(BaseModel):
-    """One normalized capability value plus source metadata."""
+    """One normalized capability value plus source metadata.
+
+    `message` is prose for whoever reads logs. `message_code` is the same fact
+    with an identity: a closed-vocabulary token the host maps to whatever it
+    shows a reader, in whatever language that reader asked for. Splitting them
+    is the shape the studio error contract already uses (`error_code` decides
+    what is shown, `message` explains it to an operator) — without it a host
+    that wants to display the finer observation has to substring-match English
+    prose, and then show that English to everyone.
+
+    It is optional and defaults to absent because it names a SPECIFIC
+    observation. A default would make every capability read off a provider
+    document claim to be something somebody watched happen.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -84,6 +97,7 @@ class CapabilityValue(BaseModel):
     source: CapabilitySource
     observed_at: str | None = None
     message: str | None = None
+    message_code: str | None = None
 
 
 class FieldSource(BaseModel):

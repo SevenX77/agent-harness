@@ -380,7 +380,11 @@
         "maxOutputNotListed": "最大输出：未列出",
         "routeTestFailed": "路由测试失败：{{message}}",
         "routeTestFailedBare": "路由测试失败",
-        "route": "路由：{{id}}"
+        "route": "路由：{{id}}",
+        "toolsClosedTheLoop": "工具：调用了一次，并带着结果回来了",
+        "toolsCalledTheTool": "工具：让它用时它调用了",
+        "toolsMeasured": "工具：在这条路由上实测过",
+        "toolsDeclared": "工具：供应商列出的，未实测"
       },
       "deleteConfirm": {
         "title": "删除 {{displayName}}？",

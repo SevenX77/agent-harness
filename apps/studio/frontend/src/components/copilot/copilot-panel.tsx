@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import ReactMarkdown from 'react-markdown'
@@ -52,6 +52,9 @@ import { RolePicker, copilotRoleOptions } from './role-picker'
 import { loadAppSettings } from '../../hooks/useAppSettings'
 import { startCliTerminalSession, type CliTerminalSession } from './cli-terminal-session'
 import { SessionTabs } from './session-tabs'
+import { MentionComposer, type MentionComposerHandle } from './composer/MentionComposer'
+import { EMPTY_COMPOSER_VALUE, type ComposerValue } from './composer/composer-document'
+import { buildMentionCandidates, type MentionSources } from './composer/mention-candidates'
 import { ToolCallBubble } from './tool-call-bubble'
 import { cn } from '@/lib/utils'
 import { formatProcessedDuration, buildAssistantView, type TranscriptSegment } from './transcript'
@@ -301,15 +304,14 @@ interface CopilotPanelProps {
   // ah-orchestration-design.md §10 D3 — collapsing is a detach, not a shutdown).
   cliSession?: CliTerminalSession | null
   onCliSessionChange?: (session: CliTerminalSession | null) => void
-}
-
-/** F6: Enter sends, Shift+Enter breaks the line, and an IME composition never sends. */
-export function isComposerSendKey(event: {
-  key: string
-  shiftKey: boolean
-  nativeEvent: { isComposing: boolean }
-}): boolean {
-  return event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing
+  /**
+   * Everything the surrounding screens can name, for the `@` menu (F4 ①).
+   *
+   * Handed DOWN rather than fetched here: F4 ③ forbids the composer from
+   * reaching for context on its own, so the set of nameable objects has to be
+   * exactly what the workspace is already showing.
+   */
+  mentionSources?: MentionSources | null
 }
 
 export function copilotBackendErrorMessage(error: unknown, fallback: string): string {
@@ -492,9 +494,18 @@ export function CopilotPanel({
   onCollapse,
   cliSession = null,
   onCliSessionChange,
+  mentionSources = null,
 }: CopilotPanelProps) {
   const { t } = useTranslation('copilot')
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState<ComposerValue>(EMPTY_COMPOSER_VALUE)
+  const composerRef = useRef<MentionComposerHandle | null>(null)
+  const mentionCandidates = useMemo(
+    () =>
+      buildMentionCandidates(
+        mentionSources ?? { filePaths: [], phases: [], diagnostics: [], trace: null },
+      ),
+    [mentionSources],
+  )
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
   const [selectedRouteId, setSelectedRouteId] = useState('')
@@ -542,7 +553,7 @@ export function CopilotPanel({
     }
     try {
       const refs = await prepareCopilotJudgeContext(skillId, judgeRefs)
-      setDraft(buildCopilotJudgeDraft(refs))
+      composerRef.current?.setText(buildCopilotJudgeDraft(refs))
       setDraftJudgeContext(refs)
       onJudgePrepared?.(refs)
     } catch (error) {
@@ -551,13 +562,13 @@ export function CopilotPanel({
   }
 
   function handleJudgePrepared(refs: CopilotJudgeResponse) {
-    setDraft(buildCopilotJudgeDraft(refs))
+    composerRef.current?.setText(buildCopilotJudgeDraft(refs))
     setDraftJudgeContext(refs)
     onJudgePrepared?.(refs)
   }
 
   useEffect(() => {
-    setDraftJudgeContext((current) => nextDraftJudgeContext(draft, current, { skillId, view, judgeRefs }))
+    setDraftJudgeContext((current) => nextDraftJudgeContext(draft.text, current, { skillId, view, judgeRefs }))
   }, [draft, skillId, view, judgeRefs])
 
   // E3 entry①: "开单个 copilot chat" — one node, one chat. A new session rather
@@ -568,7 +579,9 @@ export function CopilotPanel({
       return
     }
     copilot.newSession()
-    setDraft(buildGoldenDesignDraft({ id: goldenDesignRequest.nodeId, label: goldenDesignRequest.label }))
+    composerRef.current?.setText(
+      buildGoldenDesignDraft({ id: goldenDesignRequest.nodeId, label: goldenDesignRequest.label }),
+    )
     onGoldenDesignRequestHandled?.()
   }, [goldenDesignRequest, copilot, onGoldenDesignRequestHandled])
 
@@ -830,10 +843,10 @@ export function CopilotPanel({
   }
 
   async function sendDraft() {
-    if (!draft.trim() || copilot.connectionStatus !== 'open') {
+    if (!draft.text.trim() || copilot.connectionStatus !== 'open') {
       return
     }
-    const activeJudgeContext = nextDraftJudgeContext(draft, draftJudgeContext, { skillId, view, judgeRefs })
+    const activeJudgeContext = nextDraftJudgeContext(draft.text, draftJudgeContext, { skillId, view, judgeRefs })
     let roleKey = selectedOption?.role ?? null
     if (selectedOption && rolesData) {
       const resolution = resolveCopilotSendRole(rolesData, selectedOption, registry?.model_groups ?? [])
@@ -851,12 +864,15 @@ export function CopilotPanel({
         }
       }
     }
-    if (copilot.sendMessage(draft, {
+    if (copilot.sendMessage(draft.text, {
       modelOverride: selectedRouteId || defaultRouteId || null,
       role: roleKey,
       judgeContext: activeJudgeContext,
+      // F4 ②: only what the user picked in THIS composer rides along.
+      mentions: draft.mentions,
     })) {
-      setDraft('')
+      composerRef.current?.clear()
+      setDraft(EMPTY_COMPOSER_VALUE)
       setDraftJudgeContext(null)
     }
   }
@@ -866,13 +882,6 @@ export function CopilotPanel({
     void sendDraft()
   }
 
-  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!isComposerSendKey(event)) {
-      return
-    }
-    event.preventDefault()
-    void sendDraft()
-  }
 
   return (
     <aside className="studio-copilot-panel studio-canvas-panel z-copilot flex h-full min-h-0 flex-col border-l text-foreground">
@@ -1124,7 +1133,7 @@ export function CopilotPanel({
               <div className="mt-3 space-y-2">
                 <button
                   type="button"
-                  onClick={() => setDraft(t('empty.describeSkillDraft'))}
+                  onClick={() => composerRef.current?.setText(t('empty.describeSkillDraft'))}
                   className="studio-canvas-input-surface w-full rounded-md border px-2 py-1.5 text-start text-xs font-medium text-foreground hover:bg-muted"
                 >
                   {t('empty.describeSkill')}
@@ -1136,7 +1145,7 @@ export function CopilotPanel({
                       <button
                         key={template.id}
                         type="button"
-                        onClick={() => setDraft(t('empty.templateDraft', { template: template.name }))}
+                        onClick={() => composerRef.current?.setText(t('empty.templateDraft', { template: template.name }))}
                         className="studio-canvas-input-surface rounded-md border px-2 py-1 text-xs text-foreground hover:bg-muted"
                       >
                         {template.name}
@@ -1173,17 +1182,19 @@ export function CopilotPanel({
 
       <form onSubmit={submit} className="shrink-0 space-y-1.5 px-4 pb-4 pt-2">
         <div className="studio-copilot-input studio-canvas-input-surface flex flex-col gap-1 rounded-md border px-2.5 py-2 transition-colors focus-within:[border-color:var(--studio-canvas-accent-muted)]">
-          <textarea
-            value={draft}
-            onChange={(event) => {
-              const nextDraft = event.target.value
-              setDraft(nextDraft)
-              setDraftJudgeContext((current) => nextDraftJudgeContext(nextDraft, current, { skillId, view, judgeRefs }))
-            }}
-            onKeyDown={handleComposerKeyDown}
-            rows={3}
-            className="min-h-[60px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
+          <MentionComposer
+            ref={composerRef}
+            candidates={mentionCandidates}
             placeholder={t('composer.placeholder')}
+            onChange={(value) => {
+              setDraft(value)
+              setDraftJudgeContext((current) =>
+                nextDraftJudgeContext(value.text, current, { skillId, view, judgeRefs }),
+              )
+            }}
+            onSend={() => {
+              void sendDraft()
+            }}
           />
           {/* F6: inside the bordered box only the send action lives (stop joins it
               with F7-③ interrupt); every settings control sits BELOW the box. */}
@@ -1204,21 +1215,21 @@ export function CopilotPanel({
             ) : (
               <button
                 type="submit"
-                disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
+                disabled={!draft.text.trim() || copilot.connectionStatus !== 'open'}
                 aria-label={t('composer.send')}
                 className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-                  draft.trim() && copilot.connectionStatus === 'open'
+                  draft.text.trim() && copilot.connectionStatus === 'open'
                     ? 'bg-[color:var(--studio-canvas-accent)] text-primary-foreground hover:bg-primary/80'
                     : 'bg-secondary text-secondary-foreground'
                 }`}
               >
-                <ArrowUp className={`size-3.5 ${!draft.trim() ? 'text-muted-foreground' : ''}`} />
+                <ArrowUp className={`size-3.5 ${!draft.text.trim() ? 'text-muted-foreground' : ''}`} />
               </button>
             )}
           </div>
         </div>
-        {/* F7 context actions (attach / @mention) join the left side of this row
-            once they are functional — no dead placeholders. */}
+        {/* F4 ① now lives INSIDE the box (type `@`); the attach entry joins the
+            left side of this row once it is functional — no dead placeholders. */}
         <div className="flex items-center justify-end gap-0.5">
           {/* R7-C (PM 2026-07-02): the role anchor is ALWAYS present. While config
               loads it shows the fixed default (opus4.8) + a spinner (the loading

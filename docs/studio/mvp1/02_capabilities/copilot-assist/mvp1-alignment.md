@@ -45,7 +45,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **机制**：① 显式 @ → 输入框弹 MentionMenu(files/phases/dots/errors/trace，键盘导航，模糊过滤 <50ms)；② 只有用户在 composer 中选择/保留的 @mention 随本次 Copilot 消息发送；③ 禁止点画布节点/dot/文件后自动把对象送给 Copilot，禁止隐式 view/选中/dirty buffer 后台同步；④ 后端 resolver 只处理当前 WS 消息 payload 中的显式 mentions/attachments/judge context；⑤ 发送后**第一条**回显本轮实际注入清单。
 - **决策+动机**：**composer = 输入框内联彩色 pill**(需 tiptap 类富文本，react-mentions overlay 渲染不了真 DOM pill)；**dot=黑板**(对齐 trace 走查，取代旧 @edge_context 边语义)；**上下文回显插在 agent 开跑前、第一条**(可折叠、点开看实际内容/文档，反 hidden prompt magic，与 F1"不省略"一套)。
 - **原话**：「输入框内联彩色 pill」/「能否插入在 agent 开始任务的前面... user输入完按发送后, 第一条弹出的就是这个信息, 可折叠, 可查看具体内容或文档」
-- **status**：线上契约与后端已 live——payload 带 `mentions[]` / `attachments[]`,resolver 按 COPILOT_ASSIST-8 分「读正文」与「只给引用」两类,⑤ 的回显逐条说明每一条实际变成了什么;**composer 仍是空壳**(占位符 + disabled "Add context"),① 的 MentionMenu、内联 pill、附图入口尚未实现 = target(问题台账 CP1)。
+- **status**：线上契约、后端 resolver 与 composer 的 ①②③ 均已 live——composer 是一台 ProseMirror(tiptap)编辑器,键入 `@` 弹 MentionMenu(五类、模糊过滤、键盘导航),选中落成一枚带 `(kind, ref, label)` 的原子 pill,发送时 pill 变成正文里的 `@label` 加 `mentions[]` 里的一条身份(COPILOT_ASSIST-10 ①);resolver 按 COPILOT_ASSIST-8 分「读正文」与「只给引用」两类,⑤ 的回显逐条说明每一条实际变成了什么。**仍欠**:附图入口(`attachments[]` 的契约与后端已 live,composer 里还没有那个入口)= target(问题台账 CP1)。
 - **测试点**：输入 `@plan`→菜单过滤高亮、选中成内联 pill 可删；点击画布节点/dot/文件本身不触发后端 Copilot 请求；发送消息时 payload 只包含 composer 内显式 mentions；发送后第一条=注入清单点开看内容；大工程菜单 <50ms / 超 150K 截断告警。
 - **归属**：region [[copilot]](菜单/pill/回显)；可提名对象来自 [[canvas]]/[[editor]]/[[timeline]]，但提名只由 composer 内显式选择触发。
 - **决策 COPILOT_ASSIST-8(一次提名是用户挑出来的一个东西,不是一段被猜出来的上下文;2026-08-20 立,问题台账 CP1)**:
@@ -80,6 +80,53 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
     scheme+path 分法——kind 决定 ref 该怎么解释,于是加一类可提名对象不需要改解析规则;
     **拒**了真的用 URI 字符串(`file://…`),因为那要求每一类都能编码进一套转义规则,而
     `dot` 的键、`trace` 的事件下标本来就不是路径,硬套只会让前后端各写一份易错的拆分。
+- **决策 COPILOT_ASSIST-10(提名在屏幕上、在正文里、在菜单里各长什么样;2026-08-21 立,问题台账 CP1)**:
+  COPILOT_ASSIST-8 定死了一次提名在**线上**的形状 `(kind, ref, label)`,没说它在**屏幕上**
+  和在 `user_message` **正文里**长什么样。这条把剩下的三处定死。
+  - **① 一枚 pill 在正文里就是 `@<label>`,在它原来的位置**。`mentions[]` 携带身份,
+    `user_message` 携带的是**一句话**——模型读到的必须仍然是一句通顺的话。把 pill 从正文里
+    抹掉,「看一下 @plan 再改」会变成「看一下  再改」,模型只能去 `<mentions>` 块里猜它
+    原本指着句子的哪个位置。用 `@label` 而不是 `ref`,是因为**用户当时看见的就是 label**:
+    正文、屏幕、⑤ 的回显三处说的是同一个字。身份仍然只走 `mentions[]`——正文里那个 `@label`
+    不定位任何东西,这正是 COPILOT_ASSIST-8「label 只回显不定位」在正文这一侧的同一条规矩。
+  - **② 同一个 `(kind, ref)` 提两次,只读一次正文;正文里两个 `@label` 都留着**。
+    去重发生在**后端 resolver**,因为 150K 的注入预算是后端的规矩(`MENTION_CONTENT_BUDGET`,
+    一轮共用一份)——同一份文件读两遍不多给出任何信息,却可能把第二条提名挤出预算。
+    放在前端去重会让这条规矩依赖客户端守规矩,而预算的 owner 不是客户端(「Fail fast,
+    在边界校验」)。**这不是替用户决定上下文是什么**:被合并的两条指的是同一个对象,
+    不存在「挑了哪一个」的判断;⑤ 的回显仍逐条说明,合并了就说合并了。
+  - **③ 菜单按 ① 列的顺序分组:file → phase → dot → error → trace,每组至多 8 条,
+    被截断的组在组头写明还有多少条没显示**。分组而不是按分数混排,是因为五类是 F4 立的
+    词表,用户想找一个相位时不该在文件里翻;每组设上限,是因为一个大工程的文件数会把另外
+    四类挤出屏幕,而 F4 的「大工程菜单 <50ms」本来就要求菜单不能无限长。**截断必须说出来**:
+    一个没说自己被截断的清单,会让用户以为那个对象不存在——这与 F13「一个看不出理由的命中,
+    比没有命中更坏」是同一条:**屏幕不能让人得出错误结论,哪怕它显示的每一条都是对的**。
+  - **④ composer 是一台 ProseMirror 编辑器(tiptap 是它的 React 绑定)**。F4 已经判定需要
+    「tiptap 类富文本」,这条记下**借了什么、拒了什么**:
+    **借**的是 ProseMirror 的两样东西——一是 `atom: true` 的行内节点,它让一枚 pill 在
+    退格时**整枚消失**而不是掉一个字母(自己用 `contenteditable` 搭的话,这一条要靠手写
+    选区逻辑去猜);二是它对**输入法组合态**的处理(`DOMObserver` 在 `compositionstart`
+    与 `compositionend` 之间挂起 DOM 观察),而本产品的主力输入是中文——手搓 contenteditable
+    在输入法上翻车是这类编辑器最常见的死法,那正是「凭直觉发明」。
+    **拒**的是 tiptap 的 `StarterKit` 与官方 `@tiptap/extension-mention`:composer 的文档
+    只有「一段文字 + 若干原子」,没有标题、列表、加粗,装 StarterKit 等于为用不上的 schema
+    付体积;而官方 mention 扩展的属性是 `(id, label)` 两段,套不进 COPILOT_ASSIST-8 的
+    `(kind, ref, label)` 三段——改造它的 schema 比自己声明一个 40 行的 Node 更绕。
+    保留的第三方件是 `@tiptap/suggestion`:它负责「`@` 从哪个位置开始、查询串到哪结束、
+    这个位置在后续 transaction 里漂到哪去」,这套位置跟踪是真正难写对的部分。
+  - **⑤「彩色 pill」= 一眼看出这不是打出来的字,不是给五个 kind 配五种色**。
+    F4 的原话是「输入框内联彩色 pill」,它要解决的问题是**pill 与正文文字混在一起分不开**;
+    而把 kind 编进色相会撞上 `FRONTEND_UI_SPEC.md` §2.2 立的那条硬规则——
+    **颜色只表达严重度,不表达分类**,判据是「把一屏截图去饱和,信息不该丢失」。
+    五个色相扛五个 kind,去饱和之后 kind 就没了,直接判负。那条规则不是审美偏好,
+    它带着实证:2026-08-08 的 Trace 面板 40 条事件里 39 条带彩色胶囊,颜色的信噪比归零,
+    真正出错的那一条反而不突出。
+    所以 pill 只有**一种**呈现(`bg-primary/10` 淡底 + `text-foreground`,§2.2 认可的
+    「承载文字的主色面」写法),kind 按 §2.2 指定的方式用**文字**承载:菜单在**挑选那一刻**
+    就按 kind 分了组,label 本身也自带区分度(`plan` / `plan.outline` / `GRAPH.md`);
+    唯一会歧义的情形——同名的一个文件和一个相位——由 pill 的 hover title `kind · ref` 消歧。
+    **设计源这条措辞据此订正**:两份文档只有一份能对,而针对颜色语义、带判据和实证的那一份
+    更专门,所以 §2.2 赢,F4 的「彩色」按其本意读作「与正文可区分」。
 
 ### F5 Copilot 自写 + diff 气泡 + Bash 审批
 - **机制**：MVP1 明确允许 Copilot SDK `Read/Write/Edit` 在当前 workspace/cwd/add_dirs 范围内自行读写文件；Studio 不要求把 Write/Edit 拦成 Rust 写入或 `patch_proposed` 才算合规。工具事件仍要回显，能拿到前后内容时展示 diff 气泡 / Open Compare；写后 compile/predict/run 使用磁盘上的最新结果。Bash 命令仍逐条审批卡(human-in-the-loop)，因为 Bash 可执行任意 shell 与重定向写入。
@@ -106,7 +153,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
   实现上后端**按会话记住每条已结束审批的结束原因**(参照 supervisor 记录子进程退出原因:
   「没了」和「因为超时没了」不是同一个答案),生命周期与会话同长,`_cleanup_pending_tool_approvals`
   清挂起时一并清掉——所以它不会无限增长,而一个已被清掉的会话里的审批号,本来就正是第③种。
-- **决策 COPILOT_ASSIST-8(挂起自己过期时,要在它那张卡上说出来;2026-08-20 立,问题台账 CP7)**：
+- **决策 COPILOT_ASSIST-9(挂起自己过期时,要在它那张卡上说出来;2026-08-20 立,问题台账 CP7)**：
   一条挂起审批到时无人应答,后端**停任务、保会话**(`can_use_tool` 回 `interrupt=True`)。
   这里**刻意不折算成「用户拒绝」**:把一个没有人做过的拒绝喂给模型,它会带着一个错误
   信号继续往下跑。而这件事**必须回到那张卡上**:过期事件要**指名 `tool_use_id`**,
@@ -121,7 +168,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
   「Waiting for approval.」、按钮照样可点,而背后的任务早就停了。这正是仓规
   「事件说不清是哪份数据变了,就去修事件契约」的原样场景。
   **与 COPILOT_ASSIST-7 的分工**:两者是同一条挂起生命周期的两半 —— 7 管**用户来问**
-  的时候(点了一张陈旧的卡)后端要如实答出是哪一种结局;8 管**没有人问**的时候后端要
+  的时候(点了一张陈旧的卡)后端要如实答出是哪一种结局;9 管**没有人问**的时候后端要
   主动说,而且要说给具体的那一张卡听。
 - **测试点**：Write/Edit 可在 workspace 内直接修改文件且不触发 D12 违规报警；改后 predict/run 读取最新文件；工具事件展示文件名与 diff/summary（可取到前后内容时）；Bash 审批拒绝后不执行；挂起超时后那张卡自报 `timed_out`、按钮消失、并说明任务已停。
 - **归属**：Write/Edit 自写归 region [[copilot]] / `copilot-assist`；Studio 自有写入仍归 platform [[native-fs]]。
@@ -164,6 +211,14 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 > **框架决策(PM 原话)**：「1.现在是mvp1. 2.做全」—— chat-shell（@mention/pill/diff/Bash 审批）+ brain 全纳入，不再 deferred；copilot 一等能力、全功能不延后。
 
 ## 5. 决策 + 动机
+
+> **编号更正(2026-08-21)**:`COPILOT_ASSIST-8` 一度同时指两条决议——CP1 的「一次提名的
+> 身份是 `(kind, ref)`」与 CP7 的「挂起自己过期要落到那张卡上」,两条都在 2026-08-20 由
+> 并行的两个任务各自认领了同一个号。一个 ID 指着两样东西就不成其为 ID,所以重编:
+> **8 留给提名身份**(它被 `app/models/copilot.py`、`services/copilot_context.py`、
+> `types/copilot.ts` 等处按名引用),**挂起过期改为 9**,本轮新立的提名呈现改为 **10**。
+> 编号是标识符不是时间轴,所以 9 早于 10 成立并不矛盾——各条自己写着成立日期。
+
 | ID | 决策 | 动机 |
 |---|---|---|
 | COPILOT_ASSIST-1 | ThinkingBlock | 单元 `copilot-session-persistence`；**为什么**：全流式消息(含 ThinkingBlock)要完整翻译渲染、不省略 |
@@ -172,7 +227,9 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 | COPILOT_ASSIST-4 | SDK 测试 | 单元 `copilot-sdk-test-parity`；**为什么**：copilot test 必须走真实 `ClaudeSDKClient`，不能用 AsyncAnthropic 假路径 |
 | COPILOT_ASSIST-6 | 决议归消息记录所有 | 单元 `copilot-session-persistence`；**为什么**：决议存在卡片 `useState` 里,会话落盘存的却是「刚到时的样子」,重挂载即复活成未决议 |
 | COPILOT_ASSIST-7 | 挂起消失要分三种结局 | 单元 `copilot-session-persistence`；**为什么**：一个 `approval_not_found` 同时指「已决议」「超时」「会话没了」,前端还断言成 expired |
-| COPILOT_ASSIST-8 | 挂起自己过期要落到那张卡上 | 单元 `copilot-session-persistence`；**为什么**：超时只发一条泛型 `error`,说不出是哪一张卡,于是每张卡都继续停在「Waiting for approval.」、按钮照样可点,而背后的任务早已停了 |
+| COPILOT_ASSIST-9 | 挂起自己过期要落到那张卡上 | 单元 `copilot-session-persistence`；**为什么**：超时只发一条泛型 `error`,说不出是哪一张卡,于是每张卡都继续停在「Waiting for approval.」、按钮照样可点,而背后的任务早已停了 |
+| COPILOT_ASSIST-8 | 一次提名的身份是 `(kind, ref)`,由前端给出 | 单元 `copilot-assist` F4；**为什么**：让后端拿显示名反查,等于把「用户挑了哪一个」变成一次模糊匹配,正是 F4 ③ 禁的 |
+| COPILOT_ASSIST-10 | 提名在屏幕上/正文里/菜单里各长什么样 | 单元 `copilot-assist` F4；**为什么**：8 只定死了它在线上的形状,没说 pill 在 `user_message` 里留下什么、同一个对象提两次算几次、菜单装不下时怎么说 |
 | COPILOT_ASSIST-5 | 会话身份契约（2026-08-15 用户裁决） | 单元 `copilot-session-persistence`；**为什么**：每个前端会话标签对应一条**独立的后端 SDK 对话**，会话身份必须显式进契约——此前 New chat 只换前端视图，报文无 session 标识，后端按 skill 只存一条 SDK 对话，生成中新建标签发的消息被注入正在跑的对话（2026-08-15 实测缺陷）。目标契约：① ws 报文必带 `session_id`（前端标签的 session id，缺失即边界拒绝）；② 后端 SDK client 缓存键 = (skill, **session**, model, provider, credential, workspace)，不同标签绝不共享对话；③ 流式事件按**发起查询的会话**归属渲染，与"当前激活标签"无关，切标签不串流；④ 关闭标签经 `POST /api/skills/{skill_id}/copilot/session-close` 结束对应后端 client（每 client 一个 CLI 子进程，不关则漏资源）；⑤ ws 断连仍重置该 skill 全部会话、一条连接内查询仍串行（单活跃查询不变式不变，审批/中断继续按 skill 键） |
 
 ## 6. 测试关键点

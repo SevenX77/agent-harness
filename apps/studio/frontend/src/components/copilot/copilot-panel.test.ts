@@ -13,9 +13,9 @@ import {
   codeAssistantPendingPhase,
   copilotBackendErrorMessage,
   CopilotPanel,
-  isComposerSendKey,
   nextDraftJudgeContext,
 } from './copilot-panel'
+import { isComposerSendKey } from './composer/composer-keys'
 import { BACKEND_UNAVAILABLE_MESSAGE } from '@/utils/errors'
 
 const mocks = vi.hoisted(() => ({
@@ -119,21 +119,44 @@ vi.mock('sonner', () => ({
 
 describe('isComposerSendKey', () => {
   it('sends on plain Enter only', () => {
-    expect(isComposerSendKey({ key: 'Enter', shiftKey: false, nativeEvent: { isComposing: false } })).toBe(true)
+    expect(isComposerSendKey({ key: 'Enter', shiftKey: false, isComposing: false })).toBe(true)
   })
 
   it('keeps Shift+Enter as a line break', () => {
-    expect(isComposerSendKey({ key: 'Enter', shiftKey: true, nativeEvent: { isComposing: false } })).toBe(false)
+    expect(isComposerSendKey({ key: 'Enter', shiftKey: true, isComposing: false })).toBe(false)
   })
 
   it('never sends while an IME composition is active', () => {
-    expect(isComposerSendKey({ key: 'Enter', shiftKey: false, nativeEvent: { isComposing: true } })).toBe(false)
+    expect(isComposerSendKey({ key: 'Enter', shiftKey: false, isComposing: true })).toBe(false)
   })
 
   it('ignores other keys', () => {
-    expect(isComposerSendKey({ key: 'a', shiftKey: false, nativeEvent: { isComposing: false } })).toBe(false)
+    expect(isComposerSendKey({ key: 'a', shiftKey: false, isComposing: false })).toBe(false)
   })
 })
+
+
+/** The composer, stubbed down to the two callbacks the panel talks to.
+ *
+ * What the real editor does with a pick is covered next door
+ * (`composer/MentionComposer.test.tsx`); what is only visible HERE is whether
+ * the panel carries the picked objects into the message it sends.
+ */
+const composerSeam = vi.hoisted(() => ({
+  onChange: null as ((value: { text: string; mentions: unknown[] }) => void) | null,
+  onSend: null as (() => void) | null,
+}))
+
+vi.mock('./composer/MentionComposer', () => ({
+  MentionComposer: (props: {
+    onChange: (value: { text: string; mentions: unknown[] }) => void
+    onSend: () => void
+  }) => {
+    composerSeam.onChange = props.onChange
+    composerSeam.onSend = props.onSend
+    return null
+  },
+}))
 
 describe('buildCopilotJudgeDraft', () => {
   beforeEach(() => {
@@ -1242,6 +1265,81 @@ function copilotState(overrides: Partial<{
     switchSession: vi.fn(),
   }
 }
+
+
+describe('what a turn carries out of the composer', () => {
+  beforeEach(() => {
+    mocks.getRegistry.mockResolvedValue({ roles: {} })
+    mocks.getRoles.mockResolvedValue({})
+    mocks.useTemplates.mockReturnValue({ templates: [], templatesLoading: false })
+    mocks.subscribeCodeAssistantStatus.mockResolvedValue(vi.fn())
+    mocks.ensureCodeAssistantStatusEvents.mockResolvedValue(undefined)
+    mocks.lastOpenedCodeAssistant.mockResolvedValue('claude')
+    composerSeam.onChange = null
+    composerSeam.onSend = null
+  })
+
+  async function mountPanel() {
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    const copilot = copilotState()
+    mocks.useCopilot.mockReturnValue(copilot)
+    // The fixture is the same partial controller the rest of this file uses; the
+    // panel only reads the fields it sets.
+    const controller = copilot as unknown as Parameters<typeof CopilotPanel>[0]['copilot']
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root: Root = createRoot(container)
+    await act(async () => {
+      root.render(React.createElement(CopilotPanel, {
+        skillId: 'text-segmentation',
+        copilot: controller,
+        workspaceRoot: '/tmp/text-segmentation',
+      }))
+    })
+    return { copilot, root, container }
+  }
+
+  it('sends the objects the user picked in THIS composer', async () => {
+    // F4 ②: exactly what is in the composer rides along — the panel adds
+    // nothing of its own, and drops nothing the user put there.
+    const { copilot, root } = await mountPanel()
+    const picked = [{ kind: 'phase', ref: 'chunking/segment', label: 'segment' }]
+
+    act(() => composerSeam.onChange?.({ text: 'why is @segment slow?', mentions: picked }))
+    await act(async () => composerSeam.onSend?.())
+
+    expect(copilot.sendMessage).toHaveBeenCalledTimes(1)
+    const [message, options] = copilot.sendMessage.mock.calls[0] as [
+      string,
+      { mentions?: unknown[] },
+    ]
+    expect(message).toBe('why is @segment slow?')
+    expect(options.mentions).toEqual(picked)
+    await act(async () => root.unmount())
+  })
+
+  it('sends nothing at all when the composer holds nothing', async () => {
+    const { copilot, root } = await mountPanel()
+
+    act(() => composerSeam.onChange?.({ text: '   ', mentions: [] }))
+    await act(async () => composerSeam.onSend?.())
+
+    expect(copilot.sendMessage).not.toHaveBeenCalled()
+    await act(async () => root.unmount())
+  })
+
+  it('carries an empty mention list rather than inventing one', async () => {
+    // A plain question is still a turn; it just names nothing.
+    const { copilot, root } = await mountPanel()
+
+    act(() => composerSeam.onChange?.({ text: 'hello', mentions: [] }))
+    await act(async () => composerSeam.onSend?.())
+
+    const [, options] = copilot.sendMessage.mock.calls[0] as [string, { mentions?: unknown[] }]
+    expect(options.mentions).toEqual([])
+    await act(async () => root.unmount())
+  })
+})
 
 describe('buildGoldenDesignDraft (E3 entry①)', () => {
   it('asks for the node by name and points at the two documents the design names', () => {

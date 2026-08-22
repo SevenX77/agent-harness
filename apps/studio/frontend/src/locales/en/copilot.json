@@ -145,7 +145,18 @@
   "composer": {
     "placeholder": "Use '@' to mention nodes...",
     "stop": "Stop generating",
-    "send": "Send message"
+    "send": "Send message",
+    "mentionMenu": {
+      "label": "Objects you can mention",
+      "more": "{{count}} more",
+      "kind": {
+        "file": "Files",
+        "phase": "Phases",
+        "dot": "Blackboard keys",
+        "error": "Diagnostics",
+        "trace": "Trace events"
+      }
+    }
   },
   "toast": {
     "routeSwitched": "Route switched. Future messages will use it.",

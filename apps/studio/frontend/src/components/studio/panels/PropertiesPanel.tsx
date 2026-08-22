@@ -62,6 +62,7 @@ import { roleTokenLimitSummary } from "@/components/studio/settings/llm-roles/Ro
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { cn } from "@/lib/utils"
+import { distinguishingRouteLabels, type RouteLabelInput } from "@/lib/route-labels"
 import { errorMessage } from "@/utils/errors"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
@@ -176,29 +177,51 @@ export function compareModelGroupsForPicker(groups: readonly ModelGroup[]): Mode
     ))
 }
 
+/**
+ * The endpoints this model can be reached through, each named so the reader can
+ * choose between them.
+ *
+ * A route's label comes from `distinguishingRouteLabels`, not from the provider
+ * name alone: one provider name covers several transports, and this list is
+ * where the reader has to pick ONE of them to run.
+ */
 export function modelGroupRouteOptions(group: ModelGroup | null): LlmCompareRouteOption[] {
+  const listed = listedProviderModels(group?.provider_models ?? [])
+  const labels = distinguishingRouteLabels(listed)
+  return listed.map((model) => routeOption(model.route_id.trim(), model, labels))
+}
+
+/** The routes of a group, each once, in the order the group lists them. */
+function listedProviderModels(
+  providerModels: readonly ModelGroup["provider_models"][number][],
+): ModelGroup["provider_models"][number][] {
   const seen = new Set<string>()
-  const options: LlmCompareRouteOption[] = []
-  for (const model of group?.provider_models ?? []) {
+  const listed: ModelGroup["provider_models"][number][] = []
+  for (const model of providerModels) {
     const routeId = model.route_id.trim()
-    if (!routeId || seen.has(routeId)) {
-      continue
-    }
+    if (!routeId || seen.has(routeId)) continue
     seen.add(routeId)
-    const endpointId = model.endpoint_id?.trim()
-    const providerLabel = model.provider_label.trim()
-    const providerModelId = model.provider_model_id.trim()
-    options.push({
-      value: `route:${routeId}`,
-      label: providerLabel || endpointId || routeId,
-      detail: [
-        endpointId ? `Endpoint: ${endpointId}` : null,
-        providerModelId ? `Model: ${providerModelId}` : null,
-        `Route: ${routeId}`,
-      ].filter(Boolean).join("\n"),
-    })
+    listed.push(model)
   }
-  return options
+  return listed
+}
+
+function routeOption(
+  routeId: string,
+  model: ModelGroup["provider_models"][number] | undefined,
+  labels: ReadonlyMap<string, string>,
+): LlmCompareRouteOption {
+  const endpointId = model?.endpoint_id?.trim()
+  const providerModelId = model?.provider_model_id.trim()
+  return {
+    value: `route:${routeId}`,
+    label: labels.get(routeId) ?? model?.provider_label.trim() ?? endpointId ?? routeId,
+    detail: [
+      endpointId ? `Endpoint: ${endpointId}` : null,
+      providerModelId ? `Model: ${providerModelId}` : null,
+      `Route: ${routeId}`,
+    ].filter(Boolean).join("\n"),
+  }
 }
 
 function providerModelsByRouteId(modelGroups: readonly ModelGroup[]): Map<string, ModelGroup["provider_models"][number]> {
@@ -211,27 +234,12 @@ function providerModelsByRouteId(modelGroups: readonly ModelGroup[]): Map<string
   return byRouteId
 }
 
-function routeOptionFromRouteId(
-  routeId: string,
-  providerModelByRouteId: ReadonlyMap<string, ModelGroup["provider_models"][number]>,
-): LlmCompareRouteOption | null {
-  const trimmedRouteId = routeId.replace(/^route:/, "").trim()
-  if (!trimmedRouteId) return null
-  const providerModel = providerModelByRouteId.get(trimmedRouteId)
-  const endpointId = providerModel?.endpoint_id?.trim()
-  const providerLabel = providerModel?.provider_label.trim()
-  const providerModelId = providerModel?.provider_model_id.trim()
-  return {
-    value: `route:${trimmedRouteId}`,
-    label: providerLabel || endpointId || trimmedRouteId,
-    detail: [
-      endpointId ? `Endpoint: ${endpointId}` : null,
-      providerModelId ? `Model: ${providerModelId}` : null,
-      `Route: ${trimmedRouteId}`,
-    ].filter(Boolean).join("\n"),
-  }
-}
-
+/**
+ * The endpoints a configured role will actually try, in the order it tries them.
+ *
+ * Named by the same rule as `modelGroupRouteOptions`, and for the same reason:
+ * a chain routinely holds several transports of one provider.
+ */
 export function roleEndpointRouteOptions(
   role: RoleEntry | null | undefined,
   modelGroups: readonly ModelGroup[],
@@ -240,15 +248,23 @@ export function roleEndpointRouteOptions(
     ? role.fallback_chain.map((entry) => entry.route_id)
     : Object.values(role?.models ?? {}).flatMap((model) => model.providers)
   const providerModelByRouteId = providerModelsByRouteId(modelGroups)
+  const listed: string[] = []
   const seen = new Set<string>()
-  const options: LlmCompareRouteOption[] = []
   for (const routeId of routeIds) {
-    const option = routeOptionFromRouteId(routeId, providerModelByRouteId)
-    if (!option || seen.has(option.value)) continue
-    seen.add(option.value)
-    options.push(option)
+    const trimmed = routeId.replace(/^route:/, "").trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    listed.push(trimmed)
   }
-  return options
+  const labels = distinguishingRouteLabels(
+    listed.map((routeId) => providerModelByRouteId.get(routeId) ?? unknownRoute(routeId)),
+  )
+  return listed.map((routeId) => routeOption(routeId, providerModelByRouteId.get(routeId), labels))
+}
+
+/** A chain entry the registry no longer lists: still nameable, by its own id. */
+function unknownRoute(routeId: string): RouteLabelInput {
+  return { route_id: routeId, provider_label: "", provider_model_id: "" }
 }
 
 function endpointComboboxOptions(options: readonly LlmCompareRouteOption[]): SearchableComboboxOption[] {

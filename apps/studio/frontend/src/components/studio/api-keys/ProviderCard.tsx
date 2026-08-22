@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import i18n from "@/i18n"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
+import { transportLabel } from "@/lib/route-labels"
 import { cn } from "@/lib/utils"
 import { isRedactedEndpointSecret, type CredentialsState, type ModelInfo, type ModelProbeStatus, type ProviderTestResult, type ProviderType, type ProviderUiState, type RouteStatus } from "../../../api/llm"
 import { inferProviderType, providerCachedTestResult, providerEndpointDraftsForAction, providerTestParamsMatch } from "../settings/provider-utils"
@@ -597,7 +598,7 @@ function AvailableEndpointSummary({
       <div className="flex flex-wrap gap-1">
         <TooltipProvider>
           {endpoints.map((endpoint) => {
-            const endpointLabel = `${endpointProtocolShortLabel(endpoint.protocol)} / ${endpointHostLabel(endpoint.baseUrl || endpoint.id)}`
+            const endpointLabel = transportLabel(endpoint.protocol, endpoint.baseUrl || endpoint.id)
             const isActiveEndpoint = hasActiveProbeEndpoint(endpoint.id)
             const effectiveStatus: TestMessageStatus = isActiveEndpoint ? "testing" : endpoint.status
             // Design §1.2 matrix point 9: an unsupported cell points to the
@@ -817,31 +818,6 @@ function endpointProtocolLabel(providerType: ProviderType | null): string {
   if (providerType === "google_genai") return i18n.t("apiKeys.card.protocol.google")
   if (providerType === "openai_compatible") return i18n.t("apiKeys.card.protocol.openai")
   return i18n.t("apiKeys.card.protocol.unknown")
-}
-
-function endpointProtocolShortLabel(providerType: ProviderType | null): string {
-  if (providerType === "anthropic_compatible") return i18n.t("apiKeys.card.protocolShort.anthropic")
-  if (providerType === "google_genai") return i18n.t("apiKeys.card.protocolShort.gemini")
-  if (providerType === "openai_compatible") return i18n.t("apiKeys.card.protocolShort.openai")
-  if (providerType === "ark_runtime") return i18n.t("apiKeys.card.protocolShort.ark")
-  return i18n.t("apiKeys.card.protocolShort.unknown")
-}
-
-function endpointHostLabel(value: string): string {
-  const compactHost = (host: string) => {
-    if (!host || host === "localhost" || /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$/.test(host)) return host
-    const [hostname, port] = host.split(":")
-    const labels = hostname.split(".").filter(Boolean)
-    const compact = labels.length >= 2 ? labels.slice(0, -1).join(".") : hostname
-    return port ? `${compact}:${port}` : compact
-  }
-
-  try {
-    const parsed = new URL(value)
-    return compactHost(parsed.host) || value
-  } catch {
-    return compactHost(value.replace(/^https?:\/\//, "").replace(/\/.*$/, "")) || value
-  }
 }
 
 export function endpointProfileSummary(models: ModelInfo[]): Pick<

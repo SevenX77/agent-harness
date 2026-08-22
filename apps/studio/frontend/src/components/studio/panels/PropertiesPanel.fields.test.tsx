@@ -534,12 +534,31 @@ describe('PropertiesPanel - node compare model group picker', () => {
     ])
   })
 
-  it('deduplicates endpoint options, shows readable names, and keeps endpoint details for tooltip', () => {
+  it('deduplicates endpoint options and tells same-named ones apart by transport', () => {
+    // Measured 2026-08-21: one model offered 17 options, seven of them reading
+    // `Qiniu` and nothing else — the endpoint id that told them apart lived only
+    // in `detail`, which the list does not print. A label the reader cannot
+    // choose by is the defect; the duplicate row is only how it shows.
     const group = modelGroup({
       provider_models: [
-        providerModel({ route_id: 'qiniu-main:llama3', endpoint_id: 'qiniu-main' }),
-        providerModel({ route_id: 'qiniu-main:llama3', endpoint_id: 'qiniu-main' }),
-        providerModel({ route_id: 'qiniu-backup:llama3', endpoint_id: 'qiniu-backup' }),
+        providerModel({
+          route_id: 'qiniu-main:llama3',
+          endpoint_id: 'qiniu-main',
+          base_url: 'https://api.qnaigc.com/v1',
+          protocol: 'openai_compatible',
+        }),
+        providerModel({
+          route_id: 'qiniu-main:llama3',
+          endpoint_id: 'qiniu-main',
+          base_url: 'https://api.qnaigc.com/v1',
+          protocol: 'openai_compatible',
+        }),
+        providerModel({
+          route_id: 'qiniu-backup:llama3',
+          endpoint_id: 'qiniu-backup',
+          base_url: 'https://anthropic.qnaigc.com',
+          protocol: 'anthropic_compatible',
+        }),
         providerModel({ route_id: ' ', endpoint_id: 'empty' }),
       ],
     })
@@ -547,15 +566,27 @@ describe('PropertiesPanel - node compare model group picker', () => {
     expect(modelGroupRouteOptions(group)).toEqual([
       {
         value: 'route:qiniu-main:llama3',
-        label: 'Qiniu',
+        label: 'Qiniu \u00b7 OpenAI / api.qnaigc',
         detail: 'Endpoint: qiniu-main\nModel: llama3\nRoute: qiniu-main:llama3',
       },
       {
         value: 'route:qiniu-backup:llama3',
-        label: 'Qiniu',
+        label: 'Qiniu \u00b7 Anth / anthropic.qnaigc',
         detail: 'Endpoint: qiniu-backup\nModel: llama3\nRoute: qiniu-backup:llama3',
       },
     ])
+  })
+
+  it('leaves a lone endpoint named by its provider alone', () => {
+    // Shortest label that still tells the list apart (settings-ux §1.2's
+    // collision rule): with nothing to collide with, nothing is appended.
+    const group = modelGroup({
+      provider_models: [
+        providerModel({ route_id: 'qiniu-main:llama3', base_url: 'https://api.qnaigc.com/v1' }),
+      ],
+    })
+
+    expect(modelGroupRouteOptions(group).map((option) => option.label)).toEqual(['Qiniu'])
   })
 
   it('derives endpoint options for a configured role from its fallback chain', () => {

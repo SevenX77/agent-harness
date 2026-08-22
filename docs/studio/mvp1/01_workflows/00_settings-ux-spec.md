@@ -149,6 +149,28 @@
 - **拖入 role 面板**：落下时把该 provider 的**全部** transport route 写入 role 配置，并在 provider 链里**展开为 provider 内部的 fallback 子序**（同 provider 的多 transport 可拖动排序、可单删），不是只存被折叠选中的那一条。实证反例（同日）：拖 GLM 5.1 进 role，`llm_roles.yaml` 只落 1 条 route（选哪条用户不可见不可控）。
 - 此设计与「§1.2 确认②endpoint 平铺进 model group 的 endpoints 标签」一致——聚合只发生在**展示**层，配置与执行永远面向 route 全集。
 
+**同一条规则适用于任何「把 route 列出来让人挑」的界面（补记 2026-08-21，问题台账 L6）**：上面两条
+写的是可用模型侧栏，但让读者在 route 之间做选择的界面不止一处。判据不变，措辞落到通用形式——
+**列表里的每个标签必须能唯一指认它代表的那一条 route**；做不到时，读者选哪一行是掷骰子。
+
+- **现场**：节点 `Add compare LLM` 弹窗的 Endpoint 下拉里，一个模型展开成 **17 个选项**，`Qiniu`
+  出现 7 次、`Ark Official` / `Jiekou` / `OpenRouter` 各 2 次，而把它们区分开的 endpoint id 与
+  model id 只写在 `detail` 里——那一行**不渲染** `detail`，它只进 `aria-label`。所以屏幕上就是
+  七行一模一样的 `Qiniu`。
+- **标签怎么取**：把 §1.2 的**命名防撞**规则从「一个 endpoint id」推广到「一份列表」——从 provider
+  名开始，只补**在同名兄弟之间确实有差异**的字段，顺序是 transport（协议 / 主机）在前、model id
+  在后；两者都不足以分开时兜底 route id。同名兄弟之间**没有**差异的字段一概不写:在一行会被截断
+  的列表里，重复每一行都相同的 `OpenAI / api.qnaigc` 花掉的正是那个唯一有差异的字段所需的宽度。
+  唯一性是这条规则的**后置条件**,不是尽力而为——一份交回两个相同标签的列表没有回答它存在的那个问题。
+- **一处实现，多处使用**：`frontend/src/lib/route-labels.ts::distinguishingRouteLabels`。transport
+  怎么念（`OpenAI / api.qnaigc`）也在这里,由 API Keys 页原来那两个私有函数**搬**过来——两处各念一套,
+  就会出现同一条 endpoint 在两屏上叫两个名字。
+- **底层材料**：Studio 后端的 `_provider_model_option` 补出 `base_url` 与 `protocol`。在此之前
+  投影里根本没有这两样，所以**任何**界面都不可能说清一条 route 是哪一条——这是先修的那一层。
+- **弃用区按 route 一行一条**：它每一行都带自己的 re-probe 按钮（本节「弃用区」一条），而 re-probe
+  作用在一条 route 上。把同名的几条折叠掉，等于让被折叠的那几条**永远无法被捞回来**。
+
+
 **failed vs cooling_down vs disabled（PM #10「needs_setup 是什么」的最终裁定，定义留底）**：三个「不能直接用」的状态正交，别混。**取消原 `needs_setup` 灰态——它本质是 `failed` 的一个 reason（配置缺口），并入 failed 显红**：
 
 | 状态 | 含义 + reason | 颜色 | 谁来动 |

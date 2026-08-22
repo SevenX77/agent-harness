@@ -17,6 +17,12 @@ shape as the ones the first-run path had already been fixed for:
 4. The resume never passed the breakpoints on, so the continued run was compiled
    without them and would run straight through every remaining one.
 
+And a fifth, found by CI on the fix for the fourth: asking for the marks by
+resolving the LIVE skill directory made the endpoint answer 404 SKILL_NOT_FOUND
+for every skill this Studio does not hold open — swallowing the runtime-state
+errors the endpoint exists to report. A run resumes from its own artifact; the
+skill directory is consulted, not required.
+
 Design: run-execution/mvp1-alignment.md F10 + RUN_EXECUTION-16.
 """
 
@@ -30,6 +36,7 @@ import pytest
 from app.models.runs import ResumeReq, RunMetadata, RunPausePoint
 from app.services import run_manager as run_manager_module
 from app.services.run_manager import RunManager, RunRecord
+from fastapi.testclient import TestClient
 
 SKILL = "text-segmentation"
 RUN_ID = "run-resumed"
@@ -252,3 +259,46 @@ def test_a_resume_that_failed_is_still_a_failure() -> None:
 
     assert failed.status == "failed"
     assert failed.paused_at is None
+
+
+def test_marks_on_a_skill_this_studio_does_not_hold_are_no_marks() -> None:
+    """Asking has to have an answer, because a resume can outlive the opening.
+
+    The marks live in the skill's workspace, so reading them means naming a
+    directory — and this Studio may hold no directory under that id: the skill
+    was closed, or the run is being resumed in a sidecar that never opened it.
+    That is not a failure to answer. Nobody could have set a mark on a skill
+    nobody has open, so "none" is the whole truth.
+    """
+    from app.services.breakpoints import breakpoints_for_skill
+
+    assert breakpoints_for_skill("a-skill-nobody-here-has-open") == []
+
+
+def test_a_resume_reports_the_runtime_state_error_even_with_no_skill_dir_to_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression CI caught: reading the marks must not be able to fail the
+    resume. Resolving the live skill directory raises SKILL_NOT_FOUND, and that
+    404 landed on top of a `state.lease_conflict` the caller has to see."""
+    import app.core.adapters.transport_factory as transport_factory
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    conflict = {"run_id": "run-1", "active_owner": "worker-a"}
+
+    class _Adapter:
+        def resume(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise StudioAdapterError("state.lease_conflict", conflict)
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: _Adapter())
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.post(
+            "/api/skills/a-skill-nobody-here-has-open/runs/run-1/resume",
+            json={"human_input": "continue"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "state.lease_conflict"

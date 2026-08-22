@@ -423,6 +423,21 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     断点时,它的结局仍然是「停住了,还能接着跑」——而 Studio 这一侧原本在出口处把
     引擎的三档又压回两档(`"success" if res.success else "failed"`),于是那种停被记成
     **失败**。这和 worker 那个洞是同一个形状,修法也一样:出口先问「停在哪」,再问成败。
+  - **断点是「顺便问一下」,不是「必须问到」。**(2026-08-22 CI 补)续跑要被告知断点,
+    而断点住在 skill 的工作区里,于是读它先得把 skill id 变成一个目录——**而这台 Studio
+    可能没有那个目录**:skill 关掉了,或者这次续跑发生在从没打开过它的 sidecar 里。
+    run 是从**它自己的冻结 artifact 与 runtime-state 快照**续起来的,不是从活的 skill
+    目录续起来的,所以"没打开"不是一次失败:没人打开过的 skill 上不可能有人设过断点,
+    答「没有」就是全部真相。先前拿会抛 404 的 `resolve_skill_dir` 去读,把每一次这样的
+    续跑变成 `SKILL_NOT_FOUND`,还盖掉了调用方真正该看到的 `state.*` 运行时状态错误。
+    因此同一次查找按调用方的需要出两种形状:`resolve_skill_dir`(请求是**关于**这个
+    skill 的,没有目录就进行不下去,抛)与 `opened_skill_dir`(请求只是**顺便问问**,
+    没有目录也是一个成立的答案,返回 `None`)。
+  - **停住期间新设的断点,在续跑时生效。** 这一条照搬每一个成熟调试器的取舍(gdb 的
+    `break` 之后 `continue`、浏览器 devtools、PyCharm):**程序停着的时候设的断点,
+    继续跑时算数**,否则用户为了多停一处就得重跑整个 run。它与上面「run 起飞之后新设的
+    断点对这一次不生效」不矛盾——那句说的是**正在跑**的图没法重编译;而续跑本来就要
+    重新编译一次图,所以读的是**当下**的断点集合,代价为零。
   - **续跑必须被看见:它的事件要送到看的人手上,它的结束要广播。**(2026-08-22 真机
     走查补)首跑跑在 worker 里,事件经进程队列送到 run 的实时流;**续跑跑在 HTTP 请求
     里**,原本既没有 event subscriber(事件只落进 trace 文件),`record_resume_result`
@@ -469,7 +484,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   底栏 Resume + Stop 由 F7 既有实现直接覆盖(`center-action-bar.tsx` 的 `paused` 分支)。
   **续跑一侧(2026-08-22 补)**:`apps/studio/backend/tests/services/test_a_resume_goes_on_visibly.py`
   (续跑结束会广播 gate、再撞上断点报 `paused` 而不是通过、这段的事件到得了看的人手上、
-  没有本地记录时没人可送、再停一次不封盘、三档结局在出引擎时不被压回两档);
+  没有本地记录时没人可送、再停一次不封盘、三档结局在出引擎时不被压回两档、
+  没打开的 skill 上「没有断点」而不是报错、读断点读不到也不许盖掉运行时状态错误);
   前端 `src/components/studio/a-breakpoint-is-not-a-question.test.ts`(断点停不弹答题框、
   不遮住更早的真问题、真问题即使问句为空仍然是问题、没写 reason 的旧 trace 仍按问题处理)、
   `src/utils/a-boundary-cannot-carry-a-breakpoint.test.ts`(端点说 `paused` 不说 `breakpoint`)。

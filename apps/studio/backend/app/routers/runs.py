@@ -30,10 +30,9 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.breakpoints import read_breakpoints
+from app.services.breakpoints import breakpoints_for_skill
 from app.services.predictor import PredictArtifactError, PredictDeadlockError, predictor_service
 from app.services.run_manager import run_manager
-from app.services.skills import resolve_skill_dir
 
 
 def _resume_event_subscriber(observe: Callable[[dict[str, Any]], None]) -> Callable[[Any], None]:
@@ -355,10 +354,11 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
         if request.human_response is not None:
             payload["human_response"] = request.human_response
         # The same two things the first run is given: which phases to stop
-        # before, and somewhere to send what happens (RUN_EXECUTION-16). Read
-        # here rather than in the adapter — this is the boundary that already
-        # resolves a skill id to a directory.
-        payload["pause_before"] = read_breakpoints(resolve_skill_dir(skill_id))
+        # before, and somewhere to send what happens (RUN_EXECUTION-16). The
+        # marks are CONSULTED, never required: this run continues from its own
+        # artifact, so a skill this Studio does not hold open means no marks,
+        # not a dead resume.
+        payload["pause_before"] = breakpoints_for_skill(skill_id)
         observer = run_manager.observe_resumed_run(run_id)
         if observer is not None:
             payload["event_subscriber"] = _resume_event_subscriber(observer)

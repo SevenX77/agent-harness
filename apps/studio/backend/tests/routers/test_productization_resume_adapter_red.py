@@ -240,6 +240,7 @@ def test_resume_validity_maps_non_state_adapter_error_to_structured_422(
 def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
     client: TestClient,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     import app.core.adapters.transport_factory as transport_factory
     from app.models.runs import RunMetadata
@@ -254,6 +255,13 @@ def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
         def is_alive(self) -> bool:
             return False
 
+    # A run dir with the real shape (<skill>/.workspace/runs/<run_id>), because a
+    # resume that reaches the end now closes the run out the same way any other
+    # ending does — sealing walks up two levels for the artifact store, and a
+    # made-up path sent that at the filesystem root.
+    run_dir = tmp_path / "text-segmentation" / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True)
+
     record = RunRecord(
         metadata=RunMetadata(
             run_id=run_id,
@@ -262,7 +270,7 @@ def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
             input_summary="topic=old",
         ),
         skill_id="text-segmentation",
-        run_dir=Path("/tmp/run-resume-audit"),
+        run_dir=run_dir,
         process=FakeProcess(),
         process_queue=SimpleNamespace(),
         # A resumed ordinary run archives on success like any other; this file

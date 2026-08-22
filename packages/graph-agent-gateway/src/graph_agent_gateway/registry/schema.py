@@ -118,7 +118,11 @@ class RuntimePolicy(BaseModel):
     provider_down_ttl_seconds: int = Field(default=60, ge=0, le=3600)
     probe_timeout_seconds: int = Field(default=5, ge=1, le=120)
     token_escalation_rounds: int = Field(default=2, ge=0, le=10)
-    terminal_retry_enabled: bool = False
+    # No `terminal_retry_enabled` beside this: a switch and a budget are two
+    # ways to say the same thing, and the budget already says it — one attempt
+    # IS retrying disabled. The flag existed, defaulted to False, and was read
+    # nowhere, so the retries actually happening were the provider SDK's
+    # (problem ledger E22).
     terminal_retry_policy: TerminalRetryPolicy = Field(default_factory=TerminalRetryPolicy)
     secret_lifetime_policy: SecretLifetimePolicy = Field(default_factory=SecretLifetimePolicy)
 

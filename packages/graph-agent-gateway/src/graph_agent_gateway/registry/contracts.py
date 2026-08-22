@@ -121,26 +121,28 @@ class SecretLifetimePolicy(BaseModel):
 
 
 class StandardTerminalRetrySettings(BaseModel):
-    """Retry settings for Gateway-owned standard provider terminals."""
+    """How many times a Gateway-owned standard terminal may ask, and how it waits.
+
+    ``max_attempts`` counts ASKS, so 1 means "never retry" and 2 means "one
+    retry"; ``backoff_ms`` holds the gaps between them, one per gap.
+
+    WHICH failures are retryable is deliberately not a field here.
+    :func:`graph_agent_gateway.resolve.classify_exception` already decides that,
+    and it decides more than a status list can express — a connection that never
+    reached the provider has no status code at all. A second list here would be
+    a second answer to one question, and the two would drift.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     max_attempts: int = Field(default=1, ge=1, le=5)
     backoff_ms: list[int] = Field(default_factory=list)
-    retryable_status_codes: list[int] = Field(default_factory=list)
 
     @field_validator("backoff_ms")
     @classmethod
     def _backoff_ms_are_non_negative(cls, value: list[int]) -> list[int]:
         if any(item < 0 for item in value):
             raise ValueError("backoff_ms entries must be non-negative")
-        return value
-
-    @field_validator("retryable_status_codes")
-    @classmethod
-    def _status_codes_are_httpish(cls, value: list[int]) -> list[int]:
-        if any(item < 100 or item > 599 for item in value):
-            raise ValueError("retryable_status_codes entries must be HTTP status codes")
         return value
 
     @model_validator(mode="after")
@@ -159,11 +161,7 @@ class SdkTerminalRetrySettings(BaseModel):
 
 
 def _standard_runtime_retry_settings() -> StandardTerminalRetrySettings:
-    return StandardTerminalRetrySettings(
-        max_attempts=2,
-        backoff_ms=[250],
-        retryable_status_codes=[429, 500, 502, 503, 504, 529],
-    )
+    return StandardTerminalRetrySettings(max_attempts=2, backoff_ms=[250])
 
 
 def _standard_probe_retry_settings() -> StandardTerminalRetrySettings:

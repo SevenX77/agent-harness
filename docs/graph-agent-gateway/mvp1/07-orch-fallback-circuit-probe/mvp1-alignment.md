@@ -117,15 +117,55 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
   - 旧测试点写「probe 失败 → mark_down + 发 fallback event + 继续下一条 route」「probe 不可 fallback → 抛 `AllProvidersFailedError`」——**这两条按新语义都不成立**:拒绝不写熔断;是否换路、是否终止,由调用方拿 `classify_exception` 的结论决定,而不是由「探问失败」本身决定。
 - **归属**：③b `packages/graph-agent-gateway`(前置探问住 `call/pre_call_probe.py`)；base_url 归一化存写主体跨 [[03-orch-credentials-endpoints]]、调用时双保险跨 [[09-inv-invocation-runtime]]。
 
-### F4 retry（保留 ChatX 瞬时重试，撤回 `max_retries=0`）
+### F4 retry（防抖动重试保留，由网关自己做并入账）
 
-- **机制/数据流**：ChatX 瞬时重试保留在同 route invoke 内;`GatewayChatModel._generate` 只在 ChatX 重试耗尽后接收最终异常并决定跨 route fallback。**注**(F2 撤回 `max_retries=0`):ChatX 只对 429/5xx/连接重试、对 429 尊重 Retry-After、不对 400/401 重试,天然是"同 route 防抖动重试";现状 SDK `max_retries=0`(`call/clients.py:171,:206`)反而会把瞬时 429 直接升级成跨 route 跳转。
+- **机制/数据流**：同 route 的防抖动重试由 `GatewayChatModel` 在它自己的 route 循环里做,
+  次数与等待读 `RuntimePolicy.terminal_retry_policy.standard_runtime`
+  (`max_attempts` 数的是**问了几次**,所以 2 次 = 允许重试一次;`backoff_ms` 是每两次之间的
+  间隔,一格一个)。每重试一次发一条 `retried_same_route`;重试预算用尽后的异常才进
+  `classify_exception` 决定跨 route fallback。**传输层一律 `max_retries=0`**
+  (`call/factory.py` 的 `_TRANSPORT_RETRIES`,四种 protocol 都传)。
 - **决策 + 动机**：
-  - **F2 — 保留 ChatX 瞬时重试(撤回 `max_retries=0`)**:**决策 = 保留 ChatX 的瞬时重试(有界,如默认 2),不设 0**。理由:ChatX 只对 429/5xx/连接重试、对 429 尊重 `Retry-After`、不对 400/401 重试 → 天然就是"同 route 防抖动重试",与网关"跨 route fallback"是**两层、不冲突**;当前代码反而**没有同-route 重试**(SDK 显式 `max_retries=0`,`call/clients.py:171,:206`),一次瞬时 429 会被 `_generate` 当 `fallback_allowed`(`call/chat_model.py:237-249`)直接跳 route,把所有 route 连环跳废。唯一要钉死的不变量:ChatX 重试**耗尽后**抛出的异常仍能被 `classify_exception` 正确分类(确定性单测)。**PM 原话见本段下方**:"和Claude sdk copilot一样的问题, 防抖动重试可以留"。
+  - **F2 — 防抖动重试保留(PM 裁决,不变);2026-08-22 换层:由网关做,不由 ChatX 做。**
+    PM 的要求是"防抖动重试可以留"(原话见下),这一条**没有改**:重试仍然有界、仍然只对
+    429/5xx/连接、仍然尊重 `Retry-After`,一次瞬时 429 仍然不会把所有 route 连环跳废。
+    改的是**谁来做**。F2 当年选择留在 ChatX 内,写下的理由是「**当前代码反而没有同-route
+    重试**(SDK 显式 `max_retries=0`)」——**这个前提已经不成立**:`call/chat_model.py` 的
+    route 循环在 `classification.action == "retry_same_route"` 时就会重试同一条路由,
+    并且发 `retried_same_route`。于是留在 ChatX 内的那一层不再是"唯一的重试",而是
+    **第二层看不见的重试**。
+  - **换层的理由是「账」,不是"重试不好"。**(问题台账 E22,2026-08-22 实测)网关记的是
+    **决定**;SDK 内部的重试不是它做的决定,所以记不下来。实测:假 provider 每组消息先答
+    一次 500 再成功,wire 上五次 500 五次成功,而 run 的 `trace.jsonl` 里五条
+    `llm_route_decision` **全是 `answered`**——读的人看到"这次很顺利",实际每次调用发了
+    三个请求。根因是 `langchain_openai.ChatOpenAI` 的 `max_retries` 默认 `None`,不设就
+    落到 openai SDK 的 `DEFAULT_MAX_RETRIES = 2`。**没人选过这个数**:网关自己的契约从写
+    下那天起就说 `standard_runtime.max_attempts = 2`(= 只重试一次),而在跑的是 3;叠上
+    网关自己那一次,一次调用最多可以发 6 个请求。挪到网关之后,"这条路由被问了几次"与
+    "trace 上有几条 `retried_same_route`"**在构造上是同一个数**,这是两者唯一不会漂的
+    办法。
+  - **拿回来的时候要连 `Retry-After` 一起拿。** 那是 SDK 那一层做得比固定 backoff 好的
+    地方——429 说了什么时候回来,只有 provider 知道桶什么时候满。所以
+    `classify_exception` 顺手把它读出来(`retry_after_seconds`,只认秒数不认 HTTP 日期:
+    日期要减本机时钟,时钟一偏"等 3 秒"就变成"等一小时"或"不等"),重试时取它与策略
+    backoff 的**较大者**——provider 说 0 也不至于砸上去。
+  - **「哪些失败可以重试」不进策略字段。** `StandardTerminalRetrySettings` 原本还有一个
+    `retryable_status_codes`,与 `classify_exception` 的判断重复,而后者判得更多(连都没连
+    上的失败根本没有状态码)。同一个问题两个答案必然漂,所以删掉字段、由分类器单独负责
+    (SSOT)。同时删掉 `RuntimePolicy.terminal_retry_enabled`:开关与预算是同一件事的两种
+    说法,而预算已经说了——`max_attempts=1` 就是"不重试";它此前默认 `false`、全仓无人读,
+    真正在重试的是 SDK。
+  - **没有跟着改的**:`sdk_runtime` / `sdk_probe` 的 `claude_code_max_retries` 仍然没有
+    读它的地方。那是 SDK 终端(claude-code)的预算,与本条的标准终端是两种终端,单独处置。
 - **原话**：
   > **F2 保留瞬时重试**："和Claude sdk copilot一样的问题, 防抖动重试可以留"
-- **测试点**：**ChatX 瞬时重试(F2)** — 同 route 瞬时 429/5xx → ChatX 内重试(有界,非 0),**重试耗尽后**的异常才进 `classify_exception` 决定跨 route fallback;关键确定性单测:fake 401 / 400 / 网络错喂分类器 → 分别 fallback / fail-fast / fallback(状态码语义见 06)。
-- **status**：现 OpenAI/Anthropic client `max_retries=0`(`call/clients.py:171`,`:205`)= target；改为保留 ChatX 默认有界瞬时重试,跨 route fallback 仍由 `_generate` 管。
+- **测试点**：`packages/graph-agent-gateway/tests/test_every_retry_is_on_the_books.py`
+  ——trace 上的重试条数 == 路由被问的次数、预算来自策略而不是写死的一次、重试按
+  `backoff_ms` 等待、provider 的 `Retry-After` 压过策略 backoff、`Retry-After` 是日期时
+  退回策略 backoff、四种 protocol 建出来的 client 都是 `max_retries=0`。仍然钉死的老不变
+  量:重试**耗尽后**抛出的异常仍能被 `classify_exception` 正确分类
+  (`test_chatx_invocation_runtime.py`)。
+- **status**：done(2026-08-22)。
 - **归属**：③b `packages/graph-agent-gateway`(调用细节归 [[09-inv-invocation-runtime]])。
 
 ### F5 截断升级重试（`_call_with_token_escalation` 搬到编排层）
@@ -224,7 +264,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 | probe | `_probe` 已在 invoke 前执行,并对 probe 失败发 fallback event,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:115-189`。 | 保留;probe 仍用 client manager 的轻量 SDK/client path,不跟真实 ChatX invoke 绑定。 | ③b |
 | 异常分类 | 调用前 probe 异常和真实调用异常都走 `classify_exception`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:124` 和 `:238`。 | 保留;ChatX 抛出的 provider/HTTP 异常要继续被分类器识别(状态码语义归 06)。 | ③b |
 | fallback event | `_generate` 已在 probe 和 invoke fallback 分支发 event,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:136-151` 和 `:250-265`。 | 保留;event context 继续含 route diagnostics 和 runtime settings。 | ③b(归 13) |
-| 同 route retry | 当前 OpenAI/Anthropic client `max_retries=0`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/clients.py:171` 和 `:205`。 | 改为保留 ChatX 默认有界瞬时重试;跨 route fallback 仍由 `_generate` 管。 | ③b(调用细节归 09) |
+| 同 route retry | (2026-08-22 起 = target)网关自己重试:`call/chat_model.py` 的 `_RetryBudget` 读 `terminal_retry_policy.standard_runtime`,每次重试发一条 `retried_same_route`;传输层四种 protocol 一律 `max_retries=0`(`call/factory.py` 的 `_TRANSPORT_RETRIES`)。 | 保留(见 F4);跨 route fallback 仍由 route 循环管。 | ③b(调用细节归 09) |
 | 截断升级 | 由 `_Attempt` 在 `_answer` 循环里执行,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:123-152` 与 `:401-408`;重试前 `void()` 作废已吐出的片段。 | 决策(保留该策略、归编排层)不变;当年那两个 helper 函数已不存在。 | ③b |
 | usage 归属 | 当前先看 client manager 是否已记账,未记账再从 response dict 补记,见 `packages/graph-agent-gateway/src/graph_agent_gateway/call/chat_model.py:191-235`。 | 改从 ChatX `AIMessage.usage_metadata` 取 usage,然后仍写入 `LLMCircuitAndUsageLedger.record_usage`。 | ③b |
 | 熔断持久化 | `SqliteLlmHealthStore` 已能持久化 circuit,见 `apps/studio/backend/app/services/llm_health_store.py:26-124`。 | **本轮反转**:从"③a seam / 是否打通是疑点"改判 **③b 公共,待下沉**;SQLite 路径留 ③a 注入。 | ③b(现 ③a 待下沉) |

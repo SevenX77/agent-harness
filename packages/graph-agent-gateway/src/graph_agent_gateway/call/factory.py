@@ -24,6 +24,22 @@ from graph_agent_gateway.registry import (
     provider_temperature_from_authored,
 )
 
+#: How many times the TRANSPORT may retry on its own: never.
+#:
+#: Retrying a route is a decision, and the gateway's decisions are written down
+#: as they are made (``retried_same_route``). A retry taken inside the provider
+#: SDK is one the ledger cannot record, so a call that took three requests is
+#: read afterwards as one that went smoothly — measured, not supposed (problem
+#: ledger E22). Left unset, ``langchain_openai`` and ``langchain_anthropic``
+#: both leave ``max_retries=None`` and their SDKs apply
+#: ``DEFAULT_MAX_RETRIES = 2``: a number this gateway never chose, stacked on
+#: top of the one it did.
+#:
+#: The anti-flap retry itself is NOT given up — it moves to
+#: ``GatewayChatModel``, which does it on the same terms (429/5xx/connection
+#: only, honouring ``Retry-After``) where it can be counted.
+_TRANSPORT_RETRIES: Final[int] = 0
+
 
 class RouteChatModelFactory:
     """Construct a provider ChatX model for one resolved route."""
@@ -65,6 +81,7 @@ class RouteChatModelFactory:
                 "api_key": api_key,
                 "base_url": base_url,
                 "timeout": timeout,
+                "max_retries": _TRANSPORT_RETRIES,
                 **_mapped_runtime_kwargs(protocol, common),
             }
             chat_openai_cls = (
@@ -78,6 +95,7 @@ class RouteChatModelFactory:
                 "api_key": api_key,
                 "base_url": base_url,
                 "timeout": timeout,
+                "max_retries": _TRANSPORT_RETRIES,
                 **_mapped_runtime_kwargs(protocol, common),
             }
             return ChatAnthropic(**_apply_profiles(route, kwargs))
@@ -89,6 +107,7 @@ class RouteChatModelFactory:
                 "model": route.provider_model_id,
                 "google_api_key": api_key,
                 "timeout": timeout,
+                "max_retries": _TRANSPORT_RETRIES,
                 **_mapped_runtime_kwargs(protocol, common),
             }
             return cast(BaseChatModel, chat_google(**_apply_profiles(route, kwargs)))

@@ -198,10 +198,8 @@ def test_runtime_policy_defaults_and_ranges() -> None:
     assert policy.provider_down_ttl_seconds == 60
     assert policy.probe_timeout_seconds == 5
     assert policy.token_escalation_rounds == 2
-    assert policy.terminal_retry_enabled is False
     assert policy.terminal_retry_policy.standard_runtime.max_attempts == 2
     assert policy.terminal_retry_policy.standard_runtime.backoff_ms == [250]
-    assert 529 in policy.terminal_retry_policy.standard_runtime.retryable_status_codes
     assert policy.terminal_retry_policy.standard_probe.max_attempts == 1
     assert policy.terminal_retry_policy.sdk_runtime.claude_code_max_retries == 2
     assert policy.secret_lifetime_policy.invalidate_on_rotation is True
@@ -245,7 +243,7 @@ def test_control_plane_runtime_contract_models_validate_without_secrets() -> Non
 
     assert descriptor.model_dump()["ref"] == "cred:anthropic-prod"
     assert version.client_id == "graph_agent"
-    assert policy.standard_runtime.retryable_status_codes == [429, 500, 502, 503, 504, 529]
+    assert policy.standard_runtime.backoff_ms == [250]
     assert lifetime.standard_client_cache_ttl_seconds == 300
 
     with pytest.raises(ValidationError):

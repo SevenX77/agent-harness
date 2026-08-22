@@ -17,6 +17,7 @@ import {
 } from './copilot-panel'
 import { isComposerSendKey } from './composer/composer-keys'
 import { BACKEND_UNAVAILABLE_MESSAGE } from '@/utils/errors'
+import { toast } from 'sonner'
 
 const mocks = vi.hoisted(() => ({
   useCopilot: vi.fn(),
@@ -145,15 +146,18 @@ describe('isComposerSendKey', () => {
 const composerSeam = vi.hoisted(() => ({
   onChange: null as ((value: { text: string; mentions: unknown[] }) => void) | null,
   onSend: null as (() => void) | null,
+  onImagesPasted: null as ((files: File[]) => void) | null,
 }))
 
 vi.mock('./composer/MentionComposer', () => ({
   MentionComposer: (props: {
     onChange: (value: { text: string; mentions: unknown[] }) => void
     onSend: () => void
+    onImagesPasted?: (files: File[]) => void
   }) => {
     composerSeam.onChange = props.onChange
     composerSeam.onSend = props.onSend
+    composerSeam.onImagesPasted = props.onImagesPasted ?? null
     return null
   },
 }))
@@ -1277,6 +1281,7 @@ describe('what a turn carries out of the composer', () => {
     mocks.lastOpenedCodeAssistant.mockResolvedValue('claude')
     composerSeam.onChange = null
     composerSeam.onSend = null
+    composerSeam.onImagesPasted = null
   })
 
   async function mountPanel() {
@@ -1315,6 +1320,64 @@ describe('what a turn carries out of the composer', () => {
     ]
     expect(message).toBe('why is @segment slow?')
     expect(options.mentions).toEqual(picked)
+    await act(async () => root.unmount())
+  })
+
+  it('carries a pasted image by value, with the message it was pasted into', async () => {
+    // COPILOT_ASSIST-11: an image has no address to re-fetch it from, so its
+    // bytes travel with the turn.
+    const { copilot, root, container } = await mountPanel()
+    const png = new File([new Uint8Array([1, 2, 3, 4])], 'shot.png', { type: 'image/png' })
+
+    await act(async () => composerSeam.onImagesPasted?.([png]))
+    expect(container.querySelector('[data-attachment-chip="shot.png"]')).toBeTruthy()
+
+    act(() => composerSeam.onChange?.({ text: 'what is wrong here?', mentions: [] }))
+    await act(async () => composerSeam.onSend?.())
+
+    const [, options] = copilot.sendMessage.mock.calls[0] as [
+      string,
+      { attachments?: Array<{ media_type: string; name?: string }> },
+    ]
+    expect(options.attachments).toHaveLength(1)
+    expect(options.attachments?.[0]).toMatchObject({ media_type: 'image/png', name: 'shot.png' })
+    await act(async () => root.unmount())
+  })
+
+  it('treats a picture with no words as a real turn', async () => {
+    // "What is wrong here?" is often the picture itself; requiring text as well
+    // would grey the send button out on the commonest way people ask.
+    const { copilot, root } = await mountPanel()
+    const png = new File([new Uint8Array([9])], 'only.png', { type: 'image/png' })
+
+    await act(async () => composerSeam.onImagesPasted?.([png]))
+    await act(async () => composerSeam.onSend?.())
+
+    expect(copilot.sendMessage).toHaveBeenCalledTimes(1)
+    await act(async () => root.unmount())
+  })
+
+  it('refuses a type the wire has no word for, and attaches nothing', async () => {
+    const { root, container } = await mountPanel()
+    const pdf = new File([new Uint8Array([1])], 'notes.pdf', { type: 'application/pdf' })
+
+    await act(async () => composerSeam.onImagesPasted?.([pdf]))
+
+    expect(container.querySelector('[data-attachment-chip="notes.pdf"]')).toBeNull()
+    expect(toast.error).toHaveBeenCalled()
+    await act(async () => root.unmount())
+  })
+
+  it('drops the images once the turn they belonged to has gone', async () => {
+    const { copilot, root, container } = await mountPanel()
+    copilot.sendMessage.mockReturnValue(true)
+    const png = new File([new Uint8Array([1, 2])], 'shot.png', { type: 'image/png' })
+
+    await act(async () => composerSeam.onImagesPasted?.([png]))
+    act(() => composerSeam.onChange?.({ text: 'look', mentions: [] }))
+    await act(async () => composerSeam.onSend?.())
+
+    expect(container.querySelector('[data-attachment-tray]')).toBeNull()
     await act(async () => root.unmount())
   })
 

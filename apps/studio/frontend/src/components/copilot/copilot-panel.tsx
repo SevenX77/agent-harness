@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, ChevronDown, CircleAlert, History, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
+import { ArrowUp, ChevronDown, CircleAlert, History, ImagePlus, Loader2, MonitorCheck, Square, SquareTerminal } from 'lucide-react'
 import { allowTextSelectionProps } from '@/hooks/useNativeDoubleClickGuard'
 import { toast } from 'sonner'
 import { prepareCopilotJudgeContext, type CopilotJudgeResponse } from '../../api/client'
@@ -11,7 +11,7 @@ import type { CopilotController, CopilotJudgeContext } from '../../hooks/useCopi
 import { resolveCopilotSendRole } from '../studio/settings/copilot/copilot-role-derivation'
 import { useStudioEventStream } from '../../hooks/useStudioEventStream'
 import { useTemplates } from '../../hooks/useTemplates'
-import type { CopilotMessage } from '../../types/copilot'
+import type { CopilotImageAttachment, CopilotMessage } from '../../types/copilot'
 import {
   closeCodeAssistant,
   ensureCodeAssistantStatusEvents,
@@ -55,6 +55,9 @@ import { SessionTabs } from './session-tabs'
 import { MentionComposer, type MentionComposerHandle } from './composer/MentionComposer'
 import { EMPTY_COMPOSER_VALUE, type ComposerValue } from './composer/composer-document'
 import { buildMentionCandidates, type MentionSources } from './composer/mention-candidates'
+import { AttachmentTray, formatAttachmentSize } from './composer/AttachmentTray'
+import { admitAttachments, type RefusedImage } from './composer/attachment-intake'
+import { readIncomingImages } from './composer/read-images'
 import { ToolCallBubble } from './tool-call-bubble'
 import { cn } from '@/lib/utils'
 import { formatProcessedDuration, buildAssistantView, type TranscriptSegment } from './transcript'
@@ -499,6 +502,10 @@ export function CopilotPanel({
   const { t } = useTranslation('copilot')
   const [draft, setDraft] = useState<ComposerValue>(EMPTY_COMPOSER_VALUE)
   const composerRef = useRef<MentionComposerHandle | null>(null)
+  // COPILOT_ASSIST-11: images ride by VALUE, so what is attached lives here
+  // until the turn goes out — there is no address to re-fetch them from.
+  const [attachments, setAttachments] = useState<CopilotImageAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const mentionCandidates = useMemo(
     () =>
       buildMentionCandidates(
@@ -842,8 +849,45 @@ export function CopilotPanel({
     }
   }
 
+  function reportRefusals(refused: readonly RefusedImage[]) {
+    // Every refusal is named out loud: a picture that quietly failed to attach
+    // looks exactly like one that attached fine, right up until the answer
+    // makes no sense (COPILOT_ASSIST-11 ③).
+    for (const item of refused) {
+      toast.error(
+        item.refusal.reason === 'unsupported_type'
+          ? t('composer.attachments.refusedType', {
+              name: item.name,
+              mediaType: item.refusal.mediaType,
+            })
+          : t('composer.attachments.refusedBudget', {
+              name: item.name,
+              total: formatAttachmentSize(item.refusal.totalBytes),
+              budget: formatAttachmentSize(item.refusal.budgetBytes),
+            }),
+      )
+    }
+  }
+
+  async function attachImages(files: File[]) {
+    const incoming = await readIncomingImages(files)
+    // Read against the CURRENT list rather than a captured one: two picks can
+    // land while a big file is still being read, and the budget is shared.
+    setAttachments((current) => {
+      const { accepted, refused } = admitAttachments(current, incoming)
+      reportRefusals(refused)
+      return accepted
+    })
+  }
+
+  /** Something to send: words, or a picture, or both. */
+  const canSend =
+    (draft.text.trim().length > 0 || attachments.length > 0) && copilot.connectionStatus === 'open'
+
   async function sendDraft() {
-    if (!draft.text.trim() || copilot.connectionStatus !== 'open') {
+    // An image with no words is a real ask ("what is wrong here?"), so the
+    // turn is empty only when BOTH are.
+    if ((!draft.text.trim() && attachments.length === 0) || copilot.connectionStatus !== 'open') {
       return
     }
     const activeJudgeContext = nextDraftJudgeContext(draft.text, draftJudgeContext, { skillId, view, judgeRefs })
@@ -870,9 +914,11 @@ export function CopilotPanel({
       judgeContext: activeJudgeContext,
       // F4 ②: only what the user picked in THIS composer rides along.
       mentions: draft.mentions,
+      attachments,
     })) {
       composerRef.current?.clear()
       setDraft(EMPTY_COMPOSER_VALUE)
+      setAttachments([])
       setDraftJudgeContext(null)
     }
   }
@@ -1182,6 +1228,12 @@ export function CopilotPanel({
 
       <form onSubmit={submit} className="shrink-0 space-y-1.5 px-4 pb-4 pt-2">
         <div className="studio-copilot-input studio-canvas-input-surface flex flex-col gap-1 rounded-md border px-2.5 py-2 transition-colors focus-within:[border-color:var(--studio-canvas-accent-muted)]">
+          <AttachmentTray
+            attachments={attachments}
+            onRemove={(index) =>
+              setAttachments((current) => current.filter((_, at) => at !== index))
+            }
+          />
           <MentionComposer
             ref={composerRef}
             candidates={mentionCandidates}
@@ -1194,6 +1246,9 @@ export function CopilotPanel({
             }}
             onSend={() => {
               void sendDraft()
+            }}
+            onImagesPasted={(files) => {
+              void attachImages(files)
             }}
           />
           {/* F6: inside the bordered box only the send action lives (stop joins it
@@ -1215,22 +1270,51 @@ export function CopilotPanel({
             ) : (
               <button
                 type="submit"
-                disabled={!draft.text.trim() || copilot.connectionStatus !== 'open'}
+                disabled={!canSend}
                 aria-label={t('composer.send')}
                 className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-                  draft.text.trim() && copilot.connectionStatus === 'open'
+                  canSend
                     ? 'bg-[color:var(--studio-canvas-accent)] text-primary-foreground hover:bg-primary/80'
                     : 'bg-secondary text-secondary-foreground'
                 }`}
               >
-                <ArrowUp className={`size-3.5 ${!draft.text.trim() ? 'text-muted-foreground' : ''}`} />
+                <ArrowUp className={`size-3.5 ${!canSend ? 'text-muted-foreground' : ''}`} />
               </button>
             )}
           </div>
         </div>
-        {/* F4 ① now lives INSIDE the box (type `@`); the attach entry joins the
-            left side of this row once it is functional — no dead placeholders. */}
-        <div className="flex items-center justify-end gap-0.5">
+        {/* F4 ① lives INSIDE the box (type `@`); COPILOT_ASSIST-11 ① puts the
+            attach entry here, on the left, opposite the model and role pickers. */}
+        <div className="flex items-center gap-0.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])]
+              // Reset first: picking the SAME file twice fires no change event
+              // otherwise, and the second attempt looks like a broken button.
+              event.target.value = ''
+              if (files.length > 0) void attachImages(files)
+            }}
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label={t('composer.attachments.attach')}
+                data-copilot-attach=""
+                className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <ImagePlus className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('composer.attachments.attach')}</TooltipContent>
+          </Tooltip>
+          <div className="ml-auto flex items-center gap-0.5">
           {/* R7-C (PM 2026-07-02): the role anchor is ALWAYS present. While config
               loads it shows the fixed default (opus4.8) + a spinner (the loading
               state lives inside RolePicker), not a skeleton block that swaps the
@@ -1250,6 +1334,7 @@ export function CopilotPanel({
             onSelect={setSelectedRole}
             loading={!(registrySettled && rolesSettled)}
           />
+          </div>
         </div>
       </form>
       </>

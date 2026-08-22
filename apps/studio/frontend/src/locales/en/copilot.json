@@ -156,6 +156,13 @@
         "error": "Diagnostics",
         "trace": "Trace events"
       }
+    },
+    "attachments": {
+      "attach": "Attach an image",
+      "unnamed": "Pasted image",
+      "remove": "Remove {{name}}",
+      "refusedType": "{{name}} is {{mediaType}} — only PNG, JPEG, GIF and WebP can be attached.",
+      "refusedBudget": "{{name}} would put this message's images at {{total}}, over the {{budget}} limit."
     }
   },
   "toast": {

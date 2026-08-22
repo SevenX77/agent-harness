@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { MarkedText, splitOnTerm } from './marked-text'
+import { MarkedText, MarkedValue, splitOnTerm, splitOnTermWithin } from './marked-text'
 
 describe('splitOnTerm', () => {
   it('hands back one unmarked run when there is nothing to mark', () => {
@@ -33,6 +33,59 @@ describe('splitOnTerm', () => {
       { text: 'a.b', marked: true },
       { text: ' and axb', marked: false },
     ])
+  })
+})
+
+describe('splitOnTermWithin', () => {
+  it('marks the term inside the value and leaves the sentence around it alone', () => {
+    // The sentence is ours; only the id came off the event. A reader searching
+    // `end` matched some OTHER row — marking the word "endpoint" here would
+    // claim this row matched for a reason it did not.
+    expect(splitOnTermWithin('endpoint: sendgrid-official', 'sendgrid-official', 'end')).toEqual([
+      { text: 'endpoint: ', marked: false },
+      { text: 's', marked: false },
+      { text: 'end', marked: true },
+      { text: 'grid-official', marked: false },
+    ])
+  })
+
+  it('marks a value that is the whole sentence', () => {
+    expect(splitOnTermWithin('ark-official', 'ark-official', 'ark')).toEqual([
+      { text: 'ark', marked: true },
+      { text: '-official', marked: false },
+    ])
+  })
+
+  it('leaves everything unmarked when the value is absent or empty', () => {
+    // i18n decides the wording; if a translation drops the interpolation, the
+    // honest answer is an unmarked sentence, not a mark placed by guesswork.
+    expect(splitOnTermWithin('no id here', 'ark-official', 'ark')).toEqual([
+      { text: 'no id here', marked: false },
+    ])
+    expect(splitOnTermWithin('endpoint: ', '', 'ark')).toEqual([
+      { text: 'endpoint: ', marked: false },
+    ])
+  })
+})
+
+describe('MarkedValue', () => {
+  it('marks inside the value only', () => {
+    const html = renderToStaticMarkup(
+      <MarkedValue text="endpoint: ark-official" value="ark-official" term="ark" />,
+    )
+
+    expect(html).toContain('>ark</mark>')
+    expect(html).toContain('endpoint: ')
+    expect(html).not.toContain('<mark class="rounded-[2px] bg-warning/40 text-foreground">endpoint')
+  })
+
+  it('renders the sentence plainly when the term misses the value', () => {
+    const html = renderToStaticMarkup(
+      <MarkedValue text="endpoint: ark-official" value="ark-official" term="point" />,
+    )
+
+    expect(html).not.toContain('<mark')
+    expect(html).toContain('endpoint: ark-official')
   })
 })
 

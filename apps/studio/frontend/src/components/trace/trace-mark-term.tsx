@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import { MarkedText } from '../ui/marked-text'
+import { MarkedText, MarkedValue } from '../ui/marked-text'
 
 const TraceMarkTermContext = createContext<string>('')
 
@@ -32,4 +32,18 @@ export function useTraceMarkTerm(): string {
  */
 export function TraceMark({ text }: { text: string }) {
   return <MarkedText text={text} term={useTraceMarkTerm()} />
+}
+
+/**
+ * One value of an event printed inside a sentence this app wrote, with the
+ * searched term marked in the value and never in the sentence.
+ *
+ * Several rows do not print a value on its own — they print `endpoint: {{id}}`,
+ * `Loaded — {{path}}`, `HTTP {{status}}`. Those are the two rules above meeting
+ * in one string: the interpolated part is quotable, the frame around it is not.
+ * Without this, a row that matched on its endpoint id showed no mark at all,
+ * which is the case F13 rules out —「一个看不出理由的命中,比没有命中更坏」.
+ */
+export function TraceMarkValue({ text, value }: { text: string; value: string }) {
+  return <MarkedValue text={text} value={value} term={useTraceMarkTerm()} />
 }

@@ -32,7 +32,7 @@ import type { StepOutput } from '../../hooks/useRunDeltas'
 import type { TraceStep } from '../../utils/trace-steps'
 import { EventTypeBadge } from './EventTypeBadge'
 import { TraceText } from './TraceText'
-import { TraceMark } from './trace-mark-term'
+import { TraceMark, TraceMarkValue } from './trace-mark-term'
 import {
   factLabelText,
   factValueText,
@@ -280,7 +280,10 @@ function LlmFlowBody({ step, liveOutput }: { step: TraceStep; liveOutput?: StepO
         </FlowEntry>
       ) : null}
       {promptMessages(prompt).map((message, position) => (
-        <FlowEntry key={`sent-${position}`} title={t('flow.sent', { role: message.role })}>
+        <FlowEntry
+          key={`sent-${position}`}
+          title={<TraceMarkValue text={t('flow.sent', { role: message.role })} value={message.role} />}
+        >
           <TraceText text={message.text} label={t('text.roleMessage', { role: message.role })} />
         </FlowEntry>
       ))}
@@ -338,7 +341,7 @@ function PromptOrigin({ event }: { event: CallbackEvent }) {
   return (
     <>
       {sourcePath ? (
-        <FlowEntry title={t('flow.loaded', { path: sourcePath })}>
+        <FlowEntry title={<TraceMarkValue text={t('flow.loaded', { path: sourcePath })} value={sourcePath} />}>
           {onFileOpen ? (
             <button
               type="button"
@@ -352,7 +355,7 @@ function PromptOrigin({ event }: { event: CallbackEvent }) {
           ) : null}
         </FlowEntry>
       ) : null}
-      <FlowEntry title={t('flow.wrapped', { source: templateSource })}>
+      <FlowEntry title={<TraceMarkValue text={t('flow.wrapped', { source: templateSource })} value={templateSource} />}>
         {templateText ? (
           <TraceText text={templateText} label={t('text.promptTemplate')} />
         ) : null}
@@ -361,7 +364,10 @@ function PromptOrigin({ event }: { event: CallbackEvent }) {
   )
 }
 
-function FlowEntry({ title, children }: { title: string; children?: React.ReactNode }) {
+// `title` is a node, not a string, because three of these headings quote a
+// value off the event (the role, the source path, the template) and have to be
+// able to mark it. The rest pass plain app words and read the same as before.
+function FlowEntry({ title, children }: { title: React.ReactNode; children?: React.ReactNode }) {
   return (
     <div data-trace-flow-entry>
       <div className="text-[10px] font-semibold uppercase text-muted-foreground">{title}</div>
@@ -507,7 +513,9 @@ function RouteDecisionRepeat({
       <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${tone.title}`} />
       <span className={tone.title}>{t('route.again', { title: decisionTitle(details, t) })}</span>
       {details.endpointId ? (
-        <span className="text-muted-foreground">{t('route.endpoint', { id: details.endpointId })}</span>
+        <span className="text-muted-foreground">
+          <TraceMarkValue text={t('route.endpoint', { id: details.endpointId })} value={details.endpointId} />
+        </span>
       ) : null}
       <span className="text-muted-foreground">{t('route.repeats', { count: occurrence })}</span>
     </div>
@@ -529,13 +537,20 @@ function RouteDecisionBlock({
         {severity === 'normal' ? <Cpu className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
         {decisionTitle(details, t)}
         {details.endpointId ? (
-          <span className="font-normal text-muted-foreground">{t('route.endpoint', { id: details.endpointId })}</span>
+          <span className="font-normal text-muted-foreground">
+            <TraceMarkValue text={t('route.endpoint', { id: details.endpointId })} value={details.endpointId} />
+          </span>
         ) : null}
         {details.protocol ? (
           <span className="font-normal text-muted-foreground"><TraceMark text={details.protocol} /></span>
         ) : null}
         {details.statusCode !== null ? (
-          <span className="font-normal text-muted-foreground">{t('route.http', { status: details.statusCode })}</span>
+          <span className="font-normal text-muted-foreground">
+            <TraceMarkValue
+              text={t('route.http', { status: details.statusCode })}
+              value={String(details.statusCode)}
+            />
+          </span>
         ) : null}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-foreground">
@@ -676,7 +691,7 @@ function UnreadEventBody({ event }: { event: CallbackEvent }) {
     <div data-trace-unread-event={event.event_type} className="mt-2 space-y-1.5">
       <p className="flex items-center gap-1.5 rounded border border-warning-border bg-warning-background px-2 py-1 text-xs text-warning-foreground">
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-        {t('step.unread', { eventType: event.event_type })}
+        <TraceMarkValue text={t('step.unread', { eventType: event.event_type })} value={event.event_type} />
       </p>
       <TraceText text={jsonText(event as never)} label={t('text.eventPayload')} language="json" />
     </div>

@@ -34,6 +34,40 @@ export function splitOnTerm(text: string, term: string): TextRun[] {
 }
 
 /**
+ * Split a sentence so that only the part of it that came off the event can be
+ * marked, and the words we wrote around that part cannot.
+ *
+ * Trace rows print values inside sentences we authored — `endpoint: {{id}}`,
+ * `Loaded — {{path}}`, `HTTP {{status}}`. Marking the whole sentence would put
+ * a mark on our own vocabulary: a reader searching `end` would see "endpoint"
+ * lit up on a row that matched for some entirely different reason, which is the
+ * failure F14 names — the mark must always point at the thing that actually
+ * matched.
+ *
+ * Only the FIRST occurrence of `value` is markable. These frames interpolate a
+ * value once; if a translation ever repeats it, one lit occurrence is already
+ * enough to show the reader why the row is here, and guessing which repeat they
+ * meant would be inventing a reason.
+ *
+ * A `value` the sentence does not contain leaves the sentence entirely
+ * unmarked. i18n owns the wording, so a translation that drops the
+ * interpolation is a sentence with no verbatim part — and no mark is the honest
+ * rendering of that, where a mark placed by guesswork is not.
+ */
+export function splitOnTermWithin(text: string, value: string, term: string): TextRun[] {
+  if (value.length === 0) return [{ text, marked: false }]
+  const start = text.indexOf(value)
+  if (start === -1) return [{ text, marked: false }]
+
+  const runs: TextRun[] = []
+  if (start > 0) runs.push({ text: text.slice(0, start), marked: false })
+  runs.push(...splitOnTerm(value, term))
+  const end = start + value.length
+  if (end < text.length) runs.push({ text: text.slice(end), marked: false })
+  return runs
+}
+
+/**
  * Text with one term marked wherever it occurs.
  *
  * `warning` rather than `accent` or `destructive`: a mark has to stay legible
@@ -43,8 +77,24 @@ export function splitOnTerm(text: string, term: string): TextRun[] {
  * looking at.
  */
 export function MarkedText({ text, term }: { text: string; term: string }) {
-  const runs = splitOnTerm(text, term)
-  if (runs.length === 1 && !runs[0].marked) return <>{text}</>
+  return <Runs runs={splitOnTerm(text, term)} />
+}
+
+/**
+ * A sentence we authored with the one value in it that the event supplied,
+ * marked where the term hit that value — and nowhere else.
+ *
+ * `text` is the finished translated sentence and `value` is the substring of it
+ * that came off the event, so the caller passes both: i18n owns the wording and
+ * word order, and this component only needs to know which slice of the result
+ * is quotable.
+ */
+export function MarkedValue({ text, value, term }: { text: string; value: string; term: string }) {
+  return <Runs runs={splitOnTermWithin(text, value, term)} />
+}
+
+function Runs({ runs }: { runs: TextRun[] }) {
+  if (!runs.some((run) => run.marked)) return <>{runs.map((run) => run.text).join('')}</>
   return (
     <>
       {runs.map((run, index) => (

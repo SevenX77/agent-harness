@@ -1,6 +1,7 @@
 import { PlayCircle } from 'lucide-react'
 import type { CallbackEvent } from '../../api/types'
 import { eventTimeLabel } from '../../utils/trace'
+import { TraceMark, TraceMarkValue } from './trace-mark-term'
 import { useTraceCopy } from './trace-copy'
 
 /**
@@ -31,9 +32,11 @@ export function TraceResumeSeam({ event }: { event: CallbackEvent }) {
       <span className="flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground">
         <PlayCircle className="h-3.5 w-3.5 shrink-0" />
         <span className="font-medium text-foreground">{t('resume.resumed')}</span>
-        {phase ? <span className="font-mono">{phase}</span> : null}
+        {phase ? <span className="font-mono"><TraceMark text={phase} /></span> : null}
         {answer ? (
-          <span className="truncate" title={answer}>{t('resume.answered', { answer })}</span>
+          <span className="truncate" title={answer}>
+            <TraceMarkValue text={t('resume.answered', { answer })} value={answer} />
+          </span>
         ) : null}
         {timeLabel ? <span className="font-mono text-muted-foreground/80">{timeLabel}</span> : null}
       </span>

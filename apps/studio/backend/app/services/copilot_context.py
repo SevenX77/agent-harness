@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from xml.sax.saxutils import escape
 
 from app.core.authored_text import read_authored_text
@@ -39,6 +40,12 @@ _CONTENT_KINDS = frozenset({"file", "phase"})
 _PHASE_NODE_FILENAMES = ("LOGIC.md", "SUBGRAPH.md", "SKILL.md")
 
 
+# The four things one mention can turn into, named rather than inferred from
+# which optional fields happen to be set. An outcome nobody can spell out is one
+# every reader re-derives differently — and there are now four, not two.
+MentionOutcome = Literal["injected", "reference_only", "repeat", "failed"]
+
+
 @dataclass(frozen=True)
 class ResolvedMention:
     """What one mention actually turned into for this turn."""
@@ -46,13 +53,13 @@ class ResolvedMention:
     kind: str
     ref: str
     label: str
-    # The object's text, for the kinds that have one here; None means either a
-    # reference-only kind or a failure — `failure` tells them apart.
+    outcome: MentionOutcome
+    # The object's text. Set only when `outcome` is "injected".
     content: str | None
-    # Where the content was read from, skill-relative. None when nothing was read.
+    # Where the content was read from, skill-relative. Set only when injected.
     source_path: str | None
     truncated: bool
-    # Why nothing was injected, in the user's terms. None when the mention resolved.
+    # Why nothing was injected, in the user's terms. Set only when "failed".
     failure: str | None
 
 
@@ -62,10 +69,29 @@ def resolve_mentions(
     skill_dir: Path,
     budget: int = MENTION_CONTENT_BUDGET,
 ) -> tuple[ResolvedMention, ...]:
-    """Resolve every mention in order, spending one shared content budget."""
+    """Resolve every mention in order, spending one shared content budget.
+
+    The same object named twice is read once (COPILOT_ASSIST-10 ②). The budget
+    is a per-TURN allowance shared across every mention in it, so a second
+    reading of the same bytes buys nothing and can push a later mention out of
+    the allowance. Merging happens HERE rather than in the composer because the
+    allowance is this module's rule; a client that forgot to de-duplicate must
+    not be able to spend it twice.
+
+    Every input mention still gets an entry, so the echo can keep one line per
+    pill the user typed — a repeat is reported as a repeat, not dropped.
+    """
     resolved: list[ResolvedMention] = []
     remaining = budget
+    # Identity is the PAIR: `kind` decides how `ref` is read, so the same string
+    # under two kinds is two objects (COPILOT_ASSIST-8).
+    already_named: set[tuple[str, str]] = set()
     for mention in mentions:
+        identity = (mention.kind, mention.ref)
+        if identity in already_named:
+            resolved.append(_repeat(mention))
+            continue
+        already_named.add(identity)
         if mention.kind not in _CONTENT_KINDS:
             resolved.append(_reference_only(mention))
             continue
@@ -76,8 +102,12 @@ def resolve_mentions(
 
 
 def render_mentions_xml(resolved: tuple[ResolvedMention, ...] | list[ResolvedMention]) -> str:
-    """Render the resolved mentions as structured prompt context."""
-    blocks = [_mention_block(item) for item in resolved]
+    """Render the resolved mentions as structured prompt context.
+
+    Repeats contribute nothing: the object is already in the block above, under
+    the same ref, and a second identical entry only spends the model's context.
+    """
+    blocks = [_mention_block(item) for item in resolved if item.outcome != "repeat"]
     if not blocks:
         return ""
     return "<mentions>\n" + "\n".join(blocks) + "\n</mentions>"
@@ -89,7 +119,9 @@ def mention_echo_lines(
     """One line per mention for the context echo, saying what it actually became."""
     lines: list[str] = []
     for item in resolved:
-        if item.failure is not None:
+        if item.outcome == "repeat":
+            lines.append(f"@{item.kind} {item.ref} — already named above, injected once")
+        elif item.failure is not None:
             lines.append(f"@{item.kind} {item.ref} — {item.failure} (nothing injected)")
         elif item.content is None:
             lines.append(f"@{item.kind} {item.ref} — reference only, not read here")
@@ -103,11 +135,26 @@ def mention_echo_lines(
     return lines
 
 
+def _repeat(mention: CopilotMention) -> ResolvedMention:
+    """A second pill naming an object an earlier pill already named."""
+    return ResolvedMention(
+        kind=mention.kind,
+        ref=mention.ref,
+        label=mention.label,
+        outcome="repeat",
+        content=None,
+        source_path=None,
+        truncated=False,
+        failure=None,
+    )
+
+
 def _reference_only(mention: CopilotMention) -> ResolvedMention:
     return ResolvedMention(
         kind=mention.kind,
         ref=mention.ref,
         label=mention.label,
+        outcome="reference_only",
         content=None,
         source_path=None,
         truncated=False,
@@ -120,6 +167,7 @@ def _failed(mention: CopilotMention, reason: str) -> ResolvedMention:
         kind=mention.kind,
         ref=mention.ref,
         label=mention.label,
+        outcome="failed",
         content=None,
         source_path=None,
         truncated=False,
@@ -154,6 +202,7 @@ def _read_mentioned_file(
         kind=mention.kind,
         ref=mention.ref,
         label=mention.label,
+        outcome="injected",
         content=text[:budget] if truncated else text,
         source_path=located.relative_to(skill_dir).as_posix(),
         truncated=truncated,

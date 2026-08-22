@@ -144,7 +144,18 @@
   "composer": {
     "placeholder": "用 '@' 提及节点...",
     "stop": "停止生成",
-    "send": "发送消息"
+    "send": "发送消息",
+    "mentionMenu": {
+      "label": "可提名的对象",
+      "more": "还有 {{count}} 条",
+      "kind": {
+        "file": "文件",
+        "phase": "相位",
+        "dot": "黑板键",
+        "error": "诊断",
+        "trace": "运行事件"
+      }
+    }
   },
   "toast": {
     "routeSwitched": "路由已切换,之后的消息会用它。",

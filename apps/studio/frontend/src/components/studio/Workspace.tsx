@@ -8,6 +8,7 @@ import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/c
 import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { INPUT_ID, OUTPUT_ID, type SkillNodeStatus } from "@/components/nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
+import type { MentionSources } from "@/components/copilot/composer/mention-candidates"
 import type { CliTerminalSession } from "@/components/copilot/cli-terminal-session"
 import { CopilotFab } from "@/components/copilot/copilot-fab"
 import { CopilotPanelMorph } from "@/components/copilot/copilot-panel-morph"
@@ -2334,6 +2335,26 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [skillDetail?.lint_result, skillDetail?.manifest_errors, realtimeLint],
   )
 
+  /**
+   * What the copilot composer's `@` menu may offer (copilot-assist F4 ①).
+   *
+   * Assembled HERE rather than inside the panel because F4 ③ forbids the
+   * composer from reaching for context on its own: the nameable set has to be
+   * exactly what the workspace is already showing, and this is where that is
+   * known. `files` keys are workspace-relative paths, which is the address the
+   * backend resolver reads a `file` mention by.
+   *
+   * The trace index is a position in the run's FULL event list, not in whatever
+   * the trace panel is currently scoped to — a ref that moved when the reader
+   * filtered the panel would name a different event tomorrow.
+   */
+  const copilotMentionSources = useMemo<MentionSources>(() => ({
+    filePaths: Object.keys(skillDetail?.files ?? {}),
+    phases: skillDetail?.graph_topology ?? [],
+    diagnostics: activeLint,
+    trace: viewedRunId ? { runId: viewedRunId, events: viewedTraceEvents } : null,
+  }), [skillDetail?.files, skillDetail?.graph_topology, activeLint, viewedRunId, viewedTraceEvents])
+
   const editorLintResult = useMemo<LintResult | null>(() => {
     if (!currentSkillId) return null
     if (realtimeLint != null) return realtimeLint
@@ -2972,6 +2993,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onJudgePrepared={setCopilotJudgeResult}
         onFileChanged={handleCopilotFileChanged}
         onCollapse={() => startMorph("close", fabPosition)}
+        mentionSources={copilotMentionSources}
       />
     </WorkspaceRightPanelOverlay>
   ) : null

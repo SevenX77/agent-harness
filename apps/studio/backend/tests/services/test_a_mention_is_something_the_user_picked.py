@@ -155,3 +155,67 @@ def test_nothing_mentioned_renders_nothing(skill_dir: Path) -> None:
     assert resolve_mentions([], skill_dir=skill_dir) == ()
     assert render_mentions_xml(()) == ""
     assert mention_echo_lines(()) == []
+
+
+def test_the_same_object_mentioned_twice_is_read_once(skill_dir: Path) -> None:
+    """COPILOT_ASSIST-10 ②: one object, one reading, one charge to the budget.
+
+    The budget is a per-TURN allowance shared by every mention in it, so reading
+    one file twice does not just waste work — it can push a later mention out of
+    the allowance entirely, for no information anyone gains.
+    """
+    body = "x" * 1000
+    (skill_dir / "twice.md").write_text(body, encoding="utf-8")
+
+    first, second = resolve_mentions(
+        [_mention("file", "twice.md"), _mention("file", "twice.md")],
+        skill_dir=skill_dir,
+    )
+
+    assert first.content == body
+    assert second.outcome == "repeat"
+    assert second.content is None
+    # The XML the model reads carries the file once; a second copy would be the
+    # same bytes under the same ref, which teaches it nothing.
+    assert render_mentions_xml((first, second)).count(body) == 1
+
+
+def test_a_repeat_still_gets_its_own_line_in_the_echo(skill_dir: Path) -> None:
+    """F1's "no omission" reaches the repeat too.
+
+    The user typed two pills and must see two lines; what the second line says
+    is that it names the same object as the first, not that it vanished.
+    """
+    resolved = resolve_mentions(
+        [_mention("file", "GRAPH.md"), _mention("file", "GRAPH.md")],
+        skill_dir=skill_dir,
+    )
+
+    lines = mention_echo_lines(resolved)
+    assert len(lines) == 2
+    assert "GRAPH.md" in lines[1]
+    assert lines[0] != lines[1]
+    assert "already" in lines[1].lower()
+
+
+def test_repeating_a_reference_only_kind_is_still_one_reference(skill_dir: Path) -> None:
+    first, second = resolve_mentions(
+        [_mention("dot", "draft.summary"), _mention("dot", "draft.summary")],
+        skill_dir=skill_dir,
+    )
+
+    assert first.outcome == "reference_only"
+    assert second.outcome == "repeat"
+    assert render_mentions_xml((first, second)).count('ref="draft.summary"') == 1
+
+
+def test_two_different_objects_are_not_a_repeat(skill_dir: Path) -> None:
+    # Same ref under a different kind is a different object: `kind` decides how
+    # `ref` is read (COPILOT_ASSIST-8), so the pair is the identity, not the ref.
+    first, second = resolve_mentions(
+        [_mention("dot", "GRAPH.md"), _mention("file", "GRAPH.md")],
+        skill_dir=skill_dir,
+    )
+
+    assert first.outcome == "reference_only"
+    assert second.outcome == "injected"

@@ -20,7 +20,7 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
 | 2. 代码显式声明 | 所有 `open()` / `Path.read_text()` / `Path.write_text()` / `subprocess(text=True)` 必须显式 `encoding="utf-8"`；读子进程输出加 `errors="replace"`。 | ✅ #280 |
 | 3. 运行时兜底 | 所有进程入口设 `PYTHONUTF8=1`（Python UTF-8 模式，3.15 起为官方默认）：根 `conftest.py`、CI env、`studio-dev.ps1` / `wt-*.sh`、Tauri sidecar spawn（`sidecar.rs`）。第 2 层若有遗漏，行为仍统一。 | ✅ #280 |
 | 4. 闸门防复发 | ruff 启用 `PLW1514`（unspecified-encoding），未指定编码的文本 I/O 直接 CI 红。 | ✅ #280（`PLW1514` 走 explicit-preview-rules，稳定规则行为不变） |
-| 5. CI 真机验证 | `windows-latest` + `macos-latest` 的 cross-platform smoke job（pytest 三包 + 前端 build），**非必需检查**，只做观察信号。 | ✅ 本 PR |
+| 5. CI 真机验证 | `windows-latest` + `macos-latest` 的 cross-platform smoke job（pytest 三包 + 前端 build + tauri crate 的 `cargo test`），**两条腿都是必需检查**：红了挡合并。它建起来时只是观察信号，2026-08-12 提升为必需——理由与提升过程见 `AGENTS.md`「Workflow Pipeline」第 4 条。 | ✅ #280；2026-08-12 提升为必需 |
 
 ## 写代码时的具体规则
 

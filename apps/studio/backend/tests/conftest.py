@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import atexit
 import json
 import multiprocessing
 import os
 import shutil
 import sys
+import tempfile
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,6 +18,23 @@ os.environ.setdefault("STUDIO_API_TOKEN", "studio-test-token")
 # Cross-platform bottom line (docs/development/CROSS_PLATFORM.md): child
 # Python processes spawned by tests write UTF-8 regardless of host locale.
 os.environ.setdefault("PYTHONUTF8", "1")
+
+# The suite owns its config dir, and owns it from the first import onward.
+# `app.core.config` resolves APP_SETTINGS_DIR — and every path derived from it,
+# including the `llm/` credentials and roles the running app is using — at
+# import time. Left alone that is the developer's real per-user app directory,
+# so the suite would read and write live app state: a stored config predating a
+# schema change fails tests CI passes, and a test that saves settings edits what
+# the running app reads. Set here rather than in a fixture because a fixture
+# runs after the import that already computed the paths, and unconditionally
+# rather than via setdefault because a suite that inherits an ambient config dir
+# is exactly the dependence on machine state this removes. Spawned child
+# processes inherit the variable, so they land in the same place.
+# Same principle as the autouse fixtures below: the DEFAULT test state must
+# reach nothing real.
+_TESTS_OWN_CONFIG_DIR = tempfile.mkdtemp(prefix="studio-tests-config-")
+atexit.register(shutil.rmtree, _TESTS_OWN_CONFIG_DIR, ignore_errors=True)
+os.environ["STUDIO_CONFIG_DIR"] = _TESTS_OWN_CONFIG_DIR
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 STUDIO_BACKEND = REPO_ROOT / "apps" / "studio" / "backend"

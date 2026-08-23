@@ -222,8 +222,11 @@ jobs:
 
   cross-platform-smoke:
     # Windows/macOS observation signal (docs/development/CROSS_PLATFORM.md,
-    # layer 5). NOT a required check — a red run here never blocks a merge;
-    # it exists so platform-specific breakage is visible instead of unknown.
+    # layer 5). BOTH matrix legs are required checks: a red run here blocks the
+    # merge. They were promoted on 2026-08-12 because this is the only job that
+    # runs the suite anywhere but Linux while the primary dev machine is
+    # Windows — as an advisory signal it sat red unnoticed through #743 (a real
+    # Windows-only defect) and #749 merged while it was still running.
     # 45min: the tauri cargo test step below compiles the Rust stack cold on
     # cache misses (~10min on the Windows runner, and now the same on macOS)
     # on top of the pytest suites.

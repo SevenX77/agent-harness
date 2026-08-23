@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { configureApiToken } from "../../../api/client"
-import { deleteEndpoint, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog } from "../../../api/llm"
+import { deleteEndpoint, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRegistry, getRoles, syncVerifiedCommunityCatalog } from "../../../api/llm"
 import { SettingsPageView, useSettingsPageController } from "./SettingsPage"
 
 type Controller = ReturnType<typeof useSettingsPageController>
@@ -110,6 +110,7 @@ vi.mock("../../../api/llm", async (importOriginal) => {
     deleteRole: vi.fn(),
     forceTestEndpoint: vi.fn(),
     getCredentials: vi.fn(() => Promise.resolve({ providers: [] })),
+    getRegistry: vi.fn(() => Promise.resolve({ provider_endpoints: {} })),
     getEndpointSecret: vi.fn(),
     getModelGroups: vi.fn(() => Promise.resolve([])),
     getProviderModels: vi.fn(),
@@ -452,6 +453,14 @@ describe("useSettingsPageController lifecycle", () => {
   it("allows a settings mutation when the backend is reachable", async () => {
     configureApiToken("sidecar-token")
     mockEventStream.connectionLost = false
+    vi.mocked(getCredentials).mockResolvedValueOnce({
+      providers: [{ id: "openrouter", name: "OpenRouter", api_key: "sk", base_url: "https://openrouter.ai/api", provider_type: "openai_compatible" }],
+    })
+    vi.mocked(getRegistry).mockResolvedValueOnce({
+      provider_endpoints: {
+        openrouter: { endpoint_id: "openrouter", display_name: "OpenRouter", base_url: "https://openrouter.ai/api", metadata: {} },
+      },
+    } as never)
     await act(async () => {
       root.render(<ControllerProbe capture={(controller) => { capturedController = controller }} />)
     })

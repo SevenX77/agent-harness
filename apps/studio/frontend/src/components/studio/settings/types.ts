@@ -100,7 +100,7 @@ export interface SettingsPageContentProps {
   /** Force re-probe one (URL, protocol) cell, bypassing the half-life gate (design §1.2 matrix point 4). */
   onForceEndpointTest: (endpointId: string) => void
   onDeleteProvider: (providerId: string) => void
-  onDeleteProviderEndpoints: (endpointIds: string[]) => void
+  onDeleteProviderEndpoints: (endpointIds: string[], baseUrls: string[], providerName: string) => void
   /** Remove a model from a provider by deleting all of its route ids (P2). */
   onRemoveModel: (modelId: string, routeIds: string[]) => void
   onBeginAddProvider: () => void

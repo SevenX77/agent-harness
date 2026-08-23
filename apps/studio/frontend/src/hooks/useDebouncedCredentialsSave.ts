@@ -63,7 +63,6 @@ export function useDebouncedCredentialsSave(
   const pendingSnapshotRef = useRef<(() => ProviderCredentialUpdate[]) | null>(null)
 
   const performSave = useCallback(
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     async (getSnapshot: () => ProviderCredentialUpdate[]): Promise<CredentialsState | null> => {
       setStatus("saving")
       const payload = getSnapshot()
@@ -136,12 +135,22 @@ export function useDebouncedCredentialsSave(
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-    if (inflightRef.current) return inflightRef.current
-    const snapshot = pendingSnapshotRef.current
-    if (!snapshot) return null
-    pendingSnapshotRef.current = null
-    inflightRef.current = performSave(snapshot)
-    return inflightRef.current
+    // A caller that needs a durable boundary (delete / Test) must wait for the
+    // whole serialized queue, not merely the request that happened to be in
+    // flight when it called flush. `performSave` may start a buffered follow-up
+    // in its finally block, so keep draining until neither slot is occupied.
+    let latest: CredentialsState | null = null
+    for (;;) {
+      const inflight = inflightRef.current
+      if (inflight) {
+        latest = await inflight
+        if (inflightRef.current && inflightRef.current !== inflight) continue
+      }
+      const snapshot = pendingSnapshotRef.current
+      if (!snapshot) return latest
+      pendingSnapshotRef.current = null
+      inflightRef.current = performSave(snapshot)
+    }
   }, [performSave])
 
   // Cleanup on unmount: drop the timer, but let any in-flight PUT settle on

@@ -1907,7 +1907,7 @@ export function ProviderCard({
   onGetModels: () => void
   onEndpointTest?: (modelId: string) => void
   onDelete: () => void
-  onDeleteEndpointIds?: (endpointIds: string[]) => void
+  onDeleteEndpointIds?: (endpointIds: string[], baseUrls: string[], providerName: string) => void
   providerKind?: "official" | "third-party"
   showManualModelPanel?: boolean
   notableProviderKey?: string
@@ -2177,8 +2177,11 @@ export function ProviderCard({
       .filter((endpointId): endpointId is string => Boolean(endpointId))
     const removeRow = () => {
       updateBaseUrlRows(baseUrlRows.filter((row) => row.id !== rowId))
-      if (removedUrl && removedEndpointIds.length > 0) {
-        onDeleteEndpointIds?.(removedEndpointIds)
+      if (removedUrl) {
+        // A row added moments ago has no server endpoint ids yet. Its explicit
+        // delete intent must still reach the owner, which resolves canonical ids
+        // only after flushing the serialized save queue.
+        onDeleteEndpointIds?.(removedEndpointIds, [removedUrl], draft.name)
       }
     }
     if (!removedUrl) {

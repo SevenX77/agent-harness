@@ -630,6 +630,13 @@ def _repin_routes(
             repinned[route_id] = route
             continue
         new_route_id = f"{new_endpoint_id}:{route.route_slug}"
+        existing = routes.get(new_route_id)
+        if existing is not None and existing.route_id != route_id:
+            raise EndpointInvariantViolation(
+                "Cannot normalize endpoint id "
+                f"{old_endpoint_id!r}: route {route_id!r} would collide with existing "
+                f"route {new_route_id!r}. Resolve the duplicate endpoint records first."
+            )
         renamed[route_id] = new_route_id
         repinned[new_route_id] = route.model_copy(
             update={"route_id": new_route_id, "endpoint_id": new_endpoint_id}

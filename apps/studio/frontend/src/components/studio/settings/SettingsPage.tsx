@@ -7,7 +7,7 @@ import { shouldApplyExternalRolesRefresh, useDebouncedRolesSave } from "@/hooks/
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRoles, isRedactedEndpointSecret, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRegistry, getRoles, isRedactedEndpointSecret, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RegistryResponse, type RolesData } from "../../../api/llm"
 import { clearActiveProbeEndpoints, updateActiveProbeEndpoint } from "../api-keys/active-probe-store"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
@@ -20,6 +20,31 @@ import { errorMessage } from "@/utils/errors"
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
 const emptyActiveProbeModelIdsByEndpoint: Record<string, string[]> = Object.freeze({})
+
+function normalizeExplicitDeleteBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLowerCase()
+}
+
+export function serverEndpointIdsForExplicitDelete(
+  registry: RegistryResponse,
+  requestedEndpointIds: readonly string[],
+  baseUrls: readonly string[],
+  providerName: string,
+): string[] {
+  const ids = new Set(
+    requestedEndpointIds.filter((endpointId) => Boolean(registry.provider_endpoints[endpointId])),
+  )
+  const requestedUrls = new Set(baseUrls.map(normalizeExplicitDeleteBaseUrl).filter(Boolean))
+  if (requestedUrls.size === 0) return [...ids]
+  for (const [endpointId, endpoint] of Object.entries(registry.provider_endpoints)) {
+    if (endpoint.display_name !== providerName) continue
+    const authoredBaseUrl = typeof endpoint.metadata.studio_base_url === "string"
+      ? endpoint.metadata.studio_base_url
+      : endpoint.base_url
+    if (requestedUrls.has(normalizeExplicitDeleteBaseUrl(authoredBaseUrl))) ids.add(endpointId)
+  }
+  return [...ids]
+}
 
 function useAuthenticatedApiReady(): boolean {
   const [ready, setReady] = useState(() => authenticatedApiReady())
@@ -870,14 +895,14 @@ export function useSettingsPageController(): SettingsPageController {
   function deleteProvider(providerId: string) {
     if (!ensureBackendReachable()) return
     const draft = providerDraftForAction(draftsRef.current, providerId)
-    const endpointIds = draft
-      ? providerEndpointDraftsForAction(draft).map((endpointDraft) => endpointDraft.id)
-      : [providerId]
+    const endpointDrafts = draft ? providerEndpointDraftsForAction(draft) : []
+    const endpointIds = endpointDrafts.map((endpointDraft) => endpointDraft.id)
+    const baseUrls = endpointDrafts.map((endpointDraft) => endpointDraft.base_url)
     pendingRoleProjectionRefreshRef.current = true
     dirtyProviderIdsRef.current.delete(providerId)
     deletedProviderIdsRef.current.add(providerId)
     setDrafts((current) => current.filter((draft) => draft.id !== providerId))
-    void deleteProviderEndpoints(endpointIds)
+    void deleteProviderEndpoints(endpointIds, baseUrls, draft?.name ?? "")
   }
 
   /**
@@ -886,13 +911,14 @@ export function useSettingsPageController(): SettingsPageController {
    * removing one of its Base URL rows — because saving no longer infers deletion
    * from what a payload happens to omit (docs/design/2026-08-20-deletion-is-explicit.md).
    */
-  async function deleteProviderEndpoints(endpointIds: string[]) {
+  async function deleteProviderEndpoints(endpointIds: string[], baseUrls: string[], providerName: string) {
     if (!ensureBackendReachable()) return
-    const uniqueEndpointIds = Array.from(new Set(endpointIds.filter(Boolean)))
-    if (uniqueEndpointIds.length === 0) return
-    // Land any debounced save first, so the delete cannot race a write that is
-    // still creating the very endpoints it is about to remove.
+    // First drain every queued write. Only then is the registry's canonical id
+    // set authoritative; draft ids are merely placeholders for a new endpoint.
     await flushCredentialsSave()
+    const registry = await getRegistry({ force: true })
+    const uniqueEndpointIds = serverEndpointIdsForExplicitDelete(registry, endpointIds, baseUrls, providerName)
+    if (uniqueEndpointIds.length === 0) return
     pendingRoleProjectionRefreshRef.current = true
     try {
       for (const endpointId of uniqueEndpointIds) {
@@ -1234,7 +1260,7 @@ export function useSettingsPageController(): SettingsPageController {
     },
     onForceEndpointTest: (endpointId) => void forceReprobeEndpoint(endpointId),
     onDeleteProvider: deleteProvider,
-    onDeleteProviderEndpoints: (endpointIds) => void deleteProviderEndpoints(endpointIds),
+    onDeleteProviderEndpoints: (endpointIds, baseUrls, providerName) => void deleteProviderEndpoints(endpointIds, baseUrls, providerName),
     onRemoveModel: (modelId, routeIds) => void removeModelRoutes(modelId, routeIds),
     onBeginAddProvider: beginAddProvider,
     onAddProvider: addProviderWithData,

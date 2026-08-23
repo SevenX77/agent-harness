@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { REDACTED_ENDPOINT_SECRET, type CredentialsState } from "../../../api/llm"
-import { reconcileDraftsWithCredentials } from "./SettingsPage"
+import { REDACTED_ENDPOINT_SECRET, type CredentialsState, type RegistryResponse } from "../../../api/llm"
+import { reconcileDraftsWithCredentials, serverEndpointIdsForExplicitDelete } from "./SettingsPage"
 import { draftFromAddProviderSubmission } from "./provider-utils"
 
 // Regression: adding one third-party provider must not render TWO identical
@@ -112,5 +112,43 @@ describe("reconcileDraftsWithCredentials — no duplicate card after adding a pr
     )
 
     expect(result.filter((draft) => draft.name === "Fresh Co")).toHaveLength(1)
+  })
+})
+
+describe("serverEndpointIdsForExplicitDelete", () => {
+  it("resolves a just-created URL row to all canonical server cells, even when no draft id exists yet", () => {
+    const registry = {
+      provider_endpoints: {
+        "stable-openai": {
+          endpoint_id: "stable-openai",
+          display_name: "New Gateway",
+          base_url: "https://runtime.example/v1",
+          metadata: { studio_base_url: "https://new.example/v1" },
+        },
+        "stable-ark": {
+          endpoint_id: "stable-ark",
+          display_name: "New Gateway",
+          base_url: "https://runtime.example/v1",
+          metadata: { studio_base_url: "https://new.example/v1" },
+        },
+        unrelated: {
+          endpoint_id: "unrelated",
+          display_name: "Other Gateway",
+          base_url: "https://runtime.example/v1",
+          metadata: { studio_base_url: "https://new.example/v1" },
+        },
+      },
+    } as unknown as RegistryResponse
+
+    expect(serverEndpointIdsForExplicitDelete(registry, [], ["https://new.example/v1/"], "New Gateway")).toEqual(
+      expect.arrayContaining(["stable-openai", "stable-ark"]),
+    )
+    expect(serverEndpointIdsForExplicitDelete(registry, [], ["https://new.example/v1/"], "New Gateway")).not.toContain("unrelated")
+  })
+
+  it("never issues a delete for a client-only placeholder id", () => {
+    const registry = { provider_endpoints: {} } as unknown as RegistryResponse
+
+    expect(serverEndpointIdsForExplicitDelete(registry, ["custom-url-openai"], [], "New Gateway")).toEqual([])
   })
 })

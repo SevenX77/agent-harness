@@ -379,6 +379,64 @@ def test_normalizing_the_id_repins_routes_instead_of_orphaning_them(tmp_path: Pa
     assert orphans == []
 
 
+def test_normalizing_an_id_rejects_a_route_id_collision_without_losing_either_route(
+    tmp_path: Path,
+) -> None:
+    """A legacy duplicate must not turn a re-key into a last-write-wins delete."""
+    from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
+    from app.services.llm_credentials import EndpointInvariantViolation, save_credentials
+    from graph_agent_gateway.registry import stable_endpoint_id
+
+    path = tmp_path / "llm_credentials.json"
+    base_url = "https://api.legacy.example/v1"
+    protocol = "openai_compatible"
+    canonical_id = stable_endpoint_id(protocol=protocol, base_url=base_url)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "legacy-hand-written": ProviderEndpoint(
+                    endpoint_id="legacy-hand-written",
+                    display_name="Legacy",
+                    protocol=protocol,
+                    base_url=base_url,
+                    api_key="legacy-secret",
+                ),
+                canonical_id: ProviderEndpoint(
+                    endpoint_id=canonical_id,
+                    display_name="Canonical",
+                    protocol=protocol,
+                    base_url=base_url,
+                    api_key="canonical-secret",
+                ),
+            },
+            provider_routes={
+                "legacy-hand-written:m1": ProviderRoute(
+                    route_id="legacy-hand-written:m1",
+                    endpoint_id="legacy-hand-written",
+                    route_slug="m1",
+                    provider_model_id="legacy-model",
+                    status="verified",
+                ),
+                f"{canonical_id}:m1": ProviderRoute(
+                    route_id=f"{canonical_id}:m1",
+                    endpoint_id=canonical_id,
+                    route_slug="m1",
+                    provider_model_id="canonical-model",
+                    status="verified",
+                ),
+            },
+        ),
+        path=path,
+    )
+
+    with pytest.raises(EndpointInvariantViolation, match="would collide"):
+        upsert_endpoints({"legacy-hand-written": _legacy_payload()}, path=path)
+
+    after = load_credentials(path)
+    assert set(after.provider_endpoints) == {"legacy-hand-written", canonical_id}
+    assert set(after.provider_routes) == {"legacy-hand-written:m1", f"{canonical_id}:m1"}
+
+
 def test_normalizing_the_id_keeps_the_observation_and_the_credential(tmp_path: Path) -> None:
     # A rename changes what the record is CALLED, not what it IS, so nothing it
     # learned about its address is retired.

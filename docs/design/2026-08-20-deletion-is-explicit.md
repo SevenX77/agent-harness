@@ -122,7 +122,10 @@ A-1 与 A-2 **不是两个缺陷，是同一个缺陷的两次显形**：派生�
 **同步纪律**：`deleteBaseUrlRow` 触发的删除，必须先 `flush` 掉尚未落地的凭据保存，
 再解析待删 id。否则一条「刚敲进去、保存还在飞」的 URL 行被删掉时，它的 `endpoint_ids`
 还是空的，后端已经建出来的格子就没人删了——差集删除从前会顺手扫掉它们，现在不会。
-用既有的 `flushCredentialsSave` 关掉这个窗口，不新造机制。
+`flushCredentialsSave` 必须排空**当前 in-flight 与其后缓冲的全部**保存；随后从服务端
+canonical registry 按这条行的 `studio_base_url` 解析实际 endpoint id。前端占位 id 不能
+作为 DELETE 目标；解析同时限定这张 provider 卡的名称，不能因另一张卡恰好使用同一 URL
+而越权删除。用既有的保存队列与 registry 真相关掉这个窗口，不新造第二份删除状态。
 
 ### 4.3 前端草稿与服务端 canonical snapshot 的交互边界
 
@@ -158,6 +161,10 @@ route 的 id 也跟着换名）：
   `model_profiles[*].fallback_chain[*].route_id`、
   `model_bundles[*].fallback_chain[*].route_id`、
   `model_bundles[*].model_groups[*].provider_models[*].route_id`。
+
+**改钉冲突不得静默覆盖**：若历史遗留 endpoint 与规范 endpoint 已经同时存在，且两条
+route 改钉后会得到相同的 route id，upsert 必须拒绝并保留两边全部记录。它不是一次可以
+靠字典后写覆盖解决的「改名」；必须由独立修复明确裁决两条 route 如何合并或删除。
 
 **原子性能保证到哪一层，说清楚**：
 
@@ -231,12 +238,16 @@ route 的 id 也跟着换名）：
 7. 搬家（地址真的变了）仍然是**清除**而不是改钉——PR #876 的行为不被本次改动动摇。
 8. 角色写入失败（注入故障）时，凭据文件**一个字节都没变**：endpoint 仍在旧 id 上、
    route 仍是旧 route_id——即上面「中间态必须可重做」的可执行证据。
+9. 新 URL 的 PUT 正在飞行时立即确认删除 → 保存队列排空后，按服务端 canonical id 删除
+   该 URL 名下的全部格子；前端占位 id 不得发到 DELETE 路由。
+10. 两条历史重复 endpoint 的同 route slug 会在改钉后相撞 → 请求被拒绝，两个 endpoint 与
+   两条 route 都保持不变。
 
 **真机（合并后）**
 
-9. 在主 app 上编辑任意一张卡的任意字段并保存，`llm_credentials.json` 的
+11. 在主 app 上编辑任意一张卡的任意字段并保存，`llm_credentials.json` 的
    `provider_endpoints` 键集合不减少。
-10. 显式删掉一条 Base URL 行，该行对应的格子确实从盘上消失。
+12. 显式删掉一条 Base URL 行，该行对应的格子确实从盘上消失。
 
 ## 7. 不在本次范围
 

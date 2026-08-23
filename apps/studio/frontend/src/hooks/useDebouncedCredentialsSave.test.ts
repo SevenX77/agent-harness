@@ -243,6 +243,51 @@ describe("useDebouncedCredentialsSave", () => {
 
     act(() => root.unmount())
   })
+
+  it("flush waits for a buffered save that follows the request already in flight", async () => {
+    vi.useFakeTimers()
+    const first = deferred<CredentialsState>()
+    const second = deferred<CredentialsState>()
+    const putFn = vi.fn<(updates: ProviderCredentialUpdate[]) => Promise<CredentialsState>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+    let hook: ReturnType<typeof useDebouncedCredentialsSave> | null = null
+
+    function Harness() {
+      const result = useDebouncedCredentialsSave({ delayMs: 20, putFn })
+      useEffect(() => {
+        hook = result
+      })
+      return null
+    }
+
+    const { root } = renderJsx(createElement(Harness))
+    act(() => {
+      hook?.queue(() => [sampleCredential("first")])
+      vi.advanceTimersByTime(20)
+      hook?.queue(() => [sampleCredential("second")])
+    })
+
+    let settled = false
+    const currentHook = hook as unknown as ReturnType<typeof useDebouncedCredentialsSave>
+    const flush = currentHook.flush().then(() => { settled = true })
+    await act(async () => {
+      first.resolve(sampleCredentialsState("first"))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(putFn).toHaveBeenCalledTimes(2)
+    expect(settled).toBe(false)
+
+    await act(async () => {
+      second.resolve(sampleCredentialsState("second"))
+      await flush
+    })
+
+    expect(settled).toBe(true)
+    act(() => root.unmount())
+  })
 })
 
 // Regression (2026-08-19): the whole-page save is a FULL declaration —

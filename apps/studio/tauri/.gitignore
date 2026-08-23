@@ -4,7 +4,6 @@
 /gen/schemas
 /.cache/
 /vendor/python/
-/vendor/python_runtime/
 /vendor/site-packages/
 /vendor/backend/
 /vendor/resources/

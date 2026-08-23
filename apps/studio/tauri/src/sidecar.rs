@@ -504,17 +504,17 @@ pub fn python_executable_path(tauri_dir: &Path) -> PathBuf {
     }
 }
 
+/// Where the portable CPython lives, under a dev tree and inside a packaged app
+/// alike. `scripts/download_runtime.js` unpacks it to `vendor/python/<triple>`
+/// and `tauri.conf.json` ships `vendor/**/*`, so one name covers both.
+///
+/// Deliberately not a search over alternatives. Two other names — `vendor/
+/// python_runtime` and a bare `python_runtime` — were tried first and probed
+/// here for years after nothing produced them any more, which made a leftover
+/// directory at either name outrank the real runtime whenever the real one was
+/// missing: the sidecar would then start from whatever a stale tree held
+/// instead of failing with the path it actually wanted.
 pub fn python_runtime_dir(resource_root: &Path) -> PathBuf {
-    for candidate in [
-        resource_root.join("vendor").join("python"),
-        resource_root.join("vendor").join("python_runtime"),
-        resource_root.join("python_runtime"),
-    ] {
-        let runtime_dir = candidate.join(host_target_triple());
-        if runtime_dir.exists() {
-            return runtime_dir;
-        }
-    }
     resource_root
         .join("vendor")
         .join("python")
@@ -726,6 +726,29 @@ mod tests {
     // STUDIO_SIDECAR_PORT: process env is shared by every test thread, and the
     // set/remove dance raced under cargo's parallel runner (CI 2026-08-14: the
     // pinned test observed a sibling's remove_var and got a dynamic port).
+    /// A directory parked at either retired runtime name must not outrank the
+    /// one place the interpreter is actually vendored. The decoy stands where
+    /// a tree that once used the old layout would leave one, and the real
+    /// `vendor/python/<triple>` is absent — the case where a search would take
+    /// the bait and hand the sidecar a stale interpreter instead of failing
+    /// with the path it wanted.
+    #[test]
+    fn python_runtime_dir_names_one_place_and_ignores_retired_names() {
+        let root = std::env::temp_dir().join(format!("studio-runtime-dir-{}", std::process::id()));
+        let triple = host_target_triple();
+        for retired in [
+            root.join("vendor").join("python_runtime").join(triple),
+            root.join("python_runtime").join(triple),
+        ] {
+            std::fs::create_dir_all(&retired).expect("decoy runtime dir");
+        }
+
+        let resolved = python_runtime_dir(&root);
+
+        assert_eq!(resolved, root.join("vendor").join("python").join(triple));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
     #[test]
     fn allocate_loopback_port_returns_bindable_dynamic_port() {
         let port = allocate_loopback_port_from(None).expect("port");

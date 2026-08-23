@@ -8,7 +8,7 @@
 
 当前 prod/dev separation 不是“已经完全拆成生产 SDK 和开发壳”的状态，而是一个本地优先 Studio + Python engine 包 + Tauri sidecar 的组合。用户看到的是桌面应用或 Vite Web UI；真正执行 skill 的是 Studio backend 调 graph-agent。Tauri 只负责桌面壳、文件/终端类系统能力和启动 sidecar，不直接执行 graph。
 
-Tauri 打包配置显示产物包含前端 dist、vendor、python_runtime、skills、config，见 `apps/studio/tauri/tauri.conf.json:6` 到 `apps/studio/tauri/tauri.conf.json:33`。这说明当前桌面 prod 包不是纯前端，它把 Python runtime 和 backend 资源一起带上。Python runtime lock 指向 Python 3.12.13 多平台包，见 `apps/studio/tauri/python-runtime.lock.json:3` 到 `apps/studio/tauri/python-runtime.lock.json:36`。
+Tauri 打包配置显示产物包含前端 dist 与整棵 `vendor/`（解释器、backend、site-packages、resources 都在其中），见 `apps/studio/tauri/tauri.conf.json:6` 到 `apps/studio/tauri/tauri.conf.json:31`。这说明当前桌面 prod 包不是纯前端，它把 Python runtime 和 backend 资源一起带上。Python runtime lock 指向 Python 3.12.13 多平台包，见 `apps/studio/tauri/python-runtime.lock.json:3` 到 `apps/studio/tauri/python-runtime.lock.json:36`。
 
 UI 层通过 runtime config 找到 backend。浏览器/dev 模式默认走 `VITE_STUDIO_API_BASE_URL` 或 localhost，见 `apps/studio/frontend/src/config/runtime.ts:27` 到 `apps/studio/frontend/src/config/runtime.ts:40`；Tauri 模式则调用 `get_sidecar_config`，见 `apps/studio/frontend/src/config/runtime.ts:43` 到 `apps/studio/frontend/src/config/runtime.ts:58`。所以“prod/dev 分离”在 UI 层表现为：同一 React app，根据运行环境选择 sidecar config 或 web fallback config。
 
@@ -18,7 +18,7 @@ UI 层通过 runtime config 找到 backend。浏览器/dev 模式默认走 `VITE
 
 浏览器/dev 用户体验中，Vite proxy 是关键连接层。前端同源请求 `/api` 和 `/ws`，Vite 转到 local backend，见 `apps/studio/frontend/vite.config.ts:47` 到 `apps/studio/frontend/vite.config.ts:68`。因此 dev tunnel 看起来像一个远端 web app，但执行仍在本机 backend/engine。
 
-当前 architecture baseline 不能把 Studio 描述为“纯生产 runtime 外壳”。Tauri bundle 明确包含 vendor/backend、vendor/site-packages、python_runtime、skills、config，见 `apps/studio/tauri/tauri.conf.json:25` 到 `apps/studio/tauri/tauri.conf.json:33`。这是一种一体化桌面分发形态，而不是 production engine 与 development Studio 的硬隔离。
+当前 architecture baseline 不能把 Studio 描述为“纯生产 runtime 外壳”。Tauri bundle 明确包含 vendor/python、vendor/backend、vendor/site-packages、vendor/resources（`"resources": ["vendor/**/*"]`），见 `apps/studio/tauri/tauri.conf.json:29` 到 `apps/studio/tauri/tauri.conf.json:31`。这是一种一体化桌面分发形态，而不是 production engine 与 development Studio 的硬隔离。
 
 UI 层的 prod/dev 差异也不改变 graph-agent 运行路径。无论是 Tauri 还是浏览器 dev，skill compile/run 最终都到 Studio backend，再由 backend 调 Python package。compile 服务见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`；run worker 调 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:81` 到 `apps/studio/backend/app/services/run_manager.py:105`。
 
@@ -164,7 +164,7 @@ Audit 映射补充：Studio 也不只是外部唤起壳。它有 run manager、a
 
 Desktop 映射补充：Tauri sidecar lifecycle 是桌面生产形态的核心。启动逻辑见 `apps/studio/tauri/src/lib.rs:166` 到 `apps/studio/tauri/src/lib.rs:188`；退出 shutdown 见 `apps/studio/tauri/src/lib.rs:200` 到 `apps/studio/tauri/src/lib.rs:217`。这条路径在浏览器 dev 模式不存在。
 
-Desktop 映射补充：sidecar 运行依赖 bundled resources。config 指向 `vendor/python_runtime`、`vendor/backend`、`vendor/site-packages`、`vendor/resources`，见 `apps/studio/tauri/src/sidecar.rs:53` 到 `apps/studio/tauri/src/sidecar.rs:74`。Tauri bundle 资源列表也写在 `apps/studio/tauri/tauri.conf.json:25` 到 `apps/studio/tauri/tauri.conf.json:33`。
+Desktop 映射补充：sidecar 运行依赖 bundled resources。config 指向 `vendor/python`、`vendor/backend`、`vendor/site-packages`、`vendor/resources`，见 `apps/studio/tauri/src/sidecar.rs:53` 到 `apps/studio/tauri/src/sidecar.rs:74`。Tauri bundle 资源列表也写在 `apps/studio/tauri/tauri.conf.json:25` 到 `apps/studio/tauri/tauri.conf.json:33`。
 
 Dev 映射补充：Vite proxy 和 tunnel token 是开发访问层，不是 engine 运行层。proxy 配置见 `apps/studio/frontend/vite.config.ts:47` 到 `apps/studio/frontend/vite.config.ts:68`；token hash bootstrap 见 `apps/studio/frontend/src/config/tunnel-token.ts:1` 到 `apps/studio/frontend/src/config/tunnel-token.ts:13`。run path 仍进 backend。
 

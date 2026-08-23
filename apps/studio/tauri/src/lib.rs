@@ -5019,6 +5019,41 @@ mod tests {
         assert!(config_dir_from_override(None).is_none());
     }
 
+    /// One `#[test]` per test function. A second one on the same function is
+    /// accepted by rustc and by the harness — the test simply runs twice, under
+    /// the same name, and both runs pass — so nothing turns red and the only
+    /// visible trace is a duplicated line in `cargo test` output that reads like
+    /// a rerun. It happens when a doc comment is written for a new test and the
+    /// test underneath it never gets written: the stray attribute is left
+    /// stacked on the next function, which then also silently carries a doc
+    /// comment describing something it does not assert.
+    #[test]
+    fn every_test_function_carries_exactly_one_test_attribute() {
+        let source = include_str!("lib.rs");
+        let doubled: Vec<usize> = source
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.trim() == "#[test]")
+            .map(|(index, _)| index)
+            .filter(|index| {
+                source
+                    .lines()
+                    .skip(index + 1)
+                    .find(|line| {
+                        let trimmed = line.trim();
+                        !trimmed.is_empty() && !trimmed.starts_with("///")
+                    })
+                    .is_some_and(|next| next.trim() == "#[test]")
+            })
+            .map(|index| index + 1)
+            .collect();
+
+        assert!(
+            doubled.is_empty(),
+            "these #[test] attributes are followed by another one, so the test below runs twice: lines {doubled:?}"
+        );
+    }
+
     #[test]
     fn invoke_handler_registers_publish_package_writer_command() {
         let source = include_str!("lib.rs");
@@ -6777,39 +6812,17 @@ mod tests {
         assert!(unix_payload.contains(&format!("requires ah >= {AH_VERSION_MIN}")));
     }
 
-    // ── studio-ah-state-contract-v1 task 2 (version gate) RED tests ──────────
+    // ── studio-ah-state-contract-v1 task 2 (version gate) ────────────────────
     //
-    // Authored by g1 (泳道1 gatekeeper) test-first: g1-m1 turns these GREEN by
-    // adding ONLY the production code named below and must NOT edit this test.
-    // Contract seam g1-m1 must implement for `test_version_gate_rejects_below_1_4_0`:
-    //
-    //   /// The single-source ah version gate. Trims a bare `ah version` string and
-    //   /// compares it to the one 1.4.0 floor constant. `Ok(())` = supported;
-    //   /// `Err(diagnostic)` = blocked (too old OR unparseable), actionable text.
-    //   /// start/attach/status/cleanup AND the events subscription all call THIS.
-    //   fn ah_version_gate(version_output: &str) -> Result<(), String>
+    // The contract these hold `ah_version_gate` to: it trims a bare `ah version`
+    // string and compares it to the one `AH_VERSION_MIN` floor constant.
+    // `Ok(())` = supported; `Err(diagnostic)` = blocked (too old OR unparseable)
+    // with actionable text. start/attach/status/cleanup AND the events
+    // subscription all reach it through `ensure_ah_ready`, so one verdict covers
+    // every entry point.
     //
     // See .kiro/specs/studio-ah-state-contract-v1/tasks.md task 2 (lines 48-55).
 
-    /// Req 1.1/1.6/5.4: the ah runtime floor is 1.4.0. A `< 1.4.0` runtime is
-    /// blocked at the single-source gate; because start/attach/status/cleanup AND
-    /// the `ah events --format json` subscription all consult that one gate before
-    /// acting, a blocked runtime yields no events subscription.
-    ///
-    /// RED when written: `ah_version_gate` does not exist yet — the only version
-    /// check today lives inside the launcher shell templates — so this fails to
-    /// COMPILE until g1-m1 adds the Rust gate. Anchored to the task-1 boundary
-    /// version fixtures (contract inputs), not to internal state: reverting
-    /// g1-m1's comparison logic (e.g. off-by-one at the floor) turns it red again.
-    ///
-    /// The "no events subscription is spawned" half is the direct consequence of
-    /// this gate returning `Err`: `start_code_assistant_status_stream`
-    /// (lib.rs:1335) must call `ah_version_gate` before entering its respawn loop.
-    /// That wiring is a Req-1.6/5.4 acceptance rollback check (revert the events-
-    /// path gate call → an unsupported ah spawns `ah events` again) — a pure unit
-    /// test can't observe subprocess non-spawn without a live WSL/ah + Tauri
-    /// AppHandle, so the gate's `Err` verdict is the load-bearing unit assertion.
-    #[test]
     /// launcher 脚本里的版本门禁必须**按语义**正确,而不是"文本里有个比较"。
     ///
     /// 2026-08-04 真机复现:装着 1.8.2 的机器被自己的门禁挡住,报
@@ -6891,6 +6904,13 @@ mod tests {
         );
     }
 
+    /// Req 1.1/1.6/5.4. The second half of that requirement — a blocked runtime
+    /// spawns no `ah events --format json` subscription — is a consequence of
+    /// this verdict rather than a separate behaviour:
+    /// `start_code_assistant_status_stream` calls `ensure_ah_ready`, and so
+    /// reaches this gate, before it spawns the respawn loop. Observing the
+    /// non-spawn directly would need a live WSL + ah + Tauri AppHandle, so the
+    /// `Err` asserted here is the load-bearing unit assertion for both halves.
     #[test]
     fn test_version_gate_rejects_below_the_master_env_floor() {
         use ah_contract_fixtures::{

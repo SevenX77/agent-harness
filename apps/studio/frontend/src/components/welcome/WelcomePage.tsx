@@ -1,6 +1,8 @@
 import { AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import i18n from '../../i18n'
 import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
@@ -42,8 +44,6 @@ import { CommunitySharingConsentDialog } from './CommunitySharingConsentDialog'
 import { NewSkillDialog } from './NewSkillDialog'
 import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath } from './utils'
 
-export const REVEAL_ACTION_LABEL = 'Show in folder'
-export const REMOVE_ACTION_LABEL = 'Remove from recent'
 export const ACTION_MENU_CLASSNAME = 'w-48'
 
 interface WelcomePageProps {
@@ -125,10 +125,14 @@ function sentenceFragment(message: string) {
 export function formatCreateSkillError(error: unknown, skillId: string): string {
   const payload = studioErrorPayload(error)
   if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
-    return `Cannot create "${skillId}": a skill with this name already exists. Choose a different name.`
+    return i18n.t('dialog.errors.alreadyExists', { ns: 'welcome', skillId })
   }
   if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
-    return `Cannot create "${skillId}": ${sentenceFragment(payload.message)}`
+    return i18n.t('dialog.errors.invalidDirectory', {
+      ns: 'welcome',
+      skillId,
+      reason: sentenceFragment(payload.message),
+    })
   }
   // D2 (不卡导入): new-skill creation now writes via the Studio Rust native-fs
   // command, which rejects OS-level failures with a plain error string and emits
@@ -157,6 +161,7 @@ export function formatImportSkillError(error: unknown): string {
 }
 
 export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePageProps) {
+  const { t } = useTranslation('welcome')
   const [openingFolder, setOpeningFolder] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newSkillOpen, setNewSkillOpen] = useState(false)
@@ -217,7 +222,7 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
 
   const openWorkspace = (workspace: WorkspaceCardModel) => {
     openSkill(workspace.absolutePath, workspace.displayName).catch((error) => {
-      toast.error('Open folder failed', { description: formatImportSkillError(error) })
+      toast.error(t('home.openFolderFailedToast'), { description: formatImportSkillError(error) })
     })
   }
 
@@ -246,14 +251,14 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
 
   const handleRemove = (workspace: { identity: string; displayName: string }) => {
     removeWorkspace(workspace.identity)
-    toast.success(`Removed "${workspace.displayName}" from recent`)
+    toast.success(t('home.recent.removedToast', { name: workspace.displayName }))
   }
 
   const submitNewSkill = async (event?: FormEvent, options: { withWizard?: boolean } = {}) => {
     event?.preventDefault()
     const trimmed = newSkillName.trim()
     if (!trimmed) {
-      setNewSkillError('Name is required')
+      setNewSkillError(t('dialog.nameRequired'))
       return
     }
     const skillId = normalizeSkillId(trimmed)
@@ -292,7 +297,7 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
       }
       await openSkill(directory)
     } catch (error) {
-      toast.error('Open folder failed', { description: formatImportSkillError(error) })
+      toast.error(t('home.openFolderFailedToast'), { description: formatImportSkillError(error) })
     } finally {
       setOpeningFolder(false)
     }
@@ -306,8 +311,8 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
             <Layers className="size-6 text-background" strokeWidth={2} />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">GSkill Studio</h1>
-            <p className="text-sm text-muted-foreground">Open a skill to start editing.</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t('home.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('home.subtitle')}</p>
           </div>
         </div>
 
@@ -321,19 +326,21 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
               className="w-full justify-start"
             >
               <Plus />
-              {creating ? 'Creating' : 'New skill'}
+              {creating ? t('home.newSkill.buttonCreating') : t('home.newSkill.button')}
             </Button>
             {defaultSkillParentDirectory ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <p className="mt-1 truncate text-xs text-muted-foreground">
-                    Default: {defaultSkillParentDirectory}
+                    {t('home.newSkill.defaultHint', { path: defaultSkillParentDirectory })}
                   </p>
                 </TooltipTrigger>
                 <TooltipContent>{defaultSkillParentDirectory}</TooltipContent>
               </Tooltip>
             ) : (
-              <p className="mt-1 truncate text-xs text-muted-foreground">Default: AgentStudio/Skills</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                {t('home.newSkill.defaultHint', { path: t('home.newSkill.defaultPathFallback') })}
+              </p>
             )}
           </div>
           <div>
@@ -347,14 +354,14 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
               className="w-full justify-start"
             >
               <FolderOpen />
-              {openingFolder ? 'Opening' : 'Open folder'}
+              {openingFolder ? t('home.openFolder.buttonOpening') : t('home.openFolder.button')}
             </Button>
-            <p className="mt-1 truncate text-xs text-muted-foreground">Choose any local folder</p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{t('home.openFolder.hint')}</p>
           </div>
         </div>
 
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{t('home.recent.heading')}</h2>
         </div>
 
         {/*
@@ -367,7 +374,7 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
         {recentError ? (
           <Alert variant="destructive" className="mb-3 border-destructive-border bg-destructive-background">
             <AlertTriangle />
-            <AlertTitle>Could not load recent skills</AlertTitle>
+            <AlertTitle>{t('home.recent.loadErrorTitle')}</AlertTitle>
             <AlertDescription>{recentError}</AlertDescription>
           </Alert>
         ) : null}
@@ -408,7 +415,7 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
                             <Button
                               variant="ghost"
                               size="icon"
-                              aria-label={`More actions for ${workspace.displayName}`}
+                              aria-label={t('home.recent.moreActionsAriaLabel', { name: workspace.displayName })}
                               className="absolute right-2 top-2 z-10"
                               onClick={(event) => event.stopPropagation()}
                               onPointerDown={(event) => event.stopPropagation()}
@@ -424,14 +431,14 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
                           >
                             <DropdownMenuItem onSelect={() => handleReveal(workspace)}>
                               <FolderOpen />
-                              {REVEAL_ACTION_LABEL}
+                              {t('home.recent.showInFolder')}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               variant="destructive"
                               onSelect={() => handleRemove(workspace)}
                             >
                               <Trash2 />
-                              {REMOVE_ACTION_LABEL}
+                              {t('home.recent.removeFromRecent')}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -448,14 +455,14 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
                 <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
                   <ContextMenuItem onSelect={() => handleReveal(workspace)}>
                     <FolderOpen />
-                    {REVEAL_ACTION_LABEL}
+                    {t('home.recent.showInFolder')}
                   </ContextMenuItem>
                   <ContextMenuItem
                     variant="destructive"
                     onSelect={() => handleRemove(workspace)}
                   >
                     <Trash2 />
-                    {REMOVE_ACTION_LABEL}
+                    {t('home.recent.removeFromRecent')}
                   </ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>
@@ -469,8 +476,8 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
               <EmptyMedia variant="icon">
                 <FolderOpen />
               </EmptyMedia>
-              <EmptyTitle>No recent skills</EmptyTitle>
-              <EmptyDescription>Create a new skill or open a folder to get started.</EmptyDescription>
+              <EmptyTitle>{t('home.recent.emptyTitle')}</EmptyTitle>
+              <EmptyDescription>{t('home.recent.emptyDescription')}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}

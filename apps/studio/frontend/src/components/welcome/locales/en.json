@@ -1,0 +1,49 @@
+{
+  "home": {
+    "title": "GSkill Studio",
+    "subtitle": "Open a skill to start editing.",
+    "newSkill": {
+      "button": "New skill",
+      "buttonCreating": "Creating",
+      "defaultHint": "Default: {{path}}",
+      "defaultPathFallback": "AgentStudio/Skills"
+    },
+    "openFolder": {
+      "button": "Open folder",
+      "buttonOpening": "Opening",
+      "hint": "Choose any local folder"
+    },
+    "openFolderFailedToast": "Open folder failed",
+    "recent": {
+      "heading": "Recent",
+      "loadErrorTitle": "Could not load recent skills",
+      "emptyTitle": "No recent skills",
+      "emptyDescription": "Create a new skill or open a folder to get started.",
+      "noRunsYet": "No runs yet",
+      "moreActionsAriaLabel": "More actions for {{name}}",
+      "showInFolder": "Show in folder",
+      "removeFromRecent": "Remove from recent",
+      "removedToast": "Removed \"{{name}}\" from recent"
+    }
+  },
+  "dialog": {
+    "title": "New skill",
+    "description": "Create the folder with starter files, or plan the skill out first and let the folder follow from that.",
+    "nameLabel": "Skill name",
+    "namePlaceholder": "my-new-skill",
+    "nameRequired": "Name is required.",
+    "folderNameLabel": "Folder name:",
+    "parentLabel": "Parent folder",
+    "parentPlaceholder": "Select a parent folder",
+    "chooseFolder": "Choose folder",
+    "choosing": "Choosing",
+    "cancel": "Cancel",
+    "planTogether": "Plan it together",
+    "create": "Create",
+    "creating": "Creating",
+    "errors": {
+      "alreadyExists": "Cannot create \"{{skillId}}\": a skill with this name already exists. Choose a different name.",
+      "invalidDirectory": "Cannot create \"{{skillId}}\": {{reason}}"
+    }
+  }
+}

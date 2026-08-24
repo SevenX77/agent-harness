@@ -86,7 +86,12 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 
 ## 5. 失败退路
 
-- **sidecar 未就绪**:Settings 面用骨架屏 + 全局"后端就绪"指示;gateway 起不来在该面内报错,而非全屏失败(壳 / FS 仍可用)。
+- **sidecar 未就绪(启动期)**:Settings 面用骨架屏 + 全局"后端就绪"指示;gateway 起不来在该面内报错,而非全屏失败(壳 / FS 仍可用)。
+- **sidecar 运行中掉线(运行期,2026-08-24 补,dead-sidecar-says-so)**:上一条只覆盖"启动就没起来";sidecar 在 app 已经就绪之后自己死掉(进程崩溃 / 被杀)是另一半失败退路,过去没有任何代码路径覆盖它——探测只在挂载那一刻和用户按 Retry 时跑一次(`RuntimeGate.tsx` 的探测 `useEffect` 依赖数组是 `[attempt]`),运行中死掉不会触发重新探测,界面停在最后一次"就绪"的画面,没有任何提示,`error` 态才渲染的 Retry 按钮也因此不出现(实测:杀掉进程后 9 秒界面零提示)。修复分四层:
+  - **活性可观测**:复用两个已有的推送信号,不新增定时轮询器——呼应 §2 的 SSOT 精神(AGENTS.md 的「事件驱动 revalidation」条约束的是重取**真相数据**;活性不是真相数据,但两个信号本来就会触发,没有理由再加一条心跳)。信号一是共享 WebSocket 事件流的 `connectionLost`(`useStudioEventStream`,已有阈值:连续 3 次重连失败或累计 10 秒无连接);信号二是任一 HTTP 调用拿不到响应(`BACKEND_UNAVAILABLE_HTTP_EVENT`,`apps/studio/frontend/src/api/client.ts` 的 axios 响应拦截器在归类为"后端不可达"时派发)。两者在 `apps/studio/frontend/src/hooks/useBackendDownSignal.ts` 汇合成一次性的"掉线"边沿触发,直到显式重新启用才会再次触发。
+  - **有界自动重启**:最多 3 次,退避 1s / 4s / 16s,总窗口 2 分钟;到限即停,不再自动重试,直到人工 Retry 重新打开一轮预算。前端按此时序调度(`apps/studio/frontend/src/components/runtime-gate-auto-restart.ts`),Rust 侧 `SidecarSupervisor::restart_automatic`(`apps/studio/tauri/src/sidecar.rs`)独立地对次数与窗口做第二次强制约束——两层都拦是因为"限流"这件事该长在被监督对象自己身上、不该只靠调用者自觉,这一点借鉴 systemd 的 `StartLimitBurst`/`StartLimitIntervalSec` 与 Erlang/OTP 的 `max_restarts`/`max_seconds`。这不是该文件旧注释里明确拒绝过的 `Restart=always`:旧注释反对的是"自动重试会埋掉永久性失败",而有界策略到限就停在一个可见终态、错误原文原样保留——`Restart=always` 才是那个会把错误埋掉的东西。
+  - **人工 Retry 永远优先、永不被自动预算挡住**:人工按下的 Retry 调用 `restartSidecar`(Rust 命令 `restart_sidecar`),自动重试调用另一条独立的 `restartSidecarAutomatic`(Rust 命令 `restart_sidecar_automatic`)。两条命令分离,是为了让"自动重启预算耗尽"只挡自动重试、绝不挡人工重试——按钮既然显示在屏幕上就必须真的做点什么,一次人工点击被静默拒绝,比修复前"零提示"的原始缺陷更糟。人工 Retry 同时重置自动预算,让下一轮自动重启重新拥有满额度。
+  - **到限之后的常驻失败态,外壳绝不因此关闭**:横幅(`RuntimeShell`)不自动消失,带最后一次尝试的错误原文和一个可用的 Retry 按钮;依赖 sidecar 的功能面带原因置灰而非无声的灰按钮——画布的 Compile / Predict / Run / Pause / Resume / Stop(`center-action-bar.tsx` 的 `backendReachable` 属性)与本节点 §3.2 的 API Keys 测试按钮(既有的 `backendReachable` 投影,`SettingsPage.tsx`)共享同一条"后端可达"信号。呼应 §2.3:壳、文件树、Rust 本地编辑器全程可用,这与 AGENTS.md「Rust native-fs 层是 skill 文件在磁盘上的唯一写入方」互相印证——关掉 app 会连带毁掉与 sidecar 无关的工作(包括未保存的编辑器缓冲),没有必要为一个可恢复的子系统故障支付这个代价。
 - **测试失败**:返回结构化原因码(invalid_key / rate_limited / quota_exceeded / network_error / timeout / missing_key),UI 据此给可读诊断 + 对应 state,而非笼统报错;临时类失败走 cooling_down 等待重试。
 - **密钥泄漏防护**:redact + secret 端点 + 前端不 log / 不 toast / 不持久化明文。
 - **Copilot session 持久化失败(D8 MUST 配套)**:copilot 对话与 session 必须落盘且重进恢复一模一样;**写盘 / 读回失败必须显式告警,绝不静默吞** —— 静默吞 = 对话丢失,违"零容忍静默失败"铁律。此失败退路是 D8 的配套待建动作。

@@ -83,6 +83,27 @@ let currentApiToken: string | null = null
 
 export const apiClientConfigChangedEvent = 'studio-api-client-config-changed'
 
+/**
+ * dead-sidecar-says-so — RuntimeGate liveness signal #2 (the other is the
+ * shared WebSocket event stream's own `connectionLost`, computed in
+ * `useStudioEventStream`). Dispatched on `window` from the response
+ * interceptor below, ONCE PER FAILED CALL, whenever `isBackendUnavailableError`
+ * classifies the failure as "no HTTP response was received at all" — which on
+ * a loopback sidecar reliably means the process is gone, not a flaky network.
+ *
+ * Deliberately push-driven off an event that already fires for every request,
+ * not a new poller: AGENTS.md's SSOT 读取原则 forbids re-fetching TRUTH data on
+ * a timer, and while liveness isn't truth data, reusing a signal that already
+ * exists on every call is strictly cheaper than adding a redundant heartbeat.
+ */
+export const BACKEND_UNAVAILABLE_HTTP_EVENT = 'studio-backend-http-unavailable'
+
+function notifyBackendUnavailableOverHttp(): void {
+  if (typeof window === 'undefined') return
+  if (typeof window.dispatchEvent !== 'function') return
+  window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+}
+
 export const api = axios.create({
   baseURL: currentApiBaseURL,
 })
@@ -128,11 +149,13 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error: unknown) => Promise.reject(
-    isBackendUnavailableError(error)
-      ? new BackendUnavailableError(error)
-      : error,
-  ),
+  (error: unknown) => {
+    if (!isBackendUnavailableError(error)) {
+      return Promise.reject(error)
+    }
+    notifyBackendUnavailableOverHttp()
+    return Promise.reject(new BackendUnavailableError(error))
+  },
 )
 
 export async function fetcher<T>(url: string): Promise<T> {

@@ -5,11 +5,12 @@ import { CenterActionBar, type SkillBuildStage } from './center-action-bar'
 
 const PREDICT_LOCK_REASON = 'Compile must pass first'
 const RUN_LOCK_REASON = 'Predict must pass first'
+const BACKEND_UNAVAILABLE_REASON = 'Backend unavailable — reconnecting'
 
-function renderBar(stage: SkillBuildStage): string {
+function renderBar(stage: SkillBuildStage, backendReachable?: boolean): string {
   return renderToStaticMarkup(
     <TooltipProvider>
-      <CenterActionBar stage={stage} />
+      <CenterActionBar stage={stage} backendReachable={backendReachable} />
     </TooltipProvider>,
   )
 }
@@ -137,5 +138,60 @@ describe('CenterActionBar canvas surface styling', () => {
     })
 
     expect(liveRun).toEqual(['predict-pass'])
+  })
+})
+
+// dead-sidecar-says-so (2026-08-24): "功能面带原因置灰,不是无声的灰按钮" — the
+// sidecar-dependent action buttons must disable AND say why once RuntimeGate
+// detects the backend is down, using the same lock-reason affordance already
+// established for the compile/predict/run gating above (#13).
+describe('CenterActionBar — disabled with a reason when the backend is unreachable', () => {
+  it('disables Compile with the backend-unavailable reason even in a normally-enabled stage', () => {
+    const html = renderBar('idle', false)
+
+    expect(html).toContain(`aria-label="${BACKEND_UNAVAILABLE_REASON}"`)
+  })
+
+  it('disables Predict with the backend-unavailable reason, overriding its usual reason once compile has passed', () => {
+    const html = renderBar('compile-pass', false)
+
+    expect(html).toContain(`aria-label="${BACKEND_UNAVAILABLE_REASON}"`)
+    expect(html).not.toContain(`aria-label="${PREDICT_LOCK_REASON}"`)
+  })
+
+  it('disables Run with the backend-unavailable reason, overriding its usual reason once predict has passed', () => {
+    const html = renderBar('predict-pass', false)
+
+    expect(html).toContain(`aria-label="${BACKEND_UNAVAILABLE_REASON}"`)
+    expect(html).not.toContain(`aria-label="${RUN_LOCK_REASON}"`)
+  })
+
+  it('leaves the normal stage-driven gating untouched when the backend IS reachable', () => {
+    const reachableTrue = renderBar('idle', true)
+    const reachableOmitted = renderBar('idle')
+
+    expect(reachableTrue).not.toContain(BACKEND_UNAVAILABLE_REASON)
+    expect(reachableOmitted).not.toContain(BACKEND_UNAVAILABLE_REASON)
+  })
+
+  it('every button in the bar is disabled while the backend is unreachable, in every stage', () => {
+    const everyStage: SkillBuildStage[] = [
+      'idle',
+      'compiling',
+      'compile-fail',
+      'compile-pass',
+      'predicting',
+      'predict-fail',
+      'predict-pass',
+      'running',
+      'paused',
+    ]
+
+    for (const stage of everyStage) {
+      const html = renderBar(stage, false)
+      const disabledCount = (html.match(/disabled=""/g) ?? []).length
+      const buttonCount = (html.match(/<button/g) ?? []).length
+      expect(disabledCount, `stage=${stage}: expected every button disabled`).toBe(buttonCount)
+    }
   })
 })

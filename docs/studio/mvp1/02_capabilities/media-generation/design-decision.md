@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/media-generation
 doc: design-decision
+role: workflow-record
 status: drafted（用户批准 2026-08-13；本文档为决议落盘，未进入 63 档审计冻结体系；实现随同一 PR 交付）
 aligns_with: 01_workflows/00_settings-ux-spec.md（Settings shell 交互范式）· ../../../graph-agent-gateway/mvp1/14-media-generation/design-decision.md（gateway 媒体域契约）
 ---

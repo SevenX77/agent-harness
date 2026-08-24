@@ -1,6 +1,6 @@
 ---
 doc: _report-2026-06-06-engine-opt-studio-handoff
-status: report（2026-06-06 session 报告;engine mvp1 优化总结 + studio 对接建议）
+status: retired（2026-06-06 session 报告快照;engine mvp1 优化总结 + studio 对接建议,内容已消费完毕,仅存档）
 owns: 本 session engine 侧优化记录 + engine↔studio 对接 handoff
 audience: PM + studio session（B 部分可直接转交 studio session）
 related: _api-handshake-audit.md（API 对接细节）· INDEX.md（单元锁台账）

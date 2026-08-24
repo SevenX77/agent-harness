@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/run-execution
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（后端 run manager live；前端 Run handler 仍是桩，predict-pass 不会置位，batch UI 未挂主路径 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [run-execution-node-status, golden-per-agent-node]

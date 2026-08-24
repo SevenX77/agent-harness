@@ -1,3 +1,7 @@
+---
+role: guide
+---
+
 # Studio MVP1 集成基线（Integration Baseline）
 
 > **日期**: 2026-06-11

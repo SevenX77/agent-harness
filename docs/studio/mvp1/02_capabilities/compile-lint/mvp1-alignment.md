@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/compile-lint
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（lint/compile 触发与 compile-pass stage live；错误仍是底部浮层/toast，drawer 与上下文标记未落 ⚠️。；目标结构已按 R4-R8 retrofit；2026-07-01 PM 增补 F6:触发语义扩画布拓扑改动 + lint 聚合完整性）
 binds_baseline: ./baseline.md
 units: [compile-stage-gate, compile-lint-structured-error]

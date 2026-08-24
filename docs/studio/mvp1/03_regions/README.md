@@ -1,3 +1,7 @@
+---
+role: guide
+---
+
 # 03_regions — UI 区域维 (维度 ③)
 
 > 治理规则见 [design-doc-standards](../../../development/design-doc-standards/)(三轴模型 + 写作标准 + 审计标准)。本 tier 拥有 **UI 组件**的结构/状态/props/API, 区域间 MECE(一个组件只属一个区域)。跨组件流程归 `02_capabilities`, 只在此被链接。文档模板见 01-writing-standard。

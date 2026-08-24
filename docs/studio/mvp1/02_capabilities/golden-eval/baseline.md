@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/golden-eval
 doc: baseline
+role: baseline
 status: FROZEN（2026-07 对账:后端 golden 已按 per-agent-node cases 落地(set_golden_baseline_for_run(node_id)+cases/{id}.json,golden_diff.py:58-79/186-208),旧"整次 run final_state 复制"已废;useGoldenDiff 路由已与 compare.py 对齐,TracePanel 已挂;创建入口部分 live(editor diff + analysis bar),I/O output 手动模板/Assets 入口尚未接 UI ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/services/golden_diff.py:set_golden_baseline_for_run · apps/studio/backend/app/services/golden_diff.py:compare_run_to_golden · apps/studio/frontend/src/hooks/useGoldenDiff.ts:compare · apps/studio/backend/app/services/diagnostic_export.py:export_predict_diagnostics

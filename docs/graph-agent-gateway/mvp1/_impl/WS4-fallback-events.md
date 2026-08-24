@@ -16,7 +16,7 @@ owns_files:
   - apps/studio/backend/tests/services/test_run_manager_gateway_events.py
 spec_ssot:
   - ../13-x-tracing-events-exceptions/mvp1-alignment.md §F1 / gaps 第 1 条(PM 2026-06-04 P4a=B:拆专属 fallback event code)
-status: completed
+status: retired（工作流已完成落地,本工单书仅存档,不再是现状 SSOT）
 ---
 
 # WS-4 fallback event 专属 code — 需求书(给 Codex)

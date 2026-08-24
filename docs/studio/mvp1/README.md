@@ -1,3 +1,7 @@
+---
+role: guide
+---
+
 # Studio docs — MVP1 / 新设计(重设计目标)
 
 > **新设计文档**(MVP1 重设计目标)的三维体系。旧设计(MVP0 当前实现)baseline 在 [`../mvp0/`](../mvp0/)。

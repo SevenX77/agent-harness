@@ -1,5 +1,5 @@
 ---
-status: Living
+status: living
 target_goal: "Studio LLM configuration uses deterministic endpoint/route registry execution"
 linked_code_paths:
   - apps/studio/frontend/src/components/studio/settings/endpoints/EndpointsTab.tsx

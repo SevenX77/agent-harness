@@ -1,6 +1,7 @@
 ---
 module: 03_regions/input
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（2026-07-02 r3 定稿:PM 确认黑板优先配置树模型——面板=预览+Configure+文件 list,输入配置=黑板 context 第一行的字段勾选树+Add file 追加,输出配置=artifacts 文件清单×黑板字段勾选;golden 区从面板移除。样稿经 PM 三轮确认。；目标结构已按 R4-R8 retrofit）｜2026-07-03 r5 修订（PM 真机 4 点反馈,已实施 feat/io-node-scoped-config）:①「节点↔io」关系模型建对——**按角色收敛面板段**(Input 边界只 input、Output 边界只 output、phase 两段、空白=GRAPH.md 两段,见 F3 归属规则,原为代码 drift);②**io 字段全链路支持嵌套寻址**(engine 递归 required + backend field_supply 递归 + 前端配置树可展开、子字段 `chapter.aa_number` 独立勾选,见 F3);③**输入配置改内联**(可折叠段 + 紧凑树行,替换 F2「配置全在弹窗」;输出 artifacts 编辑因多卡片过宽保留 scoped modal);④**New file 改 ghost list 行**(F2/r4b 的 `variant=secondary` 暗色近黑,改透明底 hover 亮)。｜2026-07-03 r6 修订（PM 真机第二轮 5 点反馈,已实施 feat/io-panel-import-run-edit）:①**移除面板批量 run 入口**(Test Inputs 区删勾选框 + C10 命名序列建议 + Run-N-as-batch + `useBatchRun`;唯一 run = 中央动作条,见 F6);②**导入合并为单个「Import…」=文件夹选择器**(删「Import file…」双按钮,见 F5);③**导入即自动匹配**(候选字段名 normalize 后比对声明 io.inputs,命中自动勾选+高亮;批量条目 field 取 stem `chapter` 而非父目录名——原为字段取名 bug 致"导入一堆文件无一匹配",见 F5);④**导入结果按文件分组 + 文件行/Test Inputs 行加编辑按钮**(垃圾桶旁,用编辑器打开,见 F5)。
 binds_baseline: ./baseline.md
 units: [io-panel-artifacts-test-inputs, golden-per-agent-node]

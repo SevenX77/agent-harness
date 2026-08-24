@@ -1,3 +1,7 @@
+---
+role: guide
+---
+
 # 04_platform — 基础设施(后端三分 D10 锁定 2026-06-01 + i18n 横切 2026-06-03)
 
 > 平台层(非 UI 用户能力的真 infra + 横切 NFR)。详见 [../../INDEX.md](../../INDEX.md) §6/§11;D10/D12 决策原话留底见 [`native-fs`](./native-fs/mvp1-alignment.md) §4 / [`01_init`](../01_workflows/01_init.md) §3。

@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/graph-authoring
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（画布主拓扑 live；新建 phase 写入文件驱动白名单；subgraph 使用 path 引用；inline subgraph 按同级 React Flow nodes/edges 渲染；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown]

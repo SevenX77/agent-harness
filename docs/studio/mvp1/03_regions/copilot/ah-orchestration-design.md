@@ -1,3 +1,7 @@
+---
+role: alignment
+---
+
 <!--
 region: copilot
 kind: target-direction design（ah 编排底座）

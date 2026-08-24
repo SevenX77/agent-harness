@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（2026-07-02 按代码核对:TracePanel 已挂 timeline 主路径(active run 流式)、EdgeContextView 已挂 selectedEdge、edge dot 数据 = edgeContextFromEvents 真实事件派生(假黑板已删);2026-07 对账:未跑时 dot 静态字段推断已落地(staticEdgeInference,GraphCanvas.tsx:1429-1434),双态齐备;2026-07 深核:F1 agent 折叠摘要(ToolCallSubtree/~2KB,TraceEventRow.tsx:220-280)与 F5 PromptInspector 三视图(Workspace.tsx:2688/TimelinePanel.tsx:153)均已 live,旧 orphan 过时。；目标结构已按 R4-R8 retrofit；2026-07-16 增补:F7 LLM fallback 可见性落地(纯前端消费 gateway llm_fallback 事件,PM 排队单第一优先)；2026-08-09 决议改写:F3 聚焦语义由「过滤收窄」改为「滚动定位」(D2 作废原过滤语义)、F2 删除 Full Trace 独立文档面(D1)、新增 F8 顶条形态(D3/D9)；2026-08-09 第二轮:呈现单位改为步骤(新增 F9,D4/D6)、F5 由独立 Prompt Inspector 改为步骤内三段(D5 删除该组件)、F1 补上「开始即可见」的时机契约）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]

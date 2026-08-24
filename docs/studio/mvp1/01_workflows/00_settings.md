@@ -1,3 +1,8 @@
+---
+role: summary
+authority: ./00_settings-ux-spec.md
+---
+
 # Node 0: 设置与配置 (Settings & Configuration)
 
 > Tier: workflow · 能力 `studio-settings` · 区域 `settings` · 平台 `gateway`(Python sidecar)

@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # 03 · Compile(编译校验 + 错误呈现) — Workflow 节点
 
 > **Tier**: workflow

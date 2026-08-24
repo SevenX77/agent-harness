@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/conflict-overwrite
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（顺序覆盖与文件保存冲突共用一套冲突词表；两个容器按交互形态各自保留；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [conflict-overwrite-resolution]

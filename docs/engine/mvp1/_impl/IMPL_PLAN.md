@@ -1,6 +1,6 @@
 ---
 doc: impl-plan
-status: active（2026-06-10 回写:WS-E1/E1-io/E2/E3/E4/E5/E6/E7/E8 首批 Engine 功能链均已实现;剩余为 CI/质量门、Studio 消费接线与后续 backlog）
+status: living（2026-06-10 回写:WS-E1/E1-io/E2/E3/E4/E5/E6/E7/E8 首批 Engine 功能链均已实现;剩余为 CI/质量门、Studio 消费接线与后续 backlog）
 applies_standard: ../../../development/task-spec-standard.md
 binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-handshake-audit.md（studio 协同）· ./WS-E1-create-agent-core.md
 ---

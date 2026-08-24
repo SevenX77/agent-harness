@@ -1,5 +1,5 @@
 ---
-status: Living
+status: living
 target_goal: "前端模块化组织原则 + UI 组件基准规范 + 画布/拖拽/Tauri 桥接最佳实践"
 linked_code_paths:
   - apps/studio/frontend/src/components/studio/Panels.tsx

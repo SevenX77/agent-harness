@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/copilot-assist
 doc: baseline
+role: baseline
 status: FROZEN（现状对齐 pinned 代码 0d9fbaf；SDK 对话 live，Write/Edit 直写为 MVP1 允许口径；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/services/copilot.py:stream_query · apps/studio/backend/app/services/copilot.py:_translate_sdk_message · apps/studio/backend/app/routers/copilot.py:copilot_ws · apps/studio/frontend/src/store/copilotStore.ts:reset · apps/studio/backend/app/routers/llm.py:_probe_copilot_sdk_tool_call

@@ -1,6 +1,7 @@
 ---
 module: <示例>mechanism/retry-policy
 doc: milestoneN-alignment
+role: alignment
 status: drafted（目标:指数退避 + 错误分类 + 可配次数）
 binds_baseline: ./baseline-example.md
 units: [retry-policy]        # 轴③ 设计单元切面(锁态以 INDEX 为准,不在本文 frontmatter)

@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # 04 · 运行与验收(predict + run + trace + golden) — Workflow 节点
 
 > **Tier**: workflow

@@ -1,6 +1,7 @@
 ---
 module: 03_regions/timeline
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（2026-08-07 viewed-run 决议落地:本区域三视图=运行列表/所查 run 的 Trace 视图/EdgeContext,由 Workspace viewedTrace 状态分流;run 结束可返回列表;predict 以 kind 判别入列。2026-08-09 D1 决议:区域改名 **Trace**（Toolbar 第4格,PanelKind 值 `trace`）,独立 `Full Trace` 文档面板删除——"Timeline"与"Full Trace"两个名词退役;D12:点击画布空白不再关闭本区域面板;D9:运行列表行改为「类型图标 / 完整 run_id / 状态徽章」三段(F1);D8:报告改为两个入口——Trace 末尾终结条目 + 列表行链接(新增 F7),身份条 `⋮` 的报告项删除;F3(Full Trace)已作废、F4(Prompt Inspector)已改址。决议:docs/design/2026-08-07-timeline-viewed-run-and-trace-ui-decision.md、docs/design/2026-08-09-trace-ia-and-streaming-overhaul-decision.md；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [compile-lint-structured-error, trace-dot-blackboard, run-execution-node-status]

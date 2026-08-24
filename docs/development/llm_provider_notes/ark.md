@@ -1,5 +1,5 @@
 ---
-status: Living
+status: living
 target_goal: "Studio MVP — 让 PM 可用"
 ---
 

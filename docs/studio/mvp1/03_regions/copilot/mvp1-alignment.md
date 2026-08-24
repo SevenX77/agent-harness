@@ -1,6 +1,7 @@
 ---
 module: 03_regions/copilot
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（面板与 WS live；session/window persistence live；ThinkingBlock/@mention/analysis bar 未落；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [copilot-session-persistence, copilot-sdk-test-parity]

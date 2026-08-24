@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/debug-resume
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Studio resume route 存在但直接 501，节点级 Resume 主路径不可用 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [debug-resume-checkpoint]

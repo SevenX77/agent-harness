@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/run-execution
 doc: baseline
+role: baseline
 status: FROZEN（2026-07 对账:后端 run manager live;前端 Run handler 已 live(handleRun→startRun,Workspace.tsx:2153-2181/2165)、predict-pass 已置位(:2137)、节点灯接真跑态(deriveNodeStatuses,:665-666→2608);仍缺前端 batch UI(useBatchRun.ts 已删,后端 batch-run live)⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:onRun · apps/studio/frontend/src/api/client.ts:startRun · apps/studio/backend/app/routers/runs.py:start_run · apps/studio/backend/app/services/run_manager.py:start_run · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream

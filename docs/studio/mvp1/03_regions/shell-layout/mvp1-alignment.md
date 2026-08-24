@@ -1,6 +1,7 @@
 ---
 module: 03_regions/shell-layout
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Workspace shell live；RuntimeGate 已按 D10 局部化(2026-08-20 核实)，copilot prop 用 outer skillId 有下钻风险 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [shell-runtime-gate]

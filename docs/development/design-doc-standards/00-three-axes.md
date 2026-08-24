@@ -1,3 +1,9 @@
+---
+doc: three-axes-overview
+status: living（design-doc-standards/ 的心智总纲，随 01/02 的实践反馈持续演进，不进入 FROZEN 流水线）
+role: guide
+---
+
 # 设计文档三轴模型(总纲)
 
 > 任何 spec-driven 项目的设计文档,是同一系统在**三条正交轴**上的投影。本文是 `design-doc-standards/` 的心智总纲;写作规范 [`01`](./01-writing-standard.md) / 审计规范 [`02`](./02-audit-standard.md) 按这三轴办事。

@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/debug-resume
 doc: baseline
+role: baseline
 status: FROZEN（2026-07 对账:Studio resume/validity 已实现非 501(runs.py:268-313 resume / :224-256 validity → adapter.resume/resume_validity);节点级 Resume 已接线(ResumeNodeToolbar,GraphCanvas.tsx:2525)、context tamper 已接(EdgeTamperEditor,EdgeContextView.tsx:256)、TracePanel 已挂(Panels.tsx:237)。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/routers/runs.py:resume_run · apps/studio/backend/app/services/run_manager.py:start_run · apps/studio/frontend/src/components/nodes/SkillNode.tsx:SkillNode · apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:LazyMonacoPanel

@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # 06 · 保存与发布(autocommit 存档 + publish 发布) — Workflow 节点
 
 > **Tier**: workflow

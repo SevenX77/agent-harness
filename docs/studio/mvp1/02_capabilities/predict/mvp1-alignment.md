@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/predict
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（后端链路 live；前端入口 + predict-pass = target-design）
 binds_baseline: ./baseline.md
 units: [predict-execution]

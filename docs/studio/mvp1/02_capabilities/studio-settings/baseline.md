@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/studio-settings
 doc: baseline
+role: baseline
 status: FROZEN（现状已更新；Settings UI/API 大体 live；API Keys 已消费 6 态投影与 catalog evidence_refs 蓝态；部分 ③b 内核逻辑还在 Studio 后端适配壳中待边界收敛。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:SettingsPage · apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:ProviderCard · apps/studio/frontend/src/api/llm.ts:ProviderUiState · apps/studio/backend/app/services/llm_state_projection.py:ProviderUiState · apps/studio/backend/app/routers/llm.py:router

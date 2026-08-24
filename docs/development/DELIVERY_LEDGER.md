@@ -795,12 +795,24 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
 
 - [ ] **远程数据同步的架构评审**。范围是四条独立链路:skill 发布到 Artifact Registry、
       Gitea 团队协作、社区模型目录同步、本地探测证据回传。不止测通不通,要判数据结构与
-      运行架构是否合理健壮(判据见规则 D2)。
+      运行架构是否合理健壮(判据见规则 D2)。**后两条(社区目录 + 探测证据回传)已评完并修完**
+      (2026-08-24):隐私三道闸逐层核过(客户端 18 字段白名单 `extra="forbid"` +
+      `is_safe_to_publish` 主机过滤 → CF Worker `screenBatch` 复验 → 只读 token 的 cron 汇编),
+      公开性坐实(发布目录 repo 公开、staging KV 私有);修了三处——#1017 首开同意对话框
+      (`community_sharing_choice` 三态,默认不上传)、#1018 staging KV 加 30 天 TTL 防爆炸
+      (**注意:合并≠部署,worker 要用用户的 CF 凭据 `wrangler deploy`,存量 `pending/` 键
+      需用户一次性手工清**)、#1020 上传明细日志(18 字段+receipt_token)。
+      前两条链路(发布 / Gitea)待点到模块十时随模块评。
 - [ ] **设计文档体系重梳**。用户裁决的分层:`baseline.md` = 与代码同步的现状文档;
       `mvp1-alignment.md` = MVP1 设计与目标文档(目标态);studio 另有三维度文档
       (workflows / capabilities / regions)。要扫全代码里已实现的功能、把漏掉的补回文档,
       并把**哪一层是权威**记进项目规则文档。已知前提:`00_settings.md` 最后一次提交
       2026-06-05,它描述的实现改到 2026-08-22,滞后两个半月。
+      **骨架已立(#1019,2026-08-24)**:AGENTS.md 注册 `docs/development/design-doc-standards/`
+      为权威、`status:`(生命周期)与 `role:`(权威性)两字段分维、13 条 pytest 门禁
+      (词表闭集 + 摘要必须带存在的权威指针)、122 文件对齐;`00_settings.md` 五条陈旧
+      断言已修(#1013)。**剩余**:9 类无文档功能按模块随点验补(J-X.5)、分叉副本清理
+      (J-X.2/J-X.4)。
 - [ ] **i18n 分模块落地**。runtime 在 studio,翻译内容与模块代码同处以便整体迁走;
       领域专有名词不翻译(清单见规则 D7)。点到哪个模块顺带做掉哪个模块。
 - [ ] **从零环境复现**。`STUDIO_CONFIG_DIR` 指到一次性目录,key 取 `/d/coding/.env`,

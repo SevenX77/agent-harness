@@ -790,7 +790,7 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       (#1026:35 词条、`src/i18n/namespaces.ts` 显式注册表、模块共置首例、共置范式已写回
       `04_platform/i18n.md` §4.1 并重钉 FROZEN 哈希),**zh-CN 真机抽验通过**(首页+新建对话框全中文,
       skill/GSkill 按术语规则不译;共享 ui 层「Close」标签仍英文,记横切)。
-      模块二 D7 由「不符→已派修」翻**已修并真机验证**;**D2–D9 其余「部分」项随横切补齐后终收口**。
+      模块二 D7 由「不符→已派修」翻**已修并真机验证**;**D2–D9 其余「部分」项随横切补齐后终收口**。J-02.A 已于 2026-08-24 修复并真机复验(#1031)。
 - [x] **模块三 · 搭图与编辑**(02_authoring)—— D1 完成(2026-08-24,一次性配置真机):
       TB 布局 / 图级 frontmatter 表单落 Properties(#219 裁决在活,MacroContractDrawer 未复活)/
       T4 新建 LOGIC+SUBGRAPH 脚手架(白名单合规 + GRAPH.md 注册 + 子图目录脚手架)/
@@ -807,8 +807,21 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       三路 agent 并行已派:J-03.A 修复(TDD 跨层契约测试)/ 02_authoring.md 16 处过期行回填 /
       Properties+IO 面板 i18n(panels namespace,照 #1026 共置范式)。D2 记 D12 缺口:
       GRAPH.md 拓扑序列化(serializeSkillGraph)与 runtime_config.json 写入仍纯 Python,
-      与「Rust 是 skill 文件唯一写入方」裁决相悖(随文档回填记账);macroform/ 死代码待清
-      (#219 证据坐实)。**D2–D9 其余随横切补齐后终收口**。
+      与「Rust 是 skill 文件唯一写入方」裁决相悖(随文档回填记账)。
+      **收尾已落(2026-08-24,五个 PR 全部合并)**:#1029 macroform 死代码删除(628 行,#219 裁决证据);
+      #1030 J-03.A 脚手架修复(跨层契约测试把模板真喂引擎 loader);#1031 J-02.A 失败读取修复;
+      #1032 02_authoring.md 16 行状态回填(几乎全部 target-design/stale → live,断链 FROZEN 引用改指
+      `00-FORMAT-GROUND-TRUTH.md`);#1033 panels 模块 i18n(252 词条,Properties/IO 面板共置 namespace)。
+      **合并后真机复验(2026-08-24,一次性配置)**:J-03.A ✅(Add action 产物一字不改 Compile pass、
+      Predict 解锁)、J-02.A ✅(sidecar 死亡窗口内首页目录不空、同意对话框不误弹)、
+      J-01.G ✅(sidecar 全程 8787=000 时改 Properties 字段 <400ms 落盘、文件完好、Retry 恢复后不被覆盖)、
+      panels 中文 ✅;J-03.B 经三轮定向复现修订并部分撤回(详见问题台账该行)。
+      **本轮新记 i18n 缺口(留给模块四及后续)**:编译诊断抽屉(「1 compile error」「Copy all errors」)、
+      左侧栏图标 aria-label(Properties/Assets/I/O/Trace/Local History/Back to Home/Close editor)、
+      画布提示「Graph refresh failed — showing the last loaded graph.」、冷启动前几秒英文闪现。
+      **留给模块四判读**:编译失败后展开的诊断抽屉占据窗口下部约四成、模糊整个工作区并遮住底部
+      action bar(Compile/Predict/Run 不可见亦不可点),是否符合 `01_workflows/03_compile.md` 的设计意图。
+      **D2–D9 其余随横切补齐后终收口**。
 - [ ] 模块四 · 编译与诊断(03_compile)
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
@@ -845,6 +858,10 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       领域专有名词不翻译(清单见规则 D7)。点到哪个模块顺带做掉哪个模块。
       **模块二(welcome)已落**(#1026,2026-08-24):共置范式首例 + 显式注册表建立,
       架构裁决写回 `docs/studio/mvp1/04_platform/i18n.md` §4.1;后续模块照此办理。
+      **模块三(panels)已落**(#1033,2026-08-24):252 个词条覆盖 PropertiesPanel / InputPanel /
+      IoConfigDialog / TestInputsSection / Panels,namespace `panels` 共置于 `components/studio/panels/locales/`;
+      领域名词与 frontmatter 字段名按规则不译。**已知剩余**:`role-test-status.ts` 约 15 处状态文案
+      (被两份单测钉住,单独一轮)、编译抽屉、左侧栏 aria-label、画布刷新失败提示、冷启动英文闪现。
       待迁存量:旧集中式 5 个 namespace(settings/errors/canvas/copilot/trace)。
 - [ ] **从零环境复现**。`STUDIO_CONFIG_DIR` 指到一次性目录,key 取 `/d/coding/.env`,
       按当前配置从零走一遍。`.env` 覆盖 8 个 provider(五官方 + Qiniu / WaveSpeed / Jiekou),

@@ -194,7 +194,13 @@ export async function loadAppSettings(options: { force?: boolean } = {}): Promis
  * response instead).
  */
 async function loadIntoStore(options: { force?: boolean } = {}): Promise<void> {
-  commitStoreState({ isLoading: true })
+  // `isLoading` is shared now, so flip it only when the snapshot genuinely
+  // is not trustworthy yet (nothing cached, or a forced reload) — a cache-hit
+  // mount of one more hook instance must not flap every consumer gated on it
+  // (e.g. the WelcomePage consent dialog's `!isLoading` guard).
+  if (!appSettingsCache || options.force) {
+    commitStoreState({ isLoading: true })
+  }
   const nextSettings = await loadAppSettings(options)
   if (saveQueueBusy()) {
     commitStoreState({ isLoading: false })

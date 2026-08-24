@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   api,
   configureApiBaseURL,
   configureApiToken,
   currentApiTokenIsSet,
 } from '../api/client'
+
+const notifySidecarTokenRotatedMock = vi.fn()
+vi.mock('../hooks/useStudioEventStream', () => ({
+  notifySidecarTokenRotated: () => notifySidecarTokenRotatedMock(),
+}))
+
 import {
   applySidecarConfig,
   fallbackSidecarConfig,
@@ -155,6 +161,25 @@ describe('runtime config', () => {
       api.defaults.adapter = undefined
     })
   })
+
+  it(
+    'recovery-stops-when-it-succeeds: applySidecarConfig tells the WS hub a rotation ' +
+      'happened, so stale-token 4401 evidence against the OLD token cannot trip the give-up breaker',
+    () => {
+      notifySidecarTokenRotatedMock.mockClear()
+
+      applySidecarConfig({
+        port: 49318,
+        baseURL: 'http://127.0.0.1:49318/api',
+        wsURL: 'ws://127.0.0.1:49318/ws',
+        resourceDir: '/tmp/studio',
+        configDir: '/tmp/studio-config',
+        api_token: 'token-after-rotation',
+      })
+
+      expect(notifySidecarTokenRotatedMock).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('R-F13 subscribeToSidecarRestart is a no-op outside the Tauri runtime', async () => {
     // No __TAURI_INTERNALS__ on the window → there is nothing to listen to;

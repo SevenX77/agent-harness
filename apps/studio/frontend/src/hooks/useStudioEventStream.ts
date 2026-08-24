@@ -109,6 +109,41 @@ function resetHubState(): void {
   setHubConnectionLost(false)
 }
 
+/**
+ * recovery-stops-when-it-succeeds (2026-08-24) — amnesty for the auth-failure
+ * circuit breaker after a KNOWN token rotation (the Tauri `sidecar-restarted`
+ * event, consumed in `config/runtime.ts::applySidecarConfig`, which is the
+ * one place that calls this).
+ *
+ * Real-machine verification of the dead-sidecar-says-so fix found the
+ * automatic-recovery loop livelocked: every sidecar restart rotates the
+ * bearer token, and THIS hub's own reconnect timer can land in the narrow
+ * window between the restart succeeding and the frontend applying the new
+ * token — producing a 4401 that is evidence against a token now provably
+ * obsolete. Enough of those (accumulated across a restart storm) permanently
+ * trip `gaveUpOnAuth`, and nothing else clears it while at least one
+ * subscriber stays mounted (`resetHubState` above only runs at zero
+ * subscribers, which does not happen while a skill stays open) — the only
+ * recovery an operator found in the field was a full page reload.
+ *
+ * Resets the auth-failure bookkeeping and, if there is no live connection
+ * right now, reconnects immediately instead of waiting out a backoff computed
+ * against evidence that is now stale. Never tears down an already-open
+ * socket: a healthy connection has nothing to be forgiven for.
+ */
+export function notifySidecarTokenRotated(): void {
+  consecutiveAuthFailures = 0
+  gaveUpOnAuth = false
+  attempt = 0
+  if (reconnectTimer !== undefined) {
+    globalThis.clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
+  if (running && !socket) {
+    connect()
+  }
+}
+
 function dispatchEvent(event: { type?: string } & Record<string, unknown>): void {
   if (event.type === "registry_changed") {
     console.info("phase=studio-event-stream action=dispatch type=registry_changed")

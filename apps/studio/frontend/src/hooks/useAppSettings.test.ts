@@ -306,6 +306,133 @@ describe('useAppSettings community sharing choice', () => {
   })
 })
 
+/**
+ * J-01.H (real-machine repro, 2026-08-24): the resident Settings dialog is
+ * forceMount-ed at boot, so its `useAppSettings()` instance exists BEFORE the
+ * WelcomePage consent dialog saves `community_sharing_choice`. With
+ * per-instance private state, the resident instance kept its boot snapshot —
+ * the UI lied ("off" while the server said "shared") — and its next whole-object
+ * autosave silently wrote the stale choice back over the user's consent. All
+ * mounted instances must project the ONE shared snapshot (AGENTS.md SSOT: "a
+ * successful write returning the canonical server snapshot" is a truth-change
+ * trigger, and all consumers must share it).
+ */
+describe('useAppSettings shares one truth across hook instances (J-01.H)', () => {
+  beforeEach(() => {
+    apiClientMocks.apiReady = true
+    vi.mocked(getAppSettings).mockReset()
+    vi.mocked(updateAppSettings).mockReset()
+    vi.mocked(toast.error).mockReset()
+    vi.mocked(toast.success).mockReset()
+    resetAppSettingsCacheForTests()
+  })
+
+  function makeHarness(capture: { current: ReturnType<typeof useAppSettings> | null }) {
+    return function Harness() {
+      const result = useAppSettings()
+      useEffect(() => {
+        capture.current = result
+      })
+      return null
+    }
+  }
+
+  it('projects a change made through one instance into every other mounted instance immediately', async () => {
+    vi.useFakeTimers()
+    vi.mocked(getAppSettings).mockResolvedValue({ ...serverSettings, community_sharing_choice: 'unset' })
+    vi.mocked(updateAppSettings).mockImplementation((next: AppSettings) => Promise.resolve(next))
+    // Mount order mirrors the real app: the resident Settings dialog instance
+    // exists first, the WelcomePage consent instance second.
+    const residentDialog = { current: null as ReturnType<typeof useAppSettings> | null }
+    const welcomeConsent = { current: null as ReturnType<typeof useAppSettings> | null }
+    const ResidentHarness = makeHarness(residentDialog)
+    const WelcomeHarness = makeHarness(welcomeConsent)
+
+    const { root } = renderJsx(createElement(
+      'div',
+      null,
+      createElement(ResidentHarness),
+      createElement(WelcomeHarness),
+    ))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(residentDialog.current?.settings.community_sharing_choice).toBe('unset')
+    expect(welcomeConsent.current?.settings.community_sharing_choice).toBe('unset')
+
+    act(() => {
+      welcomeConsent.current?.setCommunitySharingChoice('shared')
+    })
+
+    // The resident instance must see the new value from the shared snapshot at
+    // once — before the debounced PUT even fires, and without any refetch.
+    expect(getAppSettings).toHaveBeenCalledOnce()
+    expect(residentDialog.current?.settings.community_sharing_choice).toBe('shared')
+
+    await act(async () => {
+      vi.advanceTimersByTime(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(vi.mocked(updateAppSettings).mock.calls.at(-1)?.[0].community_sharing_choice).toBe('shared')
+    expect(residentDialog.current?.settings.community_sharing_choice).toBe('shared')
+
+    act(() => root.unmount())
+  })
+
+  it('never lets an earlier-mounted instance autosave a stale snapshot over another instance\'s saved choice', async () => {
+    vi.useFakeTimers()
+    vi.mocked(getAppSettings).mockResolvedValue({ ...serverSettings, community_sharing_choice: 'unset' })
+    vi.mocked(updateAppSettings).mockImplementation((next: AppSettings) => Promise.resolve(next))
+    const residentDialog = { current: null as ReturnType<typeof useAppSettings> | null }
+    const welcomeConsent = { current: null as ReturnType<typeof useAppSettings> | null }
+    const ResidentHarness = makeHarness(residentDialog)
+    const WelcomeHarness = makeHarness(welcomeConsent)
+
+    const { root } = renderJsx(createElement(
+      'div',
+      null,
+      createElement(ResidentHarness),
+      createElement(WelcomeHarness),
+    ))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // Step 1 of the repro: the consent dialog records the user's consent.
+    act(() => {
+      welcomeConsent.current?.setCommunitySharingChoice('shared')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(vi.mocked(updateAppSettings).mock.calls.at(-1)?.[0].community_sharing_choice).toBe('shared')
+
+    // Step 2: the user edits an unrelated field through the resident Settings
+    // instance. Its whole-object autosave must carry the consent, not eat it.
+    act(() => {
+      residentDialog.current?.setUserId('renamed-user')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const lastPayload = vi.mocked(updateAppSettings).mock.calls.at(-1)?.[0]
+    expect(lastPayload?.user_id).toBe('renamed-user')
+    expect(lastPayload?.community_sharing_choice).toBe('shared')
+
+    act(() => root.unmount())
+  })
+})
+
 describe('useAppSettings autosave queue', () => {
   beforeEach(() => {
     apiClientMocks.apiReady = true

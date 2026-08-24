@@ -11,7 +11,7 @@ const NOOP_EVENT_CALLBACKS = {
 }
 
 /**
- * Fires `onDown` at most once per "down episode" while `enabled` — the
+ * Fires `onDown` at most once per "down episode" while `armed` — the
  * edge-trigger a bounded-retry state machine needs (RuntimeGate): many
  * WS/HTTP failures during one outage must start the bounded auto-restart
  * sequence ONCE, not once per failed call or reconnect attempt.
@@ -29,30 +29,63 @@ const NOOP_EVENT_CALLBACKS = {
  * schedule, and even though liveness is not truth data, there is no reason to
  * add a heartbeat when both signals already fire on their own.
  *
- * An episode ends only when `enabled` toggles off and back on — RuntimeGate
- * flips it off the instant it reacts (status leaves 'ready') and back on only
- * once a restart actually succeeds (status returns to 'ready').
+ * recovery-stops-when-it-succeeds (2026-08-24) — the WS subscription below is
+ * now unconditionally live for as long as this hook is mounted; `armed` no
+ * longer gates it. The previous design passed `armed` straight through as
+ * `useStudioEventStream`'s `enabled` option, tearing the subscription down on
+ * every episode and rebuilding it on re-arm. A brand-new subscription
+ * snapshots WHATEVER `connectionLost` reads on the shared hub at that exact
+ * instant (see `subscribe()` in `useStudioEventStream.ts`) — and real-machine
+ * verification found that snapshot is, almost always, stale: a sidecar
+ * restart rotates the auth token, the hub's own reconnect can still be
+ * holding the OLD token in that same instant, and re-arming read
+ * `connectionLost === true` (the old token's rejection, not a new failure)
+ * and fired `onDown` again immediately — livelocking the bounded restart
+ * budget against its own successful recoveries.
+ *
+ * The fix is edge-triggering, not a settle-time guess: `onDown` fires only on
+ * an OBSERVED transition of `connectionLost` from false to true while armed,
+ * never on its level. The instant `armed` turns true, whatever
+ * `connectionLost` reads right then becomes the new baseline — "already
+ * known," never "new" — so a lagging-but-already-known signal can no longer
+ * be mistaken for a fresh failure, however long the reconnect actually takes.
+ * A connection that genuinely goes down again afterward still produces a real
+ * transition and still fires — detection is never permanently blinded.
  */
-export function useBackendDownSignal(enabled: boolean, onDown: () => void): void {
-  const { connectionLost } = useStudioEventStream(NOOP_EVENT_CALLBACKS, { enabled })
+export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
+  const { connectionLost } = useStudioEventStream(NOOP_EVENT_CALLBACKS)
   const onDownRef = useRef(onDown)
   onDownRef.current = onDown
   const firedRef = useRef(false)
-
-  // A fresh episode begins the moment we're re-enabled: forget that we already
-  // fired for the PREVIOUS episode, so the next real failure fires again.
-  useEffect(() => {
-    if (enabled) firedRef.current = false
-  }, [enabled])
+  const previousArmedRef = useRef(armed)
+  const previousConnectionLostRef = useRef(connectionLost)
 
   useEffect(() => {
-    if (!enabled || !connectionLost || firedRef.current) return
+    const wasArmed = previousArmedRef.current
+    previousArmedRef.current = armed
+    const justArmed = armed && !wasArmed
+
+    if (justArmed) {
+      // A fresh episode begins: forget that we already fired for the
+      // PREVIOUS episode, and reset the edge-detection baseline to whatever
+      // connectionLost happens to read RIGHT NOW — that reading is "already
+      // known as of arming," so it can never itself count as the new edge
+      // that opens this episode.
+      firedRef.current = false
+      previousConnectionLostRef.current = connectionLost
+      return
+    }
+
+    const wasLost = previousConnectionLostRef.current
+    previousConnectionLostRef.current = connectionLost
+
+    if (!armed || !connectionLost || wasLost || firedRef.current) return
     firedRef.current = true
     onDownRef.current()
-  }, [enabled, connectionLost])
+  }, [armed, connectionLost])
 
   useEffect(() => {
-    if (!enabled) return undefined
+    if (!armed) return undefined
     function handleHttpFailure(): void {
       if (firedRef.current) return
       firedRef.current = true
@@ -60,5 +93,5 @@ export function useBackendDownSignal(enabled: boolean, onDown: () => void): void
     }
     window.addEventListener(BACKEND_UNAVAILABLE_HTTP_EVENT, handleHttpFailure)
     return () => window.removeEventListener(BACKEND_UNAVAILABLE_HTTP_EVENT, handleHttpFailure)
-  }, [enabled])
+  }, [armed])
 }

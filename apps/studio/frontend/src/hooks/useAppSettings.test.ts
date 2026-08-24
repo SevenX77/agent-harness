@@ -230,6 +230,59 @@ describe('useAppSettings API readiness', () => {
 
     act(() => root.unmount())
   })
+
+  /**
+   * recovery-stops-when-it-succeeds (2026-08-24), fix point 4: a sidecar
+   * restart is a legitimate SSOT truth-change trigger (AGENTS.md — a backend
+   * process reset is exactly a "backend post-commit domain event," not a
+   * mount/focus/poll). `apiClientConfigChangedEvent` already fires on a
+   * restart (`config/runtime.ts::applySidecarConfig` calls
+   * `configureApiBaseURL`/`configureApiToken`), but this hook used to only
+   * recompute the BOOLEAN `authenticatedApiReady()` from it — and a restart
+   * typically swaps the token/base URL WITHOUT ever making that boolean go
+   * false in between, so the `[apiReady]`-keyed load effect never saw
+   * anything change and settings stayed frozen on the pre-restart snapshot.
+   */
+  it('reloads settings from the backend after a sidecar restart, even though authenticatedApiReady stays true throughout', async () => {
+    vi.mocked(getAppSettings)
+      .mockResolvedValueOnce(serverSettings)
+      .mockResolvedValueOnce({ ...serverSettings, user_id: 'restarted-sidecar-user' })
+    const captured = { current: null as ReturnType<typeof useAppSettings> | null }
+
+    function Harness() {
+      const result = useAppSettings()
+      useEffect(() => {
+        captured.current = result
+      })
+      return null
+    }
+
+    const { root } = renderJsx(createElement(Harness))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).toHaveBeenCalledTimes(1)
+    expect(captured.current?.settings.user_id).toBe(serverSettings.user_id)
+
+    // `authenticatedApiReady()` stays true before AND after — the event
+    // itself is the only observable signal a restart happened.
+    apiClientMocks.apiReady = true
+    act(() => {
+      window.dispatchEvent(new Event(apiClientMocks.configChangedEvent))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).toHaveBeenCalledTimes(2)
+    expect(captured.current?.settings.user_id).toBe('restarted-sidecar-user')
+
+    act(() => root.unmount())
+  })
 })
 
 describe('useAppSettings community sharing choice', () => {

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // state between reconnect attempts and asserting the new WebSocket URL reflects
 // the latest token, not a cached one.
 import { configureApiBaseURL, configureApiToken } from "../api/client"
-import { useStudioEventStream } from "./useStudioEventStream"
+import { notifySidecarTokenRotated, useStudioEventStream } from "./useStudioEventStream"
 import { WS_AUTH_FAILURE_GIVEUP_THRESHOLD, WS_AUTH_REJECTED_CLOSE_CODE } from "./event-stream-backoff"
 
 // React 19's act() warns unless the environment opts in.
@@ -397,5 +397,128 @@ describe("useStudioEventStream - workspace domain events", () => {
       nodeId: "setup",
     })
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+})
+
+/**
+ * recovery-stops-when-it-succeeds (2026-08-24, follow-up to dead-sidecar-says-so):
+ * real-machine verification found the auto-recovery loop livelocked. Root
+ * cause traced to THIS module: every sidecar restart rotates the bearer
+ * token, and the shared WS hub's own reconnect timer can fire in the narrow
+ * window between the restart succeeding and the frontend applying the new
+ * token — landing a stale-token reconnect attempt that the sidecar's auth
+ * gate rejects with 4401. Enough of these (accumulated across a restart
+ * storm) trip `shouldGiveUpOnAuthFailures` and the hub stops dialing FOREVER
+ * (`resetHubState` only runs at zero subscribers, which never happens while
+ * a skill stays open) — the only fix operators found in the field was a full
+ * page reload. `notifySidecarTokenRotated` is the missing "amnesty": once we
+ * KNOW a rotation happened (the Tauri `sidecar-restarted` event), any 4401
+ * evidence collected against the OLD token is moot, and the hub should stop
+ * waiting out its backoff and just try the NEW token immediately.
+ */
+describe("notifySidecarTokenRotated — amnesty after a known token rotation", () => {
+  it("lifts a tripped give-up circuit breaker and reconnects immediately, without a new fake timer tick", () => {
+    mountHook()
+
+    for (let i = 0; i < WS_AUTH_FAILURE_GIVEUP_THRESHOLD; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current.dropWith(WS_AUTH_REJECTED_CLOSE_CODE, "Unauthorized")
+      })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+    }
+    expect(FakeWebSocket.instances.length).toBe(WS_AUTH_FAILURE_GIVEUP_THRESHOLD)
+    expect(toastMock.error).toHaveBeenCalledTimes(1)
+
+    // No more sockets appear on their own — the breaker is tripped.
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000)
+    })
+    expect(FakeWebSocket.instances.length).toBe(WS_AUTH_FAILURE_GIVEUP_THRESHOLD)
+
+    // The rotation notice must reconnect on its own, synchronously — no
+    // timer advance, because the whole point is not waiting out a backoff
+    // computed against evidence that is now known to be stale.
+    act(() => {
+      notifySidecarTokenRotated()
+    })
+    expect(FakeWebSocket.instances.length).toBe(WS_AUTH_FAILURE_GIVEUP_THRESHOLD + 1)
+  })
+
+  it("skips the remaining backoff wait and reconnects immediately when mid-backoff", () => {
+    mountHook()
+
+    // One transient drop schedules a reconnect on the standard backoff
+    // (up to 1s pre-jitter) — deliberately NOT advancing time before the
+    // rotation notice arrives.
+    act(() => {
+      FakeWebSocket.instances[0].dropWith(1006, "abnormal")
+    })
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      notifySidecarTokenRotated()
+    })
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    // The original backoff timer must have been cancelled, not merely
+    // raced — advancing past it must not produce a THIRD socket.
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it("does not tear down an already-open, healthy connection", () => {
+    mountHook()
+    act(() => {
+      FakeWebSocket.instances[0].acceptOpen()
+    })
+
+    act(() => {
+      notifySidecarTokenRotated()
+    })
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.OPEN)
+  })
+
+  it("resets the auth-failure counter so it takes a fresh full threshold to give up again", () => {
+    mountHook()
+
+    // Three 4401s — under the threshold — then a rotation notice.
+    for (let i = 0; i < 3; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current.dropWith(WS_AUTH_REJECTED_CLOSE_CODE, "Unauthorized")
+      })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+    }
+    act(() => {
+      notifySidecarTokenRotated()
+    })
+
+    // Without the reset, four more 4401s would total 7 and trip the (5)
+    // threshold well before the end of this loop.
+    for (let i = 0; i < 4; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current.dropWith(WS_AUTH_REJECTED_CLOSE_CODE, "Unauthorized")
+      })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+    }
+
+    expect(toastMock.error).not.toHaveBeenCalled()
+  })
+
+  it("is a no-op when there are no subscribers at all", () => {
+    // Nothing mounted — must not throw reaching into a torn-down hub.
+    expect(() => notifySidecarTokenRotated()).not.toThrow()
   })
 })

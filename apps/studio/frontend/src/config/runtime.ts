@@ -1,4 +1,5 @@
 import { configureApiBaseURL, configureApiToken, currentApiTokenIsSet } from '../api/client'
+import { notifySidecarTokenRotated } from '../hooks/useStudioEventStream'
 import { errorMessage } from '../utils/errors'
 
 export interface SidecarConfig {
@@ -151,6 +152,14 @@ async function performShellRestart(command: string, options: RuntimeOptions): Pr
  *
  * Exported as a pure helper so the Tauri `sidecar-restarted` event listener can
  * call it without needing access to the React tree.
+ *
+ * recovery-stops-when-it-succeeds — this is also the single point that tells
+ * the WS event-stream hub a rotation happened (`notifySidecarTokenRotated`).
+ * Every caller of this function (a successful manual/automatic restart, or
+ * the Tauri `sidecar-restarted` event) is by definition a moment where any
+ * 4401 evidence the hub collected against the OLD token became moot — so the
+ * hub's auth-failure circuit breaker must not go on treating that evidence as
+ * live once we know the exact reason it happened and that it is now over.
  */
 export function applySidecarConfig(config: SidecarConfig): void {
   runtimeConfig = config
@@ -158,6 +167,7 @@ export function applySidecarConfig(config: SidecarConfig): void {
   runtimeStatusMessage = undefined
   configureApiBaseURL(config.baseURL)
   configureApiToken(config.api_token ?? null)
+  notifySidecarTokenRotated()
 }
 
 /**

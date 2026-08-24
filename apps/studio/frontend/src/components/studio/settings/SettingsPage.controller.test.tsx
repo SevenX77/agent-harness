@@ -340,6 +340,48 @@ describe("useSettingsPageController lifecycle", () => {
     expect(getCredentials).toHaveBeenCalled()
   })
 
+  /**
+   * recovery-stops-when-it-succeeds (2026-08-24), fix point 4: a sidecar
+   * restart rotates the bearer token (`config/runtime.ts::applySidecarConfig`
+   * → `configureApiToken`), which dispatches `apiClientConfigChangedEvent` —
+   * but `authenticatedApiReady()` was already true before the restart (a
+   * token was already set) and stays true after (a NEW token is set, never
+   * cleared in between), so the `[apiReady]`-keyed credentials effect never
+   * saw its dependency change and kept serving the pre-restart cached
+   * snapshot. The restart is exactly the kind of backend-process-reset event
+   * AGENTS.md's SSOT section allows as a truth-change trigger — credentials
+   * must force a fresh read, not keep serving what a now-dead process said.
+   */
+  it("reloads credentials after a sidecar restart rotates the token, even though apiReady stays true throughout", async () => {
+    // Outside Tauri, `authenticatedApiReady()` is `!isTauriRuntime() || ...` —
+    // unconditionally true regardless of the token. That is exactly the
+    // property this test needs: the boolean never once changes value across
+    // the whole test, so a passing assertion can only be explained by the
+    // reload nonce, not by a stale "the boolean also happened to flip" reading.
+    configureApiToken("token-before-restart")
+
+    await act(async () => {
+      root.render(<ControllerProbe />)
+    })
+    await flushControllerEffects()
+
+    expect(getCredentials).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(getCredentials).mock.calls[0]?.[0]).toEqual({ hydrateSecrets: false })
+
+    vi.mocked(getCredentials).mockClear()
+
+    // The restart: a NEW token replaces the old one via the exact same
+    // `configureApiToken` call `config/runtime.ts::applySidecarConfig` makes.
+    await act(async () => {
+      configureApiToken("token-after-restart")
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getCredentials).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(getCredentials).mock.calls[0]?.[0]).toEqual({ hydrateSecrets: false, force: true })
+  })
+
   it("does not sync the remote community catalog just because settings mounted", async () => {
     mockAppSettings.communitySharingChoice = "shared"
 

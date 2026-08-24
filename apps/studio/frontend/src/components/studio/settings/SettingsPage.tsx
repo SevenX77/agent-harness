@@ -46,20 +46,42 @@ export function serverEndpointIdsForExplicitDelete(
   return [...ids]
 }
 
-function useAuthenticatedApiReady(): boolean {
+/**
+ * recovery-stops-when-it-succeeds (2026-08-24), fix point 4 — alongside the
+ * ready boolean, also returns a `reloadNonce` that increments on EVERY
+ * `apiClientConfigChangedEvent`, not just the ones that flip the boolean.
+ *
+ * A sidecar restart calls `configureApiToken` with a NEW token
+ * (`config/runtime.ts::applySidecarConfig`), which fires this same event —
+ * but `authenticatedApiReady()` was already true before the restart and
+ * stays true after it (the token is replaced, never cleared in between), so
+ * the boolean alone never signals that anything happened. The nonce is the
+ * reload trigger the credentials-loading effect below needs to force a fresh
+ * fetch on a restart while still loading from cache on ordinary re-renders.
+ */
+function useAuthenticatedApiReady(): { ready: boolean; reloadNonce: number } {
   const [ready, setReady] = useState(() => authenticatedApiReady())
+  const [reloadNonce, setReloadNonce] = useState(0)
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined
-    const handleConfigChange = () => setReady(authenticatedApiReady())
+    // Catch up once, synchronously, in case authenticatedApiReady() changed
+    // between the initializer above and this effect mounting. This catch-up
+    // is not itself a "something changed AFTER we started observing" signal
+    // — it must not bump reloadNonce, or every single mount would force one
+    // redundant reload of data that is already fresh.
+    setReady(authenticatedApiReady())
+    const handleConfigChange = () => {
+      setReady(authenticatedApiReady())
+      setReloadNonce((current) => current + 1)
+    }
     window.addEventListener(apiClientConfigChangedEvent, handleConfigChange)
-    handleConfigChange()
     return () => {
       window.removeEventListener(apiClientConfigChangedEvent, handleConfigChange)
     }
   }, [])
 
-  return ready
+  return { ready, reloadNonce }
 }
 
 export async function refreshLoadedLlmRolesProjection({
@@ -460,7 +482,12 @@ export function upsertProviderModels(
 
 export function useSettingsPageController(): SettingsPageController {
   const appSettings = useAppSettings()
-  const apiReady = useAuthenticatedApiReady()
+  const { ready: apiReady, reloadNonce: apiReadyReloadNonce } = useAuthenticatedApiReady()
+  // recovery-stops-when-it-succeeds, fix point 4: mirrors useAppSettings' own
+  // hasLoadedOnceRef — false until the FIRST credentials load completes. Only
+  // loads triggered by a LATER `apiReadyReloadNonce` bump (a real restart)
+  // force-bypass the registry cache; the initial load stays cache-aware.
+  const hasLoadedCredentialsOnceRef = useRef(false)
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
   const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
@@ -705,9 +732,10 @@ export function useSettingsPageController(): SettingsPageController {
     if (!apiReady) return
     let cancelled = false
     credentialsHydratingRef.current = true
-    getCredentials({ hydrateSecrets: false })
+    getCredentials({ hydrateSecrets: false, ...(hasLoadedCredentialsOnceRef.current ? { force: true } : {}) })
       .then((next) => {
         if (cancelled) return
+        hasLoadedCredentialsOnceRef.current = true
         invalidatedTestOutcomeIdsRef.current.clear()
         setCredentialsError(null)
         setCredentials(next)
@@ -727,7 +755,7 @@ export function useSettingsPageController(): SettingsPageController {
     return () => {
       cancelled = true
     }
-  }, [apiReady])
+  }, [apiReady, apiReadyReloadNonce])
 
   async function revealProviderSecret(providerId: string): Promise<string | null> {
     if (!ensureBackendReachable()) return null

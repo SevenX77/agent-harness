@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configureApiBaseURL, configureApiToken } from '../api/client'
+import { useStudioEventStream } from '../hooks/useStudioEventStream'
 import { AUTO_RESTART_DELAYS_MS, AUTO_RESTART_MAX_ATTEMPTS } from './runtime-gate-auto-restart'
 import { RuntimeGate, RuntimeShell } from './RuntimeGate'
 
@@ -112,6 +113,25 @@ let container: HTMLDivElement | undefined
 let root: Root | undefined
 const originalWebSocket = globalThis.WebSocket
 
+// Mirrors Workspace.tsx's own, permanently-enabled `useStudioEventStream`
+// subscriber: production always has at least one of these alive for the
+// app's whole lifetime, so the shared hub's `subscribers.size` never actually
+// reaches zero while RuntimeGate's OWN subscription (inside
+// `useBackendDownSignal`) toggles off and back on across a down/recovery
+// episode. Without this sibling, RuntimeGate would be the ONLY subscriber in
+// this test tree, so disabling it would drop `subscribers.size` to zero and
+// trigger a full `resetHubState()` — masking exactly the stale-state race the
+// recovery-stops-when-it-succeeds tests below exist to catch.
+const PERMANENT_SUBSCRIBER_CALLBACKS = {
+  onRegistryChanged: (): void => {},
+  onRolesChanged: (): void => {},
+}
+
+function PermanentSubscriber(): null {
+  useStudioEventStream(PERMANENT_SUBSCRIBER_CALLBACKS)
+  return null
+}
+
 async function mountReady(): Promise<void> {
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -119,7 +139,14 @@ async function mountReady(): Promise<void> {
   const mountedRoot = root
 
   await act(async () => {
-    mountedRoot.render(createElement(RuntimeGate, null, createElement('div', null, 'app-shell-content')))
+    mountedRoot.render(
+      createElement(
+        RuntimeGate,
+        null,
+        createElement(PermanentSubscriber),
+        createElement('div', null, 'app-shell-content'),
+      ),
+    )
     await Promise.resolve()
   })
 }
@@ -345,5 +372,105 @@ describe('RuntimeGate — post-ready sidecar death is observable (dead-sidecar-s
     // The app never gets torn down / replaced by a full-screen error — the
     // shell content is present the whole time, banner or not.
     expect(bannerText()).toContain('app-shell-content')
+  })
+})
+
+/**
+ * recovery-stops-when-it-succeeds (2026-08-24): real-machine verification of
+ * the fix above found the bounded auto-restart loop livelocked. A restart
+ * attempt genuinely succeeded (confirmed in the Rust logs), but the shared
+ * WS hub's `connectionLost` had not yet caught up — it takes a moment to
+ * reconnect with the freshly-rotated token — and re-arming detection at
+ * EXACTLY that instant read the stale `true` as a brand-new failure, firing a
+ * second (then third) automatic restart. All three "succeeded," yet the
+ * Rust-side budget (a single long-lived counter, correctly NOT reset by
+ * automatic attempts — only a manual Retry resets it) still exhausted across
+ * the three spurious rounds, freezing the banner on
+ * "automatic restart budget exhausted — press Retry" while the sidecar sat
+ * healthy the entire time.
+ *
+ * These tests drive the REAL (unmocked) `useBackendDownSignal` /
+ * `useStudioEventStream` hub through that exact race — connectionLost is
+ * left deliberately stale (true) at the moment `restartSidecarAutomatic`
+ * resolves, by never opening a fresh FakeWebSocket for it to catch up on.
+ *
+ * The first automatic attempt is held PENDING (a manually-controlled deferred
+ * promise) rather than pre-resolved: the 1s/4s/16s schedule and the WS hub's
+ * own 1s ticker share the same fake-timer clock, so a single big
+ * `advance(60_000)` used to detect the down-episode ALSO crosses the first
+ * attempt's 1s delay in the same jump — a pre-resolved mock would settle
+ * before the test ever got to inspect the "restart succeeded, WS still
+ * stale" moment it exists to pin.
+ */
+describe('RuntimeGate — recovery-stops-when-it-succeeds (a successful restart ends its own episode)', () => {
+  async function driveIntoADownEpisodeWithStaleConnectionLost(): Promise<{
+    resolveFirstAttempt: (value: typeof READY_CONFIG) => void
+  }> {
+    let resolveFirstAttempt: (value: typeof READY_CONFIG) => void = () => {}
+    const firstAttempt = new Promise<typeof READY_CONFIG>((resolve) => {
+      resolveFirstAttempt = resolve
+    })
+    runtimeMocks.restartSidecarAutomatic.mockReturnValueOnce(firstAttempt)
+
+    await mountReady()
+    act(() => {
+      FakeWebSocket.instances[0]?.acceptOpen()
+    })
+    for (let i = 0; i < 3; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current?.dropWith(1006, 'abnormal')
+      })
+      await advance(60_000)
+    }
+    expect(bannerText().toLowerCase()).toContain('unavailable')
+    // The first automatic attempt already fired (1s delay, well inside the
+    // 60s jumps above) and is sitting pending — exactly the moment the
+    // real-machine repro caught: a restart in flight, connectionLost still
+    // reporting the pre-restart failure because nothing has reopened it.
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
+    // Deliberately: no FakeWebSocket in this describe block is ever reopened.
+    // connectionLost stays exactly as stale/true as it was the instant the
+    // restart below resolves — that staleness is the point of the test.
+    return { resolveFirstAttempt }
+  }
+
+  it('mandated test (a): a successful automatic restart does not trigger a second one, even while connectionLost is still stale-true', async () => {
+    const { resolveFirstAttempt } = await driveIntoADownEpisodeWithStaleConnectionLost()
+
+    await act(async () => {
+      resolveFirstAttempt(READY_CONFIG)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
+
+    // The would-be second and third rounds (#1016's real-machine livelock)
+    // must never fire: no new automatic attempt, no matter how long we wait,
+    // even though connectionLost never actually flipped back to false (no
+    // FakeWebSocket in this test is ever reopened).
+    await advance(5 * 60_000)
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
+  })
+
+  it('mandated test (c): a successful automatic restart clears the banner and never re-freezes it on a stale budget-exhausted message', async () => {
+    const { resolveFirstAttempt } = await driveIntoADownEpisodeWithStaleConnectionLost()
+
+    await act(async () => {
+      resolveFirstAttempt(READY_CONFIG)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(bannerText().toLowerCase()).not.toContain('unavailable')
+    expect(bannerText()).not.toContain('budget exhausted')
+    expect(findButton()).toBeNull()
+
+    // The banner must STAY cleared — it must never re-assert a state (like
+    // "budget exhausted") that stopped being true the moment the restart
+    // above actually succeeded.
+    await advance(5 * 60_000)
+    expect(bannerText().toLowerCase()).not.toContain('unavailable')
+    expect(findButton()).toBeNull()
   })
 })

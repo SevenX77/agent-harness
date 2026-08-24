@@ -40,20 +40,42 @@ const APP_SETTINGS_SAVE_DELAY_MS = 300
 let appSettingsCache: AppSettings | null = null
 let appSettingsRequest: Promise<AppSettings> | null = null
 
-function useAuthenticatedSettingsApiReady(): boolean {
+/**
+ * recovery-stops-when-it-succeeds (2026-08-24), fix point 4 — alongside the
+ * ready boolean, also returns a `reloadNonce` that increments on EVERY
+ * `apiClientConfigChangedEvent`, not just the ones that flip the boolean.
+ *
+ * A sidecar restart calls `configureApiBaseURL`/`configureApiToken` with a
+ * NEW base URL/token (`config/runtime.ts::applySidecarConfig`), which fires
+ * this same event — but `authenticatedApiReady()` was already true before the
+ * restart and stays true after it (both values are replaced, never cleared
+ * in between), so the boolean alone never signals that anything happened. The
+ * nonce is the reload trigger `useAppSettings` needs to force a fresh fetch
+ * on a restart while still loading from cache on ordinary re-renders.
+ */
+function useAuthenticatedSettingsApiReady(): { ready: boolean; reloadNonce: number } {
   const [ready, setReady] = useState(() => authenticatedApiReady())
+  const [reloadNonce, setReloadNonce] = useState(0)
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
-    const handleConfigChange = () => setReady(authenticatedApiReady())
+    // Catch up once, synchronously, in case authenticatedApiReady() changed
+    // between the initializer above and this effect mounting. This catch-up
+    // is not itself a "something changed AFTER we started observing" signal
+    // — it must not bump reloadNonce, or every single mount would force one
+    // redundant reload of data that is already fresh.
+    setReady(authenticatedApiReady())
+    const handleConfigChange = () => {
+      setReady(authenticatedApiReady())
+      setReloadNonce((current) => current + 1)
+    }
     window.addEventListener(apiClientConfigChangedEvent, handleConfigChange)
-    handleConfigChange()
     return () => {
       window.removeEventListener(apiClientConfigChangedEvent, handleConfigChange)
     }
   }, [])
 
-  return ready
+  return { ready, reloadNonce }
 }
 
 function withRuntimeDefaults(settings: AppSettings): AppSettings {
@@ -117,7 +139,7 @@ export async function saveAppSettings(settings: AppSettings): Promise<AppSetting
 }
 
 export function useAppSettings() {
-  const apiReady = useAuthenticatedSettingsApiReady()
+  const { ready: apiReady, reloadNonce } = useAuthenticatedSettingsApiReady()
   const [settings, setSettings] = useState<AppSettings>(withRuntimeDefaults(DEFAULT_APP_SETTINGS))
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
@@ -128,6 +150,13 @@ export function useAppSettings() {
   const inflightRef = useRef<Promise<AppSettings | null> | null>(null)
   const pendingSettingsRef = useRef<AppSettings | null>(null)
   const performSaveRef = useRef<(nextSettings: AppSettings) => Promise<AppSettings | null>>(async () => null)
+  // recovery-stops-when-it-succeeds, fix point 4: false until the FIRST load
+  // completes. Only loads triggered by a LATER `reloadNonce` bump — i.e. a
+  // real `apiClientConfigChangedEvent` after this hook already has data —
+  // force-bypass the module cache. The initial load stays cache-aware (so a
+  // second `useAppSettings()` consumer mounting around the same time still
+  // shares the one in-flight request, per the SSOT read-through rule).
+  const hasLoadedOnceRef = useRef(false)
 
   useEffect(() => {
     if (!apiReady) {
@@ -136,9 +165,10 @@ export function useAppSettings() {
     }
     let cancelled = false
     setIsLoading(true)
-    loadAppSettings()
+    loadAppSettings({ force: hasLoadedOnceRef.current })
       .then((nextSettings) => {
         if (cancelled) return
+        hasLoadedOnceRef.current = true
         latestSettingsRef.current = nextSettings
         setSettings(nextSettings)
         setError(null)
@@ -156,7 +186,7 @@ export function useAppSettings() {
     return () => {
       cancelled = true
     }
-  }, [apiReady])
+  }, [apiReady, reloadNonce])
 
   const performSave = useCallback(async (nextSettings: AppSettings): Promise<AppSettings | null> => {
     setSaveStatus('saving')

@@ -57,7 +57,7 @@ PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」�
 - D2:打开**任意**文件夹(缺 GRAPH.md/SKILL.md)不被拒,交 compile+copilot。
 - D12:新建/打开的落盘走 Rust 文件命令(非 Python `POST /skills`)。
 - Back-to-Home 卸载工作区但 copilot 对话可恢复(D8);打开 Settings **不**卸载。
-- RuntimeGate 退役后壳/FS 立即可用、调 sidecar 处 skeleton(无全屏 splash)。
+- RuntimeGate 未退役:壳/FS 立即渲染,sidecar 状态用非阻塞底部横幅呈现(冷启动/掉线两态),从不用全屏 splash 挡住 UI;运行中途死掉时还有有界自动重启(1s/4s/16s,耗尽后停,靠手动 Retry 重开一轮)。
 
 ## 6. 跨切 / 已知债
 - **注册表→无注册表重塑(已还,2026-08-24 复核确认)**:`GET /skills` 列表聚合端点已从后端路由整体移除(`apps/studio/backend/app/routers/skills.py` 现无任何裸 `@router.get("")`/list 路由;`apps/studio/backend/app/services/skills.py` 也已无 `list_skills`/`MetadataStore` 聚合函数),前端 `useSkills.ts:6-11` 的注释原样记载这次退役("Only the per-skill DETAIL fetch remains. The old GET /skills LIST was retired…Design: Home = local MRU, no registry aggregation (D11 "无注册表")")。Home 完全由 `useRecentSkills.ts`(Rust `recent_workspaces.json`)驱动,不再有任何列表级注册表聚合。
@@ -81,3 +81,4 @@ PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」�
   - 「进入 Home 屏」「打开一个 Recent skill」「新建对话框选父目录」「Recent 卡片 → Reveal」「返回 Home」「打开 Settings 不算退出工作区」「进 workspace 后右侧出现 Copilot」「[失败退路] Recent 加载失败」「[空态] 无 skill」:决策状态不变(原已是 live),仅因组件从 `components/WelcomePage.tsx` 迁至 `components/welcome/WelcomePage.tsx` 且历经重写而重新核实、更新 file:line。
   - §6:「注册表→无注册表重塑」「D12 写归属」「D3 死代码」「孤儿 `WelcomeScreen.tsx`」四项标记为**已还**;新增一条孤儿嫌疑记录(Python `POST /skills`/`DELETE /skills/{id}` 疑似孤儿,留待代码健康度复核);「多窗口(D9)」未改动。
   - **未改动、超出授权范围、留待复核**:§1/§3/§4/§5 正文与全部 FROZEN 决策原文本次未动一字;§5 现存"RuntimeGate 退役后壳/FS 立即可用"一句与本次更新后的 §2 第一行(RuntimeGate 未退役)已不一致,因超出本次任务的授权编辑范围(仅限 §2 status/依据列 + §6 + 本修订记录)未一并修正,已在交付说明中另行提请复核。
+  - **2026-08-24(追加,协调者补授权)**:上一条记录的 §5/§2 不一致已收掉——§5「测试关键点」最后一行改写为与 §2「应用启动 gate」行一致的现状描述(RuntimeGate 未退役,演进为壳/FS 立即渲染 + 非阻塞底部横幅 + 有界自动重启),复核依据同 §2 该行:`App.tsx:19`(`<RuntimeGate>` 包裹 `<Workspace>`)、`RuntimeGate.tsx:31-33,34-65,72-204,77-123,159-164`、`runtime-gate-auto-restart.ts:26`。

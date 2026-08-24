@@ -13,28 +13,28 @@ role: workflow-record
 PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」间切换。核心范式 = **强隔离 Home/Workspace + IDE/workspace 模型**(D11 锁):skill = 一个文件夹;Home = 打开文件夹 + Recent(MRU localStorage);**无聚合注册表**;一窗口专注一个 skill;子图按 path 解析(D7)。
 
 ## 2. atom action 决策表
-> status 见 INDEX §4。**⚠️ 全局架构错配(影响整层 status)**:现状 Home/后端是**注册表模型**(MetadataStore + `GET /skills` 聚合 + 自动发现 unregistered,`useSkills.ts:7`/`services/skills.py:183-258`),与 D1/D11 锁定的「无注册表」**方向冲突** → 很多看似 live 的动作其底层机制要重塑为 skill-workspace(故标 stale-doc/stale-code 非 live)。
+> status 见 INDEX §4。**2026-08-24 模块二真机点验复核**:下表 status 与 file:line 依据已逐行按当前代码核实更新(改动明细见 §7 修订记录)。此前记录的「⚠️ 全局架构错配」——Home/后端仍是注册表模型(MetadataStore + `GET /skills` 聚合 + 自动发现 unregistered)与 D1/D11「无注册表」方向冲突、导致多条看似 live 的动作实为 stale——**核实后已不成立**:`GET /skills` 列表聚合端点已从后端路由整体移除(`apps/studio/backend/app/routers/skills.py` 现无任何裸 `@router.get("")`/list 路由,`apps/studio/backend/app/services/skills.py` 亦无 `list_skills`/`MetadataStore` 聚合函数),前端 `useSkills.ts:6-11` 的注释原样记载了这次退役("Only the per-skill DETAIL fetch remains. The old GET /skills LIST was retired…Design: Home = local MRU, no registry aggregation (D11 "无注册表")")。Home 现完全由 Rust native-fs MRU(`useRecentSkills.ts`)驱动,不再有列表级注册表聚合;下表因此多数动作由 stale-doc/stale-code 改判 live,真实剩余缺口见各行与 §6。
 
 | 动作 | 最终决策 / status | 能力·区域 | 依据(file:line)+ 动机/FROZEN |
 |---|---|---|---|
-| 应用启动 gate(全屏 splash→ready 才渲染) | **stale-doc**:RuntimeGate 退役 → 两 sidecar 启动期 Rust eager-spawn + 壳/FS 立即渲染 + 调 sidecar 处 skeleton(非全屏 gate,D10) | skill-workspace · shell-layout | `App.tsx:16`/`RuntimeGate.tsx:31-44`/`config/runtime.ts:53-61`;实现归 04_platform(native-fs 管 sidecar) |
-| 进入 Home 屏(`currentSkillId===null`→WelcomePage) | **live** | skill-workspace · welcome | `Workspace.tsx:512-513,38-54`;D11 强隔离落点 |
-| Home 显示 Recent 列表(MRU 卡片) | **stale-doc** → 机制重塑为 Recent(MRU)主导,**卡片极简(只存路径+名,D-1-1)**;欢迎屏整体抄 Cursor/VS Code(R2) | skill-workspace · welcome | `WelcomePage.tsx:241-244,401-521`/`useRecentSkills.ts:26-32`(MRU localStorage max10);现内容来自注册表聚合=冲突 |
-| 打开一个 Recent skill(点卡片→进 workspace) | **live** | skill-workspace · welcome | `WelcomePage.tsx:246-249,408-416`;Cursor Open Recent 同款 |
-| 新建 Skill(填名/选父目录→建文件夹+脚手架+git init→进 workspace) | **stale-code** → 写盘迁 Rust(D12);**脚手架=logic→agent 模板**(D-1-4,非空文件夹、不调 copilot) | skill-workspace · welcome | `WelcomePage.tsx:352-361`/`NewSkillDialog.tsx:23-107`/`skills.py:81-96`/`services/skills.py:558-560`。**FROZEN/D12**:写脚手架+git init 从 Python `POST /skills` 迁 Rust 文件命令 |
-| 新建对话框选父目录(OS 目录选择器;默认来自 `default_skills_directory`) | **live** | skill-workspace · welcome | `WelcomePage.tsx:258-268,239-240`/`lib/tauri.ts:64-81`/`skill-paths.ts:18` |
-| 打开现有文件夹(选任意本地文件夹→进 workspace) | **stale-code** → **删导入校验门**(D2:不卡导入、不合规交 compile+copilot 修);写路径迁 Rust(D12);文案改"打开文件夹" | skill-workspace · welcome | `WelcomePage.tsx:370-381,310-335`/`services/skills.py:517-522`(缺 GRAPH.md/SKILL.md 硬拒=违 D2)。**FROZEN/D2**:删校验门+import-error 文案 |
-| Recent 卡片 → Reveal(系统文件管理器定位) | **live**(浏览器降级复制路径) | skill-workspace · welcome | `WelcomePage.tsx:481-484`/`lib/tauri.ts:38-62` |
-| ~~Recent 卡片 → Delete~~ | **移除(R1)**:抄 Cursor,**不在 IDE 内删 skill**(要删去系统文件夹);Recent 失效路径改为**点击报错 + 自动移除** | skill-workspace · welcome | `WelcomePage.tsx:486-492`/`services/skills.py:436-447`(原 delete=仅注销不删盘) |
-| ~~Recent 卡片 Config drift 徽章~~ | **移除(D-1-1)**:去注册表后无落点 | skill-workspace · welcome | `WelcomePage.tsx:431-457`/`config_arbitration.py:15-41` |
-| 返回 Home(Back-to-Home→卸载工作区:清 navStack/面板/分屏/选中/copilot) | **live** | skill-workspace · shell-layout | `Header.tsx:56-66`/`Workspace.tsx:439-442,44-48`;D11 退出专注模式 |
-| 返回 Home 后 copilot 对话应可恢复(现全丢) | **target-design** → D8 MUST:退出再进恢复一模一样;其余工作态(面板/分屏)可丢(Q3) | copilot-assist · shell-layout | `copilotStore.ts:10-12,27-28`(纯内存 reset);实现归 copilot-assist / native-fs(D8 Rust 写) |
-| 打开 Settings 不算退出工作区(center overlay) | **live** | skill-workspace · shell-layout | `Workspace.tsx:496-497,466,439-440`;Q3 |
-| 进 workspace 后右侧出现 Copilot(welcome 无;新建空 skill 进入即有) | **live** | copilot-assist · shell-layout | `Workspace.tsx:41,47-52,545-555`;Q4(PM 修正:无矛盾) |
-| [失败退路] Recent 加载失败(局部红框,不阻塞新建/打开) | **live** | skill-workspace · welcome | `WelcomePage.tsx:392-399` |
-| [失败退路] 新建/打开失败(结构化错误文案) | **stale-code** → D2 删校验门后,manifest 校验类退路随之移除(仅留 OS 级失败) | skill-workspace · welcome | `WelcomePage.tsx:193-228`/`services/skills.py:488-510` |
-| [空态] 无 skill → "No skills found"(引导新建/打开) | **live** | skill-workspace · welcome | `WelcomePage.tsx:524-534` |
-| [NFR 缺口] Recent 列表加载骨架(D6/§11) | **target-design** | skill-workspace · welcome | `WelcomePage.tsx:401-521`(无 skeleton 分支);available models 巨长列表是首要 |
+| 应用启动 gate(全屏 splash→ready 才渲染) | **live**:RuntimeGate 并未退役,而是演进为「壳/FS 立即渲染 + 非阻塞底部横幅」(D10)——冷启动显示"Connecting to backend…",失败态显示"Backend unavailable"+ Retry,从不遮蔽整个 UI;新增**有界自动重启**(1s/4s/16s,耗尽后停,靠手动 Retry 重开一轮),覆盖"sidecar 运行中途死掉"这一此前的空白(dead-sidecar-says-so) | skill-workspace · shell-layout | `App.tsx:19`(`<RuntimeGate>` 包裹 `<Workspace>`)/`RuntimeGate.tsx:31-33`(非阻塞横幅设计注释)`,34-65`(`RuntimeShell`)`,72-204`(`RuntimeGate`)`,77-123`(有界自动重启调度)`,159-164`(`useBackendDownSignal` 检测运行中掉线)/`runtime-gate-auto-restart.ts:26`(`AUTO_RESTART_DELAYS_MS=[1000,4000,16000]`;文件头注释自标"2026-08-24 dead-sidecar-says-so fix");D10 |
+| 进入 Home 屏(`currentSkillId===null`→WelcomePage) | **live** | skill-workspace · welcome | `Workspace.tsx:3094-3103`(`currentSkillId === null` 分支渲染 `WelcomePage`;组件已迁至 `components/welcome/WelcomePage.tsx`);D11 强隔离落点 |
+| Home 显示 Recent 列表(MRU 卡片) | **live**:Recent 完全由 Rust native-fs MRU 驱动,后端不参与;卡片极简(名+路径+时间,D-1-1),欢迎屏整体沿用 Cursor/VS Code 范式(R2) | skill-workspace · welcome | `useRecentSkills.ts:104-159`(`useRecentSkills` hook,读 Rust `recent_workspaces.json`)`,17-18`(`RECENT_CAP=10`)/`lib/tauri.ts:700,716,733`(`addRecentWorkspace`/`listRecentWorkspaces`/`removeRecentWorkspace` 均为 Rust invoke)/`WelcomePage.tsx:101-106,180-185`(卡片模型只取 absolutePath/displayName/identity/lastOpenedAt) |
+| 打开一个 Recent skill(点卡片→进 workspace) | **live** | skill-workspace · welcome | `WelcomePage.tsx:203-222`(`openSkill`/`openWorkspace`)`,382-392`(卡片 `onClick`/`onKeyDown`);Cursor Open Recent 同款 |
+| 新建 Skill(填名/选父目录→建文件夹+脚手架+git init→进 workspace) | **live**:D12 写盘已全量迁 Rust,D-1-4 脚手架(logic→agent 模板)已生效 | skill-workspace · welcome | `WelcomePage.tsx:252-281`(`submitNewSkill` 调 `createSkillWorkspace`)/`NewSkillDialog.tsx:9-38,46,107`(表单壳,委托 `onSubmit`)/`lib/tauri.ts:578-589`(`createSkillWorkspace` invoke `create_skill_workspace`)/`native_fs.rs:1619-1664`(`create_skill_workspace_impl`:建目录+写脚手架+`git init`+写 `skill_index`)`,1290-1298`(`scaffold_files_for`:`GRAPH.md` `schema_version: "v0.3.0"`、单 `init` agent phase)`,1465-1481`(`initialize_skill_repository`:写 `.gitignore`+`git init`+`git add -A`+提交 `initial-skill`)。**FROZEN/D12 已兑现**:无 Python `POST /skills` 参与(该端点的孤儿嫌疑见 §6) |
+| 新建对话框选父目录(OS 目录选择器;默认来自 `default_skills_directory`) | **live** | skill-workspace · welcome | `WelcomePage.tsx:63-74`(`defaultSkillsDirectory`)`,231-241`(`chooseNewSkillParentDirectory`)/`lib/tauri.ts:513-534`(`selectSkillDirectory`) |
+| 打开现有文件夹(选任意本地文件夹→进 workspace) | **live**:D2 校验门已删(不卡导入,不合规交 compile+copilot),D12 写路径已迁 Rust,文案已是"Open folder" | skill-workspace · welcome | `WelcomePage.tsx:286-299`(`openFolder`)`,187-216`(`resolveBackendSkillIdForWorkspace`/`openSkill` 调 `openSkillWorkspace`)/`lib/tauri.ts:596-603`(`openSkillWorkspace` invoke `open_skill_workspace`)/`native_fs.rs:1666-1688`(`open_skill_workspace_impl`:仅 OS 级存在性/目录检查,不校验 manifest,skill id 由路径推导)。**FROZEN/D2 已兑现**:后端 `services/skills.py:1225-1245` 的 import 分支自身也已实现同一条 D2(行内注释直接引用本文档),但前端 D12 迁移后已不再调用它(孤儿嫌疑见 §6) |
+| Recent 卡片 → Reveal(系统文件管理器定位) | **live**(浏览器降级复制路径) | skill-workspace · welcome | `WelcomePage.tsx:243-245`(`handleReveal`)`,425-428,449-452`(菜单项)/`lib/tauri.ts:42-70`(`revealInFileManager`,非 Tauri 环境降级为复制路径到剪贴板) |
+| ~~Recent 卡片 → Delete~~ | **移除(R1)**:抄 Cursor,**不在 IDE 内删 skill**(要删去系统文件夹);Recent 失效路径改为**点击报错 + 自动移除** | skill-workspace · welcome | 现状核查(2026-08-24):`WelcomePage.tsx` 仅剩 `handleRemove`(:247-250,"Remove from recent",调 Rust `removeRecentWorkspace`)与 `REMOVE_ACTION_LABEL`(:46)两处菜单入口(:429-435 下拉、:453-459 右键),全文件 grep 未见"删除 skill 文件夹"相关代码,确认仍移除;旧引用 `WelcomePage.tsx:486-492`/`services/skills.py:436-447` 对应 D12 重写前的文件版本,该版本已不存在 |
+| ~~Recent 卡片 Config drift 徽章~~ | **移除(D-1-1)**:去注册表后无落点 | skill-workspace · welcome | 现状核查(2026-08-24):`WelcomePage.tsx` 全文件 grep "drift" 零命中,卡片模型(:101-106)只有 absolutePath/displayName/identity/lastOpenedAt 四字段,确认仍移除;旧引用 `WelcomePage.tsx:431-457`/`config_arbitration.py:15-41` 对应 D12 重写前的文件版本,该版本已不存在 |
+| 返回 Home(Back-to-Home→卸载工作区:清 navStack/面板/分屏/选中/copilot) | **live** | skill-workspace · shell-layout | `Header.tsx:161-173`(「Back to Home」按钮+tooltip)/`Workspace.tsx:2878-2881`(`handleHome`)`,3072`(`onHome={handleHome}`)`,513-523`(`skillId` 变 null 时清 `navStack`/`activePanel`/`copilotOpen`)/`App.tsx:23`(`onCloseSkill={() => setCurrentSkillId(null)}`);D11 退出专注模式 |
+| 返回 Home 后 copilot 对话应可恢复(旧记录:现全丢) | **live(机制已接线;端到端真机行为复核留待模块十一)**:D8 要求的"退出再进恢复一模一样"已有完整代码路径——离开 workspace 只清内存投影,**不删磁盘文件**;重新进入同一 skill 时从磁盘重新水合窗口状态与会话内容 | copilot-assist · shell-layout | `useCopilot.ts:270-296`(`skillId` 变化时依次 `copilotStore.setContext`+`copilotStore.hydrate`,注释"Cold-start recovery (F2): restore only the last persisted window state (`_window.json`)")/`copilotStore.ts:332-363`(`hydrate`:读 `_window.json`,按需逐个读回未在内存中的 session 文件)`,236-249`(`persistSessionToDisk`)`,173-198`(`writeWindowState`/`persistWindowState`)`,555-568`(`reset`:仅清内存 `sessionsByContext`/`hydratedKeys`,不触碰磁盘文件)/`native_fs.rs:1243-1253`(`ensure_workspace_support_dirs` 建 `.workspace/copilot/{sessions,checkpoints}`)/单测 `copilotStore.test.ts:301`("hydrate round-trips persisted assistant content through _window.json")。本次为代码级核实,非真机逐项点验,行为级验证按 brief 归模块十一 |
+| 打开 Settings 不算退出工作区(center overlay) | **live** | skill-workspace · shell-layout | `Workspace.tsx:3230-3249`(`<Dialog open={settingsOpen} ... modal={false}>` 与画布同层渲染,不卸载 `navStack`/`copilot`)`,1222-1233`(`openSettings`/`handleSettingsToggle`) |
+| 进 workspace 后右侧出现 Copilot(welcome 无;新建空 skill 进入即有) | **live** | copilot-assist · shell-layout | `Workspace.tsx:513-523`(`skillId` 非空时 `setCopilotOpen(true)`)`,3020-3025`(`rightPanelOverlay` 渲染 `CopilotPanel`)`,3046-3050`(`copilotFab`/`copilotMorph`,仅在有 `currentSkillId` 时可能渲染;WelcomePage 分支两者均不渲染) |
+| [失败退路] Recent 加载失败(局部红框,不阻塞新建/打开) | **live** | skill-workspace · welcome | `WelcomePage.tsx:367-373`(`recentError` 红框 Alert)/`useRecentSkills.ts:96-101`(读失败降级为 `entries: []` + 非空 `error`) |
+| [失败退路] 新建/打开失败(结构化错误文案) | **live**:D2 删校验门后,manifest 校验类退路已随之移除,仅留 OS 级失败 | skill-workspace · welcome | `WelcomePage.tsx:125-140`(`formatCreateSkillError`,注释明写"D2: ...surfaces only OS-level reasons...otherwise falls through to the raw error message")`,142-157`(`formatImportSkillError`,直接 `errorMessage(error)`,注释记载旧 manifest/registry 拒绝分支"are removed")`,219-221,276-278,294-296`(三处调用点) |
+| [空态] 无 skill → "No skills found"(引导新建/打开) | **live** | skill-workspace · welcome | `WelcomePage.tsx:466-476`(`Empty`/`EmptyTitle` "No recent skills") |
+| [NFR 缺口] Recent 列表加载骨架(D6/§11) | **live(缺口已补)** | skill-workspace · welcome | `WelcomePage.tsx:375-376`(`isHydrating ? <RecentSkeleton /> : ...`)`,505-530`(`RecentSkeleton` 组件,注释"N1 Home · atom #8 (recent-skeleton)")/`useRecentSkills.ts:110-113,123-124`(`isHydrating` 状态:首次原生读取完成前为 true)。D6 里另一处"available models 巨长列表"skeleton 不在本节点范围,本次未核查 |
 
 ## 3. 设计决策基础(原话依据,锁定决策)
 - **D11 [锁] IDE/workspace 模型** > "锁 IDE/workspace 模型";Home=打开文件夹+Recent(MRU),skill=文件夹,无注册表,子图按 path(D7)。
@@ -60,8 +60,24 @@ PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」�
 - RuntimeGate 退役后壳/FS 立即可用、调 sidecar 处 skeleton(无全屏 splash)。
 
 ## 6. 跨切 / 已知债
-- **注册表→无注册表重塑**(最重要):MetadataStore/`GET /skills` 聚合 → skill-workspace(Recent MRU + 子图按 path)。
-- **D12 写归属**:新建脚手架/打开注册/删除等落盘 → Rust(native-fs 唯一写者)。
-- **D3 死代码**:`lib/tauri.ts:26-36` open_in_cursor/terminal/codex 前端零调用 → 删 helper + Rust 命令。
-- **孤儿**:`components/WelcomeScreen.tsx`(no-op 包装,真实挂载=`Workspace.tsx:513`)。
-- **多窗口(D9)**:归 04_platform(Rust 壳 + 无状态 sidecar)。
+- **注册表→无注册表重塑(已还,2026-08-24 复核确认)**:`GET /skills` 列表聚合端点已从后端路由整体移除(`apps/studio/backend/app/routers/skills.py` 现无任何裸 `@router.get("")`/list 路由;`apps/studio/backend/app/services/skills.py` 也已无 `list_skills`/`MetadataStore` 聚合函数),前端 `useSkills.ts:6-11` 的注释原样记载这次退役("Only the per-skill DETAIL fetch remains. The old GET /skills LIST was retired…Design: Home = local MRU, no registry aggregation (D11 "无注册表")")。Home 完全由 `useRecentSkills.ts`(Rust `recent_workspaces.json`)驱动,不再有任何列表级注册表聚合。
+- **D12 写归属(已还)**:新建(`createSkillWorkspace`→`native_fs.rs:1619-1664` `create_skill_workspace_impl`)、打开注册(`openSkillWorkspace`→`native_fs.rs:1669-1688` `open_skill_workspace_impl`)、Recent 增/查/删(`lib/tauri.ts:700,716,733` `addRecentWorkspace`/`listRecentWorkspaces`/`removeRecentWorkspace`)全部落 Rust native-fs(命令已注册于 `apps/studio/tauri/src/lib.rs:4430-4431`),前端全仓多种 grep 模式下未见任何调用 Python `POST /skills` 创建/导入路径的残留。
+- **孤儿嫌疑,新增(2026-08-24 复核发现)——Python 注册表式 CRUD 端点未随迁移退役**:`apps/studio/backend/app/routers/skills.py:312-313`(`POST "" create_skill`)与 `:985-986`(`DELETE "/{skill_id}" delete_skill_endpoint`)在 `apps/studio/frontend/src` 全仓多种 grep 模式(`createSkill`/`deleteSkill`/`post('/skills'`/`` delete(`/skills/${id}` ``等)下均无非测试调用方——D12(创建落盘迁 Rust)与 R1(禁止 IDE 内删 skill)生效后,这两个端点疑似已成孤儿。本次任务范围为文档 status 追平,未做进一步代码健康度裁决;是否退役留待后续复核。
+- **D3 死代码(已还)**:`lib/tauri.ts` 现全仓 grep `open_in_cursor`/`open_in_terminal`/`open_in_codex`(含 camelCase 变体)零命中,对应 Rust 命令与前端 helper 均已删除。
+- **孤儿(已还)**:`components/WelcomeScreen.tsx` 现仓库内不存在(`find` 确认零文件);真实 Home 挂载路径固定在 `components/studio/Workspace.tsx:3094-3103`(`WelcomePage`,已随重构迁至 `components/welcome/WelcomePage.tsx`)。
+- **多窗口(D9)**:归 04_platform(Rust 壳 + 无状态 sidecar);本次复核未涉及,状态未变。
+
+## 7. 修订记录
+- **2026-08-24**(动因:模块二真机点验发现本文件 status 列与 file:line 依据系统性滞后于代码)——逐行按当前代码核实更新;FROZEN 决策原文(D1/D2/D3/D6/D8/D9/D10/D11/D12/R1/R2/D-1-1/D-1-4 及 §3 全部原话)未改一字,仅改了 §2 的 status/依据列与 §6。逐条改动:
+  - §2 头部「⚠️ 全局架构错配」警示:改判为**不再成立**并重写说明——`GET /skills` 列表聚合与 `MetadataStore` 已从后端**整体移除**(不只是前端弃用调用),`useSkills.ts` 顶部注释自证这次退役。
+  - 「应用启动 gate」:`stale-doc` → **live**(RuntimeGate 未退役,演进为非阻塞横幅 + 有界自动重启,`runtime-gate-auto-restart.ts` 自标 2026-08-24 的 dead-sidecar-says-so 修复)。
+  - 「Home 显示 Recent 列表」:`stale-doc` → **live**(确认为 Rust native-fs MRU,非 localStorage)。
+  - 「新建 Skill」:`stale-code` → **live**(D12 已兑现:`createSkillWorkspace` → Rust `create_skill_workspace_impl`)。
+  - 「打开现有文件夹」:`stale-code` → **live**(D2+D12 均已兑现)。
+  - 「返回 Home 后 copilot 对话应可恢复」:`target-design` → **live(机制已接线;端到端真机行为复核留待模块十一)**(`useCopilot.ts`/`copilotStore.ts` 的 hydrate/persist 路径完整存在且有单测覆盖)。
+  - 「[失败退路] 新建/打开失败」:`stale-code` → **live**(D2 已兑现,manifest 校验分支已从前端删除)。
+  - 「[NFR 缺口] Recent 列表加载骨架」:`target-design` → **live(缺口已补)**(`RecentSkeleton` 组件与 `isHydrating` 分支已存在)。
+  - 「Recent 卡片 → Delete」「Recent 卡片 Config drift 徽章」:决策状态不变(仍移除),依据列改为现状核查证据(旧文件行号对应 D12 重写前的版本,已不存在)。
+  - 「进入 Home 屏」「打开一个 Recent skill」「新建对话框选父目录」「Recent 卡片 → Reveal」「返回 Home」「打开 Settings 不算退出工作区」「进 workspace 后右侧出现 Copilot」「[失败退路] Recent 加载失败」「[空态] 无 skill」:决策状态不变(原已是 live),仅因组件从 `components/WelcomePage.tsx` 迁至 `components/welcome/WelcomePage.tsx` 且历经重写而重新核实、更新 file:line。
+  - §6:「注册表→无注册表重塑」「D12 写归属」「D3 死代码」「孤儿 `WelcomeScreen.tsx`」四项标记为**已还**;新增一条孤儿嫌疑记录(Python `POST /skills`/`DELETE /skills/{id}` 疑似孤儿,留待代码健康度复核);「多窗口(D9)」未改动。
+  - **未改动、超出授权范围、留待复核**:§1/§3/§4/§5 正文与全部 FROZEN 决策原文本次未动一字;§5 现存"RuntimeGate 退役后壳/FS 立即可用"一句与本次更新后的 §2 第一行(RuntimeGate 未退役)已不一致,因超出本次任务的授权编辑范围(仅限 §2 status/依据列 + §6 + 本修订记录)未一并修正,已在交付说明中另行提请复核。

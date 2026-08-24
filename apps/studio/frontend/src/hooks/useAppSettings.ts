@@ -158,6 +158,16 @@ export function resetAppSettingsCacheForTests(): void {
   storeState = null
 }
 
+/**
+ * J-02.A (2026-08-24, PROBLEM_LEDGER.md): this used to swallow the rejection
+ * and resolve with `withRuntimeDefaults(DEFAULT_APP_SETTINGS)` instead — a
+ * fabricated value standing in for the server's truth, with no way for a
+ * caller to tell it apart from a real snapshot. A failed read is not a fact
+ * about the server's settings, so it now propagates as a rejection: the
+ * caller (the store in `loadIntoStore`, or `copilot-panel.tsx`'s CLI-default
+ * lookup) decides what "no data" means for its own purpose, instead of the
+ * built-in defaults being mistaken for reality three layers downstream.
+ */
 export async function loadAppSettings(options: { force?: boolean } = {}): Promise<AppSettings> {
   if (!options.force && appSettingsCache) return appSettingsCache
   // A forced load joins an in-flight FORCED request (e.g. every mounted
@@ -172,9 +182,9 @@ export async function loadAppSettings(options: { force?: boolean } = {}): Promis
       appSettingsCache = nextSettings
       return nextSettings
     })
-    .catch((error) => {
+    .catch((error: unknown) => {
       console.warn('Failed to load settings', error)
-      return withRuntimeDefaults(DEFAULT_APP_SETTINGS)
+      throw error
     })
     .finally(() => {
       if (appSettingsRequest === request) {
@@ -192,6 +202,16 @@ export async function loadAppSettings(options: { force?: boolean } = {}): Promis
  * edits are queued or in flight: a read result must never clobber a newer
  * draft (the save pipeline refreshes the snapshot from its own canonical
  * response instead).
+ *
+ * J-02.A: a failed `loadAppSettings` must NEVER be treated like a successful
+ * one. The old code committed its (fabricated) resolution unconditionally,
+ * landing on the exact same `{ isLoading: false, error: null }` shape a real
+ * success produces — indistinguishable, and therefore trusted by gates like
+ * WelcomePage's community-sharing consent dialog. On failure this now leaves
+ * `settings` untouched (the last known real snapshot, or — on a still-cold
+ * store — the untrusted initial placeholder) and records the failure in
+ * `error`, so any consumer that must not act on unverified data can gate on
+ * it (fail fast at the boundary, don't let a bad read masquerade downstream).
  */
 async function loadIntoStore(options: { force?: boolean } = {}): Promise<void> {
   // `isLoading` is shared now, so flip it only when the snapshot genuinely
@@ -201,13 +221,17 @@ async function loadIntoStore(options: { force?: boolean } = {}): Promise<void> {
   if (!appSettingsCache || options.force) {
     commitStoreState({ isLoading: true })
   }
-  const nextSettings = await loadAppSettings(options)
-  if (saveQueueBusy()) {
-    commitStoreState({ isLoading: false })
-    return
+  try {
+    const nextSettings = await loadAppSettings(options)
+    if (saveQueueBusy()) {
+      commitStoreState({ isLoading: false, error: null })
+      return
+    }
+    commitStoreState({ settings: nextSettings, isLoading: false, error: null })
+    syncI18nLanguage(nextSettings.language)
+  } catch (error) {
+    commitStoreState({ isLoading: false, error })
   }
-  commitStoreState({ settings: nextSettings, isLoading: false, error: null })
-  syncI18nLanguage(nextSettings.language)
 }
 
 export async function saveAppSettings(settings: AppSettings): Promise<AppSettings> {

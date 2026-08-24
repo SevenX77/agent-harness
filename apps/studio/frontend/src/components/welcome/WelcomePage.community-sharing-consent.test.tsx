@@ -20,6 +20,9 @@ const appSettingsMocks = vi.hoisted(() => ({
   isLoading: false,
   communitySharingChoice: 'unset' as AppSettings['community_sharing_choice'],
   setCommunitySharingChoice: vi.fn(),
+  // J-02.A: a failed settings read must be distinguishable from a real
+  // "unset" snapshot — see the dedicated describe block below.
+  error: null as unknown,
 }))
 
 vi.mock('../../hooks/useAppSettings', () => ({
@@ -41,7 +44,7 @@ vi.mock('../../hooks/useAppSettings', () => ({
     setCommunitySharingChoice: appSettingsMocks.setCommunitySharingChoice,
     setCliSessions: vi.fn(),
     save: vi.fn(),
-    error: null,
+    error: appSettingsMocks.error,
     lastSaveError: null,
   }),
 }))
@@ -87,6 +90,7 @@ describe('WelcomePage community-sharing consent gating', () => {
   beforeEach(() => {
     appSettingsMocks.isLoading = false
     appSettingsMocks.communitySharingChoice = 'unset'
+    appSettingsMocks.error = null
     appSettingsMocks.setCommunitySharingChoice.mockReset()
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -119,6 +123,23 @@ describe('WelcomePage community-sharing consent gating', () => {
 
   it('never fires while settings are still loading, even if the cached default reads "unset"', () => {
     appSettingsMocks.isLoading = true
+    renderWelcome()
+
+    expect(document.body.textContent).not.toContain('Share provider parameters with the community?')
+  })
+
+  /**
+   * J-02.A: before the fix, a failed settings read committed
+   * `withRuntimeDefaults(DEFAULT_APP_SETTINGS)` into the shared store with
+   * `isLoading: false, error: null` — indistinguishable from a real "unset"
+   * snapshot. For an install that had already answered ("shared" or
+   * "declined") but hit a transient read failure (e.g. sidecar unreachable
+   * at boot), this fired the dialog again; a "Not now" click there overwrites
+   * the real choice with "declined" — silent data loss from a network blip.
+   * The dialog must stay closed until a real server snapshot says "unset".
+   */
+  it('never fires when the settings read failed, even though the untrustworthy cached default reads "unset"', () => {
+    appSettingsMocks.error = new Error('sidecar unreachable')
     renderWelcome()
 
     expect(document.body.textContent).not.toContain('Share provider parameters with the community?')

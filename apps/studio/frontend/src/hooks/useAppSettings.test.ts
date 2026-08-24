@@ -102,12 +102,21 @@ describe('useAppSettings helpers', () => {
     expect(getAppSettings).toHaveBeenCalledOnce()
   })
 
-  it('does not cache the default fallback after a failed load', async () => {
+  /**
+   * J-02.A (2026-08-24): the old contract had `loadAppSettings` swallow the
+   * rejection and resolve with `DEFAULT_APP_SETTINGS` instead — a fabricated
+   * value silently standing in for the server's truth. A failed read is not a
+   * fact about the server's settings; it must propagate as a failure so every
+   * caller (the store, `copilot-panel.tsx`'s CLI-default lookup) decides for
+   * itself what "no data" means, instead of the built-in defaults being
+   * mistaken for a real snapshot three layers away.
+   */
+  it('propagates a failed load instead of caching a fabricated default (J-02.A)', async () => {
     vi.mocked(getAppSettings)
       .mockRejectedValueOnce(new Error('401'))
       .mockResolvedValueOnce(serverSettings)
 
-    await expect(loadAppSettings()).resolves.toEqual(DEFAULT_APP_SETTINGS)
+    await expect(loadAppSettings()).rejects.toThrow('401')
     await expect(loadAppSettings()).resolves.toEqual(serverSettings)
 
     expect(getAppSettings).toHaveBeenCalledTimes(2)
@@ -280,6 +289,97 @@ describe('useAppSettings API readiness', () => {
 
     expect(getAppSettings).toHaveBeenCalledTimes(2)
     expect(captured.current?.settings.user_id).toBe('restarted-sidecar-user')
+
+    act(() => root.unmount())
+  })
+})
+
+/**
+ * J-02.A (2026-08-24, PROBLEM_LEDGER.md): a failed settings read used to be
+ * indistinguishable from a successful one — `loadIntoStore` committed
+ * `withRuntimeDefaults(DEFAULT_APP_SETTINGS)` with `isLoading: false, error:
+ * null`, exactly the shape of a real snapshot. Downstream, WelcomePage's
+ * first-run community-sharing consent dialog reads that lie as "the server
+ * says unset" and can fire for an install that already answered, and the
+ * user's "Not now" click then overwrites the real `shared`/`declined` value
+ * with `declined` — silent data loss triggered by a transient network blip.
+ * A failed read is not a fact about the server's settings; the store must
+ * keep whatever it already knew (a real snapshot, or nothing yet) and record
+ * the failure through `error` instead of fabricating a truth.
+ */
+describe('useAppSettings load failure handling (J-02.A)', () => {
+  beforeEach(() => {
+    apiClientMocks.apiReady = true
+    vi.mocked(getAppSettings).mockReset()
+    vi.mocked(updateAppSettings).mockReset()
+    resetAppSettingsCacheForTests()
+  })
+
+  function makeHarness(capture: { current: ReturnType<typeof useAppSettings> | null }) {
+    return function Harness() {
+      const result = useAppSettings()
+      useEffect(() => {
+        capture.current = result
+      })
+      return null
+    }
+  }
+
+  it('keeps the last known real snapshot and reports the failure via `error` when a forced reload fails', async () => {
+    vi.mocked(getAppSettings)
+      .mockResolvedValueOnce(serverSettings)
+      .mockRejectedValueOnce(new Error('sidecar unreachable'))
+    const captured = { current: null as ReturnType<typeof useAppSettings> | null }
+
+    const { root } = renderJsx(createElement(makeHarness(captured)))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).toHaveBeenCalledTimes(1)
+    expect(captured.current?.settings).toEqual(serverSettings)
+    expect(captured.current?.error).toBeNull()
+
+    // A sidecar-restart event forces a reload (recovery-stops-when-it-succeeds
+    // fix point 4), and this one fails.
+    act(() => {
+      window.dispatchEvent(new Event(apiClientMocks.configChangedEvent))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).toHaveBeenCalledTimes(2)
+    // The store projection must NOT have been swapped for a fabricated
+    // default — the last known real server snapshot stays in place.
+    expect(captured.current?.settings).toEqual(serverSettings)
+    expect(captured.current?.isLoading).toBe(false)
+    expect(captured.current?.error).not.toBeNull()
+
+    act(() => root.unmount())
+  })
+
+  it('on a cold store, a failed first load reports the failure instead of committing the built-in defaults as the server truth', async () => {
+    vi.mocked(getAppSettings).mockRejectedValue(new Error('sidecar unreachable'))
+    const captured = { current: null as ReturnType<typeof useAppSettings> | null }
+
+    const { root } = renderJsx(createElement(makeHarness(captured)))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getAppSettings).toHaveBeenCalledTimes(1)
+    expect(captured.current?.isLoading).toBe(false)
+    // The un-trustworthy placeholder is co-tagged with a real error — a
+    // consumer MUST check `error` (or `isLoading`) before treating `settings`
+    // as the server's truth. Never `isLoading: false, error: null` here, the
+    // exact shape a genuine successful load also produces.
+    expect(captured.current?.error).not.toBeNull()
 
     act(() => root.unmount())
   })

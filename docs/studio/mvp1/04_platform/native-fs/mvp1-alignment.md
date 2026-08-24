@@ -1,6 +1,7 @@
 ---
 module: 04_platform/native-fs
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Tauri sidecar/picker/reveal live；Studio 自有 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️；Copilot SDK Write/Edit 为 MVP1 明确例外。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-drilldown, publish-artifact-autocommit, local-history-snapshot, copilot-session-persistence]

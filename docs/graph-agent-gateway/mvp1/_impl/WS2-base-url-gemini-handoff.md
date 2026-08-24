@@ -1,7 +1,7 @@
 ---
 handoff_id: WS-2-base-url-gemini-implementation
 target_agent: Gemini
-status: ready_for_implementation
+status: drafted（任务书已定稿待派发实施,尚未进入 audited-ready 哈希锁）
 created: 2026-06-06
 source_task: ./WS2-base-url.md
 kiro_tasks: ../../../../../.kiro/specs/graph-agent-gateway-mvp1/tasks.md

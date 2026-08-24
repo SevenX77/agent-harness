@@ -1,7 +1,7 @@
 ---
 module: 01-contract/02-skill-syntax
 doc: baseline
-status: active
+status: living
 updated: 2026-06-28
 binds_alignment: ./mvp1-alignment.md
 format_ssot: ../../../skill-spec/00-FORMAT-GROUND-TRUTH.md

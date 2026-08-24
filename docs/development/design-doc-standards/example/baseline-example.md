@@ -1,6 +1,7 @@
 ---
 module: <示例>mechanism/retry-policy
 doc: baseline
+role: baseline
 status: drafted（现状对齐 pinned 代码 <commit>；固定 3 次、无退避、不分错误类型）
 binds_alignment: ./alignment-example.md
 binds_code: core/retry.py:retry_call

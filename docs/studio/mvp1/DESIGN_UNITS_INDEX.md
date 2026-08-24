@@ -1,5 +1,6 @@
 ---
 doc: design-units-index
+role: index
 status: drafted（活注册表、不入哈希锁；PM 已审 decomposition/owner 2026-06-05：25→22 单元、四层 owner 改回 ③b；22/22 owned-lock=locked（12 integration-locked、10 external floating-draft）、63 档已 FROZEN 2026-06-05；锁态由 _design-unit-lock-snapshot.json 快照测试强制；新增单元/改 spans 须 owner 评审并同步快照）
 aligns_with: ../../development/design-doc-standards/02-audit-standard.md（R8）· 01_workflows/INDEX.md（轴① 走查索引，不同物）
 ---

@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/phase-editing
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Properties 按 phase kind 暴露可写白名单；SUBGRAPH 通过 folder reconnect 写 `path`，旧字段只读迁移、不写回；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [phase-field-whitelist, node-properties-role-test, io-panel-artifacts-test-inputs]

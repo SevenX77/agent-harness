@@ -1,6 +1,7 @@
 ---
 module: 03_regions/assets
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（文件树 live；subgraph 检测读取 topology path / legacy migration signal；无本地假 fallback 行；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown]

@@ -1,5 +1,5 @@
 ---
-status: Living
+status: living
 target_goal: "贡献流程入口指路——唯一真相源是根目录 AGENTS.md,本文件不复述其内容"
 linked_code_paths: []
 linked_specs: []

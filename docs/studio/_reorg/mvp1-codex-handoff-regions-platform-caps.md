@@ -1,7 +1,7 @@
 ---
 doc: mvp1-codex-handoff-regions-platform-caps
 audience: codex(executor，无对话历史，必须自包含)
-status: handoff drafted 2026-06-03，待派发
+status: drafted（2026-06-03，待派发）
 scope: studio mvp1 补 23 个模块文档 = regions(12) + platform(4) + capabilities 缺口(7)
 ground_truth:
   - docs/DESIGN-PROCESS.md（写作框架，必读）

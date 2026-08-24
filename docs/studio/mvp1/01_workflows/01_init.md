@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # Node 1: 发现与初始化 (Discovery & Init)
 
 > Tier: workflow · Owns: 进入 Studio + Home↔skill-workspace 强隔离切换的完整旅程 · 能力 `skill-workspace`(引用 `copilot-assist`)· 区域 `welcome` / `shell-layout` · 平台 `native-fs`(Rust) / `gateway`(sidecar)

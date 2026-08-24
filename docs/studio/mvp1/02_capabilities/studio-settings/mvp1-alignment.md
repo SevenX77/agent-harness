@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/studio-settings
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Settings UI/API 大体 live；API Keys 已消费 6 态投影与 catalog evidence_refs 蓝态；部分 ③b 内核逻辑仍在 Studio 后端适配壳中待边界收敛。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [settings-six-state-provider-health, model-group-role-materialization, node-properties-role-test, copilot-sdk-test-parity]

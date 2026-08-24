@@ -1,7 +1,8 @@
 ---
 doc: proposal
+role: alignment
 title: Skill 存储与身份模型 — 从"技能库"到"一 skill 一 git 仓"
-status: proposed（变更提案，不入哈希锁；待 owner 评审后决定正式并入方式）
+status: drafted（变更提案，不入哈希锁；待 owner 评审后决定正式并入方式）
 date: 2026-07-03
 supersedes-drift-in:
   - 02_capabilities/skill-workspace（workspace-open-folder-mru：no-registry IDE 模型）

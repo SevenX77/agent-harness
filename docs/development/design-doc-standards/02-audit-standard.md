@@ -1,3 +1,9 @@
+---
+doc: audit-standard
+status: living（怎么审的规范，随实际审计执行反馈持续演进，不进入 FROZEN 流水线）
+role: guide
+---
+
 # 设计文档审计规范
 
 > 审计**怎么审**。配套:文档怎么写见 [`01-writing-standard.md`](./01-writing-standard.md);三轴心智见 [`00-three-axes.md`](./00-three-axes.md);符合标准的范例见 [`example/`](./example/)。

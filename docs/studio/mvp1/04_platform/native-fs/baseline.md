@@ -1,6 +1,7 @@
 ---
 module: 04_platform/native-fs
 doc: baseline
+role: baseline
 status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Tauri sidecar/picker/reveal live；Studio 自有 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️；Copilot SDK Write/Edit 为 MVP1 明确例外。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/tauri/src/lib.rs:select_directory · apps/studio/tauri/src/lib.rs:reveal_in_file_manager · apps/studio/tauri/src/lib.rs:open_in_cursor · apps/studio/tauri/src/sidecar.rs:SidecarManager · apps/studio/frontend/src/api/client.ts:writeSkillFile · apps/studio/backend/app/services/artifact_registry.py:build_publish_package

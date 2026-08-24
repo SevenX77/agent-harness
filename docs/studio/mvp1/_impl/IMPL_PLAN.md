@@ -1,5 +1,6 @@
 ---
 doc: impl-plan
+role: guide
 status: drafted（2026-06-06; 按 Studio MVP1 FROZEN 文档与当前代码热点编排，待拆 WS 任务书后执行）
 applies_standard: ../../../development/task-spec-standard.md
 binds_design: ../DESIGN_UNITS_INDEX.md · ../README.md · ../01_workflows/INDEX.md · ../../../development/FRONTEND_UI_SPEC.md

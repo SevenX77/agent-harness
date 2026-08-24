@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: baseline
+role: baseline
 status: FROZEN（2026-07 对账:TracePanel/useRunStream/PromptInspector 均已挂主 Studio 流(Panels.tsx:237 / TimelinePanel.tsx:153);edge dot 双态齐备——运行期 edgeContextFromEvents + 未跑期 staticEdgeInference,假黑板 getMockEdgeContext 已删;edge 上下文已从 Properties 迁到 EdgeContextView。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/TracePanel.tsx:TracePanel · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream · apps/studio/frontend/src/lib/edge-static-inference.ts:staticEdgeInference · apps/studio/frontend/src/lib/edge-context.ts:edgeContextFromEvents · apps/studio/frontend/src/components/studio/panels/EdgeContextView.tsx:EdgeContextView · apps/studio/backend/app/routers/websockets.py:run_events

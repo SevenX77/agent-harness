@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # Node 2: 编辑与编译 (Authoring & Compile)
 
 > Tier: workflow · Owns: 把业务逻辑装配成严谨 graph_skill 的旅程(宏观契约 / 中观拓扑 / 微观节点编辑 / 实时 compile 门控)· 能力 `graph-authoring` `phase-editing` `file-editing` `compile-lint` `conflict-overwrite` · 区域 `canvas` `editor` `input(→i/o panel)` `properties` `center-action-bar` · 平台 `native-fs`(Rust 写) / `engine`(compile)

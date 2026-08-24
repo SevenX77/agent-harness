@@ -1,6 +1,6 @@
 ---
 doc: _impl-backlog
-status: backlog（2026-06-06;设计内容已齐,把各模块"impl 归 kiro"的 Gap 工单化,待 CCB 恢复后委派 codex）
+status: living（活工单表;2026-06-06 起把各模块"impl 归 kiro"的 Gap 工单化,持续维护、随派单更新,不进入 FROZEN 流水线）
 owns: engine mvp1 实施任务清单(分层 + 依赖 + 落点),codex/kiro 执行入口
 audience: 架构师(派单)+ codex(执行);待 daemon 恢复
 related: INDEX.md（设计单元台账）· 各模块 mvp1-alignment.md §8（impl-target 来源）· _api-handshake-audit.md（studio 协同）

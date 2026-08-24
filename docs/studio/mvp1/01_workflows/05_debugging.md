@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # 05 · Debug(调试续跑) — Workflow 节点
 
 > **Tier**: workflow

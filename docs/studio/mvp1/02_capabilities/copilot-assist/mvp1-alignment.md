@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/copilot-assist
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session/window persistence live，ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [copilot-sdk-test-parity, copilot-session-persistence]

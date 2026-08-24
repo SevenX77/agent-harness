@@ -300,6 +300,17 @@ one-page orientation, not the full design.
 
 ## Standard Documents
 
+- **设计文档体系与文档状态的权威**:`docs/development/design-doc-standards/`
+  (`00-three-axes.md` 三轴心智 + `01-writing-standard.md` 写作标准,含文件级
+  状态机 `drafted`/`audited-ready`/`FROZEN`/`superseded`/`retired`/`living` 与
+  frontmatter `role:` 载体划分 + `02-audit-standard.md` 审计标准 +
+  `example/` 范例)。**改文档结构、状态词表或载体角色划分要回这里改,不要在
+  别处另立一套**——这份规范此前从未被任何项目规则入口引用过,这正是它虽然
+  早就写好、却没人遵守的原因(2026-08 复核:`docs/` 下带 `status:` 的文档里
+  约四分之一的取值不在旧状态机里)。`docs/development/design-doc-standards/`
+  与 `docs/studio/mvp1/` 下每份文档的 frontmatter 现在都必须带
+  `status:`/`role:` 并落在闭集里,门禁见
+  `apps/studio/backend/tests/docs/test_design_doc_standards_governance.py`。
 - **交付台账(当前活动工作的唯一可变状态)**:
   `docs/development/DELIVERY_LEDGER.md` — 在做什么、到哪一步、被什么挡住、
   过哪道门算完。**新会话接手推进工作先读它**;合并在册 PR 时同步更新对应行。

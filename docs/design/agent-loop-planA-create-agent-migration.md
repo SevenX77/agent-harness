@@ -1,5 +1,5 @@
 ---
-status: Designing (架构方向已与用户拍板; 输出格式与 structured-output 两项待实证)
+status: drafted（架构方向已与用户拍板; 输出格式与 structured-output 两项待实证）
 created: 2026-06-01
 updated: 2026-06-02
 owner: Engine (graph-agent)

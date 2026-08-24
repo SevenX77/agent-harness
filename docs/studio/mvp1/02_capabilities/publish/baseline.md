@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/publish
 doc: baseline
+role: baseline
 status: FROZEN（现状对齐当前修复线；ProductArtifactStore release 已成为本地发布真相；远端 Artifact Registry 为后置 sync；D12 Rust package writer 未收口 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/hooks/usePublishSkill.ts:usePublishSkill · apps/studio/backend/app/routers/skills.py:publish_skill · apps/studio/backend/app/services/publish_pipeline.py:ProductArtifactPublisher · apps/studio/backend/app/core/adapters/product_store_local.py:LocalProductArtifactStore · apps/studio/backend/app/services/artifact_registry.py:ArtifactRegistryClient.upload_artifact · apps/studio/backend/app/services/run_manager.py:_auto_commit_successful_run

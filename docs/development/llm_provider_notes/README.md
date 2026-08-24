@@ -1,5 +1,5 @@
 ---
-status: Archived Reference
+status: retired（非运行期真相源，仅供人工/自动化取用参考事实；见下文 scope 说明）
 target_goal: "Provider facts for Probe Knowledge Catalog seeding and human endpoint setup"
 linked_specs:
   - .kiro/specs/llm-provider-intelligence-v2/design.md

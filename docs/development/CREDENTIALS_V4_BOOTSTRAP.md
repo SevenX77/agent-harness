@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: drafted
 target_goal: "Define the LLM Provider Intelligence V2 hard-cut bootstrap and recovery path"
 linked_specs:
   - .kiro/specs/llm-provider-intelligence-v2/requirements.md

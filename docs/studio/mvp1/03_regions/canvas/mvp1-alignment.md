@@ -1,6 +1,7 @@
 ---
 module: 03_regions/canvas
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（2026-07-02 按代码核对:edge dot 已接真实事件派生(edgeContextFromEvents,mock 已删),缺静态推断态;node status / inline subgraph 现状以代码为准 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown, run-execution-node-status, trace-dot-blackboard]

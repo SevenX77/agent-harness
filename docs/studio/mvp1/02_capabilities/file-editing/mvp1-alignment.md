@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/file-editing
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Monaco 编辑与 FastAPI 写文件 live；MVP1 D12 要求 Rust 唯一写者，当前写路径仍走 FastAPI ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [native-rust-writer]

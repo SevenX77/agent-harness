@@ -1,5 +1,5 @@
 ---
-status: Living
+status: living
 target_goal: "定义 Studio 桌面版中 Frontend、Tauri command 与 Python sidecar 的职责边界"
 linked_code_paths:
   - apps/studio/frontend/src/lib/tauri.ts

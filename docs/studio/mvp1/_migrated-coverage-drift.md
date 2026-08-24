@@ -1,3 +1,7 @@
+---
+role: guide
+---
+
 > 临时存档：retrofit 前各 baseline 的旧 Coverage/Drift。**待对应代码实现 + 验证无误后彻底删除。** 现行真相 = 各 baseline 的新结构（测试锚点 + ⚠️ drift 行）；本档仅迁移期安全网。
 
 <a id="02-capabilities-compile-lint"></a>

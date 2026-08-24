@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/05-exit-control
 doc: baseline
-status: implemented-audited（WS-E8 exit gate + 双闸 nudge 适配器已落地,2026-08-15 迁移决议 §3.5）
+status: audited-ready（WS-E8 exit gate + 双闸 nudge 适配器已落地,2026-08-15 迁移决议 §3.5）
 ---
 
 # 05-exit-control - Baseline（当前代码实现逻辑）

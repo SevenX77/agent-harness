@@ -1,6 +1,7 @@
 ---
 module: 03_regions/center-action-bar
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（Compile 入口 live；Predict/Run handler 仍是 `console.info` 桩，compile error 仍底部浮层 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [compile-stage-gate, predict-execution]

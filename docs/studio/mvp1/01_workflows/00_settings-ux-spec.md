@@ -1,3 +1,7 @@
+---
+role: workflow-record
+---
+
 # Settings Page — 用户 UX Workflow 详细规格（API Keys / LLM Roles / Copilot）
 
 > **来源**：PM 口述需求（2026-06-02）。PM 强调此前"写过好几次"但未落进 mvp1，本次正式记载。

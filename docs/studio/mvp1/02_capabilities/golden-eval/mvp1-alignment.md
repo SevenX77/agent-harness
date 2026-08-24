@@ -1,6 +1,7 @@
 ---
 module: 02_capabilities/golden-eval
 doc: mvp1-alignment
+role: alignment
 status: FROZEN（2026-07 对账:后端 golden 已落 per-agent-node cases（set_golden_baseline_for_run(node_id) + cases/{id}.json,golden_diff.py:58-79 / 186-208），旧"整次 run final_state 复制"已废；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [golden-per-agent-node]

@@ -1,5 +1,5 @@
 ---
-status: active
+status: living
 ssot: graph_skill_format_templates
 updated: 2026-06-28
 ---

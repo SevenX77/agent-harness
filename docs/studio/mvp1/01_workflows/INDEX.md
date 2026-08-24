@@ -1,3 +1,7 @@
+---
+role: guide
+---
+
 # Skill Studio UI/UX 工作流总览
 
 **目标**: 定义产品经理 (PM) 在 Skill Studio 中的完整工作流闭环，并为每个节点的界面 (UI) 与交互 (UX) 提供详细的设计参考。

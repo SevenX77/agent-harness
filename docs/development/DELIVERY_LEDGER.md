@@ -779,7 +779,13 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
 - [x] **模块一 · 开机与底座配置**(00_settings)—— D1 完成:12 条实测通过 / 1 条无法观测
       (本机 0 条 failed route)/ 0 条不符。报告 Artifact `7cf8a8be`。**D2–D9 未做**,
       随本批次横切要求补齐后才算收口。
-- [ ] 模块二 · 进门:Home / Recent / 新建 / 打开(01_init)
+- [x] **模块二 · 进门:Home / Recent / 新建 / 打开**(01_init)—— D1 完成(2026-08-24,
+      一次性配置真机):空态 / 新建(Rust 落盘:脚手架+git init+skill_index)/ Back-to-Home /
+      Recent 卡片重开 / D2 任意文件夹不被拒 / R1 失效路径 hydrate 自动剪除(store 文件同步剪)/
+      Settings 不卸载工作区 / D3 无外部 IDE 跳转 / down 窗口壳与 FS 可用,共 14 条实测通过、
+      0 不符;D8 copilot 恢复=持久化目录已建、行为验证留模块十一。新发现 J-02.A(失败读取编造默认值,未修)。
+      顺带完成:J-01.H 真机复验、#1021 第三次自动恢复证据。01_init.md 状态列回填与 welcome 模块 i18n
+      已派 agent(PR 待落)。**D2–D9 其余维度随横切补齐后收口**。
 - [ ] 模块三 · 搭图与编辑(02_authoring)
 - [ ] 模块四 · 编译与诊断(03_compile)
 - [ ] 模块五 · 试飞 predict(04 §B)

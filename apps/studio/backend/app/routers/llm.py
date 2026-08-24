@@ -23,6 +23,7 @@ from app.core.adapters.gateway import (
     CapabilitySource,
     CredentialProviderProtocol,
     EndpointProbeResult,
+    EvidenceUpload,
     GatewayAdapter,
     GatewayProviderRoute,
     GatewayRoleEntry,
@@ -184,9 +185,11 @@ async def _autoshare_after_probe_best_effort() -> None:
     path OR the single community model-catalog toggle
     (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
     """
-    uploads: list[Any] = []
+    uploads: list[EvidenceUpload] = []
+    gate_url: str | None = None
     try:
         cfg = get_backend_config()
+        gate_url = cfg.community_gate_url
         if not community_upload_configured(
             gate_url=cfg.community_gate_url,
             enabled=cfg.community_upload_enabled,
@@ -204,25 +207,47 @@ async def _autoshare_after_probe_best_effort() -> None:
             gate_url=cfg.community_gate_url,
             protocol_major=cfg.community_protocol_major,
         )
+        idempotency_key = batch_idempotency_key(uploads)
         # Phase 6: no offline queue. If the upload fails it just raises (swallowed
         # below); the next probe re-derives candidates from credentials and retries.
-        await client.upload_batch(uploads, idempotency_key=batch_idempotency_key(uploads))
-        # W2-E.1c / R-F4: record the post-probe upload outcome so General settings
-        # shows how many evidence records were contributed and that it succeeded.
+        ack = await client.upload_batch(uploads, idempotency_key=idempotency_key)
+        # W2-E.1c / R-F4, widened 2026-08-24: the runtime activity log is an audit
+        # ledger, not a one-line summary (docs/studio/mvp1/01_workflows/
+        # 00_settings-ux-spec.md:808) — `changes` must carry the same facts as the
+        # underlying truth. So this records the full per-record payload (safe: an
+        # ``EvidenceUpload`` is the wire-safe, extra="forbid" allowlisted shape,
+        # never a raw credential object), where it was sent, the idempotency key,
+        # and the gate's ack — including `receipt_token`, the only handle to ever
+        # retract this contribution later.
         record_runtime_activity(
             source_id="llm_credentials",
             action="autoshare_uploaded",
             message="Auto-shared probe-verified evidence to the community catalog gate.",
-            changes={"uploaded_count": len(uploads)},
+            changes={
+                "uploaded_count": len(uploads),
+                "records": [upload.model_dump(exclude_none=True) for upload in uploads],
+                "gate_url": gate_url,
+                "idempotency_key": idempotency_key,
+                "accepted": ack.accepted,
+                "rejected": ack.rejected,
+                "receipt_token": ack.receipt_token,
+            },
         )
     except Exception as exc:  # noqa: BLE001 — best-effort: sharing must never fail a probe
         logger.warning("post-probe community auto-share failed", exc_info=True)
         try:
+            changes: dict[str, Any] = {"attempted_count": len(uploads), "error": str(exc)}
+            if uploads:
+                # Symmetric with the success log: show what was ATTEMPTED, not
+                # just how many, so a failed contribution is auditable too.
+                changes["records"] = [upload.model_dump(exclude_none=True) for upload in uploads]
+            if gate_url:
+                changes["gate_url"] = gate_url
             record_runtime_activity(
                 source_id="llm_credentials",
                 action="autoshare_failed",
                 message="Post-probe community auto-share failed (best-effort; retried on next probe).",
-                changes={"attempted_count": len(uploads), "error": str(exc)},
+                changes=changes,
             )
         except Exception:  # noqa: BLE001 — recording the failure must also never raise
             logger.warning("failed to record auto-share failure", exc_info=True)

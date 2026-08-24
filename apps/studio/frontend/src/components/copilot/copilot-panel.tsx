@@ -398,7 +398,7 @@ function isAssistantLingering(state: AssistantState): boolean {
   return state.status === 'lingering'
 }
 
-// 两个 hands-off 相位各自的进行态文案。它们不是"功能不可用",而是"正在发生的事还没有
+// 两个 hands-off 阶段各自的进行态文案。它们不是"功能不可用",而是"正在发生的事还没有
 // 结论",所以头部渲染的是一个**带 spinner 的进行态控件**,而不是一个外观与不可用无异的
 // 禁用按钮——后者会被读成"坏了",于是被反复点击(FRONTEND_UI_SPEC §2「进行态 vs 不可用」)。
 //

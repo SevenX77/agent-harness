@@ -66,7 +66,7 @@ Studio Copilot 的编排底座走 **ah（Agent Hypervisor）为主、Claude Agen
 **当前 Studio 基线:ah ≥ 1.3.4。** 1.2.0 已验证支持 editable rules / skills 注入,但 1.3.0 新增
 `[master].window_size = "follow"`:默认仍是 `fixed`,Studio 若不显式写 `follow`,attach 进去的 MoirAI
 终端窗口不会自动跟随当前终端大小。1.3.2 提供 daemon env passthrough;1.3.4 新增
-冷启动 `starting` 相位与 provider 层 worker `IS_SANDBOX=1` 注入,替代 Studio 临时 `[env]` 注入。
+冷启动 `starting` 阶段与 provider 层 worker `IS_SANDBOX=1` 注入,替代 Studio 临时 `[env]` 注入。
 Studio launcher 必须在启动前检查 `ah --version`;低于 1.3.4 时直接提示升级,不允许继续用旧 ah 静默启动。
 
 历史踩坑:本机原装 `ah` 是 0.9.0(2026-06-22 的 debug build),它根本没有实现 `bundle` 与
@@ -184,21 +184,21 @@ Studio 入口必须把 provider 的交互确认前置消掉,不能让每次打�
 
 - `ah start` 后 daemon/master/agent 都是长生命周期后台进程;用户 detach 或关闭 terminal tab 不等于销毁。
 - Studio 显式管理入口是 `Open in CLI` 位置:没有活跃 ahd 时显示 Claude code/Codex 打开菜单。活跃判定读 Studio 订阅
-  `ah events --format json` 得到的 runtime snapshot 里的**结构化 `runtime_state` 相位**(见下方相位语义),不再
+  `ah events --format json` 得到的 runtime snapshot 里的**结构化 `runtime_state` 阶段**(见下方阶段语义),不再
   靠 `ahd_has_inventory`/`master_tmux_alive` 双布尔同时成立来猜 stale;ahd 活但 `active=false` 是合法的可 Open
-  态,不当错误。需要清理的相位(如 `degraded`)下,Studio 必须先按 workspace 清理所有 Studio-managed ah
+  态,不当错误。需要清理的阶段(如 `degraded`)下,Studio 必须先按 workspace 清理所有 Studio-managed ah
   config,再允许重新打开。
   **诊断结论(2026-07-06)——事件快照只投影状态,绝不触发清理**:`ah start` 冷启动窗口(session 已
   ACTIVE、master tmux 还要 ~15s 才活)在快照布尔上与 stale 完全同形(`ahd_has_inventory=true,
-  master_tmux_alive=false`),而当时 Studio 读到的 ah 快照还没有相位字段、只能靠这两个布尔猜——这正是根因。
+  master_tmux_alive=false`),而当时 Studio 读到的 ah 快照还没有阶段字段、只能靠这两个布尔猜——这正是根因。
   若在事件流处理里做"stale 即自动 cleanup",Studio 会 `ah stop` 掉自己正在启动的 runtime,终端里阻塞在
   `spawn_master_pane` RPC 上的 `ah start` 被断连,报 `invalid JSON response from daemon: EOF`(exit 3)。
   因此 stale 判定 + 清理**只允许发生在用户动作时机**:Open 前的 prepare 决策、Attach 的 CleanupStale
   分支、Close、app quit;事件快照 handler 只更新状态缓存并 emit 给前端,前向绝不接清理(否则下面的 `starting` 冷启动窗口会被
   passive handler 误清)。
-  **相位语义(ah 1.3.4 起,现为 Studio 基线)**:`runtime_state` 是**四值相位** `active` / `inactive` /
+  **阶段语义(ah 1.3.4 起,现为 Studio 基线)**:`runtime_state` 是**四值阶段** `active` / `inactive` /
   `starting` / `degraded`(权威数据模型见 `.kiro/specs/studio-ah-state-contract-v1/design.md`),不是布尔——
-  上面那个冷启动窗口现在由 `starting` 正式表达,与 stale 从「同形」拆成两个可判别的相位:
+  上面那个冷启动窗口现在由 `starting` 正式表达,与 stale 从「同形」拆成两个可判别的阶段:
     - `starting`:**hands-off**——不清理、不重复启动、UI 显示 starting 不报错。它根除了 2026-07-06
       自杀式 cleanup 的根因(冷启动不再被误判为 stale)。
     - `degraded`:ahd 活但编队掉线(如 master tmux 死、session 仍 ACTIVE)。**必须暴露可用的
@@ -629,7 +629,7 @@ frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled 
   下写入 `window_size = "follow"`;master 与三女神的 `skills` 一律由 `agent-skill-map.json`
   运行时派生(与 SDK 路 AgentDefinition.skills 同源,R5.5/R7.3),开场自报仍由 `moirai-intro`
   skill 而不是硬编码 prompt 承载;
-- launcher 在 `ah start` 前拒绝 `ah < 1.3.4`,避免缺失 starting 相位或 worker sandbox env;
+- launcher 在 `ah start` 前拒绝 `ah < 1.3.4`,避免缺失 starting 阶段或 worker sandbox env;
 - launcher 记录启动 ah 前的宿主 HOME;Claude master cmd 设置 `SYSTEMD_LOG_LEVEL=err` 并补沙盒
   `$HOME/.local/bin/claude` symlink;Codex master cmd 补 `$HOME/.local/bin/codex` symlink,并把
   Windows 源头登录复制到 WSL 后再链接进 ah sandbox 的 `$HOME/.codex/auth.json`,同时写入 sandbox
@@ -642,7 +642,7 @@ frontmatter `related` + 正文 `[[KB-xx]]` 网状互链;每篇标注 `Distilled 
 - Windows launcher 里仍先 `cd "$WS"` 再 `ah --config "$CFG" start --wait`;
 - Attach launcher 使用稳定标题 `Studio <assistant> master - <workspace> - <hash>`;Open 初次启动永远跑
   launcher,Attach 则先按该标题激活已有窗口,只在找不到窗口时新开终端;
-- 状态检测与生命周期决策以 `ah events --format json` 为**主决策面**、`ah status --json` 为 bootstrap/fallback 读,按 `sequence` 仲裁;绝不解析 `ah ps` 文本、绝不探测 tmux 存活来做常规决策。活跃/相位判定读结构化 `runtime_state`(`active`/`inactive`/`starting`/`degraded`),不再用 `ahd_has_inventory`/`master_tmux_alive` 双布尔同时成立去猜 stale。每帧快照先按请求 config 做身份校验(权威判据 `state_dir` + 会话身份 `session_id`/`path`/`project_id`,`config_path` 仅诊断),不匹配即丢弃;
+- 状态检测与生命周期决策以 `ah events --format json` 为**主决策面**、`ah status --json` 为 bootstrap/fallback 读,按 `sequence` 仲裁;绝不解析 `ah ps` 文本、绝不探测 tmux 存活来做常规决策。活跃/阶段判定读结构化 `runtime_state`(`active`/`inactive`/`starting`/`degraded`),不再用 `ahd_has_inventory`/`master_tmux_alive` 双布尔同时成立去猜 stale。每帧快照先按请求 config 做身份校验(权威判据 `state_dir` + 会话身份 `session_id`/`path`/`project_id`,`config_path` 仅诊断),不匹配即丢弃;
 - 事件快照 handler **只更新状态缓存 + emit,前向不接任何 cleanup**;冷启动窗口与 stale 在快照布尔上
   同形,事件驱动的自动清理会杀掉正在启动的 runtime(2026-07-06 事故,详见 §4 生命周期规则的诊断结论);
   stale 清理只在 Open 前 prepare 决策、Attach CleanupStale、Close、app quit 这四个用户动作时机执行;

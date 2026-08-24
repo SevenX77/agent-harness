@@ -253,7 +253,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
     (由 `components/nodes/buildEdges.ts` 铸出),所以**没有任何运行事件会指向它**,
     trace 行在这条边上天然为空,静态推断也解释不了「已经跑完了」。这颗 dot 该显示的是
     **这次 run 交出去的那份东西**,它的唯一发布方是 run 自己在结束时报的那一次:
-    `run_ended.final_context.phase_outputs[<带 output 标记的相位>]`。实测 run
+    `run_ended.final_context.phase_outputs[<带 output 标记的阶段>]`。实测 run
     `2026-08-20T13-14-59_14582c6b`:`phase_outputs.global_synthesis` 恰好是
     `{story_framework: …}`,与该 skill `GRAPH.md` 的 `io.outputs.required: [story_framework]`
     逐字对应——**声明的产出与实际产出是同一份数据**,不需要第二个来源。
@@ -261,11 +261,11 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
     - **不新增引擎事件**。那份值 run 结束时已经报过一次;再发一条携带同样值的事件,
       就是同一个事实有两个发布方(与可观测性设计源的 OB11/OB12 同一条纪律)。
     - **判别用伪节点 id 本身,不用「是不是输出边界」**。skill 可以声明一个真名叫
-      `output` 的相位,那是**真节点、有真迁移、有真 `input_dispatch`**;只有画布伪节点
+      `output` 的阶段,那是**真节点、有真迁移、有真 `input_dispatch`**;只有画布伪节点
       `__global_output__` 是没有事件的那一个。
     - **终止边不提供 tamper / resume**。边界之后没有下游,续跑请求的 `resumeFromNodeId`
       会是引擎不认识的 id;面板在这条边上给出**只读的产出值**(`Run output` 段,并标明
-      是哪个相位产出的,长文本走同一个 text-well 原语),不给一个按下去必然报错的操作。
+      是哪个阶段产出的,长文本走同一个 text-well 原语),不给一个按下去必然报错的操作。
 - 决策: dot 仍是节点间状态机转换点(2026-07-02 语义不变),但**运行期"真实快照/操作记录"
   的呈现载体从独立的 EdgeContextView 面板改组为 trace 行本身**(D5:"边点显示 phase 间
   步骤,与节点步骤同样式")。理由:边操作本来就是事件流里的事件,再养一个平行面板等于同一
@@ -277,7 +277,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
   Input 边界边接受 null `from_phase`);`EdgeTamperSection.test.tsx`(静态推断体 / tamper
   编辑器 / 无记录时的诚实空态 / **Output 边界只读产出体且不出现 Tamper 与 Resume**);
   `edge-context.test.ts`(**终止边读 `run_ended` 的 `phase_outputs`;run 未结束时留给静态推断;
-  真名叫 `output` 的相位仍走 `input_dispatch`**);`TracePanel.test.tsx`(边范围时 tamper 区
+  真名叫 `output` 的阶段仍走 `input_dispatch`**);`TracePanel.test.tsx`(边范围时 tamper 区
   出现在范围 chip 下)。
 - Status: live(2026-08-14:EdgeContextView 删除,EdgeTamperSection + edge 范围接管;
   静态推断 lib/edge-static-inference.ts 不变;2026-08-20:终止边接 `run_ended` 产出值)。
@@ -287,9 +287,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 
 - 机制: 展开一条 LLM 步骤,**没有第二个入口**(没有 "Inspect prompt" 链接、没有独立弹窗),
   就地按**执行顺序**看到这几格——每格的标题是引擎**做的那个动作**,不是它**存的那类数据**:
-  1. **`Loaded — <相位文档路径>`**:作者写的那份相位文档。这一格给的是一个**能打开真文件的
+  1. **`Loaded — <阶段文档路径>`**:作者写的那份阶段文档。这一格给的是一个**能打开真文件的
      链接**(「Open this phase」,走工作区既有的 `onFileOpen` 通路),不是文档正文的副本。
-     数据源 `prompt_captured.phase_source_path`(工作区相对路径);相位不来自文件时整格不出现。
+     数据源 `prompt_captured.phase_source_path`(工作区相对路径);阶段不来自文件时整格不出现。
   2. **`Wrapped — <模板 id>`**:引擎把作者那份文档裹进去的**认知模板全文**。
      数据源 `prompt_captured.template_source`(id,如 `cognitive/v0.3.0`)+ `template_text`(正文)。
   3. **`Filled in`**:代入的变量(`variables`),为空则整格不出现。
@@ -303,7 +303,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
   - **标题写动作,不写数据类别。** 这是 2026-08-13 D1「废除 TEMPLATE / VARIABLES 特殊容器」
     那条裁决的正读法:被废除的是**按种类归堆、与时间无关**的容器,不是"模板正文不许出现"。
     所以本条把每一格都命名成引擎当时做的那一下(装载 / 套模板 / 代入 / 发出),顺序即执行顺序。
-  - **作者的文档走路径,引擎的模板走正文——因为二者的"真相在哪"不同。** 相位文档是工作区里
+  - **作者的文档走路径,引擎的模板走正文——因为二者的"真相在哪"不同。** 阶段文档是工作区里
     的一个**文件**,读者可以打开、可以改;把它的副本抄进 trace,读者改完文件后 trace 里那份
     立刻变成一份没人维护的旧影子(违反「文档事实唯一所有权」)。引擎模板则**盘上没有文件**——
     `V030_COGNITIVE_TEMPLATE_ID` 是常量 id,正文过去只以 f-string 形式存在于
@@ -456,17 +456,17 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ### F11. resume 是一道可见的接缝
 
 - 机制: `resumed` 事件**不按步骤渲染**,而是渲染成一条横跨列表的接缝行
-  (`data-trace-resume-seam=<相位>`):左右各一条细线,中间一枚 chip 写清三件事——
-  这是一次 resume、从哪个相位接上、人回答了什么(附时间)。
+  (`data-trace-resume-seam=<阶段>`):左右各一条细线,中间一枚 chip 写清三件事——
+  这是一次 resume、从哪个阶段接上、人回答了什么(附时间)。
 - 决策:
   - **它不是步骤,因为它里面没有执行。** 与列表另一端的结局行同理(结局行也明确「不是步骤」),
-    接缝不展开、不参与相位分组的缩进。此前它按普通步骤渲染,于是一路掉进 `GenericPayload`
+    接缝不展开、不参与阶段分组的缩进。此前它按普通步骤渲染,于是一路掉进 `GenericPayload`
     的原始 JSON 兜底,唯一还看得出"这里断过"的线索只剩时间戳的跳变。
   - **它要修的误读是「串台」。** 同一个 run 被 resume 后复用同一个 `run_id`,于是两簇相隔很远的
     时间戳同屏出现,读起来像两次运行的事件混进了一条 trace。流层面已被证明是干净的
     (`useRunStream` 渲染期同步重置 + 每次写入都要报出 subject),缺的是**把断点画出来**。
 - 原话/来源: PM 2026-08-09 与 2026-08-19 截图(跨 run 事件串台);台账 T12 复核结论。
-- 测试: `TraceEventList.test.tsx`(接缝行出现 / 写明相位与人的回答 / 不回落原始 payload)。
+- 测试: `TraceEventList.test.tsx`(接缝行出现 / 写明阶段与人的回答 / 不回落原始 payload)。
 - Status: target-design(2026-08-20 立)。
 - 归属: capability `trace-observability`; region `timeline`.
 

@@ -1,7 +1,7 @@
 """parse_md 说得出它没读懂哪几行。
 
 缺陷实测(2026-08-16,`story-deconstruction-v3-lab` 用 DeepSeek V4 Flash 真跑
-`segmentation` 相位,run 09f67b86-eb65-4c97-ba60-deb05e58ce22):模型把
+`segmentation` 阶段,run 09f67b86-eb65-4c97-ba60-deb05e58ce22):模型把
 `list[dict]` 字段写成嵌套 bullet ——
 
     - parsed_segments:
@@ -11,7 +11,7 @@
 
 `parse_md` 把其中一半的行 `logger.warning(... skipping ...)` 掉,返回一个
 看起来正常的 `ParsedBlock`,`parsed_segments` 只剩 `['index: 1']`。日志进不了
-模型的上下文,所以模型收到的下一条反馈是相位校验器的
+模型的上下文,所以模型收到的下一条反馈是阶段校验器的
 "No segments produced. Re-analyze the chapter text." —— 一条指向不存在问题的
 建议,模型照着它重新分析、重新写同样的格式,烧完预算然后死掉。
 

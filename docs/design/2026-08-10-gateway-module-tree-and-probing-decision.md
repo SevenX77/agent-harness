@@ -129,7 +129,7 @@ B7 那个不发请求就写证据的分支删除。
 (`llm.py::_measure_whether_these_routes_call_tools`)。
 
 - **为什么归到角色 Test 而不是另造一颗按钮**:一条路由能不能跑 agent,恰恰是**角色**这个层面
-  要回答的问题——这个角色服务的每一个 agent 相位都会 `bind_tools` 再读回一次 tool call。
+  要回答的问题——这个角色服务的每一个 agent 阶段都会 `bind_tools` 再读回一次 tool call。
 - **代价这一关是怎么过的**:T3 是梯子最深的一级(两次真实请求,对比 T1 的一次 GET),所以立的
   规矩是**它只能搭在「路由集合由用户自己挑定」的路径上**。角色的 fallback chain 正是这样一个
   集合;而 bulk「test models」那条路的集合是某个端点碰巧列出多少个模型,不是任何人挑的——所以

@@ -42,7 +42,7 @@ describe('graphEditProblemMessage', () => {
     expect(graphEditProblemMessage(problem)).toBe('A phase cannot depend on itself.')
 
     await i18n.changeLanguage('zh-CN')
-    expect(graphEditProblemMessage(problem)).toBe('一个相位不能依赖它自己。')
+    expect(graphEditProblemMessage(problem)).toBe('一个阶段不能依赖它自己。')
   })
 
   it('puts the offending phase name into the sentence in both languages', async () => {
@@ -52,7 +52,7 @@ describe('graphEditProblemMessage', () => {
     expect(graphEditProblemMessage(problem)).toBe('A phase named draft already exists.')
 
     await i18n.changeLanguage('zh-CN')
-    expect(graphEditProblemMessage(problem)).toBe('已经有一个叫 draft 的相位了。')
+    expect(graphEditProblemMessage(problem)).toBe('已经有一个叫 draft 的阶段了。')
   })
 
   it('has copy for every code the validators can produce, in every language', async () => {

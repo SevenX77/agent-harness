@@ -341,19 +341,6 @@ class RolesData(BaseModel):
         )
 
 
-class ProbeCatalogSharingSummary(BaseModel):
-    """MVP1 probe catalog sharing mode exposed to Studio UI."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Literal["local_export_only"] = "local_export_only"
-    auto_upload_enabled: bool = False
-    message: str = (
-        "Local probe evidence is recorded on this machine. "
-        "MVP1 does not auto-upload community catalog evidence."
-    )
-
-
 class CommunityCatalogEntry(BaseModel):
     """One advisory community-verified route surfaced to the Settings UI.
 
@@ -397,7 +384,12 @@ class ProbeCatalogSummary(BaseModel):
     local_route_candidates_count: int = 0
     remote_catalog_source: dict[str, Any] | None = None
     community_catalog: CommunityCatalogSummary = Field(default_factory=CommunityCatalogSummary)
-    sharing: ProbeCatalogSharingSummary = Field(default_factory=ProbeCatalogSharingSummary)
+    # No `sharing` projection here: the community-sharing state has exactly one
+    # truth (`AppSettings.community_sharing_choice`), fetched via GET /api/settings
+    # and already held by the Settings page. A second copy of the same fact
+    # projected into this response would be a parallel truth that could drift
+    # from the settings toggle (the exact defect this model used to hardcode —
+    # see docs/studio/mvp1/01_workflows/00_settings.md §5).
 
 
 class RegistryResponse(BaseModel):
@@ -436,7 +428,6 @@ __all__ = [
     "ModelInfo",
     "ModelBundle",
     "ModelProfile",
-    "ProbeCatalogSharingSummary",
     "ProbeCatalogSummary",
     "ProbeResult",
     "ProviderEndpoint",

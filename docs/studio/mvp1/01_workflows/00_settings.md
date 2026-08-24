@@ -8,7 +8,7 @@
 
 01–06 是"做一个 skill"的主旅程,但它们集体悬在一个隐含前提上:**LLM 得能跑**。Predict 要把抽象角色解析成真实 route 才能试飞,Run 要真实消耗 provider,Publish 要知道 Gitea 主机与产物落盘路径,Copilot 要有自己的模型与密钥。这些"跑起来的前提"既不属于画布、也不属于编辑器,而是一处独立的配置面 —— 这就是 00_settings。
 
-它承载 PM 的五条配置旅程:**Provider 凭证(API Keys)/ 抽象角色到模型的映射(LLM Roles)/ 助手配置(Copilot)/ 身份与产物路径(General)/ 媒体生成(Media Generation)**。第五条的设计单独立在 [`02_capabilities/media-generation/design-decision.md`](../02_capabilities/media-generation/design-decision.md)(2026-08-13 立项),本节点只登记它是 Settings 的一页,细则不在此重述。这个节点的产物不是某个 skill,而是让其余所有节点"能调模型、能上线"的运行底座。因此它在逻辑上先于 01–06 的任何 LLM 动作,是被 predict / run / publish / copilot 硬依赖的前置节点。
+它承载 PM 的五条常驻配置旅程:**Provider 凭证(API Keys)/ 抽象角色到模型的映射(LLM Roles)/ 助手配置(Copilot)/ 身份与产物路径(General)/ 媒体生成(Media Generation)**。第五条的设计单独立在 [`02_capabilities/media-generation/design-decision.md`](../02_capabilities/media-generation/design-decision.md)(2026-08-13 立项),本节点只登记它是 Settings 的一页,细则不在此重述。这五条之外还有一条**一次性的前置征询**——首次打开 Studio 时的社区共享征询对话框(§3.0),它只在从未回答过时出现一次,答案由 General 页(§3.1)里的常驻开关承接后续变更。这个节点的产物不是某个 skill,而是让其余所有节点"能调模型、能上线"的运行底座。因此它在逻辑上先于 01–06 的任何 LLM 动作,是被 predict / run / publish / copilot 硬依赖的前置节点。
 
 ## 2. 核心范式
 
@@ -24,12 +24,28 @@ Settings 看起来是"前端表单",但它的真相全在后端:一个 provider 
 ### 2.4 数据层永不 Rust 化
 横切铁律 D12 是"本地写全量走 Rust",但它管的是 **skill 源文件**(GRAPH.md / SKILL.md / `.workspace`)。Settings 的凭证与角色数据(`~/.studio/` 下的 credentials / roles)是 **gateway 拥有的服务端数据,永不 Rust 化** —— 读写一律走 gateway Python(经 storage seam 抽象、预留 `user_id`,为未来远端服务化对齐形状)。本节点唯一的本地 OS 操作,是"选默认 skills 目录"的文件夹选择器(native / Rust)。
 
-## 3. 五条配置旅程
+## 3. 首次征询与五条配置旅程
 
 > 📋 **每步操作 / 反馈 / 动机的细粒度 UX 规格**（含 draft 赋能写回、model/endpoint 标签表现、测试落点：endpoint 验证在 API key 页、model 保证在 role 页）见 [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)（PM 2026-06-02 口述，权威）。
 
+### 3.0 首次征询 — 社区共享(前置一次性 gate)
+
+Studio 每验证一次 provider,就沉淀一条"哪个公开服务的哪个模型答得通、支持哪些能力"的探测证据。这份证据可以和社区互换:分享出去就能换回别人已经验通的参数,免去自己逐个探测。是否参与这次交换,交给用户在**首次打开 Studio**、进入首屏(Welcome/Home,尚未选中任何 skill,`apps/studio/frontend/src/components/welcome/WelcomePage.tsx`)时回答一次;答完之后 General 页(§3.1)里的常驻开关承接后续变更,对话框不会再弹出。
+
+**真相字段是三态,不是布尔**:`AppSettings.community_sharing_choice ∈ {"unset", "shared", "declined"}`(后端 `apps/studio/backend/app/models/settings.py`;前端镜像同名 `CommunitySharingChoice`,`apps/studio/frontend/src/api/types.ts`)。旧字段是布尔 `remote_model_catalog_enabled`,表达不出"从没问过"与"问过而用户主动拒绝"这两种状态的区别——而首屏要不要弹窗、上传要不要放行,恰恰只取决于这一区分。这是"让非法状态不可表示"原则(仓规 Coding Standards)在这个字段上的直接应用:三态把"未决"设成第三个显式值,而不是让调用方拿一个布尔的默认值去猜测"没改过"到底是"同意"还是"还没问"。
+
+**门控规则(同一条规则,统一适用于自动回传与手动读取)**:
+- **回传(contribute,含探测后自动回传)要求 `"shared"`**——`"unset"`(没问过)与 `"declined"`(问过拒绝)一律不许上传。默认上传等于替用户做了同意声明,这正是 2026-08-23 坐实的缺陷:旧字段 `remote_model_catalog_enabled` 默认 `True` 且从未征询用户,运行时活动日志里已有 101 条 `autoshare_uploaded` 记录为证。唯一实现在 `apps/studio/backend/app/routers/llm.py` 的 `_autoshare_after_probe_best_effort`。
+- **读取(read)只在 `"declined"` 时停**——`"unset"` 仍允许读取。理由:读取不带走这台机器上的任何东西,而"能直接用上社区已验通的参数"正是对话框承诺的好处,首屏就把它关掉只会让第一次体验更差,却换不来任何隐私收益。唯一实现在 `apps/studio/backend/app/services/community_catalog_runtime.py` 的 `sync_verified_community_catalog_into_credentials`(应用面覆盖启动期自动同步与 `POST /api/llm/catalog/sync-verified` 手动同步——两处调用点共用同一个函数,门控只需改一处)。
+
+**对话框交互**:复用 `@/components/ui/dialog`(本仓 shadcn 封装,组件 `apps/studio/frontend/src/components/welcome/CommunitySharingConsentDialog.tsx`)。两个按钮——"开启共享"写 `"shared"`,"暂不开启"写 `"declined"`——都是合法的最终答案,因此**没有第三种关闭方式**:不给右上角 X(`showCloseButton={false}`)、不允许点遮罩或按 Escape 关闭。写法沿用本仓已有的必答弹窗惯例(`ConflictDialog`):`<Dialog open={...}>` 不传 `onOpenChange`,Radix Dialog 在这种受控模式下内部的 Escape/outside-dismiss 处理器没有回调可调,因此不生效。答完之后 `community_sharing_choice` 离开 `"unset"`,对话框的开启条件(`choice === "unset" && !isLoading`)恒为假,永不再弹;`isLoading` 那一半防止设置仍在加载时,乐观的默认快照(也读作 `"unset"`)让对话框对一个早已回答过的用户一闪而现。
+
+**界面陈述必须与实际行为一致**:API Keys 页曾经用 `ProbeCatalogSharingSummary`(旧 `apps/studio/backend/app/models/llm_config.py`)硬编码"Local only"徽章与"MVP1 does not auto-upload"文案——`mode`/`auto_upload_enabled`/`message` 都是常量默认值,router 里没有任何覆盖点会去改写它们,却与同一进程里 `_autoshare_after_probe_best_effort` 的真实上传行为直接矛盾。修复时这个模型被整体删除而不是修补(仓规"不留一份并行真值"):唯一真相收敛回 `community_sharing_choice`,前端 API Keys 页与 General 页的开关对同一个状态给出一致陈述,后端不再维护第二份需要手动保持同步的投影。
+
 ### 3.1 General — 身份与产物路径
 最朴素的一条:User ID、Gitea 主机、**默认 skills 目录**。前两者是身份 / 可选远端坐标(**注意:publish 走 Artifact Registry zip 上传、非 git push**,见 [`06_eval`](./06_eval.md);Gitea 主机不是 publish 机制),后者决定 Home"新建 skill"时的默认落点。交互是即填即存(debounce auto-save,无 Save 按钮);"选目录"唤起 OS 文件夹选择器,"重置"回落到计算出的默认值。
+
+除了这三个字段,General 页还持有**社区共享开关**:读写同一个 `community_sharing_choice`,开=写入 `"shared"`、关=写入 `"declined"`——它**永远不会**把值改回 `"unset"`(那个值只有"从未回答过首次征询"这一个含义,一个已经回答过的用户不能靠拨动这个开关"退回未回答"这个假状态)。它是 §3.0 首次征询对话框答案的常驻承接点,门控规则、三态理由的完整说明见 §3.0。
 
 ### 3.2 API Keys — Provider 凭证
 配 provider 让模型能连通,分两区:**official**(固定 5 厂商 anthropic/openai/gemini/deepseek/ark,只填 key)与 **third-party**(用户自增:填 URL + key,protocol 系统自动探)。
@@ -95,6 +111,7 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 - **测试失败**:返回结构化原因码(invalid_key / rate_limited / quota_exceeded / network_error / timeout / missing_key),UI 据此给可读诊断 + 对应 state,而非笼统报错;临时类失败走 cooling_down 等待重试。
 - **密钥泄漏防护**:redact + secret 端点 + 前端不 log / 不 toast / 不持久化明文。
 - **Copilot session 持久化失败(D8 MUST 配套)**:copilot 对话与 session 必须落盘且重进恢复一模一样;**写盘 / 读回失败必须显式告警,绝不静默吞** —— 静默吞 = 对话丢失,违"零容忍静默失败"铁律。此失败退路是 D8 的配套待建动作。
+- **首次征询对话框的答案保存失败(§3.0)**:两个按钮点击后走的是与 General 页开关相同的 `useAppSettings` debounced autosave 路径,PUT 失败时沿用该路径既有的 `toast.error` 提示。刻意**不**在本地乐观地假装"已经问过"——对话框是否再次出现只看服务端持久化的 `community_sharing_choice`,如果这次保存最终没有落盘,该字段仍读作 `"unset"`,下次打开 Studio 会再弹一次,而不是悄悄记成"已答复"。宁可多问一次,也不在没拿到真实、已落盘的同意时假装拿到了。
 
 ## 6. 平台依赖与下游流转
 

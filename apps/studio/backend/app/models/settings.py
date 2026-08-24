@@ -10,6 +10,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # `supportedLngs` in apps/studio/frontend/src/i18n.ts; keep the two in sync.
 SupportedLanguage = Literal["en", "zh-CN"]
 
+# Whether this Studio install has answered the first-run community-sharing
+# consent dialog. A plain bool cannot tell "never asked" apart from "asked and
+# the user said no" — and the dialog's whole job is to fire exactly once, which
+# needs that distinction (an illegal/ambiguous state must not be representable).
+# "unset" = never asked (dialog still owed; reads are allowed so a fresh
+# install can still benefit from community-verified evidence, but nothing is
+# uploaded — consent is opt-in, not opt-out). "shared" = the user opted in
+# (gates both read and contribute). "declined" = the user opted out (gates
+# both off). Mirrors the frontend `CommunitySharingChoice` in
+# apps/studio/frontend/src/api/types.ts; keep the two in sync.
+CommunitySharingChoice = Literal["unset", "shared", "declined"]
+
 
 class CliSessionProviderSettings(BaseModel):
     """一个 CLI provider 的会话默认(空串 = 跟随 CLI 自身默认,不注入旗标)。"""
@@ -55,9 +67,18 @@ class AppSettings(BaseModel):
         default="en",
         description="Studio UI language, applied via react-i18next on the frontend.",
     )
-    remote_model_catalog_enabled: bool = Field(
-        default=True,
-        description="Whether Studio automatically reads the remote model catalog.",
+    community_sharing_choice: CommunitySharingChoice = Field(
+        default="unset",
+        description=(
+            "Answer to the first-run community-sharing consent dialog. Gates the "
+            "community model-catalog feature: 'shared' is required to contribute "
+            "probe-verified evidence (never upload before the user has actively "
+            "opted in); 'declined' additionally stops reading the community "
+            "catalog (the user asked for both to stop). 'unset' still allows "
+            "reading — the dialog has not fired yet, and refusing the read side "
+            "too would make the first real session worse for no consent reason, "
+            "since reading takes nothing from this machine."
+        ),
     )
     cli_sessions: CliSessionSettings = Field(
         default_factory=CliSessionSettings,

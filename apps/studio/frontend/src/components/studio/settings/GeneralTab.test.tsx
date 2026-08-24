@@ -31,14 +31,14 @@ function makeAppSettings(overrides: Partial<AppSettingsProp> = {}): AppSettingsP
     giteaHost: "https://gitea.example.com",
     defaultSkillsDirectory: "/Users/alice/AgentStudio/Skills",
     language: "en",
-    remoteModelCatalogEnabled: true,
+    communitySharingChoice: "shared",
     isLoading: false,
     saveStatus: "saved",
     setUserId: vi.fn(),
     setGiteaHost: vi.fn(),
     setDefaultSkillsDirectory: vi.fn(),
     setLanguage: vi.fn(),
-    setRemoteModelCatalogEnabled: vi.fn(),
+    setCommunitySharingChoice: vi.fn(),
     cliSessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     setCliSessions: vi.fn(),
     ...overrides,
@@ -137,13 +137,21 @@ describe("GeneralTab render contract", () => {
   })
 
   it("renders the remote model catalog switch using the local shadcn switch primitive", () => {
-    const html = renderTab({ remoteModelCatalogEnabled: true })
+    const html = renderTab({ communitySharingChoice: "shared" })
     expect(html).toContain("Community model catalog")
     expect(html).toContain(
       "Download the verified community catalog for local route evidence and allow sanitized successful probe evidence to be contributed back. Turn off to stop both read and contribute paths.",
     )
     expect(html).toContain('data-slot="switch"')
     expect(html).toContain('aria-label="Community model catalog"')
+  })
+
+  it("checks the switch only when the choice is \"shared\", including for the never-asked default", () => {
+    expect(renderTab({ communitySharingChoice: "shared" })).toContain('data-state="checked"')
+    expect(renderTab({ communitySharingChoice: "declined" })).toContain('data-state="unchecked"')
+    // "unset" (the consent dialog has not fired yet) must render as OFF, never as
+    // an implicit "on" — a bool could not have distinguished this from "declined".
+    expect(renderTab({ communitySharingChoice: "unset" })).toContain('data-state="unchecked"')
   })
 
   it("renders grouped runtime truth sources with paths and recent logs", () => {

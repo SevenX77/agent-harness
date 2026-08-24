@@ -1,4 +1,11 @@
-"""Phase 2a R4: verified-sync endpoint is dormant unless manifest+key configured."""
+"""Phase 2a R4: verified-sync endpoint is dormant unless manifest+key configured.
+
+Also gated on ``AppSettings.community_sharing_choice`` (the first-run
+community-sharing consent dialog's answer): reading is allowed unless the user
+explicitly declined — "unset" (dialog never fired yet) must still read, since
+the read side takes nothing from this machine and the dialog's whole benefit
+pitch is "you get to use what others already verified".
+"""
 
 from __future__ import annotations
 
@@ -16,12 +23,17 @@ def test_verified_sync_endpoint_dormant_by_default(client: TestClient) -> None:
     assert body["verified_sync_enabled"] is False
 
 
-def test_verified_sync_endpoint_runs_when_configured(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _configure_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_MANIFEST_URL", "https://cdn.example.org/catalog/manifest.json")
     monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY", "ab" * 32)
     clear_backend_caches()
+
+
+def test_verified_sync_endpoint_runs_when_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default settings (``community_sharing_choice`` = "unset") still let the read run."""
+    _configure_manifest(monkeypatch)
 
     async def fake_sync(**_kwargs: object) -> SyncOutcome:
         return SyncOutcome(status="updated", record_count=3, manifest_etag='"v2"', protocol_major=1)
@@ -33,6 +45,33 @@ def test_verified_sync_endpoint_runs_when_configured(
     assert body["status"] == "success"
     assert body["sync_status"] == "updated"
     assert body["record_count"] == 3
+
+
+def test_verified_sync_endpoint_stops_when_user_declined(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit "declined" answer stops the read too, even with a valid manifest/key."""
+    _configure_manifest(monkeypatch)
+    settings_response = client.get("/api/settings")
+    assert settings_response.status_code == 200
+    settings_payload = settings_response.json()
+    settings_payload["community_sharing_choice"] = "declined"
+    assert client.put("/api/settings", json=settings_payload).status_code == 200
+
+    called = False
+
+    async def tripwire_sync(**_kwargs: object) -> SyncOutcome:
+        nonlocal called
+        called = True
+        return SyncOutcome(status="updated", record_count=3, manifest_etag='"v2"', protocol_major=1)
+
+    monkeypatch.setattr(
+        "app.services.community_catalog_runtime.sync_verified_catalog", tripwire_sync
+    )
+    body = client.post("/api/llm/catalog/sync-verified").json()
+    assert body["status"] == "disabled"
+    assert body["verified_sync_enabled"] is False
+    assert called is False  # declined => never even reaches the network fetch
 
 
 def test_verified_sync_merges_matching_evidence_into_credentials(

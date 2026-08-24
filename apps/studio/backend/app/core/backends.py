@@ -42,13 +42,16 @@ class BackendConfig(BaseSettings):
     gitea_token: str = ""
     registry_host: str = ""
     registry_token: str = ""
-    # Community Probe Catalog (Phase 2a) — ships ON by default with zero config.
-    # The gate is a CLEAN OPEN API: the client sends only sanitized records and
-    # NO token (all auth/abuse control is server-side). The gate URL, read-path
-    # signing key, and manifest URL are baked in (all public, no secrets), so a
-    # stock Studio reads + contributes out of the box. The single user-facing
-    # catalog toggle (remote_model_catalog_enabled) is the only control; an
-    # operator can still hard-disable the write path via STUDIO_COMMUNITY_UPLOAD_ENABLED.
+    # Community Probe Catalog (Phase 2a) — the gate URL, read-path signing key,
+    # and manifest URL are baked in (all public, no secrets) and the write path
+    # is operator-enabled by default, so a stock Studio CAN reach the gate with
+    # zero config. Whether it actually reads or contributes is still gated by
+    # the per-user ``AppSettings.community_sharing_choice`` (see
+    # docs/studio/mvp1/01_workflows/00_settings.md §5): reading is allowed
+    # unless the user declined, and contributing additionally requires the user
+    # to have actively opted in ("shared") — never the default. An operator can
+    # still hard-disable the write path entirely via
+    # STUDIO_COMMUNITY_UPLOAD_ENABLED, ahead of and regardless of user consent.
     community_upload_enabled: bool = True
     community_gate_url: str = "https://community-catalog-gate.xingqiqi771.workers.dev"
     community_protocol_major: int = 1

@@ -212,12 +212,6 @@ export interface EndpointSecretResponse {
   api_key: string
 }
 
-export interface ProbeCatalogSharingStatus {
-  mode: 'local_export_only'
-  auto_upload_enabled: boolean
-  message: string
-}
-
 /**
  * One advisory community-verified route projected from the disposable verified
  * cache. Community-observed evidence — never the user's own verified route.
@@ -248,7 +242,11 @@ export interface ProbeCatalogSummary {
   local_failed_records_count: number
   local_route_candidates_count: number
   community_catalog: CommunityCatalogSummary
-  sharing: ProbeCatalogSharingStatus
+  // No `sharing` projection here: whether the community catalog is being shared
+  // has exactly one truth, `AppSettings.community_sharing_choice` (see
+  // apps/studio/backend/app/models/llm_config.py `ProbeCatalogSummary` comment) —
+  // consumers render off that field directly instead of a second copy that could
+  // drift from it.
 }
 
 /**

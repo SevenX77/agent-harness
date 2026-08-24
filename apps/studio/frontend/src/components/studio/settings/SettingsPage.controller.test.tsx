@@ -24,7 +24,7 @@ vi.mock("sonner", () => ({
 }))
 
 const mockAppSettings = vi.hoisted(() => ({
-  remoteModelCatalogEnabled: false,
+  communitySharingChoice: "declined" as "unset" | "shared" | "declined",
 }))
 
 vi.mock("@/hooks/useAppSettings", () => ({
@@ -34,7 +34,7 @@ vi.mock("@/hooks/useAppSettings", () => ({
       gitea_host: "",
       default_skills_directory: "",
       language: "en",
-      remote_model_catalog_enabled: mockAppSettings.remoteModelCatalogEnabled,
+      community_sharing_choice: mockAppSettings.communitySharingChoice,
     },
     isLoading: false,
     saveStatus: "idle",
@@ -42,7 +42,7 @@ vi.mock("@/hooks/useAppSettings", () => ({
     setGiteaHost: vi.fn(),
     setDefaultSkillsDirectory: vi.fn(),
     setLanguage: vi.fn(),
-    setRemoteModelCatalogEnabled: vi.fn(),
+    setCommunitySharingChoice: vi.fn(),
   }),
 }))
 
@@ -157,7 +157,7 @@ describe("useSettingsPageController lifecycle", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockAppSettings.remoteModelCatalogEnabled = false
+    mockAppSettings.communitySharingChoice = "declined"
     mockRolesSave.status = "idle"
     mockEventStream.callbacks = null
     mockEventStream.connectionLost = false
@@ -341,7 +341,7 @@ describe("useSettingsPageController lifecycle", () => {
   })
 
   it("does not sync the remote community catalog just because settings mounted", async () => {
-    mockAppSettings.remoteModelCatalogEnabled = true
+    mockAppSettings.communitySharingChoice = "shared"
 
     await act(async () => {
       root.render(<ControllerProbe />)

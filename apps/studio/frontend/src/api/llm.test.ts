@@ -83,11 +83,6 @@ const probeCatalog = {
     record_count: 5,
     entries: [],
   },
-  sharing: {
-    mode: 'local_export_only' as const,
-    auto_upload_enabled: false,
-    message: 'Local probe evidence is recorded on this machine.',
-  },
 }
 
 function registry(overrides: Partial<RegistryResponse> = {}): RegistryResponse {
@@ -400,11 +395,6 @@ describe('API Keys v4 registry adapter', () => {
             },
           ],
         },
-        sharing: {
-          mode: 'local_export_only',
-          auto_upload_enabled: false,
-          message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
-        },
       },
     }))
 
@@ -429,11 +419,6 @@ describe('API Keys v4 registry adapter', () => {
             observed_at: '2026-06-26T09:33:40+00:00',
           },
         ],
-      },
-      sharing: {
-        mode: 'local_export_only',
-        auto_upload_enabled: false,
-        message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
       },
     })
   })

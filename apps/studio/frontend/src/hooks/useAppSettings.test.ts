@@ -35,7 +35,7 @@ const serverSettings: AppSettings = {
   gitea_host: 'https://gitea.example.com',
   default_skills_directory: '/Users/alice/AgentStudio/Skills',
   language: 'zh-CN',
-  remote_model_catalog_enabled: true,
+  community_sharing_choice: 'shared',
   cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
 }
 
@@ -119,7 +119,7 @@ describe('useAppSettings helpers', () => {
       gitea_host: 'https://git.internal.example',
       default_skills_directory: '/Users/bob/Skills',
       language: 'en',
-      remote_model_catalog_enabled: false,
+      community_sharing_choice: 'declined',
       cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
@@ -136,7 +136,7 @@ describe('useAppSettings helpers', () => {
       gitea_host: 'https://git.internal.example',
       default_skills_directory: '/Users/bob/Skills',
       language: 'en',
-      remote_model_catalog_enabled: true,
+      community_sharing_choice: 'shared',
       cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     vi.mocked(updateAppSettings).mockRejectedValue(new Error('write failed'))
@@ -152,7 +152,7 @@ describe('useAppSettings helpers', () => {
       gitea_host: '',
       default_skills_directory: '/Users/bob/Skills',
       language: 'zh-CN',
-      remote_model_catalog_enabled: true,
+      community_sharing_choice: 'shared',
       cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
@@ -175,7 +175,7 @@ describe('useAppSettings language field', () => {
       gitea_host: '',
       default_skills_directory: '/Skills',
       language: 'en',
-      remote_model_catalog_enabled: true,
+      community_sharing_choice: 'shared',
       cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
     const switched: AppSettings = { ...base, language: 'zh-CN' }
@@ -232,24 +232,24 @@ describe('useAppSettings API readiness', () => {
   })
 })
 
-describe('useAppSettings remote model catalog flag', () => {
-  it('defaults automatic remote model catalog reads to enabled', () => {
-    expect(DEFAULT_APP_SETTINGS.remote_model_catalog_enabled).toBe(true)
+describe('useAppSettings community sharing choice', () => {
+  it('defaults to "unset" — the first-run consent dialog has not fired yet', () => {
+    expect(DEFAULT_APP_SETTINGS.community_sharing_choice).toBe('unset')
   })
 
-  it('treats the remote catalog toggle as a settings change (drives a save)', () => {
+  it('treats the community sharing choice as a settings change (drives a save)', () => {
     const base: AppSettings = {
       user_id: 'alice',
       gitea_host: '',
       default_skills_directory: '/Skills',
       language: 'en',
-      remote_model_catalog_enabled: true,
+      community_sharing_choice: 'shared',
       cli_sessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
     }
-    const disabled: AppSettings = { ...base, remote_model_catalog_enabled: false }
+    const declined: AppSettings = { ...base, community_sharing_choice: 'declined' }
 
     expect(appSettingsEqual(base, base)).toBe(true)
-    expect(appSettingsEqual(base, disabled)).toBe(false)
+    expect(appSettingsEqual(base, declined)).toBe(false)
   })
 })
 

@@ -80,11 +80,6 @@ const probeCatalog: CredentialsState['probe_catalog'] = {
     record_count: 5,
     entries: [],
   },
-  sharing: {
-    mode: 'local_export_only',
-    auto_upload_enabled: false,
-    message: 'Local probe evidence is recorded on this machine.',
-  },
 }
 
 const rolesData: RolesData = {
@@ -151,14 +146,14 @@ function baseViewProps(
       giteaHost: 'https://gitea.example.com',
       defaultSkillsDirectory: '/Users/alice/Skills',
       language: 'en',
-      remoteModelCatalogEnabled: true,
+      communitySharingChoice: 'shared',
       isLoading: false,
       saveStatus: 'idle',
       setUserId: vi.fn(),
       setGiteaHost: vi.fn(),
       setDefaultSkillsDirectory: vi.fn(),
       setLanguage: vi.fn(),
-      setRemoteModelCatalogEnabled: vi.fn(),
+      setCommunitySharingChoice: vi.fn(),
       cliSessions: { claude: { model: '', effort: '' }, codex: { model: '', effort: '' }, agents: {} },
       setCliSessions: vi.fn(),
     },
@@ -1100,32 +1095,32 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders local probe catalog status without implying automatic sharing', () => {
+  it('renders local probe catalog status without implying automatic sharing when the user declined', () => {
+    // ProbeCatalogSummary carries no `sharing` field any more (there is exactly
+    // one truth for that: AppSettings.community_sharing_choice) — the badge and
+    // message below are projected from appSettings, not from probe_catalog.
+    const baseProps = baseViewProps({
+      credentials: {
+        ...credentials,
+        probe_catalog: {
+          local_evidence_records_count: 3,
+          local_verified_records_count: 2,
+          local_failed_records_count: 1,
+          local_route_candidates_count: 0,
+          community_catalog: {
+            synced: true,
+            generated_at: '2026-06-20T23:00:00+00:00',
+            protocol_major: 1,
+            record_count: 0,
+            entries: [],
+          },
+        },
+      },
+    })
     const html = renderToStaticMarkup(
       <SettingsPageContent
-        {...baseViewProps({
-          credentials: {
-            ...credentials,
-            probe_catalog: {
-              local_evidence_records_count: 3,
-              local_verified_records_count: 2,
-              local_failed_records_count: 1,
-              local_route_candidates_count: 0,
-              community_catalog: {
-                synced: true,
-                generated_at: '2026-06-20T23:00:00+00:00',
-                protocol_major: 1,
-                record_count: 0,
-                entries: [],
-              },
-              sharing: {
-                mode: 'local_export_only',
-                auto_upload_enabled: false,
-                message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
-              },
-            },
-          },
-        })}
+        {...baseProps}
+        appSettings={{ ...baseProps.appSettings, communitySharingChoice: 'declined' }}
       />,
     )
 
@@ -1134,8 +1129,38 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('1 failed')
     expect(html).toContain('Remote catalog synced')
     expect(html).toContain('Local only')
-    expect(html).toContain('MVP1 does not auto-upload')
+    expect(html).toContain('Community sharing is off')
     expect(html).not.toContain('Pull Request')
+  })
+
+  it('renders the sharing badge as active once the user opted in', () => {
+    const baseProps = baseViewProps({
+      credentials: {
+        ...credentials,
+        probe_catalog: {
+          local_evidence_records_count: 3,
+          local_verified_records_count: 2,
+          local_failed_records_count: 1,
+          local_route_candidates_count: 0,
+          community_catalog: {
+            synced: true,
+            generated_at: '2026-06-20T23:00:00+00:00',
+            protocol_major: 1,
+            record_count: 0,
+            entries: [],
+          },
+        },
+      },
+    })
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseProps}
+        appSettings={{ ...baseProps.appSettings, communitySharingChoice: 'shared' }}
+      />,
+    )
+
+    expect(html).toContain('Sharing with community')
+    expect(html).not.toContain('Local only')
   })
 
   it('summarizes verified community catalog routes without listing them in API Keys', () => {
@@ -1170,12 +1195,6 @@ describe('SettingsPageContent (api_keys)', () => {
                     observed_at: '2026-06-25T08:00:00+00:00',
                   },
                 ],
-              },
-              sharing: {
-                mode: 'local_export_only',
-                auto_upload_enabled: false,
-                message:
-                  'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
               },
             },
           },

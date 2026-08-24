@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.adapters.gateway import UPLOADABLE_TRUST_STATE, EvidenceRecord, endpoint_host
-from app.core.backends import get_backend_config
+from app.core.backends import get_backend_config, get_metadata
 from app.models.llm_config import LLMCredentialsFile, RemoteCatalogSyncMarker
 from app.services.community_catalog_sync import make_httpx_fetcher, sync_verified_catalog
 from app.services.llm_credentials_evidence import merge_route_evidence
@@ -92,7 +92,27 @@ async def sync_verified_community_catalog_into_credentials(*, trigger: str) -> d
     onto ``route.evidence`` (SSOT); only a tiny last-sync marker is persisted. All
     runtime-activity here is logged under the ``llm_credentials`` source — the single
     truth this sync reads-from and writes-to.
+
+    Gated on ``AppSettings.community_sharing_choice``: only ``"declined"`` stops the
+    read (the user explicitly asked for both reading and sharing to stop). ``"unset"``
+    (the first-run consent dialog has not fired yet) still reads — the read side takes
+    nothing from this machine, and refusing it would only make a fresh install worse
+    for no consent reason (design: docs/studio/mvp1/01_workflows/00_settings.md §5).
     """
+    settings = await get_metadata().read_app_settings()
+    if settings.community_sharing_choice == "declined":
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="sync_verified_catalog_skipped",
+            message="Skipped verified community catalog sync because the user declined community sharing.",
+            changes={"verified_sync_enabled": False, "trigger": trigger},
+        )
+        return {
+            "status": "disabled",
+            "verified_sync_enabled": False,
+            "message": "Community sharing is off, so the verified catalog is not read.",
+        }
+
     cfg = get_backend_config()
     manifest_url = cfg.community_catalog_manifest_url.strip()
     public_key_hex = cfg.community_catalog_signing_pubkey.strip()

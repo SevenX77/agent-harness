@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import type { ResumeRunOptions } from "@/api/client"
 import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, RunMetadata, RuntimeArtifactRow, RuntimeConfig, SkillDetail } from "@/api/types"
 import type { RunVerdict } from "@/utils/run-status-projection"
@@ -159,6 +160,7 @@ export function Panels({
   onOpenSettings,
   onSelectGraph,
 }: PanelsProps) {
+  const { t } = useTranslation("panels")
   const { onFileOpen, selectedEdge } = useWorkspaceContext()
   const selectedNodeSkillId = selectedNode?.data.skillId ?? null
   const selectedNodeWorkspaceRoot = selectedNode?.data.workspaceRoot ?? null
@@ -214,8 +216,8 @@ export function Panels({
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
-        <PanelHeader title="Workspace" />
-        <div className="p-4 text-xs text-muted-foreground">Open a skill to populate this panel.</div>
+        <PanelHeader title={t("common.workspaceTitle")} />
+        <div className="p-4 text-xs text-muted-foreground">{t("common.openSkillToPopulate")}</div>
       </div>
     )
   }

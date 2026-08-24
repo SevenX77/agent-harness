@@ -1,0 +1,342 @@
+{
+  "common": {
+    "workspaceTitle": "Workspace",
+    "openSkillToPopulate": "Open a skill to populate this panel.",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "add": "Add",
+    "save": "Save",
+    "remove": "Remove",
+    "reset": "Reset",
+    "search": "Search",
+    "test": "Test",
+    "issueCount_one": "1 issue",
+    "issueCount_other": "{{count}} issues",
+    "fieldHasIssues": "Field has {{issues}}: {{messages}}"
+  },
+  "properties": {
+    "title": "Properties",
+    "sourceTooltip": {
+      "label": "Properties panel source",
+      "body": "This panel edits the front matter YAML fields in the selected Markdown file."
+    },
+    "fileBadge": {
+      "openAriaLabel": "Open {{fileLabel}}"
+    },
+    "frontmatterErrorTitle": "Frontmatter error",
+    "openFile": "Open file",
+    "toast": {
+      "frontmatterError": "Frontmatter error: {{message}}",
+      "couldNotSaveGraphProperties": "Could not save graph properties",
+      "couldNotSavePhaseProperties": "Could not save phase properties",
+      "setRoleBeforeTesting": "Set an LLM role before testing.",
+      "roleTestFailed": "Role test failed",
+      "selectChildGraphFolderInsideRoot": "Select a child graph folder inside the current skill root.",
+      "selectChildGraphFolderNotRoot": "Select a child graph folder, not the current skill root.",
+      "selectedFolderNotUsable": "Selected folder is not a usable child graph",
+      "couldNotSaveModelParams": "Could not save model params",
+      "couldNotSaveCompareCandidates": "Could not save compare candidates",
+      "compareLlmTestFailed": "Compare LLM test failed"
+    },
+    "errors": {
+      "graphMdNotAvailable": "GRAPH.md is not available in the loaded skill detail.",
+      "phaseFileNotAvailable": "Phase file is not available in the loaded skill detail.",
+      "selectPhaseNode": "Select a phase node to edit frontmatter."
+    },
+    "nodeLint": {
+      "title_one": "{{count}} lint issue on this node",
+      "title_other": "{{count}} lint issues on this node"
+    },
+    "graph": {
+      "llmRoleHelpLabel": "About llm_role",
+      "llmRoleHelpBody": "The default LLM role for the whole graph; agent phases inherit it unless they set their own. Manage roles in Settings › LLM Roles.",
+      "llmRoleNone": "(none)",
+      "selectRole": "Select a role",
+      "searchRoles": "Search roles",
+      "noRoleFound": "No role found."
+    },
+    "renamePhase": {
+      "triggerAriaLabel": "Rename phase",
+      "dialogTitle": "Rename phase",
+      "dialogDescription": "This changes the phase id in GRAPH.md and renames the matching folder under phases.",
+      "newNameLabel": "New name",
+      "helperText": "Use letters, numbers, underscores, or hyphens. The first character must be a letter or underscore.",
+      "invalidName": "Invalid phase name.",
+      "renaming": "Renaming",
+      "rename": "Rename"
+    },
+    "resume": {
+      "sectionLabel": "Checkpoint validity",
+      "resumeDisabled": "Resume disabled",
+      "resuming": "Resuming",
+      "resumeNode": "Resume node"
+    },
+    "actions": {
+      "helpLabel": "About actions",
+      "helpBody": "The deterministic functions this logic node runs, in order. Each action is one def <name>(inputs) in actions/<name>.py; the frontmatter list and body <action> tags are kept in sync for you.",
+      "empty": "No actions yet — add one to scaffold its file.",
+      "ioHint": "Output fields an action writes are bounded by io.outputs - edit those field boundaries in the I/O panel (toolbar tab 3).",
+      "unregisteredFile": "unregistered file",
+      "missingFile": "missing file",
+      "editAriaLabel": "Edit action {{name}}",
+      "deleteAriaLabel": "Delete action {{name}}",
+      "add": "Add action",
+      "deleteDialog": {
+        "title": "Delete action {{name}}?",
+        "description": "Removes {{name}} from this phase and deletes actions/{{name}}.py. This cannot be undone."
+      },
+      "addDialog": {
+        "title": "Add action",
+        "description": "Creates actions/<name>.py with a stub and registers it on this phase.",
+        "nameLabel": "Action name",
+        "helperText": "A Python identifier — becomes def <name>(inputs).",
+        "invalidName": "Use letters, digits, underscore; not starting with a digit.",
+        "duplicateName": "An action named {{name}} already exists."
+      }
+    },
+    "allowOverwrite": {
+      "helpLabel": "About allow_sequential_overwrite",
+      "helpBody": "Output fields this phase writes that an upstream phase already wrote to the blackboard. Allow the ones you mean to overwrite; any collision left un-allowed is flagged by the engine as an illegal overwrite.",
+      "fromUpstream": "from {{ids}}",
+      "deny": "Deny",
+      "denyAriaLabel": "Deny overwrite for {{field}}",
+      "allow": "Allow",
+      "allowAriaLabel": "Allow overwrite for {{field}}",
+      "empty": "No upstream phase output collides with this phase's output fields."
+    },
+    "validator": {
+      "helpLabel": "About validator",
+      "helpBody": "When on, the engine runs this node's sibling validator.py after the node finishes to check its output (return None to pass). Create the file to enable it.",
+      "editAriaLabel": "Edit validator.py",
+      "createButton": "Create validator.py"
+    },
+    "subagents": {
+      "helpLabel": "About subagents",
+      "helpBody": "Sub-agents this agent can delegate to at runtime. name is referenced in the body with @subagent:<name>; target_skill points at the agent skill being delegated to.",
+      "nameAriaLabel": "Subagent {{index}} name",
+      "targetSkillAriaLabel": "Subagent {{index}} target skill",
+      "descriptionAriaLabel": "Subagent {{index}} description",
+      "add": "Add subagent"
+    },
+    "llmRole": {
+      "helpLabel": "About llm_role",
+      "helpBody": "The configured LLM role this agent runs as. Turn “Use graph default” on to run with the graph’s llm_role (the node’s own pick is kept, just inactive). Manage roles in Settings › LLM Roles; test the graph default in the graph properties.",
+      "useGraphDefaultLabel": "Use graph default",
+      "openGraphPropertiesAriaLabel": "Open graph properties",
+      "runRoleLabel": "Run role",
+      "noNodeRole": "No node role",
+      "useGraphDefaultSwitchAriaLabel": "Use graph default llm_role"
+    },
+    "llmRoleSettingsButton": {
+      "openAriaLabel": "Open LLM Roles settings"
+    },
+    "roleTest": {
+      "testAriaLabel": "Test LLM role {{role}}",
+      "testAriaLabelGeneric": "Test LLM role",
+      "warningDetail": "One or more provider routes need attention; rerun the test for provider diagnostics.",
+      "blockedDetail": "The selected role has no currently usable provider route."
+    },
+    "nodeParams": {
+      "customModelParamsLabel": "Custom model params",
+      "helpLabel": "About model params",
+      "helpBody": "Opt-in per-node overrides of this node's LLM generation params. When off, the node inherits the role defaults; when on, blank fields still inherit field-by-field.",
+      "enableAriaLabel": "Use custom model params for this node",
+      "thinkingHelpLabel": "About thinking",
+      "thinkingHelpBody": "Whether this node asks the model to use reasoning/thinking. Best-effort: only applies when the node's model supports it.",
+      "thinkingAriaLabel": "Node thinking override",
+      "maxOutputTokensLabel": "max output tokens",
+      "maxOutputHelpLabel": "About max output tokens",
+      "maxOutputHelpBody": "Cap on this node's output tokens. Empty inherits the role default (the placeholder shows that inferred max); a value over the route's max is clamped down to it.",
+      "maxOutputAriaLabel": "Node max output tokens override",
+      "inheritPlaceholder": "Inherit",
+      "temperatureLabel": "temperature",
+      "temperatureHelpLabel": "About temperature",
+      "temperatureAriaLabel": "Node temperature override"
+    },
+    "subgraphPath": {
+      "helpLabel": "About path",
+      "helpBody": "Select the child graph folder that contains GRAPH.md. Studio saves a relative path when it can.",
+      "noneSelected": "No child graph selected",
+      "reconnectAriaLabel": "Reconnect path",
+      "notFound": "Path does not resolve to GRAPH.md.",
+      "unresolved": "Select a child graph folder."
+    },
+    "iterate": {
+      "helpLabel": "About iterate",
+      "helpBody": "Make this phase run once per item of an array on the blackboard, instead of just once. Leave mode off for a normal single run. I/O fields are edited in the I/O panel.",
+      "modeHelpLabel": "About iterate mode",
+      "modeHelpBody": "off — run once.\nbatch — map over the array concurrently, each item independent.\nloop — iterate serially and accumulate results across rounds.",
+      "overHelpLabel": "About over",
+      "overHelpBody": "Path to the array field on the blackboard to iterate, e.g. data.inputs.items. The engine runs this node once per element.",
+      "itemVarHelpLabel": "About item_var",
+      "itemVarHelpBody": "Name under which the current element is injected onto the blackboard each round, so the node can read “this item”.",
+      "rangeHelpLabel": "About range",
+      "rangeHelpBody": "Optional inclusive slice [start, end] (1-based) to iterate only that segment of the array. Leave both empty to run the whole array.",
+      "concurrencyHelpLabel": "About concurrency",
+      "concurrencyHelpBody": "Batch mode only. Max number of items processed at the same time (integer ≥ 1).",
+      "accumulateHelpLabel": "About accumulate",
+      "accumulateHelpBody": "Loop mode only. Declares how each round's output is gathered into a running value that the next round can read.",
+      "accumulateVarHelpLabel": "About accumulate.var",
+      "accumulateVarHelpBody": "Name of the running accumulator. Each round it is injected onto the blackboard holding everything gathered so far, so the next round can build on it.",
+      "accumulateFromHelpLabel": "About accumulate.from",
+      "accumulateFromHelpBody": "Which field of this round's output to take as the increment that gets merged into the accumulator.",
+      "accumulateInitHelpLabel": "About accumulate.init",
+      "accumulateInitHelpBody": "Initial value of the accumulator as JSON, e.g. [] or {}, before the first round runs.",
+      "accumulateMergeHelpLabel": "About accumulate.merge",
+      "accumulateMergeHelpBody": "How each increment joins the accumulator:\nappend — add the increment as one item.\nextend — concatenate a list of items.\nmerge — merge objects key by key.\nreplace — overwrite with the latest value."
+    },
+    "compare": {
+      "sectionLabel": "Compare LLMs",
+      "candidatesAriaLabel": "LLM compare candidates",
+      "empty": "No compare LLMs yet.",
+      "addAriaLabel": "Add LLM compare candidate",
+      "addButton": "Add compare LLM",
+      "modelLabel": "Model",
+      "modelAriaLabel": "Compare model",
+      "chooseModel": "Choose model",
+      "noModels": "No models",
+      "searchModels": "Search models",
+      "noModelFound": "No model found.",
+      "endpointLabel": "Endpoint",
+      "endpointAriaLabel": "Compare model endpoint",
+      "autoFallback": "Auto fallback",
+      "noEndpointFound": "No endpoint found.",
+      "addCandidate": "Add candidate",
+      "runButton": "Run compare",
+      "runAriaLabel": "Run model compare for this node",
+      "removeAriaLabel": "Remove compare LLM",
+      "testing": "Testing compare LLM",
+      "testFailed": "Test failed",
+      "missingModel": "Missing model",
+      "selectedEndpoint": "Selected endpoint",
+      "testAriaLabel": "Test compare LLM {{model}}",
+      "editAriaLabel": "Edit compare LLM {{model}}",
+      "testingRoute": "Testing this compare route.",
+      "notTestedYet": "Test has not run yet.",
+      "addDialog": {
+        "title": "Add compare LLM",
+        "description": "Choose a model candidate for this node. Saved with the node in the workspace, not SKILL.md."
+      },
+      "editDialog": {
+        "title": "Edit compare LLM",
+        "description": "Update this node's model candidate. Saved with the node in the workspace, not SKILL.md.",
+        "editModelAriaLabel": "Edit compare model",
+        "editEndpointAriaLabel": "Edit compare model endpoint"
+      }
+    },
+    "tools": {
+      "helpLabel": "About tools",
+      "helpBody": "Tools this agent may call at runtime, referenced in the body with @tool:<name>. Each must be declared here first.",
+      "empty": "No tools yet — add one this agent can call.",
+      "issueAriaLabel": "Tool {{name}} has {{issues}}: {{messages}}",
+      "removeAriaLabel": "Remove tool {{name}}",
+      "builtinHint": "Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available — don’t list them here.",
+      "add": "Add tool",
+      "nameLabel": "Tool name",
+      "duplicate": "{{name}} is already declared.",
+      "addDialog": {
+        "description": "Declares a tool this agent may call, referenced in the body with @tool:<name>."
+      }
+    },
+    "maxIterations": {
+      "helpLabel": "About max_iterations",
+      "helpBody": "The most internal reasoning rounds this agent may take before it must call finish_task. Integer 1–50; defaults to 10 when left empty."
+    },
+    "subgraphRefs": {
+      "helpLabel": "About subgraphs",
+      "helpBody": "Child graphs this agent can invoke, referenced in the body with @subgraph:<name>. Each binds a name to a child graph folder (absolute path). This is a runtime resource, distinct from a SUBGRAPH phase node.",
+      "nameAriaLabel": "Subgraph {{index}} name",
+      "descriptionAriaLabel": "Subgraph {{index}} description",
+      "noFolderSelected": "No folder selected",
+      "chooseFolderAriaLabel": "Choose folder for subgraph {{index}}",
+      "add": "Add subgraph",
+      "pathAriaLabel": "Subgraph {{index}} path"
+    },
+    "resourceRef": {
+      "aboutField": "About {{field}}",
+      "idAriaLabel": "{{label}} {{index}} id",
+      "pathAriaLabel": "{{label}} {{index}} path",
+      "openFileAriaLabel": "Open {{label}} {{index}} file",
+      "summaryAriaLabel": "{{label}} {{index}} summary",
+      "fileMissing": "File not found in this skill yet.",
+      "references": {
+        "addLabel": "Add reference",
+        "helpBody": "Reference documents this agent can consult, cited in the body with @reference:<id>. Each binds an id (e.g. R1) to a file path with a short summary."
+      },
+      "examples": {
+        "addLabel": "Add example",
+        "helpBody": "Example documents this agent can consult, cited in the body with @example:<id>. Each binds an id (e.g. E1) to a file path with a short summary. Distinct from inline <example> tags in the body."
+      }
+    }
+  },
+  "io": {
+    "diagnostics": {
+      "inputTitle": "Input diagnostics",
+      "outputTitle": "Output diagnostics"
+    },
+    "example": {
+      "editAriaLabel": "Edit {{title}} schema in {{relPath}}",
+      "noExample": "No {{title}} example can be generated from this md file."
+    },
+    "inputConfig": {
+      "title": "Input configuration"
+    },
+    "outputArtifacts": {
+      "label": "output artifacts",
+      "configureButton": "Configure",
+      "configureAriaLabel": "Configure output artifacts",
+      "empty": "No artifacts configured yet."
+    },
+    "blackboardContext": {
+      "graphInputsTitle": "Graph inputs",
+      "graphInputsHint": "declared entry fields — import a file to source them",
+      "nodeTitle": "Blackboard context",
+      "nodeHint": "fields on the blackboard when this node runs",
+      "empty": "No blackboard fields — import a file below to add input fields."
+    },
+    "saving": "saving",
+    "import": {
+      "button": "Import…",
+      "ariaLabel": "Import file or folder",
+      "file": "Import file",
+      "folder": "Import folder"
+    },
+    "fileGroup": {
+      "editAriaLabel": "Edit file {{label}}",
+      "openFolderAriaLabel": "Open folder {{label}}",
+      "removeAriaLabel": "Remove file group {{label}}",
+      "toggleFieldAriaLabel": "Toggle file field {{field}}",
+      "batchMeta": "batch ×{{count}} · numbers kept",
+      "runtimeFileMeta": "{{type}} · runtime file",
+      "matchedIoInputs": "matched io.inputs"
+    },
+    "fieldTree": {
+      "collapseAriaLabel": "Collapse {{path}}",
+      "expandAriaLabel": "Expand {{path}}",
+      "toggleFieldAriaLabel": "Toggle field {{path}}",
+      "fromMeta": "{{type}} · from {{from}}"
+    },
+    "errors": {
+      "savingUnavailable": "Saving is unavailable in this context",
+      "savingArtifactsUnavailable": "Saving runtime artifacts is unavailable in this context"
+    },
+    "outputDialog": {
+      "title": "Output artifacts — runtime_config",
+      "description": "Each file carries the blackboard fields you check; on-disk naming is fixed.",
+      "stemAriaLabel": "Artifact stem {{index}}",
+      "modeGroupAriaLabel": "Artifact mode",
+      "removeArtifactAriaLabel": "Remove artifact {{stem}}",
+      "addArtifact": "Add artifact"
+    },
+    "testInputs": {
+      "heading": "Test Inputs",
+      "empty": "No saved test inputs.",
+      "selectAriaLabel": "Select test input {{id}}",
+      "editAriaLabel": "Edit test input {{id}}",
+      "deleteAriaLabel": "Delete test input {{id}}",
+      "newFile": "New file",
+      "newFileAriaLabel": "New test input file",
+      "hint": "Selected input feeds Predict and Run · New file opens in the editor"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import useSWR from "swr"
 import { Loader2, Pencil, Plus, Trash2 } from "lucide-react"
 import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
@@ -26,6 +27,7 @@ export function TestInputsSection({
   onSelect,
   onFileOpen,
 }: TestInputsSectionProps) {
+  const { t } = useTranslation("panels")
   const { data, mutate } = useSWR<TestInputMetadata[]>(
     `/skills/${skillId}/test_inputs`,
     fetcher,
@@ -77,10 +79,10 @@ export function TestInputsSection({
 
   return (
     <section className="space-y-2">
-      <SectionHeading label="Test Inputs" />
+      <SectionHeading label={t("io.testInputs.heading")} />
       <div className="space-y-1">
         {items.length === 0 ? (
-          <p className="px-2 text-[11px] text-muted-foreground">No saved test inputs.</p>
+          <p className="px-2 text-[11px] text-muted-foreground">{t("io.testInputs.empty")}</p>
         ) : (
           items.map((item) => {
             const isSelected = selectedId === item.id
@@ -102,7 +104,7 @@ export function TestInputsSection({
                       // to fall back to empty).
                       onClick={() => onSelect?.(isSelected ? null : item.id)}
                       aria-pressed={isSelected}
-                      aria-label={`Select test input ${item.id}`}
+                      aria-label={t("io.testInputs.selectAriaLabel", { id: item.id })}
                       className="min-w-0 flex-1 truncate text-left text-xs text-foreground"
                     >
                       {item.name}
@@ -115,7 +117,7 @@ export function TestInputsSection({
                     type="button"
                     // P5: open this test input in the editor (next to delete).
                     onClick={() => onFileOpen(`.workspace/import_files/${item.id}.json`)}
-                    aria-label={`Edit test input ${item.id}`}
+                    aria-label={t("io.testInputs.editAriaLabel", { id: item.id })}
                     className="text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <Pencil className="size-3.5" />
@@ -124,7 +126,7 @@ export function TestInputsSection({
                 <button
                   type="button"
                   onClick={() => void handleDelete(item.id)}
-                  aria-label={`Delete test input ${item.id}`}
+                  aria-label={t("io.testInputs.deleteAriaLabel", { id: item.id })}
                   className="text-muted-foreground transition-colors hover:text-destructive"
                 >
                   <Trash2 className="size-3.5" />
@@ -147,17 +149,17 @@ export function TestInputsSection({
         type="button"
         onClick={() => void handleNewFile()}
         disabled={busy}
-        aria-label="New test input file"
+        aria-label={t("io.testInputs.newFileAriaLabel")}
         className={cn(
           "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors",
           "text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
         )}
       >
         {busy ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <Plus className="size-3.5 shrink-0" />}
-        New file
+        {t("io.testInputs.newFile")}
       </button>
       <p className="text-[11px] text-muted-foreground">
-        Selected input feeds Predict and Run · New file opens in the editor
+        {t("io.testInputs.hint")}
       </p>
     </section>
   )

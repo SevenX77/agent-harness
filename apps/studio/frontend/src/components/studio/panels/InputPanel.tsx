@@ -1,4 +1,6 @@
 import { useState, type ComponentProps } from "react"
+import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 import { AlertTriangle, FileText, Files, Settings2 } from "lucide-react"
 import type { LintError, RuntimeConfig, SkillDetail } from "@/api/types"
 import { Button } from "@/components/ui/button"
@@ -175,11 +177,13 @@ async function submitIoDocumentEdit({
   content,
   mutate,
   save,
+  t,
 }: {
   relPath: string
   content: string
   mutate: (content: string) => string
   save?: SaveIoFile
+  t: TFunction<"panels">
 }): Promise<string | null> {
   let next: string
   try {
@@ -188,7 +192,7 @@ async function submitIoDocumentEdit({
     return errorMessage(err)
   }
   if (!save) {
-    return "Saving is unavailable in this context"
+    return t("io.errors.savingUnavailable")
   }
   try {
     await save({ path: relPath, content: next, expectedHash: await sha256Hex(content) })
@@ -229,6 +233,7 @@ function ExampleField({
   relPath: string
   onEdit?: () => void
 }) {
+  const { t } = useTranslation("panels")
   const example = schema ? jsonExampleFromSchema(schema) : null
   return (
     <PanelFieldRow>
@@ -250,7 +255,7 @@ function ExampleField({
             className={YAML_ICON_BUTTON_CLASS}
             onClick={onEdit}
             disabled={!onEdit}
-            aria-label={`Edit ${title.toLowerCase()} schema in ${relPath}`}
+            aria-label={t("io.example.editAriaLabel", { title: title.toLowerCase(), relPath })}
           >
             <FileText className="size-3.5" aria-hidden />
           </Button>
@@ -258,7 +263,7 @@ function ExampleField({
         {schema ? (
           <pre className={EXAMPLE_CODE_CLASS}>{prettyJson(example)}</pre>
         ) : (
-          <FieldDescription>No {title.toLowerCase()} example can be generated from this md file.</FieldDescription>
+          <FieldDescription>{t("io.example.noExample", { title: title.toLowerCase() })}</FieldDescription>
         )}
       </Field>
     </PanelFieldRow>
@@ -335,6 +340,7 @@ export function InputPanel({
   onFileOpen,
   onPhaseFileSave,
 }: InputPanelProps) {
+  const { t } = useTranslation("panels")
   const role = resolveIoNodeRole(selectedNode, ioBoundary)
   const scope = ioPanelScope(role)
   const view = buildIoDocumentView(skillDetail, selectedNode)
@@ -368,10 +374,11 @@ export function InputPanel({
       content: view.content,
       mutate: (content) => applyIoInputChecks(content, checks),
       save: onPhaseFileSave,
+      t,
     })
 
   const handleArtifactsSave = (rows: ArtifactRow[]) =>
-    onRuntimeArtifactsSave?.(rows) ?? Promise.resolve("Saving runtime artifacts is unavailable in this context")
+    onRuntimeArtifactsSave?.(rows) ?? Promise.resolve(t("io.errors.savingArtifactsUnavailable"))
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -382,12 +389,12 @@ export function InputPanel({
             <FieldGroup>
               {scope.showInput ? (
                 <>
-                  <BoundaryDiagnostics title="Input diagnostics" errors={boundaryFallbackDiagnostics} />
+                  <BoundaryDiagnostics title={t("io.diagnostics.inputTitle")} errors={boundaryFallbackDiagnostics} />
                   <ExampleField title="Input" schema={view.inputSchema} relPath={view.relPath} onEdit={editSource} />
                   <PanelFieldRow>
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <YamlFieldLabel>Input configuration</YamlFieldLabel>
+                        <YamlFieldLabel>{t("io.inputConfig.title")}</YamlFieldLabel>
                       </div>
                       <InputConfigInline
                         skillId={skillId}
@@ -421,7 +428,7 @@ export function InputPanel({
 
               {scope.showOutput ? (
                 <>
-                  <BoundaryDiagnostics title="Output diagnostics" errors={boundaryFallbackDiagnostics} />
+                  <BoundaryDiagnostics title={t("io.diagnostics.outputTitle")} errors={boundaryFallbackDiagnostics} />
                   <ExampleField title="Output" schema={view.outputSchema} relPath={view.relPath} onEdit={editSource} />
                 </>
               ) : null}
@@ -430,17 +437,17 @@ export function InputPanel({
                 <PanelFieldRow>
                   <Field>
                     <div className="flex items-center justify-between gap-2">
-                      <YamlFieldLabel>output artifacts</YamlFieldLabel>
+                      <YamlFieldLabel>{t("io.outputArtifacts.label")}</YamlFieldLabel>
                       <Button
                         type="button"
                         size="sm"
                         variant="secondary"
                         className="h-6 gap-1 px-2 text-[11px]"
                         onClick={() => setOutputConfigOpen(true)}
-                        aria-label="Configure output artifacts"
+                        aria-label={t("io.outputArtifacts.configureAriaLabel")}
                       >
                         <Settings2 className="size-3" aria-hidden />
-                        Configure
+                        {t("io.outputArtifacts.configureButton")}
                       </Button>
                     </div>
                     {artifacts.length > 0 ? (
@@ -450,7 +457,7 @@ export function InputPanel({
                         ))}
                       </div>
                     ) : (
-                      <FieldDescription>No artifacts configured yet.</FieldDescription>
+                      <FieldDescription>{t("io.outputArtifacts.empty")}</FieldDescription>
                     )}
                   </Field>
                 </PanelFieldRow>

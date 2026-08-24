@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react"
+import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
   ChevronDown,
@@ -239,19 +240,20 @@ function diagnosticMessage(error: LintError): string {
 }
 
 function FieldDiagnosticMarker({ errors }: { errors?: readonly LintError[] | null }) {
+  const { t } = useTranslation("panels")
   if (!errors || errors.length === 0) {
     return null
   }
   const hasError = errors.some((error) => error.severity === "error")
   const tone = hasError ? "text-destructive" : "text-warning"
   const messages = errors.map(diagnosticMessage)
-  const count = errors.length === 1 ? "1 issue" : `${errors.length} issues`
+  const count = t("common.issueCount", { count: errors.length })
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           role="img"
-          aria-label={`Field has ${count}: ${messages.join("; ")}`}
+          aria-label={t("common.fieldHasIssues", { issues: count, messages: messages.join("; ") })}
           data-io-field-diagnostic="true"
           className={`inline-flex shrink-0 items-center ${tone}`}
         >
@@ -308,6 +310,7 @@ function FieldCheckRow({
   highlighted: boolean
   errors?: readonly LintError[]
 }) {
+  const { t } = useTranslation("panels")
   return (
     <div
       className={`${ROW_CLASS} border-l-2 ${highlighted ? "border-l-primary bg-accent" : "border-l-transparent"}`}
@@ -317,7 +320,7 @@ function FieldCheckRow({
         <button
           type="button"
           onClick={onToggleExpand}
-          aria-label={`${expanded ? "Collapse" : "Expand"} ${row.path}`}
+          aria-label={expanded ? t("io.fieldTree.collapseAriaLabel", { path: row.path }) : t("io.fieldTree.expandAriaLabel", { path: row.path })}
           className="text-muted-foreground transition-colors hover:text-foreground"
         >
           {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
@@ -329,7 +332,7 @@ function FieldCheckRow({
         <Checkbox
           checked={checked}
           onCheckedChange={(value) => onCheckedChange(value === true)}
-          aria-label={`Toggle field ${row.path}`}
+          aria-label={t("io.fieldTree.toggleFieldAriaLabel", { path: row.path })}
         />
       ) : (
         <span className="size-3.5 shrink-0" aria-hidden />
@@ -341,8 +344,7 @@ function FieldCheckRow({
       </span>
       <FieldDiagnosticMarker errors={errors} />
       <span className={META_CLASS}>
-        {row.type ?? "any"}
-        {row.from ? ` · from ${row.from}` : ""}
+        {row.from ? t("io.fieldTree.fromMeta", { type: row.type ?? "any", from: row.from }) : (row.type ?? "any")}
       </span>
     </div>
   )
@@ -441,6 +443,7 @@ function FileImportGroups({
   onFileOpen?: (path: string) => void
   diagnosticsByField?: Record<string, LintError[]>
 }) {
+  const { t } = useTranslation("panels")
   const importPath = async (path: string | null) => {
     if (!path) {
       return
@@ -519,7 +522,7 @@ function FileImportGroups({
               <button
                 type="button"
                 onClick={() => onFileOpen(`.workspace/${group.filePath}`)}
-                aria-label={`Edit file ${group.label}`}
+                aria-label={t("io.fileGroup.editAriaLabel", { label: group.label })}
                 className="text-muted-foreground transition-colors hover:text-foreground"
               >
                 <Pencil className="size-3.5" />
@@ -534,7 +537,7 @@ function FileImportGroups({
                     void openLocalPath(folder)
                   }
                 }}
-                aria-label={`Open folder ${group.label}`}
+                aria-label={t("io.fileGroup.openFolderAriaLabel", { label: group.label })}
                 className="text-muted-foreground transition-colors hover:text-foreground"
               >
                 <FolderOpen className="size-3.5" />
@@ -543,7 +546,7 @@ function FileImportGroups({
             <button
               type="button"
               onClick={() => void deleteGroup(group, groupIndex)}
-              aria-label={`Remove file group ${group.label}`}
+              aria-label={t("io.fileGroup.removeAriaLabel", { label: group.label })}
               className="text-muted-foreground transition-colors hover:text-destructive"
             >
               <Trash2 className="size-3.5" />
@@ -559,15 +562,15 @@ function FileImportGroups({
                 <Checkbox
                   checked={candidate.checked}
                   onCheckedChange={(value) => toggleCandidate(groupIndex, candidateIndex, value === true)}
-                  aria-label={`Toggle file field ${candidate.field}`}
+                  aria-label={t("io.fileGroup.toggleFieldAriaLabel", { field: candidate.field })}
                 />
                 <span className="font-mono text-xs text-foreground">{candidate.field}</span>
                 <FieldDiagnosticMarker errors={diagnosticsByField[candidate.field]} />
                 <span className={META_CLASS}>
                   {candidate.dir
-                    ? `batch ×${candidate.numbers?.length ?? "?"} · numbers kept`
-                    : `${candidate.type ?? "any"} · runtime file`}
-                  {candidate.matched ? " · matched io.inputs" : ""}
+                    ? t("io.fileGroup.batchMeta", { count: candidate.numbers?.length ?? "?" })
+                    : t("io.fileGroup.runtimeFileMeta", { type: candidate.type ?? "any" })}
+                  {candidate.matched ? ` · ${t("io.fileGroup.matchedIoInputs")}` : ""}
                 </span>
               </label>
             ))}
@@ -581,19 +584,19 @@ function FileImportGroups({
             size="sm"
             variant="secondary"
             disabled={busy}
-            aria-label="Import file or folder"
+            aria-label={t("io.import.ariaLabel")}
             className="h-7 gap-1 text-[11px]"
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FolderOpen className="size-3.5" aria-hidden />}
-            Import…
+            {t("io.import.button")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <DropdownMenuItem onSelect={() => { void selectImportFile().then(importPath) }}>
-            Import file
+            {t("io.import.file")}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => { void selectImportFolder().then(importPath) }}>
-            Import folder
+            {t("io.import.folder")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -647,6 +650,7 @@ export function InputConfigInline({
   isGraphInput = false,
   diagnosticsByField = {},
 }: InputConfigInlineProps) {
+  const { t } = useTranslation("panels")
   const [blackboardChecks, setBlackboardChecks] = useState<Record<string, boolean>>({})
   const saveSeq = useRef(0)
   const initialGroups = useMemo(
@@ -702,17 +706,17 @@ export function InputConfigInline({
   return (
     <div className="space-y-2">
       <div className="flex justify-end">
-        {saving ? <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">saving</Badge> : null}
+        {saving ? <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{t("io.saving")}</Badge> : null}
       </div>
       <div className="overflow-hidden rounded-md border border-border">
         <div className={GROUP_HEAD_CLASS}>
           <span className="text-xs font-medium text-foreground">
-            {isGraphInput ? "Graph inputs" : "Blackboard context"}
+            {isGraphInput ? t("io.blackboardContext.graphInputsTitle") : t("io.blackboardContext.nodeTitle")}
           </span>
           <span className={META_CLASS}>
             {isGraphInput
-              ? "declared entry fields — import a file to source them"
-              : "fields on the blackboard when this node runs"}
+              ? t("io.blackboardContext.graphInputsHint")
+              : t("io.blackboardContext.nodeHint")}
           </span>
         </div>
         {blackboard.length > 0 ? (
@@ -728,7 +732,7 @@ export function InputConfigInline({
           />
         ) : (
           <p className="px-2 py-3 text-xs text-muted-foreground">
-            No blackboard fields — import a file below to add input fields.
+            {t("io.blackboardContext.empty")}
           </p>
         )}
       </div>
@@ -776,6 +780,7 @@ export function OutputConfigDialog({
   perItemCount = null,
   onSave,
 }: OutputConfigDialogProps) {
+  const { t } = useTranslation("panels")
   const [rows, setRows] = useState<ArtifactRow[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -809,9 +814,9 @@ export function OutputConfigDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Output artifacts — runtime_config</DialogTitle>
+          <DialogTitle>{t("io.outputDialog.title")}</DialogTitle>
           <DialogDescription>
-            Each file carries the blackboard fields you check; on-disk naming is fixed.
+            {t("io.outputDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[55vh] space-y-3 overflow-y-auto">
@@ -833,13 +838,13 @@ export function OutputConfigDialog({
                 <Input
                   value={row.stem}
                   onChange={(event) => updateRow(index, { stem: event.target.value })}
-                  aria-label={`Artifact stem ${index + 1}`}
+                  aria-label={t("io.outputDialog.stemAriaLabel", { index: index + 1 })}
                   className="h-7 w-44 font-mono text-xs"
                 />
                 <span
                   className="inline-flex overflow-hidden rounded-md border border-border text-[11px]"
                   role="group"
-                  aria-label="Artifact mode"
+                  aria-label={t("io.outputDialog.modeGroupAriaLabel")}
                 >
                   <button
                     type="button"
@@ -860,7 +865,7 @@ export function OutputConfigDialog({
                 <button
                   type="button"
                   onClick={() => setRows(effectiveRows.filter((_, i) => i !== index))}
-                  aria-label={`Remove artifact ${row.stem || index + 1}`}
+                  aria-label={t("io.outputDialog.removeArtifactAriaLabel", { stem: row.stem || String(index + 1) })}
                   className="text-muted-foreground transition-colors hover:text-destructive"
                 >
                   <Trash2 className="size-3.5" />
@@ -884,10 +889,10 @@ export function OutputConfigDialog({
             size="sm"
             variant="secondary"
             onClick={() => setRows([...effectiveRows, { stem: "", mode: "single", fields: [] }])}
-            aria-label="Add artifact"
+            aria-label={t("io.outputDialog.addArtifact")}
           >
             <Plus className="size-3.5" aria-hidden />
-            Add artifact
+            {t("io.outputDialog.addArtifact")}
           </Button>
         </div>
         {error ? (
@@ -897,10 +902,10 @@ export function OutputConfigDialog({
         ) : null}
         <DialogFooter>
           <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" size="sm" onClick={() => void handleSave()} disabled={busy}>
-            Save
+            {t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

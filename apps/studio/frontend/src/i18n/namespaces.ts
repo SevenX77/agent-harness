@@ -10,6 +10,8 @@ import zhCnSettings from "../locales/zh-CN/settings.json"
 import zhCnTrace from "../locales/zh-CN/trace.json"
 import enWelcome from "../components/welcome/locales/en.json"
 import zhCnWelcome from "../components/welcome/locales/zh-CN.json"
+import enPanels from "../components/studio/panels/locales/en.json"
+import zhCnPanels from "../components/studio/panels/locales/zh-CN.json"
 
 /**
  * The explicit i18next namespace registry.
@@ -28,7 +30,9 @@ import zhCnWelcome from "../components/welcome/locales/zh-CN.json"
  *     `src/components/welcome/locales/{en,zh-CN}.json`, the pattern new
  *     modules follow going forward: when a module's code moves, its
  *     translations move with it instead of staying behind in a shared
- *     top-level directory that outlives the feature.
+ *     top-level directory that outlives the feature. `panels` (the
+ *     Properties + I/O panels under `components/studio/panels/`) follows
+ *     the same co-located pattern.
  * Both shapes plug into i18next the same way — a namespace is just a name
  * plus one JSON bundle per language — so this registry is the only place
  * that needs to know where each namespace's files physically live.
@@ -41,6 +45,7 @@ export const namespaceResources = {
     copilot: enCopilot,
     trace: enTrace,
     welcome: enWelcome,
+    panels: enPanels,
   },
   "zh-CN": {
     settings: zhCnSettings,
@@ -49,5 +54,6 @@ export const namespaceResources = {
     copilot: zhCnCopilot,
     trace: zhCnTrace,
     welcome: zhCnWelcome,
+    panels: zhCnPanels,
   },
 } as const

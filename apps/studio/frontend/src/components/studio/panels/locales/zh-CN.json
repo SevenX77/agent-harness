@@ -1,0 +1,340 @@
+{
+  "common": {
+    "workspaceTitle": "工作区",
+    "openSkillToPopulate": "打开一个 skill 以填充此面板。",
+    "cancel": "取消",
+    "delete": "删除",
+    "add": "添加",
+    "save": "保存",
+    "remove": "移除",
+    "reset": "重置",
+    "search": "搜索",
+    "test": "测试",
+    "issueCount_other": "{{count}} 个问题",
+    "fieldHasIssues": "该字段有 {{issues}}：{{messages}}"
+  },
+  "properties": {
+    "title": "属性",
+    "sourceTooltip": {
+      "label": "属性面板来源",
+      "body": "此面板编辑所选 Markdown 文件中的 frontmatter YAML 字段。"
+    },
+    "fileBadge": {
+      "openAriaLabel": "打开 {{fileLabel}}"
+    },
+    "frontmatterErrorTitle": "Frontmatter 错误",
+    "openFile": "打开文件",
+    "toast": {
+      "frontmatterError": "Frontmatter 错误：{{message}}",
+      "couldNotSaveGraphProperties": "无法保存图属性",
+      "couldNotSavePhaseProperties": "无法保存阶段属性",
+      "setRoleBeforeTesting": "测试前请先设置 LLM 角色。",
+      "roleTestFailed": "角色测试失败",
+      "selectChildGraphFolderInsideRoot": "请选择当前 skill 根目录内的子图文件夹。",
+      "selectChildGraphFolderNotRoot": "请选择一个子图文件夹，而不是当前 skill 根目录本身。",
+      "selectedFolderNotUsable": "所选文件夹不是可用的子图",
+      "couldNotSaveModelParams": "无法保存模型参数",
+      "couldNotSaveCompareCandidates": "无法保存对比候选",
+      "compareLlmTestFailed": "对比 LLM 测试失败"
+    },
+    "errors": {
+      "graphMdNotAvailable": "已加载的 skill 详情中没有 GRAPH.md。",
+      "phaseFileNotAvailable": "已加载的 skill 详情中没有这个阶段文件。",
+      "selectPhaseNode": "请选择一个阶段节点以编辑 frontmatter。"
+    },
+    "nodeLint": {
+      "title_other": "这个节点上有 {{count}} 个 lint 问题"
+    },
+    "graph": {
+      "llmRoleHelpLabel": "关于 llm_role",
+      "llmRoleHelpBody": "整个图的默认 LLM 角色；agent 阶段会继承它，除非自己另外设置。可在设置 › LLM 角色中管理角色。",
+      "llmRoleNone": "（无）",
+      "selectRole": "选择一个角色",
+      "searchRoles": "搜索角色",
+      "noRoleFound": "未找到角色。"
+    },
+    "renamePhase": {
+      "triggerAriaLabel": "重命名阶段",
+      "dialogTitle": "重命名阶段",
+      "dialogDescription": "这会修改 GRAPH.md 里的阶段 id，并重命名 phases 目录下对应的文件夹。",
+      "newNameLabel": "新名称",
+      "helperText": "只能使用字母、数字、下划线或连字符。首字符必须是字母或下划线。",
+      "invalidName": "阶段名称无效。",
+      "renaming": "重命名中",
+      "rename": "重命名"
+    },
+    "resume": {
+      "sectionLabel": "检查点有效性",
+      "resumeDisabled": "无法继续",
+      "resuming": "继续中",
+      "resumeNode": "继续节点"
+    },
+    "actions": {
+      "helpLabel": "关于 actions",
+      "helpBody": "这个 logic 节点按顺序运行的确定性函数。每个 action 就是 actions/<name>.py 里的一个 def <name>(inputs)；frontmatter 里的列表和正文中的 <action> 标签会自动帮你保持同步。",
+      "empty": "还没有 action —— 添加一个即可生成对应文件。",
+      "ioHint": "action 能写入的输出字段以 io.outputs 为界 —— 在 I/O 面板（工具栏第 3 个标签）里编辑这些字段边界。",
+      "unregisteredFile": "未注册的文件",
+      "missingFile": "文件缺失",
+      "editAriaLabel": "编辑 action {{name}}",
+      "deleteAriaLabel": "删除 action {{name}}",
+      "add": "添加 action",
+      "deleteDialog": {
+        "title": "删除 action {{name}}？",
+        "description": "会将 {{name}} 从这个阶段中移除，并删除 actions/{{name}}.py。此操作不可撤销。"
+      },
+      "addDialog": {
+        "title": "添加 action",
+        "description": "创建带初始内容的 actions/<name>.py，并将它注册到这个阶段。",
+        "nameLabel": "Action 名称",
+        "helperText": "一个 Python 标识符 —— 会生成 def <name>(inputs)。",
+        "invalidName": "只能使用字母、数字、下划线；且不能以数字开头。",
+        "duplicateName": "已经存在名为 {{name}} 的 action。"
+      }
+    },
+    "allowOverwrite": {
+      "helpLabel": "关于 allow_sequential_overwrite",
+      "helpBody": "这个阶段写入、但上游阶段已经写过黑板的输出字段。对确实想要覆盖的字段点击允许；未被允许的冲突会被引擎标记为非法覆盖。",
+      "fromUpstream": "来自 {{ids}}",
+      "deny": "拒绝",
+      "denyAriaLabel": "拒绝覆盖 {{field}}",
+      "allow": "允许",
+      "allowAriaLabel": "允许覆盖 {{field}}",
+      "empty": "没有上游阶段的输出字段与这个阶段的输出字段冲突。"
+    },
+    "validator": {
+      "helpLabel": "关于 validator",
+      "helpBody": "开启后，引擎会在这个节点结束后运行同目录下的 validator.py 来检查它的输出（返回 None 表示通过）。创建该文件即可启用。",
+      "editAriaLabel": "编辑 validator.py",
+      "createButton": "创建 validator.py"
+    },
+    "subagents": {
+      "helpLabel": "关于 subagents",
+      "helpBody": "这个 agent 在运行时可以委派的 subagent。name 会通过正文里的 @subagent:<name> 引用；target_skill 指向被委派的 agent skill。",
+      "nameAriaLabel": "Subagent {{index}} 名称",
+      "targetSkillAriaLabel": "Subagent {{index}} 目标 skill",
+      "descriptionAriaLabel": "Subagent {{index}} 描述",
+      "add": "添加 subagent"
+    },
+    "llmRole": {
+      "helpLabel": "关于 llm_role",
+      "helpBody": "这个 agent 运行时使用的已配置 LLM 角色。打开“使用图默认值”后会运行图的 llm_role（节点自己的选择会保留，只是不生效）。可在设置 › LLM 角色中管理角色；在图属性中测试图默认角色。",
+      "useGraphDefaultLabel": "使用图默认值",
+      "openGraphPropertiesAriaLabel": "打开图属性",
+      "runRoleLabel": "运行角色",
+      "noNodeRole": "没有节点角色",
+      "useGraphDefaultSwitchAriaLabel": "使用图默认 llm_role"
+    },
+    "llmRoleSettingsButton": {
+      "openAriaLabel": "打开 LLM 角色设置"
+    },
+    "roleTest": {
+      "testAriaLabel": "测试 LLM 角色 {{role}}",
+      "testAriaLabelGeneric": "测试 LLM 角色",
+      "warningDetail": "有一个或多个服务商路由需要留意；重新运行测试可查看服务商诊断信息。",
+      "blockedDetail": "所选角色目前没有可用的服务商路由。"
+    },
+    "nodeParams": {
+      "customModelParamsLabel": "自定义模型参数",
+      "helpLabel": "关于模型参数",
+      "helpBody": "按节点选择性覆盖这个节点的 LLM 生成参数。关闭时，节点继承角色的默认值；开启后，留空的字段仍会逐项继承默认值。",
+      "enableAriaLabel": "为这个节点使用自定义模型参数",
+      "thinkingHelpLabel": "关于 thinking",
+      "thinkingHelpBody": "这个节点是否要求模型使用推理/thinking。这是尽力而为的设置：只有在节点的模型支持时才会生效。",
+      "thinkingAriaLabel": "节点 thinking 覆盖",
+      "maxOutputTokensLabel": "最大输出 tokens",
+      "maxOutputHelpLabel": "关于最大输出 tokens",
+      "maxOutputHelpBody": "限制这个节点的输出 tokens 上限。留空则继承角色默认值（占位符会显示推断出的上限）；填写的值超过路由上限时会被截断到该上限。",
+      "maxOutputAriaLabel": "节点最大输出 tokens 覆盖",
+      "inheritPlaceholder": "继承",
+      "temperatureLabel": "温度",
+      "temperatureHelpLabel": "关于温度",
+      "temperatureAriaLabel": "节点温度覆盖"
+    },
+    "subgraphPath": {
+      "helpLabel": "关于 path",
+      "helpBody": "选择包含 GRAPH.md 的子图文件夹。Studio 会尽量保存相对路径。",
+      "noneSelected": "未选择子图",
+      "reconnectAriaLabel": "重新连接路径",
+      "notFound": "该路径下找不到 GRAPH.md。",
+      "unresolved": "请选择一个子图文件夹。"
+    },
+    "iterate": {
+      "helpLabel": "关于 iterate",
+      "helpBody": "让这个阶段针对黑板上数组的每一项各运行一次，而不是只运行一次。将 mode 留空（off）即为普通的单次运行。I/O 字段在 I/O 面板中编辑。",
+      "modeHelpLabel": "关于 iterate mode",
+      "modeHelpBody": "off —— 只运行一次。\nbatch —— 并发遍历数组，各项互不影响。\nloop —— 串行遍历，并在各轮之间累积结果。",
+      "overHelpLabel": "关于 over",
+      "overHelpBody": "黑板上要遍历的数组字段路径，例如 data.inputs.items。引擎会针对每个元素运行这个节点一次。",
+      "itemVarHelpLabel": "关于 item_var",
+      "itemVarHelpBody": "每一轮当前元素被注入黑板时使用的名称，节点通过它读取“当前这一项”。",
+      "rangeHelpLabel": "关于 range",
+      "rangeHelpBody": "可选的闭区间切片 [start, end]（从 1 开始计数），只遍历数组的这一段。两者都留空则遍历整个数组。",
+      "concurrencyHelpLabel": "关于 concurrency",
+      "concurrencyHelpBody": "仅用于 batch 模式。同时处理的最大项数（整数，且 ≥ 1）。",
+      "accumulateHelpLabel": "关于 accumulate",
+      "accumulateHelpBody": "仅用于 loop 模式。声明每一轮的输出如何汇总成一个累计值，供下一轮读取。",
+      "accumulateVarHelpLabel": "关于 accumulate.var",
+      "accumulateVarHelpBody": "累加器的名称。每一轮都会把目前为止汇总的内容注入黑板，供下一轮继续累加。",
+      "accumulateFromHelpLabel": "关于 accumulate.from",
+      "accumulateFromHelpBody": "取这一轮输出的哪个字段作为增量，合并进累加器。",
+      "accumulateInitHelpLabel": "关于 accumulate.init",
+      "accumulateInitHelpBody": "累加器在第一轮运行前的初始值（JSON），例如 [] 或 {}。",
+      "accumulateMergeHelpLabel": "关于 accumulate.merge",
+      "accumulateMergeHelpBody": "每次增量如何并入累加器：\nappend —— 作为单个元素追加。\nextend —— 拼接一组元素。\nmerge —— 按 key 合并对象。\nreplace —— 用最新值覆盖。"
+    },
+    "compare": {
+      "sectionLabel": "对比 LLM",
+      "candidatesAriaLabel": "LLM 对比候选",
+      "empty": "还没有对比 LLM。",
+      "addAriaLabel": "添加 LLM 对比候选",
+      "addButton": "添加对比 LLM",
+      "modelLabel": "模型",
+      "modelAriaLabel": "对比模型",
+      "chooseModel": "选择模型",
+      "noModels": "没有模型",
+      "searchModels": "搜索模型",
+      "noModelFound": "未找到模型。",
+      "endpointLabel": "端点",
+      "endpointAriaLabel": "对比模型端点",
+      "autoFallback": "自动回退",
+      "noEndpointFound": "未找到端点。",
+      "addCandidate": "添加候选",
+      "runButton": "运行对比",
+      "runAriaLabel": "为这个节点运行模型对比",
+      "removeAriaLabel": "移除对比 LLM",
+      "testing": "正在测试对比 LLM",
+      "testFailed": "测试失败",
+      "missingModel": "缺少模型",
+      "selectedEndpoint": "已选端点",
+      "testAriaLabel": "测试对比 LLM {{model}}",
+      "editAriaLabel": "编辑对比 LLM {{model}}",
+      "testingRoute": "正在测试这条对比路由。",
+      "notTestedYet": "测试尚未运行。",
+      "addDialog": {
+        "title": "添加对比 LLM",
+        "description": "为这个节点选择一个模型候选。会保存在这个节点的工作区数据里，不写入 SKILL.md。"
+      },
+      "editDialog": {
+        "title": "编辑对比 LLM",
+        "description": "更新这个节点的模型候选。会保存在这个节点的工作区数据里，不写入 SKILL.md。",
+        "editModelAriaLabel": "编辑对比模型",
+        "editEndpointAriaLabel": "编辑对比模型端点"
+      }
+    },
+    "tools": {
+      "helpLabel": "关于 tools",
+      "helpBody": "这个 agent 运行时可以调用的 tool，通过正文里的 @tool:<name> 引用。每个都必须先在这里声明。",
+      "empty": "还没有 tool —— 添加一个供这个 agent 调用。",
+      "issueAriaLabel": "Tool {{name}} 有 {{issues}}：{{messages}}",
+      "removeAriaLabel": "移除 tool {{name}}",
+      "builtinHint": "内置 tool（finish_task、read_reference、read_example、log_ambiguity）始终可用 —— 不需要在这里列出。",
+      "add": "添加 tool",
+      "nameLabel": "Tool 名称",
+      "duplicate": "{{name}} 已经声明过了。",
+      "addDialog": {
+        "description": "声明一个这个 agent 可以调用的 tool，通过正文里的 @tool:<name> 引用。"
+      }
+    },
+    "maxIterations": {
+      "helpLabel": "关于 max_iterations",
+      "helpBody": "这个 agent 在必须调用 finish_task 前，最多可以进行的内部推理轮数。整数 1–50；留空时默认为 10。"
+    },
+    "subgraphRefs": {
+      "helpLabel": "关于 subgraphs",
+      "helpBody": "这个 agent 可以调用的子图，通过正文里的 @subgraph:<name> 引用。每一项把一个 name 绑定到一个子图文件夹（绝对路径）。这是一种运行时资源，与 SUBGRAPH 阶段节点是两回事。",
+      "nameAriaLabel": "Subgraph {{index}} 名称",
+      "descriptionAriaLabel": "Subgraph {{index}} 描述",
+      "noFolderSelected": "未选择文件夹",
+      "chooseFolderAriaLabel": "为 subgraph {{index}} 选择文件夹",
+      "add": "添加 subgraph",
+      "pathAriaLabel": "Subgraph {{index}} 路径"
+    },
+    "resourceRef": {
+      "aboutField": "关于 {{field}}",
+      "idAriaLabel": "{{label}} {{index}} id",
+      "pathAriaLabel": "{{label}} {{index}} path",
+      "openFileAriaLabel": "打开 {{label}} {{index}} 文件",
+      "summaryAriaLabel": "{{label}} {{index}} summary",
+      "fileMissing": "这个 skill 里还没有这个文件。",
+      "references": {
+        "addLabel": "添加 reference",
+        "helpBody": "这个 agent 可以查阅的参考文档，通过正文里的 @reference:<id> 引用。每一项把一个 id（例如 R1）绑定到一个文件路径，并附一句简短摘要。"
+      },
+      "examples": {
+        "addLabel": "添加 example",
+        "helpBody": "这个 agent 可以查阅的示例文档，通过正文里的 @example:<id> 引用。每一项把一个 id（例如 E1）绑定到一个文件路径，并附一句简短摘要。与正文中内联的 <example> 标签是两回事。"
+      }
+    }
+  },
+  "io": {
+    "diagnostics": {
+      "inputTitle": "Input 诊断",
+      "outputTitle": "Output 诊断"
+    },
+    "example": {
+      "editAriaLabel": "在 {{relPath}} 中编辑 {{title}} schema",
+      "noExample": "无法从这个 md 文件生成 {{title}} 示例。"
+    },
+    "inputConfig": {
+      "title": "Input 配置"
+    },
+    "outputArtifacts": {
+      "label": "输出产物",
+      "configureButton": "配置",
+      "configureAriaLabel": "配置输出产物",
+      "empty": "还没有配置产物。"
+    },
+    "blackboardContext": {
+      "graphInputsTitle": "图输入",
+      "graphInputsHint": "已声明的入口字段 —— 导入文件来提供数据",
+      "nodeTitle": "黑板上下文",
+      "nodeHint": "这个节点运行时黑板上的字段",
+      "empty": "还没有黑板字段 —— 在下方导入文件即可添加输入字段。"
+    },
+    "saving": "保存中",
+    "import": {
+      "button": "导入…",
+      "ariaLabel": "导入文件或文件夹",
+      "file": "导入文件",
+      "folder": "导入文件夹"
+    },
+    "fileGroup": {
+      "editAriaLabel": "编辑文件 {{label}}",
+      "openFolderAriaLabel": "打开文件夹 {{label}}",
+      "removeAriaLabel": "移除文件组 {{label}}",
+      "toggleFieldAriaLabel": "切换文件字段 {{field}}",
+      "batchMeta": "batch ×{{count}} · 保留编号",
+      "runtimeFileMeta": "{{type}} · 运行时文件",
+      "matchedIoInputs": "已匹配 io.inputs"
+    },
+    "fieldTree": {
+      "collapseAriaLabel": "折叠 {{path}}",
+      "expandAriaLabel": "展开 {{path}}",
+      "toggleFieldAriaLabel": "切换字段 {{path}}",
+      "fromMeta": "{{type}} · 来自 {{from}}"
+    },
+    "errors": {
+      "savingUnavailable": "当前上下文不支持保存",
+      "savingArtifactsUnavailable": "当前上下文不支持保存运行时产物"
+    },
+    "outputDialog": {
+      "title": "输出产物 — runtime_config",
+      "description": "每个文件携带你勾选的黑板字段；磁盘上的命名是固定的。",
+      "stemAriaLabel": "产物 stem {{index}}",
+      "modeGroupAriaLabel": "产物模式",
+      "removeArtifactAriaLabel": "移除产物 {{stem}}",
+      "addArtifact": "添加产物"
+    },
+    "testInputs": {
+      "heading": "测试输入",
+      "empty": "还没有保存的测试输入。",
+      "selectAriaLabel": "选择测试输入 {{id}}",
+      "editAriaLabel": "编辑测试输入 {{id}}",
+      "deleteAriaLabel": "删除测试输入 {{id}}",
+      "newFile": "新建文件",
+      "newFileAriaLabel": "新建测试输入文件",
+      "hint": "已选输入会喂给 Predict 和 Run · 新建文件会在编辑器中打开"
+    }
+  }
+}

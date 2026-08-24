@@ -3,6 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { LintError, RuntimeConfig, SkillDetail } from "@/api/types"
 import { InputPanel, __test__ } from "./InputPanel"
+import i18n from "../../../i18n"
+
+const panelsT = i18n.getFixedT("en", "panels")
 
 const testInputsProps = vi.hoisted((): Array<Record<string, unknown>> => [])
 
@@ -212,6 +215,7 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
       content: graphMd,
       mutate: (content) => `${content}\n<!-- mutated -->`,
       save,
+      t: panelsT,
     })
 
     expect(error).toBeNull()
@@ -231,6 +235,7 @@ describe("InputPanel sections (D-IO-PREVIEW 2026-07-02)", () => {
         throw new Error("imported file input field name cannot be empty")
       },
       save,
+      t: panelsT,
     })
 
     expect(error).toContain("cannot be empty")

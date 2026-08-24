@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 import useSWR from "swr"
 import { AxiosError } from "axios"
 import { AlertTriangle, ChevronsUpDown, CircleHelp, FlaskConical, FolderOpen, GitCompareArrows, Loader2, Pencil, Plus, Settings, Settings2, Trash2 } from "lucide-react"
@@ -273,9 +275,9 @@ function unknownRoute(routeId: string): RouteLabelInput {
   return { route_id: routeId, provider_label: "", provider_model_id: "" }
 }
 
-function endpointComboboxOptions(options: readonly LlmCompareRouteOption[]): SearchableComboboxOption[] {
+function endpointComboboxOptions(options: readonly LlmCompareRouteOption[], t: TFunction<"panels">): SearchableComboboxOption[] {
   return [
-    { value: "auto", label: "Auto fallback", searchValue: "auto fallback" },
+    { value: "auto", label: t("properties.compare.autoFallback"), searchValue: "auto fallback" },
     ...options.map((option) => {
       const next: SearchableComboboxOption = {
         value: option.value,
@@ -377,6 +379,7 @@ export function PropertiesPanel({
   onSelectGraph,
   onStartNodeCompare,
 }: PropertiesPanelProps) {
+  const { t } = useTranslation("panels")
   useLlmRolesCacheEventSync(Boolean(skillId))
 
   // Configured LLM roles for the llm_role dropdown. These load once from cache
@@ -399,7 +402,7 @@ export function PropertiesPanel({
   }, [graphContent])
   const graphFormState = useMemo(() => {
     if (graphSourceContent === undefined) {
-      return { key: `graph:${skillId ?? "unknown"}:none`, ok: false as const, message: "GRAPH.md is not available in the loaded skill detail." }
+      return { key: `graph:${skillId ?? "unknown"}:none`, ok: false as const, message: t("properties.errors.graphMdNotAvailable") }
     }
     const parsed = parsePhaseFrontmatter(graphSourceContent)
     if (!parsed.ok) {
@@ -410,7 +413,7 @@ export function PropertiesPanel({
       ok: true as const,
       form: graphFrontmatterToForm(parsed.frontmatter),
     }
-  }, [graphSourceContent, skillId])
+  }, [graphSourceContent, skillId, t])
   const [loadedGraphFormKey, setLoadedGraphFormKey] = useState(graphFormState.key)
   const [graphDraft, setGraphDraft] = useState<GraphFrontmatterFormData | null>(() => (
     graphFormState.ok ? graphFormState.form : null
@@ -470,7 +473,7 @@ export function PropertiesPanel({
     }
     const next = applyGraphFrontmatterForm(graphSourceContent, activeGraphDraft)
     if (!next.ok) {
-      toast.error(`Frontmatter error: ${next.message}`)
+      toast.error(t("properties.toast.frontmatterError", { message: next.message }))
       return
     }
     setGraphSaving(true)
@@ -502,15 +505,15 @@ export function PropertiesPanel({
             errorToReport = retryError
           }
         } else {
-          errorToReport = new Error(`Frontmatter error: ${retry.message}`)
+          errorToReport = new Error(t("properties.toast.frontmatterError", { message: retry.message }))
         }
       }
       setGraphSaveFailedKey(graphFormState.key)
-      toast.error(errorMessage(errorToReport, "Could not save graph properties"))
+      toast.error(errorMessage(errorToReport, t("properties.toast.couldNotSaveGraphProperties")))
     } finally {
       setGraphSaving(false)
     }
-  }, [activeGraphDraft, graphFormState.key, graphSourceContent, onPhaseFileSave, skillId])
+  }, [activeGraphDraft, graphFormState.key, graphSourceContent, onPhaseFileSave, skillId, t])
 
   useEffect(() => {
     if (!graphDirty || !graphAutosaveAvailable || graphSaving || graphSaveFailed) {
@@ -548,10 +551,10 @@ export function PropertiesPanel({
   )
   const phaseFormState = useMemo(() => {
     if (!filePath) {
-      return { key: `phase:${skillId ?? "unknown"}:none`, ok: false as const, reason: "missing-node" as const, message: "Select a phase node to edit frontmatter." }
+      return { key: `phase:${skillId ?? "unknown"}:none`, ok: false as const, reason: "missing-node" as const, message: t("properties.errors.selectPhaseNode") }
     }
     if (fileContent === undefined) {
-      return { key: `phase:${skillId ?? "unknown"}:${filePath}:missing-file`, ok: false as const, reason: "missing-file" as const, message: "Phase file is not available in the loaded skill detail." }
+      return { key: `phase:${skillId ?? "unknown"}:${filePath}:missing-file`, ok: false as const, reason: "missing-file" as const, message: t("properties.errors.phaseFileNotAvailable") }
     }
     const parsed = parsePhaseFrontmatter(fileContent)
     if (!parsed.ok) {
@@ -563,7 +566,7 @@ export function PropertiesPanel({
       ok: true as const,
       form,
     }
-  }, [fileContent, filePath, skillId])
+  }, [fileContent, filePath, skillId, t])
   const [loadedFormKey, setLoadedFormKey] = useState(phaseFormState.key)
   const [draft, setDraft] = useState<PhaseFrontmatterFormData | null>(() => (
     phaseFormState.ok ? phaseFormState.form : null
@@ -635,7 +638,7 @@ export function PropertiesPanel({
     }
     const next = applyPhaseFrontmatterForm(fileContent, activeDraft, kind)
     if (!next.ok) {
-      toast.error(`Frontmatter error: ${next.message}`)
+      toast.error(t("properties.toast.frontmatterError", { message: next.message }))
       return
     }
     setSaving(true)
@@ -667,15 +670,15 @@ export function PropertiesPanel({
             errorToReport = retryError
           }
         } else {
-          errorToReport = new Error(`Frontmatter error: ${retry.message}`)
+          errorToReport = new Error(t("properties.toast.frontmatterError", { message: retry.message }))
         }
       }
       setPhaseSaveFailedKey(phaseFormState.key)
-      toast.error(errorMessage(errorToReport, "Could not save phase properties"))
+      toast.error(errorMessage(errorToReport, t("properties.toast.couldNotSavePhaseProperties")))
     } finally {
       setSaving(false)
     }
-  }, [activeDraft, fileContent, filePath, kind, onPhaseFileSave, phaseFormState.key, skillId])
+  }, [activeDraft, fileContent, filePath, kind, onPhaseFileSave, phaseFormState.key, skillId, t])
 
   useEffect(() => {
     if (!dirty || !phaseAutosaveAvailable || saving || phaseSaveFailed) {
@@ -697,7 +700,7 @@ export function PropertiesPanel({
   ) => {
     const trimmed = roleName.trim()
     if (!trimmed) {
-      toast.error("Set an LLM role before testing.")
+      toast.error(t("properties.toast.setRoleBeforeTesting"))
       return
     }
     setState({ running: true, status: null, error: null })
@@ -710,11 +713,11 @@ export function PropertiesPanel({
         details: roleTestDetailsFromResult(result),
       })
     } catch (error) {
-      const message = errorMessage(error, "Role test failed")
+      const message = errorMessage(error, t("properties.toast.roleTestFailed"))
       setState({ running: false, status: null, error: message, details: [message] })
       toast.error(message)
     }
-  }, [])
+  }, [t])
   const handleRoleTest = useCallback(
     (roleName: string) => runRoleTest(roleName, setRoleTest),
     [runRoleTest],
@@ -738,24 +741,24 @@ export function PropertiesPanel({
       return
     }
     if (!isPathInsideWorkspaceRoot(selected, effectiveWorkspaceRoot)) {
-      toast.error("Select a child graph folder inside the current skill root.")
+      toast.error(t("properties.toast.selectChildGraphFolderInsideRoot"))
       return
     }
     const nextPath = subgraphPathValueFromSelection(selected, effectiveWorkspaceRoot)
     if (nextPath === ".") {
-      toast.error("Select a child graph folder, not the current skill root.")
+      toast.error(t("properties.toast.selectChildGraphFolderNotRoot"))
       return
     }
     if (skillId) {
       try {
         await getChildGraphTopology(skillId, selected)
       } catch (error) {
-        toast.error("Selected folder is not a usable child graph", { description: errorMessage(error) })
+        toast.error(t("properties.toast.selectedFolderNotUsable"), { description: errorMessage(error) })
         return
       }
     }
     setField("path", nextPath)
-  }, [activeDraft?.path, effectiveWorkspaceRoot, skillId])
+  }, [activeDraft?.path, effectiveWorkspaceRoot, skillId, t])
 
   useEffect(() => {
     setNodeParamsSaveStatus("idle")
@@ -819,12 +822,12 @@ export function PropertiesPanel({
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
-                <div className="text-xs font-medium text-destructive">Frontmatter error</div>
+                <div className="text-xs font-medium text-destructive">{t("properties.frontmatterErrorTitle")}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{phaseFormState.message}</div>
                 <PanelActions>
                   {filePath ? (
                     <Button type="button" size="sm" variant="secondary" onClick={() => onFileOpen?.(filePath)}>
-                      Open file
+                      {t("properties.openFile")}
                     </Button>
                   ) : null}
                 </PanelActions>
@@ -848,11 +851,11 @@ export function PropertiesPanel({
               />
             ) : (
               <div className="rounded-md border border-border bg-card px-3 py-2">
-                <div className="text-xs font-medium text-destructive">Frontmatter error</div>
+                <div className="text-xs font-medium text-destructive">{t("properties.frontmatterErrorTitle")}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{graphFormState.message}</div>
                 <PanelActions>
                   <Button type="button" size="sm" variant="secondary" onClick={() => onFileOpen?.("GRAPH.md")}>
-                    Open file
+                    {t("properties.openFile")}
                   </Button>
                 </PanelActions>
               </div>
@@ -865,11 +868,12 @@ export function PropertiesPanel({
 }
 
 function NodeLintSummary({ errors }: { errors: readonly LintError[] }) {
+  const { t } = useTranslation("panels")
   if (errors.length === 0) {
     return null
   }
   const hasError = errors.some((error) => error.severity !== "warning")
-  const title = `${errors.length} lint issue${errors.length === 1 ? "" : "s"} on this node`
+  const title = t("properties.nodeLint.title", { count: errors.length })
   return (
     <Alert variant={hasError ? "destructive" : "default"}>
       <AlertTriangle className="size-3.5" aria-hidden />
@@ -958,11 +962,12 @@ function YamlInputField({
 }
 
 function PropertiesPanelTitle() {
+  const { t } = useTranslation("panels")
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      <span className="text-xs font-medium text-foreground">Properties</span>
-      <HelpTooltip label="Properties panel source" side="bottom" align="start">
-        This panel edits the front matter YAML fields in the selected Markdown file.
+      <span className="text-xs font-medium text-foreground">{t("properties.title")}</span>
+      <HelpTooltip label={t("properties.sourceTooltip.label")} side="bottom" align="start">
+        {t("properties.sourceTooltip.body")}
       </HelpTooltip>
     </span>
   )
@@ -977,11 +982,12 @@ function PropertiesFileBadge({
   filePath: string
   onFileOpen?: (fileOrPath: FileOpenInput) => void
 }) {
+  const { t } = useTranslation("panels")
   return (
     <button
       type="button"
       className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      aria-label={`Open ${fileLabel}`}
+      aria-label={t("properties.fileBadge.openAriaLabel", { fileLabel })}
       onClick={() => onFileOpen?.(filePath)}
     >
       <Badge variant="secondary" className="cursor-pointer transition-colors hover:bg-secondary/80">
@@ -1012,6 +1018,7 @@ function GraphFrontmatterForm({
   onRoleTest: (roleName: string) => void
   onOpenSettings?: (tab?: SettingsTab) => void
 }) {
+  const { t } = useTranslation("panels")
   const trimmedGraphRole = value.llmRole.trim()
   const graphComboboxOptions = useMemo<SearchableComboboxOption[]>(
     () => {
@@ -1019,11 +1026,11 @@ function GraphFrontmatterForm({
         ? [trimmedGraphRole, ...roleNames]
         : roleNames
       return [
-        { value: GRAPH_LLM_ROLE_NONE_SENTINEL, label: "(none)", searchValue: "none" },
+        { value: GRAPH_LLM_ROLE_NONE_SENTINEL, label: t("properties.graph.llmRoleNone"), searchValue: "none" },
         ...graphRoleOptions.map((name) => llmRoleComboboxOption(name, roleNames.includes(name))),
       ]
     },
-    [roleNames, trimmedGraphRole],
+    [roleNames, t, trimmedGraphRole],
   )
   return (
     <form
@@ -1057,9 +1064,8 @@ function GraphFrontmatterForm({
             <Field>
               <YamlFieldLabel htmlFor="graph-llm-role">
                 llm_role
-                <HelpTooltip label="About llm_role">
-                  The default LLM role for the whole graph; agent phases inherit it unless they set their own.
-                  Manage roles in Settings &rsaquo; LLM Roles.
+                <HelpTooltip label={t("properties.graph.llmRoleHelpLabel")}>
+                  {t("properties.graph.llmRoleHelpBody")}
                 </HelpTooltip>
               </YamlFieldLabel>
               <div className="flex items-center gap-2">
@@ -1069,9 +1075,9 @@ function GraphFrontmatterForm({
                   options={graphComboboxOptions}
                   onChange={(next) => onFieldChange("llmRole", next === GRAPH_LLM_ROLE_NONE_SENTINEL ? "" : next)}
                   ariaLabel="llm_role"
-                  placeholder="Select a role"
-                  searchPlaceholder="Search roles"
-                  emptyLabel="No role found."
+                  placeholder={t("properties.graph.selectRole")}
+                  searchPlaceholder={t("properties.graph.searchRoles")}
+                  emptyLabel={t("properties.graph.noRoleFound")}
                   triggerClassName="min-w-0 flex-1"
                 />
                 <LlmRoleSettingsButton onOpenSettings={onOpenSettings} />
@@ -1105,6 +1111,7 @@ function PropertiesAutosaveActions({
   canReset: boolean
   onReset: () => void
 }) {
+  const { t } = useTranslation("panels")
   if (!canReset) {
     return null
   }
@@ -1112,7 +1119,7 @@ function PropertiesAutosaveActions({
     <PanelActions>
       <div className="flex items-center justify-end gap-2">
         <Button type="button" size="sm" variant="secondary" onClick={onReset}>
-          Reset
+          {t("common.reset")}
         </Button>
       </div>
     </PanelActions>
@@ -1171,6 +1178,7 @@ function RenamePhaseDialog({
   phaseId: string
   onPhaseRename: (phaseId: string, nextPhaseId: string) => Promise<void> | void
 }) {
+  const { t } = useTranslation("panels")
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(phaseId)
   const [renaming, setRenaming] = useState(false)
@@ -1209,16 +1217,16 @@ function RenamePhaseDialog({
           size="icon"
           variant="secondary"
           className={YAML_ICON_BUTTON_CLASS}
-          aria-label="Rename phase"
+          aria-label={t("properties.renamePhase.triggerAriaLabel")}
         >
           <Pencil className="size-3.5" aria-hidden />
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Rename phase</DialogTitle>
+          <DialogTitle>{t("properties.renamePhase.dialogTitle")}</DialogTitle>
           <DialogDescription>
-            This changes the phase id in GRAPH.md and renames the matching folder under phases.
+            {t("properties.renamePhase.dialogDescription")}
           </DialogDescription>
         </DialogHeader>
         <Field>
@@ -1226,7 +1234,7 @@ function RenamePhaseDialog({
             event.preventDefault()
             void handleSubmit()
           }}>
-          <FieldLabel htmlFor="phase-rename-input">New name</FieldLabel>
+          <FieldLabel htmlFor="phase-rename-input">{t("properties.renamePhase.newNameLabel")}</FieldLabel>
           <Input
             id="phase-rename-input"
             name="phase-id-draft"
@@ -1244,16 +1252,16 @@ function RenamePhaseDialog({
               }
             }}
           />
-          <FieldDescription>Use letters, numbers, underscores, or hyphens. The first character must be a letter or underscore.</FieldDescription>
-          {invalid ? <p className="text-xs text-destructive">Invalid phase name.</p> : null}
+          <FieldDescription>{t("properties.renamePhase.helperText")}</FieldDescription>
+          {invalid ? <p className="text-xs text-destructive">{t("properties.renamePhase.invalidName")}</p> : null}
           </form>
         </Field>
         <DialogFooter>
           <Button type="button" variant="secondary" disabled={renaming} onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" disabled={!canRename} onClick={() => void handleSubmit()}>
-            {renaming ? "Renaming" : "Rename"}
+            {renaming ? t("properties.renamePhase.renaming") : t("properties.renamePhase.rename")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1280,6 +1288,7 @@ function NodeResumeDebugBar({
   resumeLoading: boolean
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
 }) {
+  const { t } = useTranslation("panels")
   if (!runId || nodeStatus !== "error") {
     return null
   }
@@ -1291,7 +1300,9 @@ function NodeResumeDebugBar({
       : resumeValidity?.reason ?? "checkpoint.not_found"
   const dirtyFields = resumeValidity?.dirty_fields ?? []
   const disabled = !allowed || loading || resumeLoading || !onResumeNode
-  const buttonLabel = allowed ? (resumeLoading ? "Resuming" : "Resume node") : "Resume disabled"
+  const buttonLabel = allowed
+    ? (resumeLoading ? t("properties.resume.resuming") : t("properties.resume.resumeNode"))
+    : t("properties.resume.resumeDisabled")
 
   const handleResume = () => {
     if (!allowed || !resumeValidity || !onResumeNode) {
@@ -1301,11 +1312,11 @@ function NodeResumeDebugBar({
   }
 
   return (
-    <section className="rounded-md border border-border bg-card px-3 py-2" aria-label="Checkpoint validity">
+    <section className="rounded-md border border-border bg-card px-3 py-2" aria-label={t("properties.resume.sectionLabel")}>
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Checkpoint validity
+            {t("properties.resume.sectionLabel")}
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-foreground">
             <Badge variant={allowed ? "secondary" : "destructive"}>{reason}</Badge>
@@ -1615,6 +1626,7 @@ function ActionsField({
   onActionCreate?: (phaseId: string, name: string) => Promise<void> | void
   onActionDelete?: (phaseId: string, name: string) => Promise<void> | void
 }) {
+  const { t } = useTranslation("panels")
   const logicPath = `phases/${phaseId}/LOGIC.md`
   const declared = useMemo(() => readActionsList(files?.[logicPath] ?? ""), [files, logicPath])
   const filesPresent = useMemo(() => scanActionFiles(files, phaseId), [files, phaseId])
@@ -1629,10 +1641,8 @@ function ActionsField({
     <Field>
       <YamlFieldLabel>
         actions
-        <HelpTooltip label="About actions">
-          The deterministic functions this logic node runs, in order. Each action is one
-          <span className="font-mono"> def &lt;name&gt;(inputs)</span> in <span className="font-mono">actions/&lt;name&gt;.py</span>;
-          the frontmatter list and body <span className="font-mono">&lt;action&gt;</span> tags are kept in sync for you.
+        <HelpTooltip label={t("properties.actions.helpLabel")}>
+          {t("properties.actions.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -1658,7 +1668,7 @@ function ActionsField({
           ))}
         </div>
       ) : (
-        <FieldDescription>No actions yet — add one to scaffold its file.</FieldDescription>
+        <FieldDescription>{t("properties.actions.empty")}</FieldDescription>
       )}
       {onActionCreate ? (
         <AddActionDialog existing={[...declared, ...orphans]} onAdd={(name) => onActionCreate(phaseId, name)} />
@@ -1666,7 +1676,7 @@ function ActionsField({
       {/* n2-properties #19: an action's writeable outputs are bounded by io.outputs,
           edited in the I/O panel — surfaced here as a non-blocking hint. */}
       <FieldDescription>
-        Output fields an action writes are bounded by io.outputs - edit those field boundaries in the I/O panel (toolbar tab 3).
+        {t("properties.actions.ioHint")}
       </FieldDescription>
     </Field>
   )
@@ -1685,13 +1695,14 @@ function ActionRow({
   onEdit?: () => void
   onDelete?: () => void
 }) {
+  const { t } = useTranslation("panels")
   return (
     <div className="flex items-center justify-between gap-2 text-xs text-foreground">
       <span className="min-w-0 flex-1 truncate">
         <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
         {name}
-        {orphan ? <span className="ml-1 text-warning">unregistered file</span> : null}
-        {missingFile ? <span className="ml-1 text-destructive">missing file</span> : null}
+        {orphan ? <span className="ml-1 text-warning">{t("properties.actions.unregisteredFile")}</span> : null}
+        {missingFile ? <span className="ml-1 text-destructive">{t("properties.actions.missingFile")}</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-1">
         {onEdit ? (
@@ -1700,7 +1711,7 @@ function ActionRow({
             size="icon"
             variant="secondary"
             className={YAML_ICON_BUTTON_CLASS}
-            aria-label={`Edit action ${name}`}
+            aria-label={t("properties.actions.editAriaLabel", { name })}
             onClick={onEdit}
           >
             <Pencil className="size-3.5" aria-hidden />
@@ -1713,6 +1724,7 @@ function ActionRow({
 }
 
 function DeleteActionButton({ name, onConfirm }: { name: string; onConfirm: () => void }) {
+  const { t } = useTranslation("panels")
   const [open, setOpen] = useState(false)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -1722,22 +1734,21 @@ function DeleteActionButton({ name, onConfirm }: { name: string; onConfirm: () =
           size="icon"
           variant="secondary"
           className={YAML_ICON_BUTTON_CLASS}
-          aria-label={`Delete action ${name}`}
+          aria-label={t("properties.actions.deleteAriaLabel", { name })}
         >
           <Trash2 className="size-3.5" aria-hidden />
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete action {name}?</DialogTitle>
+          <DialogTitle>{t("properties.actions.deleteDialog.title", { name })}</DialogTitle>
           <DialogDescription>
-            Removes <span className="font-mono">{name}</span> from this phase and deletes
-            <span className="font-mono"> actions/{name}.py</span>. This cannot be undone.
+            {t("properties.actions.deleteDialog.description", { name })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -1747,7 +1758,7 @@ function DeleteActionButton({ name, onConfirm }: { name: string; onConfirm: () =
               onConfirm()
             }}
           >
-            Delete
+            {t("common.delete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1756,6 +1767,7 @@ function DeleteActionButton({ name, onConfirm }: { name: string; onConfirm: () =
 }
 
 function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: string) => void }) {
+  const { t } = useTranslation("panels")
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const name = draft.trim()
@@ -1782,14 +1794,14 @@ function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name
       <DialogTrigger asChild>
         <Button type="button" size="sm" variant="secondary" className="mt-1">
           <Plus className="size-3.5" aria-hidden />
-          Add action
+          {t("properties.actions.add")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add action</DialogTitle>
+          <DialogTitle>{t("properties.actions.addDialog.title")}</DialogTitle>
           <DialogDescription>
-            Creates <span className="font-mono">actions/&lt;name&gt;.py</span> with a stub and registers it on this phase.
+            {t("properties.actions.addDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <Field>
@@ -1801,7 +1813,7 @@ function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name
               submit()
             }}
           >
-            <FieldLabel htmlFor="action-name-input">Action name</FieldLabel>
+            <FieldLabel htmlFor="action-name-input">{t("properties.actions.addDialog.nameLabel")}</FieldLabel>
             <Input
               id="action-name-input"
               value={draft}
@@ -1812,20 +1824,20 @@ function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
             <FieldDescription>
-              A Python identifier — becomes <span className="font-mono">def &lt;name&gt;(inputs)</span>.
+              {t("properties.actions.addDialog.helperText")}
             </FieldDescription>
             {invalid ? (
-              <p className="text-xs text-destructive">Use letters, digits, underscore; not starting with a digit.</p>
+              <p className="text-xs text-destructive">{t("properties.actions.addDialog.invalidName")}</p>
             ) : null}
-            {duplicate ? <p className="text-xs text-destructive">An action named {name} already exists.</p> : null}
+            {duplicate ? <p className="text-xs text-destructive">{t("properties.actions.addDialog.duplicateName", { name })}</p> : null}
           </form>
         </Field>
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" disabled={!canAdd} onClick={submit}>
-            Add
+            {t("common.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1844,6 +1856,7 @@ function AllowSequentialOverwriteField({
   errors?: LintError[]
   onChange: (next: string) => void
 }) {
+  const { t } = useTranslation("panels")
   const selectedFields = useMemo(() => overwriteFieldLines(value), [value])
   const setAllowed = (field: string, allowed: boolean) => {
     const next = new Set(selectedFields)
@@ -1872,9 +1885,8 @@ function AllowSequentialOverwriteField({
     <Field>
       <YamlFieldLabel>
         allow_sequential_overwrite
-        <HelpTooltip label="About allow_sequential_overwrite">
-          Output fields this phase writes that an upstream phase already wrote to the blackboard. Allow the ones you mean
-          to overwrite; any collision left un-allowed is flagged by the engine as an illegal overwrite.
+        <HelpTooltip label={t("properties.allowOverwrite.helpLabel")}>
+          {t("properties.allowOverwrite.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -1890,7 +1902,7 @@ function AllowSequentialOverwriteField({
                 {row.field}
                 {row.upstreamPhaseIds.length > 0 ? (
                   <span className="ml-1 text-muted-foreground">
-                    from {row.upstreamPhaseIds.join(", ")}
+                    {t("properties.allowOverwrite.fromUpstream", { ids: row.upstreamPhaseIds.join(", ") })}
                   </span>
                 ) : null}
               </span>
@@ -1900,10 +1912,10 @@ function AllowSequentialOverwriteField({
                   size="sm"
                   variant="secondary"
                   className="h-6 shrink-0"
-                  aria-label={`Deny overwrite for ${row.field}`}
+                  aria-label={t("properties.allowOverwrite.denyAriaLabel", { field: row.field })}
                   onClick={() => setAllowed(row.field, false)}
                 >
-                  Deny
+                  {t("properties.allowOverwrite.deny")}
                 </Button>
               ) : (
                 <Button
@@ -1911,10 +1923,10 @@ function AllowSequentialOverwriteField({
                   size="sm"
                   variant="default"
                   className="h-6 shrink-0"
-                  aria-label={`Allow overwrite for ${row.field}`}
+                  aria-label={t("properties.allowOverwrite.allowAriaLabel", { field: row.field })}
                   onClick={() => setAllowed(row.field, true)}
                 >
-                  Allow
+                  {t("properties.allowOverwrite.allow")}
                 </Button>
               )}
             </div>
@@ -1922,7 +1934,7 @@ function AllowSequentialOverwriteField({
         </div>
       ) : (
         <FieldDescription>
-          No upstream phase output collides with this phase&rsquo;s output fields.
+          {t("properties.allowOverwrite.empty")}
         </FieldDescription>
       )}
     </Field>
@@ -2091,6 +2103,7 @@ function SubgraphPathField({
   workspaceRoot: string | null
   onReconnectFolder: () => void
 }) {
+  const { t } = useTranslation("panels")
   const fieldState = subgraphPathFieldState(value, null, workspaceRoot)
   const [diskMissing, setDiskMissing] = useState(false)
 
@@ -2128,13 +2141,13 @@ function SubgraphPathField({
       label={(
         <>
           path
-          <HelpTooltip label="About path">
-            Select the child graph folder that contains GRAPH.md. Studio saves a relative path when it can.
+          <HelpTooltip label={t("properties.subgraphPath.helpLabel")}>
+            {t("properties.subgraphPath.helpBody")}
           </HelpTooltip>
           <FieldErrorMarker errors={errors} />
         </>
       )}
-      value={value.trim() || "No child graph selected"}
+      value={value.trim() || t("properties.subgraphPath.noneSelected")}
       readOnly
       invalid={unresolved}
       inputClassName="aria-invalid:text-destructive"
@@ -2144,7 +2157,7 @@ function SubgraphPathField({
           size="icon"
           variant="secondary"
           className={YAML_ICON_BUTTON_CLASS}
-          aria-label="Reconnect path"
+          aria-label={t("properties.subgraphPath.reconnectAriaLabel")}
           onClick={onReconnectFolder}
         >
           <FolderOpen className="size-3.5" aria-hidden />
@@ -2155,8 +2168,8 @@ function SubgraphPathField({
         <div className="space-y-1.5">
           <p className="text-xs text-destructive">
             {diskMissing
-              ? "Path does not resolve to GRAPH.md."
-              : "Select a child graph folder."}
+              ? t("properties.subgraphPath.notFound")
+              : t("properties.subgraphPath.unresolved")}
           </p>
         </div>
       ) : null}
@@ -2181,6 +2194,7 @@ function IterateField({
   errors?: LintError[]
   onChange: (next: PhaseIterateFormData) => void
 }) {
+  const { t } = useTranslation("panels")
   const update = (patch: Partial<PhaseIterateFormData>) => onChange({ ...value, ...patch })
   const modeValue = value.mode || ITERATE_OFF_VALUE
 
@@ -2188,19 +2202,18 @@ function IterateField({
     <Field>
       <YamlFieldLabel htmlFor="phase-iterate-mode">
         iterate
-        <HelpTooltip label="About iterate">
-          Make this phase run once per item of an array on the blackboard, instead of just once. Leave mode
-          <span className="font-mono"> off</span> for a normal single run. I/O fields are edited in the I/O panel.
+        <HelpTooltip label={t("properties.iterate.helpLabel")}>
+          {t("properties.iterate.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
       <Field>
         <YamlNestedFieldLabel htmlFor="phase-iterate-mode">
           mode
-          <HelpTooltip label="About iterate mode">
-            <p><span className="font-mono">off</span> — run once.</p>
-            <p><span className="font-mono">batch</span> — map over the array concurrently, each item independent.</p>
-            <p><span className="font-mono">loop</span> — iterate serially and accumulate results across rounds.</p>
+          <HelpTooltip label={t("properties.iterate.modeHelpLabel")}>
+            {t("properties.iterate.modeHelpBody").split("\n").map((line) => (
+              <p key={line}>{line}</p>
+            ))}
           </HelpTooltip>
         </YamlNestedFieldLabel>
         <Select
@@ -2227,9 +2240,8 @@ function IterateField({
             <Field>
               <YamlNestedFieldLabel htmlFor="phase-iterate-over">
                 over
-                <HelpTooltip label="About over">
-                  Path to the array field on the blackboard to iterate, e.g. <span className="font-mono">data.inputs.items</span>.
-                  The engine runs this node once per element.
+                <HelpTooltip label={t("properties.iterate.overHelpLabel")}>
+                  {t("properties.iterate.overHelpBody")}
                 </HelpTooltip>
               </YamlNestedFieldLabel>
               <Input
@@ -2242,9 +2254,8 @@ function IterateField({
             <Field>
               <YamlNestedFieldLabel htmlFor="phase-iterate-item-var">
                 item_var
-                <HelpTooltip label="About item_var">
-                  Name under which the current element is injected onto the blackboard each round, so the node can read
-                  &ldquo;this item&rdquo;.
+                <HelpTooltip label={t("properties.iterate.itemVarHelpLabel")}>
+                  {t("properties.iterate.itemVarHelpBody")}
                 </HelpTooltip>
               </YamlNestedFieldLabel>
               <Input
@@ -2258,9 +2269,8 @@ function IterateField({
           <Field>
             <YamlNestedFieldLabel>
               range
-              <HelpTooltip label="About range">
-                Optional inclusive slice <span className="font-mono">[start, end]</span> (1-based) to iterate only that
-                segment of the array. Leave both empty to run the whole array.
+              <HelpTooltip label={t("properties.iterate.rangeHelpLabel")}>
+                {t("properties.iterate.rangeHelpBody")}
               </HelpTooltip>
             </YamlNestedFieldLabel>
             <div className="grid grid-cols-2 gap-2">
@@ -2284,8 +2294,8 @@ function IterateField({
             <Field>
               <YamlNestedFieldLabel htmlFor="phase-iterate-concurrency">
                 concurrency
-                <HelpTooltip label="About concurrency">
-                  Batch mode only. Max number of items processed at the same time (integer &ge; 1).
+                <HelpTooltip label={t("properties.iterate.concurrencyHelpLabel")}>
+                  {t("properties.iterate.concurrencyHelpBody")}
                 </HelpTooltip>
               </YamlNestedFieldLabel>
               <Input
@@ -2301,9 +2311,8 @@ function IterateField({
             <div className="space-y-2">
               <YamlNestedFieldLabel>
                 accumulate
-                <HelpTooltip label="About accumulate">
-                  Loop mode only. Declares how each round&rsquo;s output is gathered into a running value that the next
-                  round can read.
+                <HelpTooltip label={t("properties.iterate.accumulateHelpLabel")}>
+                  {t("properties.iterate.accumulateHelpBody")}
                 </HelpTooltip>
               </YamlNestedFieldLabel>
               {/* Frame accumulate.* sub-properties in the shared Card box (the same
@@ -2315,9 +2324,8 @@ function IterateField({
                     <Field>
                       <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-var">
                         accumulate.var
-                        <HelpTooltip label="About accumulate.var">
-                          Name of the running accumulator. Each round it is injected onto the blackboard holding everything
-                          gathered so far, so the next round can build on it.
+                        <HelpTooltip label={t("properties.iterate.accumulateVarHelpLabel")}>
+                          {t("properties.iterate.accumulateVarHelpBody")}
                         </HelpTooltip>
                       </YamlNestedFieldLabel>
                       <Input
@@ -2330,9 +2338,8 @@ function IterateField({
                     <Field>
                       <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-from">
                         accumulate.from
-                        <HelpTooltip label="About accumulate.from">
-                          Which field of this round&rsquo;s output to take as the increment that gets merged into the
-                          accumulator.
+                        <HelpTooltip label={t("properties.iterate.accumulateFromHelpLabel")}>
+                          {t("properties.iterate.accumulateFromHelpBody")}
                         </HelpTooltip>
                       </YamlNestedFieldLabel>
                       <Input
@@ -2347,9 +2354,8 @@ function IterateField({
                     <Field>
                       <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-init">
                         accumulate.init
-                        <HelpTooltip label="About accumulate.init">
-                          Initial value of the accumulator as JSON, e.g. <span className="font-mono">[]</span> or
-                          <span className="font-mono"> {"{}"}</span>, before the first round runs.
+                        <HelpTooltip label={t("properties.iterate.accumulateInitHelpLabel")}>
+                          {t("properties.iterate.accumulateInitHelpBody")}
                         </HelpTooltip>
                       </YamlNestedFieldLabel>
                       <Input
@@ -2362,12 +2368,10 @@ function IterateField({
                     <Field>
                       <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-merge">
                         accumulate.merge
-                        <HelpTooltip label="About accumulate.merge">
-                          <p>How each increment joins the accumulator:</p>
-                          <p><span className="font-mono">append</span> — add the increment as one item.</p>
-                          <p><span className="font-mono">extend</span> — concatenate a list of items.</p>
-                          <p><span className="font-mono">merge</span> — merge objects key by key.</p>
-                          <p><span className="font-mono">replace</span> — overwrite with the latest value.</p>
+                        <HelpTooltip label={t("properties.iterate.accumulateMergeHelpLabel")}>
+                          {t("properties.iterate.accumulateMergeHelpBody").split("\n").map((line) => (
+                            <p key={line}>{line}</p>
+                          ))}
                         </HelpTooltip>
                       </YamlNestedFieldLabel>
                       <Select
@@ -2408,9 +2412,10 @@ export function RoleTestControl({
   onRoleTest: (roleName: string) => void
   disabled?: boolean
 }) {
+  const { t } = useTranslation("panels")
   const badge = roleTestStatusBadge(roleTest)
   const showBadge = badge.running || roleTest.status != null || Boolean(roleTest.error)
-  const details = roleTestTooltipDetails(roleTest)
+  const details = roleTestTooltipDetails(roleTest, t)
   const tooltipLabel = [badge.label, ...details].join("\n")
   const badgeNode = showBadge ? (
     <Badge
@@ -2450,7 +2455,7 @@ export function RoleTestControl({
         size="icon"
         variant="default"
         data-llm-role-test-trigger="true"
-        aria-label={roleName.trim() ? `Test LLM role ${roleName}` : "Test LLM role"}
+        aria-label={roleName.trim() ? t("properties.roleTest.testAriaLabel", { role: roleName }) : t("properties.roleTest.testAriaLabelGeneric")}
         disabled={disabled || badge.running || roleName.trim().length === 0}
         onClick={() => onRoleTest(roleName)}
       >
@@ -2462,17 +2467,17 @@ export function RoleTestControl({
   )
 }
 
-function roleTestTooltipDetails(roleTest: RoleTestStatusInput): string[] {
+function roleTestTooltipDetails(roleTest: RoleTestStatusInput, t: TFunction<"panels">): string[] {
   const details = uniqueStrings([
     ...(roleTest.details ?? []),
     roleTest.error ?? null,
   ].filter((detail): detail is string => Boolean(detail?.trim())))
   if (details.length > 0) return details
   if (roleTest.status === "warning") {
-    return ["One or more provider routes need attention; rerun the test for provider diagnostics."]
+    return [t("properties.roleTest.warningDetail")]
   }
   if (roleTest.status === "blocked" || roleTest.status === "failed") {
-    return ["The selected role has no currently usable provider route."]
+    return [t("properties.roleTest.blockedDetail")]
   }
   return []
 }
@@ -2512,6 +2517,7 @@ function ValidatorField({
   onValidatorCreate?: (phaseId: string) => Promise<void> | void
   onFileOpen?: (fileOrPath: FileOpenInput) => void
 }) {
+  const { t } = useTranslation("panels")
   const filePath = validatorFilePath(phaseId)
   const fileExists = files != null && files[filePath] !== undefined
 
@@ -2523,9 +2529,8 @@ function ValidatorField({
         onClick={(event) => event.preventDefault()}
       >
         validator
-        <HelpTooltip label="About validator">
-          When on, the engine runs this node&rsquo;s sibling <span className="font-mono">validator.py</span> after the
-          node finishes to check its output (return None to pass). Create the file to enable it.
+        <HelpTooltip label={t("properties.validator.helpLabel")}>
+          {t("properties.validator.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -2537,7 +2542,7 @@ function ValidatorField({
               size="icon"
               variant="secondary"
               className={YAML_ICON_BUTTON_CLASS}
-              aria-label="Edit validator.py"
+              aria-label={t("properties.validator.editAriaLabel")}
               onClick={() => onFileOpen({ path: filePath, skillId, workspaceRoot, language: "python", saveEnabled: true })}
             >
               <Pencil className="size-3.5" aria-hidden />
@@ -2561,7 +2566,7 @@ function ValidatorField({
           onClick={() => onValidatorCreate?.(phaseId)}
         >
           <Plus className="size-3.5" aria-hidden />
-          Create validator.py
+          {t("properties.validator.createButton")}
         </Button>
       )}
     </Field>
@@ -2575,17 +2580,18 @@ function ValidatorField({
  * reusing shadcn Tooltip and severity tokens - never a hand-rolled popover or raw color.
  */
 function FieldErrorMarker({ errors }: { errors?: LintError[] | null }) {
+  const { t } = useTranslation("panels")
   if (!errors || errors.length === 0) {
     return null
   }
   const hasError = errors.some((error) => error.severity === "error")
   const tone = hasError ? "text-destructive" : "text-warning"
-  const count = errors.length === 1 ? "1 issue" : `${errors.length} issues`
+  const count = t("common.issueCount", { count: errors.length })
   const messages = errors.map((error) => error.message)
   // The joined messages live on the trigger's accessible name so the diagnostic
   // is reachable without opening the styled Tooltip (UI-spec §2.7: no native
   // title alongside the Radix tooltip).
-  const accessibleSummary = `Field has ${count}: ${messages.join("; ")}`
+  const accessibleSummary = t("common.fieldHasIssues", { issues: count, messages: messages.join("; ") })
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -2615,6 +2621,7 @@ function SubagentsField({
   value: PhaseSubagentRef[]
   onChange: (next: PhaseSubagentRef[]) => void
 }) {
+  const { t } = useTranslation("panels")
   const update = (index: number, patch: Partial<PhaseSubagentRef>) => {
     onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
   }
@@ -2629,43 +2636,41 @@ function SubagentsField({
     <Field>
       <YamlFieldLabel>
         subagents
-        <HelpTooltip label="About subagents">
-          Sub-agents this agent can delegate to at runtime. <span className="font-mono">name</span> is referenced in the
-          body with <span className="font-mono">@subagent:&lt;name&gt;</span>; <span className="font-mono">target_skill</span>
-          {" "}points at the agent skill being delegated to.
+        <HelpTooltip label={t("properties.subagents.helpLabel")}>
+          {t("properties.subagents.helpBody")}
         </HelpTooltip>
       </YamlFieldLabel>
       <div className="space-y-2">
         {value.map((entry, index) => (
           <div key={index} className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
             <Input
-              aria-label={`Subagent ${index + 1} name`}
+              aria-label={t("properties.subagents.nameAriaLabel", { index: index + 1 })}
               value={entry.name}
               placeholder="name"
               onChange={(event) => update(index, { name: event.currentTarget.value })}
             />
             <Input
-              aria-label={`Subagent ${index + 1} target skill`}
+              aria-label={t("properties.subagents.targetSkillAriaLabel", { index: index + 1 })}
               value={entry.target_skill}
               placeholder="target_skill"
               onChange={(event) => update(index, { target_skill: event.currentTarget.value })}
             />
             <Input
-              aria-label={`Subagent ${index + 1} description`}
+              aria-label={t("properties.subagents.descriptionAriaLabel", { index: index + 1 })}
               value={entry.description}
               placeholder="description"
               onChange={(event) => update(index, { description: event.currentTarget.value })}
             />
             <div className="flex justify-end">
               <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
-                Remove
+                {t("common.remove")}
               </Button>
             </div>
           </div>
         ))}
       </div>
       <Button type="button" size="sm" variant="secondary" className="mt-1" onClick={add}>
-        Add subagent
+        {t("properties.subagents.add")}
       </Button>
     </Field>
   )
@@ -2708,6 +2713,7 @@ function LlmRoleField({
   onStartNodeCompare?: (nodeId: string) => void
   onNodeParamsSaveStatusChange?: (status: SaveStatus) => void
 }) {
+  const { t } = useTranslation("panels")
   const trimmed = value.trim()
   const options = useMemo(
     () => (trimmed && !roleNames.includes(trimmed) ? [trimmed, ...roleNames] : roleNames),
@@ -2722,10 +2728,8 @@ function LlmRoleField({
     <Field>
       <YamlFieldLabel htmlFor="phase-llm-role">
         llm_role
-        <HelpTooltip label="About llm_role">
-          The configured LLM role this agent runs as. Turn &ldquo;Use graph default&rdquo; on to run with the
-          graph&rsquo;s llm_role (the node&rsquo;s own pick is kept, just inactive). Manage roles in
-          Settings &rsaquo; LLM Roles; test the graph default in the graph properties.
+        <HelpTooltip label={t("properties.llmRole.helpLabel")}>
+          {t("properties.llmRole.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -2736,7 +2740,7 @@ function LlmRoleField({
             className="min-w-0"
             onClick={(event) => event.preventDefault()}
           >
-            Use graph default
+            {t("properties.llmRole.useGraphDefaultLabel")}
           </YamlNestedFieldLabel>
           <TooltipProvider>
             <Tooltip>
@@ -2744,14 +2748,14 @@ function LlmRoleField({
                 <button
                   type="button"
                   className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                  aria-label="Open graph properties"
+                  aria-label={t("properties.llmRole.openGraphPropertiesAriaLabel")}
                   data-llm-role-graph-trigger="true"
                   onClick={() => onSelectGraph?.()}
                 >
                   <Settings className="size-3.5" aria-hidden />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top">Open graph properties</TooltipContent>
+              <TooltipContent side="top">{t("properties.llmRole.openGraphPropertiesAriaLabel")}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
@@ -2759,7 +2763,7 @@ function LlmRoleField({
           id="phase-llm-role-default"
           size="sm"
           checked={useGraphDefault}
-          aria-label="Use graph default llm_role"
+          aria-label={t("properties.llmRole.useGraphDefaultSwitchAriaLabel")}
           onCheckedChange={onUseGraphDefaultChange}
         />
       </Field>
@@ -2772,7 +2776,7 @@ function LlmRoleField({
             htmlFor="phase-llm-role"
             className={useGraphDefault ? "opacity-50" : undefined}
           >
-            Run role
+            {t("properties.llmRole.runRoleLabel")}
           </YamlNestedFieldLabel>
           <div className="flex items-center gap-2">
             <SearchableOptionCombobox
@@ -2781,9 +2785,9 @@ function LlmRoleField({
               options={roleComboboxOptions}
               onChange={onChange}
               ariaLabel="llm_role"
-              placeholder="No node role"
-              searchPlaceholder="Search roles"
-              emptyLabel="No role found."
+              placeholder={t("properties.llmRole.noNodeRole")}
+              searchPlaceholder={t("properties.graph.searchRoles")}
+              emptyLabel={t("properties.graph.noRoleFound")}
               triggerClassName="min-w-0 flex-1"
               disabled={useGraphDefault}
             />
@@ -2876,6 +2880,7 @@ function LlmNodeParamsField({
   modelGroups?: ModelGroup[]
   onSaveStatusChange?: (status: SaveStatus) => void
 }) {
+  const { t } = useTranslation("panels")
   const [draft, setDraft] = useState<NodeLlmParamsDraft>(EMPTY_NODE_LLM_PARAMS_DRAFT)
   const [nodeParamsSaveStatus, setNodeParamsSaveStatus] = useState<SaveStatus>("idle")
   const { data: rolesData } = useSWR(LLM_ROLES_SWR_KEY, getRoles, { ...STUDIO_TRUTH_SWR_CONFIG, shouldRetryOnError: false })
@@ -2907,7 +2912,7 @@ function LlmNodeParamsField({
         } catch (error) {
           if (!queuedSaveRef.current) {
             setNodeParamsSaveStatus("error")
-            toast.error(errorMessage(error, "Could not save model params"))
+            toast.error(errorMessage(error, t("properties.toast.couldNotSaveModelParams")))
           }
         } finally {
           inflightSaveRef.current = null
@@ -2926,7 +2931,7 @@ function LlmNodeParamsField({
       }
       inflightSaveRef.current = run(next)
     },
-    [skillId, nodeId],
+    [skillId, nodeId, t],
   )
 
   const debouncedPersist = useDebouncedCallback((next: NodeLlmParamsDraft) => {
@@ -3031,7 +3036,7 @@ function LlmNodeParamsField({
       ? String(inferredOutputMax)
       : ""
   const fallbackTemperature = String(roleIntent?.temperature ?? DEFAULT_ROLE_TEMPERATURE)
-  const maxOutputPlaceholder = inferredOutputMax != null ? formatThousands(String(inferredOutputMax)) : "Inherit"
+  const maxOutputPlaceholder = inferredOutputMax != null ? formatThousands(String(inferredOutputMax)) : t("properties.nodeParams.inheritPlaceholder")
   const maxOutputValue = draft.enabled ? draft.maxOutputTokens : fallbackMaxOutputTokens
   const temperatureValue = draft.enabled ? draft.temperature : fallbackTemperature
   const temperatureReadout = draft.enabled
@@ -3043,17 +3048,16 @@ function LlmNodeParamsField({
     <div className="mt-2 space-y-1.5" data-llm-node-params="true">
       <div className="flex items-center justify-between gap-2" data-llm-node-params-header="true">
         <YamlNestedFieldLabel>
-          Custom model params
-          <HelpTooltip label="About model params">
-            Opt-in per-node overrides of this node&rsquo;s LLM generation params. When off, the node
-            inherits the role defaults; when on, blank fields still inherit field-by-field.
+          {t("properties.nodeParams.customModelParamsLabel")}
+          <HelpTooltip label={t("properties.nodeParams.helpLabel")}>
+            {t("properties.nodeParams.helpBody")}
           </HelpTooltip>
         </YamlNestedFieldLabel>
         <Checkbox
           id={enabledId}
           data-llm-node-params-enabled="true"
           checked={draft.enabled}
-          aria-label="Use custom model params for this node"
+          aria-label={t("properties.nodeParams.enableAriaLabel")}
           onCheckedChange={(checked) => {
             const enabled = checked === true
             update({ ...latestDraftRef.current, enabled })
@@ -3074,9 +3078,8 @@ function LlmNodeParamsField({
           >
             <YamlNestedFieldLabel htmlFor={thinkingId} className="min-w-0">
               thinking
-              <HelpTooltip label="About thinking">
-                Whether this node asks the model to use reasoning/thinking. Best-effort: only
-                applies when the node&rsquo;s model supports it.
+              <HelpTooltip label={t("properties.nodeParams.thinkingHelpLabel")}>
+                {t("properties.nodeParams.thinkingHelpBody")}
               </HelpTooltip>
             </YamlNestedFieldLabel>
             <Switch
@@ -3085,22 +3088,21 @@ function LlmNodeParamsField({
               data-llm-node-thinking="true"
               checked={thinkingChecked}
               disabled={!draft.enabled}
-              aria-label="Node thinking override"
+              aria-label={t("properties.nodeParams.thinkingAriaLabel")}
               onCheckedChange={(thinking) => update({ ...latestDraftRef.current, thinking })}
             />
           </Field>
           <Field className="min-h-14 gap-1">
             <YamlNestedFieldLabel htmlFor={maxOutputId}>
-              max output tokens
-              <HelpTooltip label="About max output tokens">
-                Cap on this node&rsquo;s output tokens. Empty inherits the role default (the placeholder
-                shows that inferred max); a value over the route&rsquo;s max is clamped down to it.
+              {t("properties.nodeParams.maxOutputTokensLabel")}
+              <HelpTooltip label={t("properties.nodeParams.maxOutputHelpLabel")}>
+                {t("properties.nodeParams.maxOutputHelpBody")}
               </HelpTooltip>
             </YamlNestedFieldLabel>
             <Input
               id={maxOutputId}
               data-llm-node-max-output="true"
-              aria-label="Node max output tokens override"
+              aria-label={t("properties.nodeParams.maxOutputAriaLabel")}
               value={formatThousands(maxOutputValue)}
               onChange={(event) => update({ ...latestDraftRef.current, maxOutputTokens: stripThousands(event.target.value) })}
               inputMode="numeric"
@@ -3110,8 +3112,8 @@ function LlmNodeParamsField({
           </Field>
           <Field className="min-h-14 gap-1">
             <YamlNestedFieldLabel htmlFor={temperatureId}>
-              temperature
-              <HelpTooltip label="About temperature">
+              {t("properties.nodeParams.temperatureLabel")}
+              <HelpTooltip label={t("properties.nodeParams.temperatureHelpLabel")}>
                 {TEMPERATURE_SCALE_HELP}
               </HelpTooltip>
             </YamlNestedFieldLabel>
@@ -3119,7 +3121,7 @@ function LlmNodeParamsField({
               <Slider
                 id={temperatureId}
                 data-llm-node-temperature="true"
-                aria-label="Node temperature override"
+                aria-label={t("properties.nodeParams.temperatureAriaLabel")}
                 min={0}
                 max={2}
                 step={0.1}
@@ -3165,6 +3167,7 @@ function LlmRoleSettingsButton({
   onOpenSettings?: (tab?: SettingsTab) => void
   disabled?: boolean
 }) {
+  const { t } = useTranslation("panels")
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -3173,7 +3176,7 @@ function LlmRoleSettingsButton({
           size="icon"
           variant="secondary"
           className={YAML_ICON_BUTTON_CLASS}
-          aria-label="Open LLM Roles settings"
+          aria-label={t("properties.llmRoleSettingsButton.openAriaLabel")}
           data-llm-role-settings-trigger="true"
           disabled={disabled}
           onClick={() => onOpenSettings?.("llm_roles")}
@@ -3181,7 +3184,7 @@ function LlmRoleSettingsButton({
           <Settings2 className="size-3.5" aria-hidden />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Open LLM Roles settings</TooltipContent>
+      <TooltipContent>{t("properties.llmRoleSettingsButton.openAriaLabel")}</TooltipContent>
     </Tooltip>
   )
 }
@@ -3278,6 +3281,7 @@ function LlmNodeCompareField({
   nodeId?: string | null
   onStartNodeCompare?: (nodeId: string) => void
 }) {
+  const { t } = useTranslation("panels")
   const nextCandidateId = useRef(0)
   const [open, setOpen] = useState(false)
   const [candidates, setCandidates] = useState<LlmCompareCandidateDraft[]>([])
@@ -3315,11 +3319,11 @@ function LlmNodeCompareField({
       if (!skillId || !nodeId) return
       void putNodeCompareCandidates(skillId, nodeId, next.map(draftToApiCandidate)).catch((error) => {
         toast.error(
-          errorMessage(error, "Could not save compare candidates"),
+          errorMessage(error, t("properties.toast.couldNotSaveCompareCandidates")),
         )
       })
     },
-    [skillId, nodeId],
+    [skillId, nodeId, t],
   )
   const [draftModelGroupId, setDraftModelGroupId] = useState("")
   const [draftRoute, setDraftRoute] = useState("auto")
@@ -3345,13 +3349,13 @@ function LlmNodeCompareField({
   const defaultModelGroupId = modelGroups[0]?.canonical_id ?? ""
   const draftGroup = modelGroups.find((group) => group.canonical_id === draftModelGroupId) ?? null
   const draftEndpointOptions = useMemo<SearchableComboboxOption[]>(
-    () => endpointComboboxOptions(modelGroupRouteOptions(draftGroup)),
-    [draftGroup],
+    () => endpointComboboxOptions(modelGroupRouteOptions(draftGroup), t),
+    [draftGroup, t],
   )
   const editGroup = modelGroups.find((group) => group.canonical_id === editModelGroupId) ?? null
   const editEndpointOptions = useMemo<SearchableComboboxOption[]>(
-    () => endpointComboboxOptions(modelGroupRouteOptions(editGroup)),
-    [editGroup],
+    () => endpointComboboxOptions(modelGroupRouteOptions(editGroup), t),
+    [editGroup, t],
   )
 
   useEffect(() => {
@@ -3451,7 +3455,7 @@ function LlmNodeCompareField({
       const result = await runCompareCandidateTest(draftGroup.canonical_id, draftRoute)
       setDraftTestState({ running: false, result })
     } catch (error) {
-      const message = errorMessage(error, "Compare LLM test failed")
+      const message = errorMessage(error, t("properties.toast.compareLlmTestFailed"))
       setDraftTestState({ running: false, error: message })
       toast.error(message)
     }
@@ -3464,7 +3468,7 @@ function LlmNodeCompareField({
       const result = await runCompareCandidateTest(editGroup.canonical_id, editRoute)
       setEditTestState({ running: false, result })
     } catch (error) {
-      const message = errorMessage(error, "Compare LLM test failed")
+      const message = errorMessage(error, t("properties.toast.compareLlmTestFailed"))
       setEditTestState({ running: false, error: message })
       toast.error(message)
     }
@@ -3476,7 +3480,7 @@ function LlmNodeCompareField({
       const result = await runCompareCandidateTest(candidate.modelGroupId, candidate.route)
       setCompareTests((current) => ({ ...current, [candidate.id]: { running: false, result } }))
     } catch (error) {
-      const message = errorMessage(error, "Compare LLM test failed")
+      const message = errorMessage(error, t("properties.toast.compareLlmTestFailed"))
       setCompareTests((current) => ({ ...current, [candidate.id]: { running: false, error: message } }))
       toast.error(message)
     }
@@ -3484,8 +3488,8 @@ function LlmNodeCompareField({
 
   return (
     <div className="mt-2 space-y-1.5">
-      <YamlNestedFieldLabel>Compare LLMs</YamlNestedFieldLabel>
-      <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2" aria-label="LLM compare candidates">
+      <YamlNestedFieldLabel>{t("properties.compare.sectionLabel")}</YamlNestedFieldLabel>
+      <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2" aria-label={t("properties.compare.candidatesAriaLabel")}>
         {candidates.length > 0
           ? candidates.map((candidate) => (
             <LlmCompareCandidateRow
@@ -3498,7 +3502,7 @@ function LlmNodeCompareField({
               onRemove={removeCandidate}
             />
           ))
-          : <FieldDescription>No compare LLMs yet.</FieldDescription>}
+          : <FieldDescription>{t("properties.compare.empty")}</FieldDescription>}
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
@@ -3507,23 +3511,23 @@ function LlmNodeCompareField({
             size="sm"
             variant="secondary"
             data-llm-role-compare-trigger="true"
-            aria-label="Add LLM compare candidate"
+            aria-label={t("properties.compare.addAriaLabel")}
             className="mt-1 w-full"
           >
             <Plus className="size-3.5" aria-hidden />
-            Add compare LLM
+            {t("properties.compare.addButton")}
           </Button>
         </DialogTrigger>
         <DialogContent className="min-w-0 overflow-hidden sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add compare LLM</DialogTitle>
+            <DialogTitle>{t("properties.compare.addDialog.title")}</DialogTitle>
             <DialogDescription>
-              Choose a model candidate for this node. Saved with the node in the workspace, not SKILL.md.
+              {t("properties.compare.addDialog.description")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">
             <Field className="min-w-0">
-              <FieldLabel>Model</FieldLabel>
+              <FieldLabel>{t("properties.compare.modelLabel")}</FieldLabel>
               <SearchableOptionCombobox
                 value={draftModelGroupId}
                 options={modelOptions}
@@ -3532,17 +3536,17 @@ function LlmNodeCompareField({
                   setDraftRoute("auto")
                   setDraftTestState(EMPTY_COMPARE_TEST_STATE)
                 }}
-                ariaLabel="Compare model"
-                placeholder={modelOptions.length > 0 ? "Choose model" : "No models"}
-                searchPlaceholder="Search models"
-                emptyLabel="No model found."
+                ariaLabel={t("properties.compare.modelAriaLabel")}
+                placeholder={modelOptions.length > 0 ? t("properties.compare.chooseModel") : t("properties.compare.noModels")}
+                searchPlaceholder={t("properties.compare.searchModels")}
+                emptyLabel={t("properties.compare.noModelFound")}
                 disabled={modelOptions.length === 0}
                 dataSelectAttribute="data-llm-compare-model-group-select"
                 dataSearchAttribute="data-llm-compare-model-group-search"
               />
             </Field>
             <Field className="min-w-0">
-              <FieldLabel>Endpoint</FieldLabel>
+              <FieldLabel>{t("properties.compare.endpointLabel")}</FieldLabel>
               <SearchableOptionCombobox
                 value={draftRoute}
                 options={draftEndpointOptions}
@@ -3550,9 +3554,9 @@ function LlmNodeCompareField({
                   setDraftRoute(next)
                   setDraftTestState(EMPTY_COMPARE_TEST_STATE)
                 }}
-                ariaLabel="Compare model endpoint"
-                placeholder="Auto fallback"
-                emptyLabel="No endpoint found."
+                ariaLabel={t("properties.compare.endpointAriaLabel")}
+                placeholder={t("properties.compare.autoFallback")}
+                emptyLabel={t("properties.compare.noEndpointFound")}
                 searchable={false}
                 disabled={!draftGroup}
               />
@@ -3570,14 +3574,14 @@ function LlmNodeCompareField({
               {draftTestState.running
                 ? <Loader2 data-llm-compare-test-icon="true" className="size-3 animate-spin" aria-hidden />
                 : <FlaskConical data-llm-compare-test-icon="true" className="size-3.5" aria-hidden />}
-              Test
+              {t("common.test")}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" disabled={!draftGroup} onClick={addCandidate}>
               <Plus className="size-3.5" aria-hidden />
-              Add candidate
+              {t("properties.compare.addCandidate")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3588,12 +3592,12 @@ function LlmNodeCompareField({
           size="sm"
           variant="outline"
           data-llm-compare-run-trigger="true"
-          aria-label="Run model compare for this node"
+          aria-label={t("properties.compare.runAriaLabel")}
           className="w-full"
           onClick={() => onStartNodeCompare(nodeId)}
         >
           <GitCompareArrows className="size-3.5" aria-hidden />
-          Run compare
+          {t("properties.compare.runButton")}
         </Button>
       ) : null}
       <Dialog
@@ -3608,14 +3612,14 @@ function LlmNodeCompareField({
       >
         <DialogContent className="min-w-0 overflow-hidden sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit compare LLM</DialogTitle>
+            <DialogTitle>{t("properties.compare.editDialog.title")}</DialogTitle>
             <DialogDescription>
-              Update this node's model candidate. Saved with the node in the workspace, not SKILL.md.
+              {t("properties.compare.editDialog.description")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">
             <Field className="min-w-0">
-              <FieldLabel>Model</FieldLabel>
+              <FieldLabel>{t("properties.compare.modelLabel")}</FieldLabel>
               <SearchableOptionCombobox
                 value={editModelGroupId}
                 options={modelOptions}
@@ -3624,17 +3628,17 @@ function LlmNodeCompareField({
                   setEditRoute("auto")
                   setEditTestState(EMPTY_COMPARE_TEST_STATE)
                 }}
-                ariaLabel="Edit compare model"
-                placeholder={modelOptions.length > 0 ? "Choose model" : "No models"}
-                searchPlaceholder="Search models"
-                emptyLabel="No model found."
+                ariaLabel={t("properties.compare.editDialog.editModelAriaLabel")}
+                placeholder={modelOptions.length > 0 ? t("properties.compare.chooseModel") : t("properties.compare.noModels")}
+                searchPlaceholder={t("properties.compare.searchModels")}
+                emptyLabel={t("properties.compare.noModelFound")}
                 disabled={modelOptions.length === 0}
                 dataSelectAttribute="data-llm-compare-model-group-select"
                 dataSearchAttribute="data-llm-compare-model-group-search"
               />
             </Field>
             <Field className="min-w-0">
-              <FieldLabel>Endpoint</FieldLabel>
+              <FieldLabel>{t("properties.compare.endpointLabel")}</FieldLabel>
               <SearchableOptionCombobox
                 value={editRoute}
                 options={editEndpointOptions}
@@ -3642,9 +3646,9 @@ function LlmNodeCompareField({
                   setEditRoute(next)
                   setEditTestState(EMPTY_COMPARE_TEST_STATE)
                 }}
-                ariaLabel="Edit compare model endpoint"
-                placeholder="Auto fallback"
-                emptyLabel="No endpoint found."
+                ariaLabel={t("properties.compare.editDialog.editEndpointAriaLabel")}
+                placeholder={t("properties.compare.autoFallback")}
+                emptyLabel={t("properties.compare.noEndpointFound")}
                 searchable={false}
                 disabled={!editGroup}
               />
@@ -3662,13 +3666,13 @@ function LlmNodeCompareField({
               {editTestState.running
                 ? <Loader2 data-llm-compare-test-icon="true" className="size-3 animate-spin" aria-hidden />
                 : <FlaskConical data-llm-compare-test-icon="true" className="size-3.5" aria-hidden />}
-              Test
+              {t("common.test")}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" disabled={!editGroup} onClick={saveCandidateEdit}>
-              Save
+              {t("common.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3682,6 +3686,7 @@ export function LlmCompareTestResultPanel({
 }: {
   state?: LlmCompareTestState
 }) {
+  const { t } = useTranslation("panels")
   if (!state || (!state.running && !state.result && !state.error)) return null
   const badge = state.running
     ? roleTestStatusBadge({ running: true })
@@ -3690,7 +3695,7 @@ export function LlmCompareTestResultPanel({
       status: state.result?.status ?? (state.error ? "failed" : null),
       error: state.error ?? null,
     })
-  const summary = state.running ? "Testing compare LLM" : state.result?.summary ?? state.error ?? "Test failed"
+  const summary = state.running ? t("properties.compare.testing") : state.result?.summary ?? state.error ?? t("properties.compare.testFailed")
   const details = state.result?.details ?? (state.error ? [state.error] : [])
   return (
     <div
@@ -3732,17 +3737,18 @@ export function LlmCompareCandidateRow({
   onEdit: (candidate: LlmCompareCandidateDraft) => void
   onRemove: (candidateId: string) => void
 }) {
+  const { t } = useTranslation("panels")
   const selectedGroup = modelGroups.find((group) => group.canonical_id === candidate.modelGroupId) ?? null
   const routeOptions = useMemo(
     () => modelGroupRouteOptions(selectedGroup),
     [selectedGroup],
   )
-  const modelLabel = selectedGroup ? modelGroupPickerLabel(selectedGroup) : "Missing model"
+  const modelLabel = selectedGroup ? modelGroupPickerLabel(selectedGroup) : t("properties.compare.missingModel")
   const routeLabel = candidate.route === "auto"
-    ? "Auto fallback"
-    : routeOptions.find((option) => option.value === candidate.route)?.label ?? "Selected endpoint"
+    ? t("properties.compare.autoFallback")
+    : routeOptions.find((option) => option.value === candidate.route)?.label ?? t("properties.compare.selectedEndpoint")
   const routeStatus = compareStatusToRouteStatus(testState)
-  const statusDetail = compareCandidateStatusDetail(testState)
+  const statusDetail = compareCandidateStatusDetail(testState, t)
 
   return (
     <div className="space-y-1.5" data-llm-compare-row="true">
@@ -3768,7 +3774,7 @@ export function LlmCompareCandidateRow({
             size="icon"
             variant="default"
             data-llm-compare-test-trigger="true"
-            aria-label={`Test compare LLM ${modelLabel}`}
+            aria-label={t("properties.compare.testAriaLabel", { model: modelLabel })}
             disabled={testState?.running}
             onClick={() => onTest(candidate)}
           >
@@ -3781,7 +3787,7 @@ export function LlmCompareCandidateRow({
             size="icon"
             variant="secondary"
             className={YAML_ICON_BUTTON_CLASS}
-            aria-label={`Edit compare LLM ${modelLabel}`}
+            aria-label={t("properties.compare.editAriaLabel", { model: modelLabel })}
             onClick={() => onEdit(candidate)}
           >
             <Settings2 className="size-3.5" aria-hidden />
@@ -3791,7 +3797,7 @@ export function LlmCompareCandidateRow({
             size="icon"
             variant="secondary"
             className={YAML_ICON_BUTTON_CLASS}
-            aria-label="Remove compare LLM"
+            aria-label={t("properties.compare.removeAriaLabel")}
             onClick={() => onRemove(candidate.id)}
           >
             <Trash2 className="size-3.5" aria-hidden />
@@ -3803,10 +3809,10 @@ export function LlmCompareCandidateRow({
   )
 }
 
-function compareCandidateStatusDetail(state: LlmCompareTestState | undefined): string | null {
-  if (state?.running) return "Testing this compare route."
+function compareCandidateStatusDetail(state: LlmCompareTestState | undefined, t: TFunction<"panels">): string | null {
+  if (state?.running) return t("properties.compare.testingRoute")
   if (state?.error) return state.error
-  if (!state?.result) return "Test has not run yet."
+  if (!state?.result) return t("properties.compare.notTestedYet")
   return [state.result.summary, ...state.result.details].join(" ") || null
 }
 
@@ -3839,6 +3845,7 @@ function SearchableOptionCombobox({
   dataSearchAttribute?: string
   triggerClassName?: string
 }) {
+  const { t } = useTranslation("panels")
   const [open, setOpen] = useState(false)
   // Dialog scroll lock sees this portaled popover as outside the dialog subtree.
   // Stop wheel bubbling at the list so CommandList keeps its native overflow scroll.
@@ -3880,7 +3887,7 @@ function SearchableOptionCombobox({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] gap-0 p-0">
         <Command filter={llmCompareModelGroupFilter}>
-          {searchable ? <CommandInput placeholder={searchPlaceholder ?? "Search"} {...searchDataAttributes} /> : null}
+          {searchable ? <CommandInput placeholder={searchPlaceholder ?? t("common.search")} {...searchDataAttributes} /> : null}
           <CommandList ref={unlockDialogWheelScroll}>
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             {groupedOptions.map((group) => (
@@ -3954,6 +3961,7 @@ function ToolsField({
   errors?: LintError[]
   onChange: (next: string) => void
 }) {
+  const { t } = useTranslation("panels")
   const tools = useMemo(
     () => value.split("\n").map((line) => line.trim()).filter(Boolean),
     [value],
@@ -3974,9 +3982,8 @@ function ToolsField({
     <Field>
       <YamlFieldLabel>
         tools
-        <HelpTooltip label="About tools">
-          Tools this agent may call at runtime, referenced in the body with
-          <span className="font-mono"> @tool:&lt;name&gt;</span>. Each must be declared here first.
+        <HelpTooltip label={t("properties.tools.helpLabel")}>
+          {t("properties.tools.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -3997,7 +4004,7 @@ function ToolsField({
                       <TooltipTrigger asChild>
                         <span
                           role="img"
-                          aria-label={`Tool ${name} has ${ownErrors.length === 1 ? "1 issue" : `${ownErrors.length} issues`}: ${ownErrors.map((error) => error.message).join("; ")}`}
+                          aria-label={t("properties.tools.issueAriaLabel", { name, issues: t("common.issueCount", { count: ownErrors.length }), messages: ownErrors.map((error) => error.message).join("; ") })}
                           className="ms-1.5 inline-flex items-center align-middle"
                         >
                           <AlertTriangle className="size-3.5" aria-hidden />
@@ -4016,7 +4023,7 @@ function ToolsField({
                   size="icon"
                   variant="secondary"
                   className={YAML_ICON_BUTTON_CLASS}
-                  aria-label={`Remove tool ${name}`}
+                  aria-label={t("properties.tools.removeAriaLabel", { name })}
                   onClick={() => remove(name)}
                 >
                   <Trash2 className="size-3.5" aria-hidden />
@@ -4026,17 +4033,18 @@ function ToolsField({
           })}
         </div>
       ) : (
-        <FieldDescription>No tools yet — add one this agent can call.</FieldDescription>
+        <FieldDescription>{t("properties.tools.empty")}</FieldDescription>
       )}
       <AddToolDialog existing={tools} onAdd={add} />
       <FieldDescription>
-        Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available &mdash; don&rsquo;t list them here.
+        {t("properties.tools.builtinHint")}
       </FieldDescription>
     </Field>
   )
 }
 
 function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: string) => void }) {
+  const { t } = useTranslation("panels")
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const name = draft.trim()
@@ -4062,15 +4070,14 @@ function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: 
       <DialogTrigger asChild>
         <Button type="button" size="sm" variant="secondary" className="mt-1">
           <Plus className="size-3.5" aria-hidden />
-          Add tool
+          {t("properties.tools.add")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add tool</DialogTitle>
+          <DialogTitle>{t("properties.tools.add")}</DialogTitle>
           <DialogDescription>
-            Declares a tool this agent may call, referenced in the body with
-            <span className="font-mono"> @tool:&lt;name&gt;</span>.
+            {t("properties.tools.addDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <Field>
@@ -4082,7 +4089,7 @@ function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: 
               submit()
             }}
           >
-            <FieldLabel htmlFor="tool-name-input">Tool name</FieldLabel>
+            <FieldLabel htmlFor="tool-name-input">{t("properties.tools.nameLabel")}</FieldLabel>
             <Input
               id="tool-name-input"
               value={draft}
@@ -4092,15 +4099,15 @@ function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: 
               aria-invalid={duplicate || undefined}
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
-            {duplicate ? <p className="text-xs text-destructive">{name} is already declared.</p> : null}
+            {duplicate ? <p className="text-xs text-destructive">{t("properties.tools.duplicate", { name })}</p> : null}
           </form>
         </Field>
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" disabled={!canAdd} onClick={submit}>
-            Add
+            {t("common.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -4117,13 +4124,13 @@ function MaxIterationsField({
   errors?: LintError[]
   onChange: (next: string) => void
 }) {
+  const { t } = useTranslation("panels")
   return (
     <Field>
       <YamlFieldLabel htmlFor="phase-max-iterations">
         max_iterations
-        <HelpTooltip label="About max_iterations">
-          The most internal reasoning rounds this agent may take before it must call
-          <span className="font-mono"> finish_task</span>. Integer 1&ndash;50; defaults to 10 when left empty.
+        <HelpTooltip label={t("properties.maxIterations.helpLabel")}>
+          {t("properties.maxIterations.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -4152,6 +4159,7 @@ function SubgraphRefsField({
   workspaceRoot: string | null
   onChange: (next: PhaseSubgraphRef[]) => void
 }) {
+  const { t } = useTranslation("panels")
   const update = (index: number, patch: Partial<PhaseSubgraphRef>) => {
     onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
   }
@@ -4167,7 +4175,7 @@ function SubgraphRefsField({
       return
     }
     if (!isPathInsideWorkspaceRoot(selected, workspaceRoot)) {
-      toast.error("Select a child graph folder inside the current skill root.")
+      toast.error(t("properties.toast.selectChildGraphFolderInsideRoot"))
       return
     }
     update(index, { path: selected })
@@ -4177,11 +4185,8 @@ function SubgraphRefsField({
     <Field>
       <YamlFieldLabel>
         subgraphs
-        <HelpTooltip label="About subgraphs">
-          Child graphs this agent can invoke, referenced in the body with
-          <span className="font-mono"> @subgraph:&lt;name&gt;</span>. Each binds a <span className="font-mono">name</span> to a
-          child graph folder (absolute <span className="font-mono">path</span>). This is a runtime resource, distinct from a
-          SUBGRAPH phase node.
+        <HelpTooltip label={t("properties.subgraphRefs.helpLabel")}>
+          {t("properties.subgraphRefs.helpBody")}
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
@@ -4189,16 +4194,16 @@ function SubgraphRefsField({
         {value.map((entry, index) => (
           <div key={index} className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
             <Input
-              aria-label={`Subgraph ${index + 1} name`}
+              aria-label={t("properties.subgraphRefs.nameAriaLabel", { index: index + 1 })}
               value={entry.name}
               placeholder="name"
               onChange={(event) => update(index, { name: event.currentTarget.value })}
             />
             <div className="flex items-center gap-2">
               <Input
-                aria-label={`Subgraph ${index + 1} path`}
+                aria-label={t("properties.subgraphRefs.pathAriaLabel", { index: index + 1 })}
                 value={entry.path}
-                placeholder="No folder selected"
+                placeholder={t("properties.subgraphRefs.noFolderSelected")}
                 readOnly
                 className={YAML_READONLY_VALUE_CLASS}
               />
@@ -4207,58 +4212,49 @@ function SubgraphRefsField({
                 size="icon"
                 variant="secondary"
                 className={YAML_ICON_BUTTON_CLASS}
-                aria-label={`Choose folder for subgraph ${index + 1}`}
+                aria-label={t("properties.subgraphRefs.chooseFolderAriaLabel", { index: index + 1 })}
                 onClick={() => void choosePath(index)}
               >
                 <FolderOpen className="size-3.5" aria-hidden />
               </Button>
             </div>
             <Input
-              aria-label={`Subgraph ${index + 1} description`}
+              aria-label={t("properties.subgraphRefs.descriptionAriaLabel", { index: index + 1 })}
               value={entry.description}
               placeholder="description"
               onChange={(event) => update(index, { description: event.currentTarget.value })}
             />
             <div className="flex justify-end">
               <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
-                Remove
+                {t("common.remove")}
               </Button>
             </div>
           </div>
         ))}
       </div>
       <Button type="button" size="sm" variant="secondary" className="mt-1" onClick={add}>
-        Add subgraph
+        {t("properties.subgraphRefs.add")}
       </Button>
     </Field>
   )
 }
 
-const RESOURCE_FIELD_COPY = {
-  references: {
-    label: "references",
-    addLabel: "Add reference",
-    help: (
-      <>
-        Reference documents this agent can consult, cited in the body with
-        <span className="font-mono"> @reference:&lt;id&gt;</span>. Each binds an <span className="font-mono">id</span>
-        {" "}(e.g. <span className="font-mono">R1</span>) to a file <span className="font-mono">path</span> with a short summary.
-      </>
-    ),
-  },
-  examples: {
-    label: "examples",
-    addLabel: "Add example",
-    help: (
-      <>
-        Example documents this agent can consult, cited in the body with
-        <span className="font-mono"> @example:&lt;id&gt;</span>. Each binds an <span className="font-mono">id</span>
-        {" "}(e.g. <span className="font-mono">E1</span>) to a file <span className="font-mono">path</span> with a short summary.
-        Distinct from inline <span className="font-mono">&lt;example&gt;</span> tags in the body.
-      </>
-    ),
-  },
+const RESOURCE_FIELD_LABEL = {
+  references: "references",
+  examples: "examples",
 } as const
+
+function resourceFieldCopy(fieldKey: "references" | "examples", t: TFunction<"panels">) {
+  return {
+    label: RESOURCE_FIELD_LABEL[fieldKey],
+    addLabel: fieldKey === "references"
+      ? t("properties.resourceRef.references.addLabel")
+      : t("properties.resourceRef.examples.addLabel"),
+    helpBody: fieldKey === "references"
+      ? t("properties.resourceRef.references.helpBody")
+      : t("properties.resourceRef.examples.helpBody"),
+  }
+}
 
 // Agent reference / example resources (frontmatter `references:` / `examples:`).
 // Both are id/path/summary shaped, so one component renders either; `path` points
@@ -4282,7 +4278,8 @@ function ResourceRefField({
   onFileOpen?: (fileOrPath: FileOpenInput) => void
   onChange: (next: PhaseResourceRef[]) => void
 }) {
-  const copy = RESOURCE_FIELD_COPY[fieldKey]
+  const { t } = useTranslation("panels")
+  const copy = resourceFieldCopy(fieldKey, t)
   const update = (index: number, patch: Partial<PhaseResourceRef>) => {
     onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
   }
@@ -4297,7 +4294,7 @@ function ResourceRefField({
     <Field>
       <YamlFieldLabel>
         {copy.label}
-        <HelpTooltip label={`About ${copy.label}`}>{copy.help}</HelpTooltip>
+        <HelpTooltip label={t("properties.resourceRef.aboutField", { field: copy.label })}>{copy.helpBody}</HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
       <div className="space-y-2">
@@ -4307,14 +4304,14 @@ function ResourceRefField({
           return (
             <div key={index} className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
               <Input
-                aria-label={`${copy.label} ${index + 1} id`}
+                aria-label={t("properties.resourceRef.idAriaLabel", { label: copy.label, index: index + 1 })}
                 value={entry.id}
                 placeholder="id"
                 onChange={(event) => update(index, { id: event.currentTarget.value })}
               />
               <div className="flex items-center gap-2">
                 <Input
-                  aria-label={`${copy.label} ${index + 1} path`}
+                  aria-label={t("properties.resourceRef.pathAriaLabel", { label: copy.label, index: index + 1 })}
                   value={entry.path}
                   placeholder="path"
                   className="min-w-0 flex-1"
@@ -4325,7 +4322,7 @@ function ResourceRefField({
                   size="icon"
                   variant="secondary"
                   className={YAML_ICON_BUTTON_CLASS}
-                  aria-label={`Open ${copy.label} ${index + 1} file`}
+                  aria-label={t("properties.resourceRef.openFileAriaLabel", { label: copy.label, index: index + 1 })}
                   disabled={!onFileOpen || trimmedPath.length === 0}
                   onClick={() => onFileOpen?.({ path: trimmedPath, skillId, workspaceRoot, saveEnabled: true })}
                 >
@@ -4333,17 +4330,17 @@ function ResourceRefField({
                 </Button>
               </div>
               {fileMissing ? (
-                <p className="text-xs text-warning">File not found in this skill yet.</p>
+                <p className="text-xs text-warning">{t("properties.resourceRef.fileMissing")}</p>
               ) : null}
               <Input
-                aria-label={`${copy.label} ${index + 1} summary`}
+                aria-label={t("properties.resourceRef.summaryAriaLabel", { label: copy.label, index: index + 1 })}
                 value={entry.summary}
                 placeholder="summary"
                 onChange={(event) => update(index, { summary: event.currentTarget.value })}
               />
               <div className="flex justify-end">
                 <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
-                  Remove
+                  {t("common.remove")}
                 </Button>
               </div>
             </div>

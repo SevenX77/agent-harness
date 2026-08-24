@@ -11,6 +11,7 @@ import {
   CatalogAccordionTrigger,
 } from "@/components/ui/catalog-accordion"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
+import type { CommunitySharingChoice } from "@/api/types"
 import { AddProviderForm, ProviderCard, ProviderListSkeleton } from "../../api-keys"
 import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, providerEndpointDraftsForAction, shouldShowManualModelPanel } from "../provider-utils"
 import { SectionTitle } from "../shared"
@@ -24,6 +25,7 @@ export function ApiKeysTab({
   pendingAddProviderId,
   saveStatus,
   backendReachable,
+  communitySharingChoice,
   onProviderFieldChange,
   onRevealProviderSecret,
   onGetProviderModels,
@@ -57,7 +59,12 @@ export function ApiKeysTab({
   | "onAddProvider"
   | "onCancelAddProvider"
   | "onProviderModelsUpdated"
->) {
+> & {
+  /** SSOT: the community-sharing state lives only in `AppSettings.community_sharing_choice`
+   * (`SettingsPageContentProps["appSettings"]["communitySharingChoice"]`); passed down as its
+   * own prop rather than re-derived from the registry response, which carries no such field. */
+  communitySharingChoice: CommunitySharingChoice
+}) {
   const { t } = useTranslation("settings")
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
@@ -76,7 +83,7 @@ export function ApiKeysTab({
         description={t("apiKeys.description")}
         trailing={<SaveStatusBadge status={saveStatus} />}
       />
-      <ProbeCatalogStatus probeCatalog={credentials.probe_catalog} />
+      <ProbeCatalogStatus probeCatalog={credentials.probe_catalog} communitySharingChoice={communitySharingChoice} />
       <div className="space-y-4" data-testid="api-keys-list">
         {credentialsLoading ? (
           <ProviderListSkeleton count={5} />
@@ -215,14 +222,44 @@ function normalizeBaseUrl(value?: string | null): string {
   return (value ?? "").trim().replace(/\/+$/, "").toLowerCase()
 }
 
+/**
+ * Sharing badge + message text for the three `community_sharing_choice` states.
+ * This is a plain, non-consent-facing status line (unlike the first-run consent
+ * dialog copy, which is fixed word-for-word) — it just has to stay truthful to
+ * what the backend will actually do, which is exactly what used to drift here
+ * (a hardcoded "Local only" while the toggle defaulted to sharing).
+ */
+function sharingStatusCopy(choice: CommunitySharingChoice): { badge: string; message: string } {
+  switch (choice) {
+    case "shared":
+      return {
+        badge: "Sharing with community",
+        message: "Probe-verified evidence is shared with the community catalog. Turn off in Settings → General.",
+      }
+    case "declined":
+      return {
+        badge: "Local only",
+        message: "Community sharing is off — probes stay local. Turn on in Settings → General.",
+      }
+    case "unset":
+      return {
+        badge: "Local only",
+        message: "Not sharing yet. Turn on community sharing in Settings → General.",
+      }
+  }
+}
+
 function ProbeCatalogStatus({
   probeCatalog,
+  communitySharingChoice,
 }: {
   probeCatalog: SettingsPageContentProps["credentials"]["probe_catalog"]
+  communitySharingChoice: CommunitySharingChoice
 }) {
   if (!probeCatalog) return null
   const community = probeCatalog.community_catalog
   const remoteSynced = Boolean(community?.synced)
+  const sharing = sharingStatusCopy(communitySharingChoice)
   return (
     <div
       className="mb-4 space-y-2 rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-xs text-muted-foreground"
@@ -240,8 +277,8 @@ function ProbeCatalogStatus({
         {community && community.record_count > 0 ? (
           <Badge variant="secondary">{community.record_count} community-verified</Badge>
         ) : null}
-        <Badge variant="secondary">Local only</Badge>
-        <span className="min-w-0">{probeCatalog.sharing.message}</span>
+        <Badge variant={communitySharingChoice === "shared" ? "success" : "secondary"}>{sharing.badge}</Badge>
+        <span className="min-w-0">{sharing.message}</span>
       </div>
     </div>
   )

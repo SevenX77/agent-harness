@@ -72,3 +72,36 @@ async def test_read_app_settings_keeps_valid_fields_when_one_value_is_invalid(
 
     assert settings.user_id == "KeepMe"  # valid field preserved
     assert settings.language == "en"  # bad value dropped → field default
+
+
+@pytest.mark.anyio
+async def test_salvaging_the_retired_catalog_toggle_lands_on_unset_never_shared(
+    tmp_path: Path,
+    metadata_store: LocalJsonMetadataStore,
+) -> None:
+    """A pre-existing file with ONLY the retired ``remote_model_catalog_enabled``
+    bool (no ``community_sharing_choice`` at all) must salvage to ``"unset"`` —
+    never ``"shared"`` and never ``"declined"``.
+
+    This is the exact shape a real machine's on-disk settings had before this
+    field was introduced. The old bool being ``True`` recorded nothing about
+    user intent (it was ship-default, on before anyone was ever asked), so
+    translating it into any answered state would silently manufacture consent
+    the user never gave — exactly the defect the first-run consent dialog
+    exists to fix. The generic salvage path (`_salvage_app_settings`) already
+    gets this right structurally: it filters `raw` down to keys the CURRENT
+    model recognizes, `remote_model_catalog_enabled` is not one of them, so
+    `community_sharing_choice` is simply absent from the survivors and falls
+    through to its own field default — this test pins that behavior so a
+    future change cannot regress it into treating "never asked" as consent.
+    """
+    _write_app_settings(
+        tmp_path / "global-config",
+        {"user_id": "KeepMe", "remote_model_catalog_enabled": True},
+    )
+
+    settings = await metadata_store.read_app_settings()
+
+    assert settings.user_id == "KeepMe"
+    assert settings.community_sharing_choice == "unset"
+    assert not hasattr(settings, "remote_model_catalog_enabled")

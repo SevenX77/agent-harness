@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import i18n from '../i18n'
 import { apiClientConfigChangedEvent, authenticatedApiReady, getAppSettings, updateAppSettings } from '../api/client'
-import type { AppLanguage, AppSettings, CliSessionSettings } from '../api/types'
+import type { AppLanguage, AppSettings, CliSessionSettings, CommunitySharingChoice } from '../api/types'
 import type { SaveStatus } from './useDebouncedCredentialsSave'
 import { runtimeDefaultSkillsDirectory } from '../utils/skill-paths'
 import { errorMessage } from '../utils/errors'
@@ -31,7 +31,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   gitea_host: '',
   default_skills_directory: '',
   language: 'en',
-  remote_model_catalog_enabled: true,
+  community_sharing_choice: 'unset',
   cli_sessions: DEFAULT_CLI_SESSIONS,
 }
 
@@ -71,7 +71,7 @@ export function appSettingsEqual(left: AppSettings, right: AppSettings) {
     && left.gitea_host === right.gitea_host
     && left.default_skills_directory === right.default_skills_directory
     && left.language === right.language
-    && left.remote_model_catalog_enabled === right.remote_model_catalog_enabled
+    && left.community_sharing_choice === right.community_sharing_choice
     && JSON.stringify(left.cli_sessions) === JSON.stringify(right.cli_sessions)
 }
 
@@ -234,8 +234,8 @@ export function useAppSettings() {
     updateSettings({ language })
   }, [updateSettings])
 
-  const setRemoteModelCatalogEnabled = useCallback((remoteModelCatalogEnabled: boolean) => {
-    updateSettings({ remote_model_catalog_enabled: remoteModelCatalogEnabled })
+  const setCommunitySharingChoice = useCallback((communitySharingChoice: CommunitySharingChoice) => {
+    updateSettings({ community_sharing_choice: communitySharingChoice })
   }, [updateSettings])
 
   const setCliSessions = useCallback((cliSessions: CliSessionSettings) => {
@@ -265,7 +265,7 @@ export function useAppSettings() {
     setGiteaHost,
     setDefaultSkillsDirectory,
     setLanguage,
-    setRemoteModelCatalogEnabled,
+    setCommunitySharingChoice,
     setCliSessions,
     save,
     isLoading,

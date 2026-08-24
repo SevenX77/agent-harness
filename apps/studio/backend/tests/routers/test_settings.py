@@ -80,7 +80,7 @@ def test_get_settings_returns_defaults(client: TestClient) -> None:
         "gitea_host": "",
         "default_skills_directory": str(config.DEFAULT_SKILLS_ROOT),
         "language": "en",
-        "remote_model_catalog_enabled": True,
+        "community_sharing_choice": "unset",
         "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
@@ -91,7 +91,7 @@ def test_put_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
         "gitea_host": "https://gitea.example.com",
         "default_skills_directory": str(tmp_path / "graph-skills"),
         "language": "en",
-        "remote_model_catalog_enabled": False,
+        "community_sharing_choice": "declined",
         "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
@@ -105,7 +105,7 @@ def test_put_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
     logs = load_runtime_activity(source_id="app_settings", limit=1)
     assert logs[0]["action"] == "update_app_settings"
     assert logs[0]["changes"]["user_id"]["to"] == "alice"
-    assert logs[0]["changes"]["remote_model_catalog_enabled"]["to"] is False
+    assert logs[0]["changes"]["community_sharing_choice"]["to"] == "declined"
 
 
 def test_put_blank_default_skills_directory_uses_effective_default(client: TestClient) -> None:
@@ -115,7 +115,7 @@ def test_put_blank_default_skills_directory_uses_effective_default(client: TestC
             "user_id": "alice",
             "gitea_host": "",
             "default_skills_directory": "",
-            "remote_model_catalog_enabled": True,
+            "community_sharing_choice": "unset",
             "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
@@ -133,7 +133,7 @@ def test_put_validates_strip(client: TestClient) -> None:
             "user_id": "  bob  ",
             "gitea_host": "",
             "default_skills_directory": "  /tmp/studio-skills  ",
-            "remote_model_catalog_enabled": True,
+            "community_sharing_choice": "unset",
             "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
@@ -154,7 +154,7 @@ def test_get_defaults_language_when_omitted(client: TestClient, tmp_path: Path) 
             "user_id": "dave",
             "gitea_host": "",
             "default_skills_directory": str(tmp_path / "skills"),
-            "remote_model_catalog_enabled": True,
+            "community_sharing_choice": "unset",
             "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
@@ -172,7 +172,7 @@ def test_put_language_roundtrips(client: TestClient, tmp_path: Path) -> None:
         "gitea_host": "",
         "default_skills_directory": str(tmp_path / "skills"),
         "language": "zh-CN",
-        "remote_model_catalog_enabled": True,
+        "community_sharing_choice": "unset",
         "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
@@ -192,7 +192,7 @@ def test_put_rejects_unsupported_language(client: TestClient, tmp_path: Path) ->
             "gitea_host": "",
             "default_skills_directory": str(tmp_path / "skills"),
             "language": "fr-FR",
-            "remote_model_catalog_enabled": True,
+            "community_sharing_choice": "unset",
             "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
         },
     )
@@ -210,7 +210,7 @@ def test_put_persists_across_app_restart(
         "gitea_host": "https://gitea.example.net",
         "default_skills_directory": str(tmp_path / "team-skills"),
         "language": "zh-CN",
-        "remote_model_catalog_enabled": False,
+        "community_sharing_choice": "declined",
         "cli_sessions": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}, "agents": {}},
     }
 
@@ -236,7 +236,7 @@ def test_put_settings_unchanged_snapshot_has_no_update_side_effect() -> None:
         gitea_host="https://gitea.example.com",
         default_skills_directory=str(config.DEFAULT_SKILLS_ROOT),
         language="en",
-        remote_model_catalog_enabled=False,
+        community_sharing_choice="declined",
     )
     metadata = _SettingsMetadataStore(existing)
 
@@ -258,9 +258,9 @@ def test_put_settings_changed_snapshot_publishes_precise_event() -> None:
         gitea_host="https://gitea.example.com",
         default_skills_directory=str(config.DEFAULT_SKILLS_ROOT),
         language="en",
-        remote_model_catalog_enabled=True,
+        community_sharing_choice="shared",
     )
-    updated = previous.model_copy(update={"language": "zh-CN", "remote_model_catalog_enabled": False})
+    updated = previous.model_copy(update={"language": "zh-CN", "community_sharing_choice": "declined"})
     metadata = _SettingsMetadataStore(previous)
 
     async def _put() -> tuple[AppSettings, dict[str, Any]]:
@@ -275,7 +275,7 @@ def test_put_settings_changed_snapshot_publishes_precise_event() -> None:
     assert event["type"] == "settings_changed"
     assert event["source"] == "http_api"
     assert event["source_id"] == "app_settings"
-    assert event["changed_fields"] == ["language", "remote_model_catalog_enabled"]
+    assert event["changed_fields"] == ["community_sharing_choice", "language"]
 
 
 def test_put_settings_event_publish_failure_does_not_break_save(
@@ -287,7 +287,7 @@ def test_put_settings_event_publish_failure_does_not_break_save(
         gitea_host="https://gitea.example.com",
         default_skills_directory=str(config.DEFAULT_SKILLS_ROOT),
         language="en",
-        remote_model_catalog_enabled=True,
+        community_sharing_choice="shared",
     )
     updated = previous.model_copy(update={"language": "zh-CN"})
     metadata = _SettingsMetadataStore(previous)

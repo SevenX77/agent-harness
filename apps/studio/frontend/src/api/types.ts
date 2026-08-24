@@ -195,12 +195,26 @@ export interface CliSessionSettings {
   agents: Record<string, CliSessionProviderSettings>
 }
 
+/**
+ * Answer to the first-run community-sharing consent dialog. Mirrors the backend
+ * `CommunitySharingChoice` (apps/studio/backend/app/models/settings.py) — keep
+ * the two in sync. A plain bool cannot distinguish "never asked" from "asked
+ * and declined", and that distinction is exactly what decides whether the
+ * dialog owes the user an appearance:
+ * - 'unset' — the dialog has not fired yet; reading the community catalog is
+ *   still allowed (it takes nothing from this machine), but nothing is
+ *   uploaded until the user actively opts in.
+ * - 'shared' — the user opted in: reading and contributing are both on.
+ * - 'declined' — the user opted out: reading and contributing are both off.
+ */
+export type CommunitySharingChoice = 'unset' | 'shared' | 'declined'
+
 export interface AppSettings {
   user_id: string
   gitea_host: string
   default_skills_directory: string
   language: AppLanguage
-  remote_model_catalog_enabled: boolean
+  community_sharing_choice: CommunitySharingChoice
   cli_sessions: CliSessionSettings
 }
 

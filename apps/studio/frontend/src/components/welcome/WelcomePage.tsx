@@ -38,6 +38,7 @@ import {
 } from '../ui/empty'
 import { Skeleton } from '../ui/skeleton'
 import { createLocalWorkspaceSelection, isAbsolutePath } from '../studio/workspace-identity'
+import { CommunitySharingConsentDialog } from './CommunitySharingConsentDialog'
 import { NewSkillDialog } from './NewSkillDialog'
 import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath } from './utils'
 
@@ -166,6 +167,12 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
   const { recentWorkspaces, rememberWorkspace, removeWorkspace, isHydrating, recentError } = useRecentSkills()
+  // First-run community-sharing consent (design: docs/studio/mvp1/01_workflows/00_settings.md
+  // §3.0): fires once, exactly while the choice is "unset" — never while settings are
+  // still loading (that would flash the dialog open even for an install that already
+  // answered, since the optimistic default settings snapshot also reads "unset").
+  const communitySharingConsentOpen = !appSettings.isLoading
+    && appSettings.settings.community_sharing_choice === 'unset'
 
   // Recent is a pure MRU projection (D11/D-1-1): each card is one entry from the
   // Rust native-fs recent_workspaces store, no registry-derived fields and no
@@ -484,6 +491,12 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
         creating={creating}
         onSubmit={submitNewSkill}
         onSubmitWithWizard={() => { void submitNewSkill(undefined, { withWizard: true }) }}
+      />
+
+      <CommunitySharingConsentDialog
+        open={communitySharingConsentOpen}
+        onShare={() => appSettings.setCommunitySharingChoice('shared')}
+        onDecline={() => appSettings.setCommunitySharingChoice('declined')}
       />
     </div>
   )

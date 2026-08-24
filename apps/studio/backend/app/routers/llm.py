@@ -180,9 +180,11 @@ async def _autoshare_after_probe_best_effort() -> None:
     Silently uploads newly probe-verified evidence to the community catalog gate
     through a clean open API (no token, no credentials — the gate rate-limits
     server-side). NEVER raises: a probe must not fail because background sharing
-    did. On by default; stays dormant only if an operator hard-disables the write
-    path OR the single community model-catalog toggle
-    (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
+    did. Stays dormant unless an operator has enabled the write path AND the user
+    has actively opted in via the first-run community-sharing consent dialog
+    (``AppSettings.community_sharing_choice == "shared"``). ``"unset"`` (never
+    asked) and ``"declined"`` (asked, said no) both keep this dormant — consent to
+    contribute is opt-in, never the fallback for "haven't been asked yet".
     """
     uploads: list[Any] = []
     try:
@@ -192,10 +194,10 @@ async def _autoshare_after_probe_best_effort() -> None:
             enabled=cfg.community_upload_enabled,
         ):
             return
-        # The single community model-catalog toggle gates both reading the
-        # catalog and contributing to it; honour the user's opt-out before upload.
+        # Contributing requires an explicit "shared" answer to the consent
+        # dialog — "unset" must not silently behave like consent was granted.
         settings = await get_metadata().read_app_settings()
-        if not settings.remote_model_catalog_enabled:
+        if settings.community_sharing_choice != "shared":
             return
         uploads = collect_uploadable(load_credentials())
         if not uploads:

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { AppLanguage, CliSessionSettings } from "@/api/types"
+import type { AppLanguage, CliSessionSettings, CommunitySharingChoice } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
@@ -65,14 +65,14 @@ export interface SettingsPageContentProps {
     giteaHost: string
     defaultSkillsDirectory: string
     language: AppLanguage
-    remoteModelCatalogEnabled: boolean
+    communitySharingChoice: CommunitySharingChoice
     isLoading: boolean
     saveStatus: SaveStatus
     setUserId: (value: string) => void
     setGiteaHost: (value: string) => void
     setDefaultSkillsDirectory: (value: string) => void
     setLanguage: (value: AppLanguage) => void
-    setRemoteModelCatalogEnabled: (value: boolean) => void
+    setCommunitySharingChoice: (value: CommunitySharingChoice) => void
     cliSessions: CliSessionSettings
     setCliSessions: (value: CliSessionSettings) => void
   }

@@ -136,6 +136,7 @@ export function SettingsPageContent({
                   pendingAddProviderId={pendingAddProviderId}
                   saveStatus={saveStatus}
                   backendReachable={backendReachable}
+                  communitySharingChoice={appSettings.communitySharingChoice}
                   onProviderFieldChange={onProviderFieldChange}
                   onRevealProviderSecret={onRevealProviderSecret}
                   onGetProviderModels={onGetProviderModels}

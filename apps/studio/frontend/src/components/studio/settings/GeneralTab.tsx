@@ -228,8 +228,10 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
               </FieldDescription>
               <Switch
                 id="remote-model-catalog-enabled"
-                checked={appSettings.remoteModelCatalogEnabled}
-                onCheckedChange={appSettings.setRemoteModelCatalogEnabled}
+                checked={appSettings.communitySharingChoice === "shared"}
+                onCheckedChange={(checked) =>
+                  appSettings.setCommunitySharingChoice(checked ? "shared" : "declined")
+                }
                 aria-label={t("general.remoteModelCatalog.label")}
                 className="shrink-0"
               />

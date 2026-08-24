@@ -317,9 +317,27 @@ one-page orientation, not the full design.
     `docs/studio/mvp1/` (`README.md` + `DESIGN_UNITS_INDEX.md`).
   - `docs/design/productization-architecture-2026-06-11.md` is the one-page
     global overview — read it first for orientation, then the body above.
+  - **摘要 vs 权威:同一个目录里两者并存,引用前先看指针。** studio 的
+    `docs/studio/mvp1/01_workflows/0N_*.md` 是**旅程摘要**,它的正文会**声明**细粒度权威在
+    哪一份(例如 `00_settings.md:29` 明写「细粒度 UX 规格…见 `00_settings-ux-spec.md`
+    (PM 2026-06-02 口述,**权威**)」)。带**修订记录**的那一份才是决策落盘处;摘要会滞后。
+    **引摘要之前必须顺着它声明的指针读到权威那一份**——2026-08-23 就因为跳过这一步,把
+    「摘要没跟权威同步」误报成了「设计与实现冲突」(权威七周前就裁完了)。
+  - **文档与代码不一致时,按三道检验定谁对,顺序固定**:①**日期**(`git log -1` 两侧比,
+    文档明显更旧就大概率是文档滞后);②**原话**(权威文档的修订记录 / 引入该实现的提交信息
+    `git log -S` / 会话历史里 `role=user` 的消息——**不认自己旧的摘要**,那是循环论证);
+    ③**第一性原理**(常见形状:文档里两半话,一半带理由一半不带,而不带理由的那半与代码冲突)。
+    三道同向才动手;指向文档滞后就**改文档**,并保留「原设计是什么、被什么实证推翻」的修订记录。
 - **MVP1 integration baseline**:
   `docs/studio/mvp1/_impl/STUDIO-MVP1-INTEGRATION-BASELINE.md`
 - **Frontend UI spec**: `docs/development/FRONTEND_UI_SPEC.md`
+- **旅程点验规则(测试阶段)**: `docs/development/JOURNEY_TEST_RULES.md` —— 对着真机
+  逐项走用户旅程时额外生效的纪律:判据来源(摘要 vs 权威、三道检验、指不到判据怎么标)、
+  每个模块必查的九个维度(功能 / 数据结构与架构 / 性能 / UI-UX 认知 / 可访问性 /
+  代码健康度 / i18n / 数据破坏与恢复 / 安全边界)、环境纪律(真窗口、打包版、
+  一次性配置目录、不信被测系统自我判定)、报告与销账纪律。**做点验前先读它**;
+  进度在 `DELIVERY_LEDGER.md` 的旅程任务块,发现记进 `PROBLEM_LEDGER.md` 的
+  「旅程点验发现」一节。
 - **Cross-platform / encoding policy**: `docs/development/CROSS_PLATFORM.md` —
   三平台（Windows/macOS/Linux）兼容铁律：文本一律 UTF-8 + LF、`subprocess`/文件
   I/O 必须显式 `encoding="utf-8"`、禁止仅大小写不同的路径。写文件、起子进程、

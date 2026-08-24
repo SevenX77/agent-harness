@@ -8,7 +8,7 @@
 
 01–06 是"做一个 skill"的主旅程,但它们集体悬在一个隐含前提上:**LLM 得能跑**。Predict 要把抽象角色解析成真实 route 才能试飞,Run 要真实消耗 provider,Publish 要知道 Gitea 主机与产物落盘路径,Copilot 要有自己的模型与密钥。这些"跑起来的前提"既不属于画布、也不属于编辑器,而是一处独立的配置面 —— 这就是 00_settings。
 
-它承载 PM 的四条配置旅程:**Provider 凭证(API Keys)/ 抽象角色到模型的映射(LLM Roles)/ 助手配置(Copilot)/ 身份与产物路径(General)**。这个节点的产物不是某个 skill,而是让其余所有节点"能调模型、能上线"的运行底座。因此它在逻辑上先于 01–06 的任何 LLM 动作,是被 predict / run / publish / copilot 硬依赖的前置节点。
+它承载 PM 的五条配置旅程:**Provider 凭证(API Keys)/ 抽象角色到模型的映射(LLM Roles)/ 助手配置(Copilot)/ 身份与产物路径(General)/ 媒体生成(Media Generation)**。第五条的设计单独立在 [`02_capabilities/media-generation/design-decision.md`](../02_capabilities/media-generation/design-decision.md)(2026-08-13 立项),本节点只登记它是 Settings 的一页,细则不在此重述。这个节点的产物不是某个 skill,而是让其余所有节点"能调模型、能上线"的运行底座。因此它在逻辑上先于 01–06 的任何 LLM 动作,是被 predict / run / publish / copilot 硬依赖的前置节点。
 
 ## 2. 核心范式
 
@@ -24,7 +24,7 @@ Settings 看起来是"前端表单",但它的真相全在后端:一个 provider 
 ### 2.4 数据层永不 Rust 化
 横切铁律 D12 是"本地写全量走 Rust",但它管的是 **skill 源文件**(GRAPH.md / SKILL.md / `.workspace`)。Settings 的凭证与角色数据(`~/.studio/` 下的 credentials / roles)是 **gateway 拥有的服务端数据,永不 Rust 化** —— 读写一律走 gateway Python(经 storage seam 抽象、预留 `user_id`,为未来远端服务化对齐形状)。本节点唯一的本地 OS 操作,是"选默认 skills 目录"的文件夹选择器(native / Rust)。
 
-## 3. 四条配置旅程
+## 3. 五条配置旅程
 
 > 📋 **每步操作 / 反馈 / 动机的细粒度 UX 规格**（含 draft 赋能写回、model/endpoint 标签表现、测试落点：endpoint 验证在 API key 页、model 保证在 role 页）见 [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)（PM 2026-06-02 口述，权威）。
 
@@ -34,7 +34,7 @@ Settings 看起来是"前端表单",但它的真相全在后端:一个 provider 
 ### 3.2 API Keys — Provider 凭证
 配 provider 让模型能连通,分两区:**official**(固定 5 厂商 anthropic/openai/gemini/deepseek/ark,只填 key)与 **third-party**(用户自增:填 URL + key,protocol 系统自动探)。
 - **一个 provider = 一把 key + 多个 URL**:每个 `(URL × 探通协议)` 拆成一个**平铺 endpoint**(前端拆好告诉后端、后端不感知"卡";同 key 共享 credential + 一个限流 bucket;一 URL 通两协议则两个都建)。
-- **验 endpoint = 批量模型探测**:official 只 `get-models` 即验通;third-party 须用模型打推理端点(`get-models` 只证 URL+key 可达、不证协议匹配)。**分批探(每批 ~3)、命中即停 / 全失败判死、结构错短路**——单模型会瞬时抖动,不能凭一个定生死。
+- **验 endpoint = 批量模型探测**:official 与 third-party **在「必须真打一次生成」上对称**——`get-models` 只证 URL+key 可达,不证能生成、也不证协议匹配,所以两类都要生成探测过了才判 verified;差别只剩 official **不做协议轮换**(协议固定)且候选**过滤为语言模型**。(**修订 2026-07-01**,原「official 只 `get-models` 即验通」作废。推翻它的实证:Anthropic 账户欠费时 `GET /models` 照常 200,而所有生成调用被 `HTTP 400 "credit balance is too low"` 拒绝,于是 role 页全红、API keys 页全绿,两页真相矛盾。权威原文与完整修订记录见 [`00_settings-ux-spec.md`](./00_settings-ux-spec.md) §1.1;实现 `apps/studio/backend/app/routers/llm.py` 的 `_verify_endpoint_by_generation_probe`。)**分批探(每批 ~3)、命中即停 / 全失败判死、结构错短路**——单模型会瞬时抖动,不能凭一个定生死。
 - **状态 6 态 + draft 赋能**:测试结果(含失败)落 draft 沉淀历史;模型 / endpoint 标签用统一 route 级 6 态(🔵 蓝=以前联通过)。
 - **锁定约束**:`base_url` 按 protocol 归一化;`api_key` 服务端明文存(0600)、`GET registry` redact、专用 secret 端点取明文;数据走 gateway(永不 Rust)。
 > 细粒度 UX(official/third-party 分步、协议探测的错误码短路、批量探测、draft 赋能/写回、命名防撞、前端 UI / 前端业务逻辑 / 后端 gateway 接口的层次分离)见权威 [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)。
@@ -63,7 +63,7 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 - **内置角色动态浮出**:默认浮出 Claude(优先 opus4.8→退 4.7)+ DeepSeek(优先 V4Pro→退 V3.2Pro)在 available 里最新最好的;eligible 判据 = 后端 anthropic-messages 兼容,**未测不预过滤**(keep them in there)。
 - **「Backend Integration」slot → 统一 save-status badge**(四页共用、接真 `saveStatus`)。
 
-> **现状 → 接线工程(亲验 file:line,见 ux-spec §3.5)**:mock 驱动(`mock-copilot-data`)+ **假测试**(测试探针 `AsyncAnthropic` ≠ 运行 `ClaudeSDKClient`,`llm.py:2150` vs `copilot.py:242`,[[copilot-assist]] + ux-spec §3.8 待修)+ `saveStatus` 丢弃 + **copilot_ 前缀分流 bug**(选组后丢前缀→后端 `_is_copilot_role` 误判存到 graph-agent 侧)+ 占位按钮。
+> **接线已完成(核验 2026-08-23,逐条对着 `main` 的代码)**:曾经记在这里的四项缺口都不再成立——① 测试走真实 SDK,`apps/studio/backend/app/routers/llm.py:1727` 写着「copilot 的 test 走 copilot 自己的真实 `ClaudeSDKClient` 调用」,`:2052` 是逐 route 的真工具调用测试,`AsyncAnthropic` 在 studio 后端已无任何引用;② mock 驱动已删,`mock-copilot-data` 在前端非测试代码里搜不到;③ `saveStatus` 已接,`CopilotTab.tsx:522` 与 `:752` 渲染 `SaveStatusBadge`;④ `copilot_` 前缀分流已修,`copilot-role-derivation.ts:377` 由 `copilotRoleNameForGroup` 统一产出 `copilot_<slug>`。**留作复核**:当年同段提到的「占位按钮」这一项本轮未逐个复核。
 > **session 持久化(D8)** 属 copilot 聊天(skill 工作台 region),settings §3 只配模型,失败退路见 §5。
 
 ## 4. 测试 → 持久化 → 投影(贯穿四旅程的核心机制)
@@ -79,7 +79,7 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
    - **`failed`**(🔴,带 `reason`) — **统一**「配置缺口(缺 key/base_url/protocol/model,`reason=missing_config`)」与「真测试失败(`reason=endpoint_unreachable`/`model_failed`)」;**红、不挡进可用**(仍可选)。
    - **`cooling_down`**(⚪+倒计时) — 有未过期熔断(网络/限流/超时),展示 `retry_at`,不当永久失败。
    - **`off`** — 被用户 / 配置主动禁用,优先级最高。
-   > 投影优先级:`off > failed > cooling_down > ready > historical_ready > untested`。代码 `ProviderUiState`(`llm_state_projection.py`)仍为旧 5 态,待接线(去 `needs_setup`、加 `failed`+reason、加蓝态)。
+   > 投影优先级:`off > failed > cooling_down > ready > historical_ready > untested`。**这套六态已在代码里落地(核验 2026-08-23)**:权威定义在 gateway `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:32` —— `ProviderUiState = Literal["ready","historical_ready","untested","failed","cooling_down","off"]`,旧 `needs_setup` 已不存在;`registry/projection.py:30-36` 把「`reason_code` 当且仅当 `ui_state == "failed"` 时存在」编成校验,让非法组合不可表示。studio 侧的 `app/services/llm_state_projection.py` 已收缩为对 gateway adapter 的薄委托,不再自带一份态定义。
 4. **复用**:角色物化时跳过 `failed` / `off`、对 `cooling_down` 记警告、只把 fit 的 route 放进兜底链 —— UI 看到的测试态,与引擎实际编排用的是同一套判断。
 
 > **现状落差(头号 gap)**:后端持久化(endpoint / route 状态 + SQLite 熔断 + 投影函数)已具雏形,但前端仍残留**易失副本**(provider 测试结果、role 测试态存内存,刷新即丢)。目标是删掉前端这层易失覆盖,完全以后端 SSOT 投影为准。这是 settings 接线的主工程。

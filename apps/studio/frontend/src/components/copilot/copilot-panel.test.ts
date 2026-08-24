@@ -558,7 +558,7 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantAttachEntries({ claude: lingering, codex: inactive })).toEqual([
       { assistant: 'claude', exited: true },
     ])
-    // 对照组:活会话不带后缀 —— 证明后缀是按相位算出来的,不是常量。
+    // 对照组:活会话不带后缀 —— 证明后缀是按阶段算出来的,不是常量。
     expect(codeAssistantAttachEntries({ claude: lingering, codex: active })).toEqual([
       { assistant: 'claude', exited: true },
       { assistant: 'codex', exited: false },
@@ -851,7 +851,7 @@ describe('buildCopilotJudgeDraft', () => {
 
   it('names the pending phase so a hands-off control never reads as broken', () => {
     // 进行态 ≠ 功能不可用。一个外观与"不可用"无异的禁用按钮会被读成"坏了",于是被反复
-    // 点击;所以 hands-off 的两个相位各自有文案,渲染成带 spinner 的进行态。
+    // 点击;所以 hands-off 的两个阶段各自有文案,渲染成带 spinner 的进行态。
     // `starting` 是更具体的事实(CLI 已经拉起),与 `unknown` 同时出现时它优先。
     const unknown = { status: 'unknown', readOnly: false } as const
     const starting = { status: 'starting', readOnly: false } as const
@@ -861,7 +861,7 @@ describe('buildCopilotJudgeDraft', () => {
     expect(codeAssistantPendingPhase({ claude: unknown, codex: unknown })).toBe('checking')
     expect(codeAssistantPendingPhase({ claude: starting, codex: inactive })).toBe('starting')
     expect(codeAssistantPendingPhase({ claude: unknown, codex: starting })).toBe('starting')
-    // 对照组:没有任何进行中的相位就没有进行态控件。
+    // 对照组:没有任何进行中的阶段就没有进行态控件。
     expect(codeAssistantPendingPhase({ claude: inactive, codex: inactive })).toBeNull()
     expect(codeAssistantPendingPhase({ claude: active, codex: inactive })).toBeNull()
   })

@@ -38,10 +38,10 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 ### F2b. 一条路由的 Test 也要问它会不会用工具(2026-08-21,问题台账 L6)
 
 - 机制: 用户对**某一条具名路由**按 Test(`POST /llm/routes/{route_id}/probe`),这条路由通过生成探测拿到 `verified` 之后,再被问一次工具问题——给它一个非用不可的工具和一个只有调工具才能回答的问题,读它回不回 tool call;回了就把工具结果喂回去,读它出不出得来(网关 `probing/tool_loop.py`,即探测阶梯的 T3)。看见它调了工具,就把 `tool_protocol` 记成 `probed_verified`。
-- 决策(「这条路由能用吗」对 agent 相位是另一个问题): 引擎每个 agent 循环都在绑工具、读 tool call(`call/chat_model.py::_dispatch`),所以一条通过了生成探测的路由**仍可能对 agent 完全无用**,而在此之前没有任何入口问过这件事。
+- 决策(「这条路由能用吗」对 agent 阶段是另一个问题): 引擎每个 agent 循环都在绑工具、读 tool call(`call/chat_model.py::_dispatch`),所以一条通过了生成探测的路由**仍可能对 agent 完全无用**,而在此之前没有任何入口问过这件事。
 - 决策(只挂在具名单条路由的 Test 上,**不挂**批量「测试模型」): T3 是阶梯最深的一级——每条路由两次真实请求,而 T1 只是一次 GET(决策文档 D1 的分级表)。挂在具名单条路由的 Test 上,代价被**用户自己那一次点击**框住;挂在批量路径上,它会被端点列出的模型数乘一遍。
 - 决策(拒绝不写 `False`): 「没看到工具调用」有两个分不开的成因——协议根本没有工具,和模型选择用散文回答。写 `False` 会抹掉这条路由可能真有的能力,而**悄悄缩水的 capability 比没测过的更坏**(网关 `measured_tool_calling` 的原话与理由)。
-- 决策(UI 要分得清「测出来的」和「文档说的」): 端点摘要里 `tool_protocol` 从此有三档——`verified`(被看见调过工具)/ `supported`(某份 catalog 或协议文档声称)/ `not_listed`。要把一个 agent 相位交给哪个端点,靠的正是这个区别。端点级取**下界并集**,与 `methodIds` 同一条规则:一个模型被看见调过工具,是关于这个端点的事实,不因兄弟模型没测过而收回。
+- 决策(UI 要分得清「测出来的」和「文档说的」): 端点摘要里 `tool_protocol` 从此有三档——`verified`(被看见调过工具)/ `supported`(某份 catalog 或协议文档声称)/ `not_listed`。要把一个 agent 阶段交给哪个端点,靠的正是这个区别。端点级取**下界并集**,与 `methodIds` 同一条规则:一个模型被看见调过工具,是关于这个端点的事实,不因兄弟模型没测过而收回。
 - 原话/来源: `docs/design/2026-08-10-gateway-module-tree-and-probing-decision.md` D1 的 T3 行(「工具调用回不回来 / ReAct 闭环收不收敛」)与 D7 的 P5 开工补记。
 - 测试: `apps/studio/backend/tests/routers/test_llm_tool_loop_probe.py` 四条(看见调工具→记成 probed_verified;只调没闭环→仍verify 协议、强弱写进 message;散文回答→不写;生成探测就失败→根本不问);`ProviderCard.test.tsx` 四条(measured 压过文档声称、端点级并集、三档文案各不相同)。
 - Status: live。

@@ -156,7 +156,7 @@ def test_the_verdict_details_narrate_the_parse_gap_on_a_rejected_verdict() -> No
 def test_no_later_stage_judges_the_data_that_was_not_read() -> None:
     """先证明 gap 确实被报了,再证明后面的关卡一道都没在残缺数据上开口。
 
-    真跑 09f67b86 里模型收到的是相位校验器在残缺数据上得出的判读
+    真跑 09f67b86 里模型收到的是阶段校验器在残缺数据上得出的判读
     (「No segments produced. Re-analyze the chapter text.」)——它把模型指向一个
     不存在的问题:章节分析没坏,坏的是输出格式没被读懂。所以 gap 必须**短路**,
     而不是"照常判完再把 gap 一起附上"。
@@ -203,7 +203,7 @@ def test_truncated_data_that_satisfies_the_schema_is_refused_anyway() -> None:
 
     reply = _reply_to_model(command)
     assert reply.status == "error"
-    assert str(reply.content) != "PHASE_COMPLETE", "残缺数据不许拿到相位完成的通行证"
+    assert str(reply.content) != "PHASE_COMPLETE", "残缺数据不许拿到阶段完成的通行证"
     # 写 `data` 通道就是 hoist 已经发生:接受路径的 update 是 data/flow/messages 三键,
     # 驳回路径只有 messages。断言 `business_data_parsed` 不在 update 里是**没有区分力**的
     # ——那是 finish_result 内部的键,两条路径的 update 里都不会出现它。

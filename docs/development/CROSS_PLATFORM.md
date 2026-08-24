@@ -35,14 +35,14 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
   正文的第一个字符；用 `"utf-8"` 读进来，它会变成一个 `\ufeff` 字符卡在最前面。
   实测踩坑（2026-08-21，问题台账 K7）：一个外部编写的 `GRAPH.md` 因此以
   `\ufeff---` 开头，引擎的 frontmatter 匹配是行首锚定的 `^---`，于是整份
-  frontmatter 判定为不存在——Studio 画出一个零相位的空技能，**没有任何报错**。
+  frontmatter 判定为不存在——Studio 画出一个零阶段的空技能，**没有任何报错**。
   所以**每个模块给"人手写、我们读回"的文件留一个解码出口，全模块只此一个**，
   三个模块各自命名同一条规则：
 
   | 模块 | 解码出口 | 管辖范围 |
   | --- | --- | --- |
   | engine | `graph_agent.core.authored_text.read_authored_text` | 技能 markdown、validator 源码、声明的运行时输入文件 |
-  | studio backend | `app.core.authored_text.read_authored_text` | skill 工作区里的一切：相位 markdown、golden case、test input、`.workspace/` 配置 |
+  | studio backend | `app.core.authored_text.read_authored_text` | skill 工作区里的一切：阶段 markdown、golden case、test input、`.workspace/` 配置 |
   | Rust native-fs | `native_fs.rs::read_workspace_text` | 前端拿到的一切工作区文本（它是前端唯一的文件读取方） |
 
   三处都只是给标准库的 `utf-8-sig` 起了个模块内的名字（Rust 侧手写等价逻辑，

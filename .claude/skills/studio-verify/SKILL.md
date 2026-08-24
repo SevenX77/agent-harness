@@ -101,7 +101,7 @@ scripts/wt-board.sh release cdp-9222
 2. **target 按端口匹配**:`/:5173/`,不匹配主机名(localhost vs 127.0.0.1 不稳定)。
 3. **底部 action bar 会遮住画布下缘节点**(Output/Predict/Run 一带):先
    `emulate.mjs 1400 1200` 把节点露出来再点,验完 set 回去。
-4. **一次采样,不要轮询截图**:瞬态(loading 相位、流式增量)用 cdp.mjs 里的 async
+4. **一次采样,不要轮询截图**:瞬态(loading 阶段、流式增量)用 cdp.mjs 里的 async
    循环 100ms 读状态返回时间线,截图轮询追不上。
 5. **报告纪律**:没实测的行不许标 ✅;每行附截图文件名;跨多 PR 的会话报告要汇总全部交付项。
    **给用户看的截图/报告必须发布成 claude.ai Artifact 页**(图片压 JPEG 内嵌 data URI,

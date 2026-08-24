@@ -59,7 +59,7 @@
     "model": "模型:{{model}}",
     "input": "输入",
     "result": "结果",
-    "openPhase": "打开这个相位",
+    "openPhase": "打开这个阶段",
     "unread": "这个版本还读不懂 {{eventType}} —— 下面是原始事件。"
   },
   "mocked": {
@@ -134,9 +134,9 @@
   },
   "message": {
     "predictStarted": "预演轨迹开始",
-    "phaseStarted": "相位开始:{{phase}}",
-    "phaseFailed": "相位失败:{{phase}}",
-    "phaseFinished": "相位结束:{{phase}}",
+    "phaseStarted": "阶段开始:{{phase}}",
+    "phaseFailed": "阶段失败:{{phase}}",
+    "phaseFinished": "阶段结束:{{phase}}",
     "transitionStarted": "转移开始:{{transition}}",
     "transitionFinished": "转移结束:{{transition}}",
     "promptCaptured": "已捕获提示词",
@@ -242,7 +242,7 @@
   "factValue": {
     "yes": "是",
     "no": "否",
-    "phaseEnded": "相位结束",
+    "phaseEnded": "阶段结束",
     "loopContinues": "循环继续"
   }
 }

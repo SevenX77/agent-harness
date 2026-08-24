@@ -13,41 +13,41 @@
     "clearBreakpoint": "不再停在这里"
   },
   "phaseKind": {
-    "skill": "Agent 相位",
-    "logic": "Logic 相位",
-    "subgraph": "子图相位"
+    "skill": "Agent 阶段",
+    "logic": "Logic 阶段",
+    "subgraph": "子图阶段"
   },
   "nameDialog": {
     "titleForKind": "添加{{kind}}",
-    "titleGeneric": "添加相位节点",
+    "titleGeneric": "添加阶段节点",
     "nodeName": "节点名",
     "cancel": "取消",
     "create": "创建"
   },
   "problem": {
-    "name_required": "相位名不能为空。",
-    "name_shape_invalid": "相位名必须以字母或下划线开头，且只能包含字母、数字、下划线或连字符。",
-    "name_taken": "已经有一个叫 {{phaseId}} 的相位了。",
-    "name_unchanged": "相位名没有变化。",
-    "connect_endpoints_must_be_phases": "连线的两端都必须是相位节点。",
-    "self_dependency": "一个相位不能依赖它自己。",
-    "input_target_must_be_phase": "Input 只能连到相位节点。",
+    "name_required": "阶段名不能为空。",
+    "name_shape_invalid": "阶段名必须以字母或下划线开头，且只能包含字母、数字、下划线或连字符。",
+    "name_taken": "已经有一个叫 {{phaseId}} 的阶段了。",
+    "name_unchanged": "阶段名没有变化。",
+    "connect_endpoints_must_be_phases": "连线的两端都必须是阶段节点。",
+    "self_dependency": "一个阶段不能依赖它自己。",
+    "input_target_must_be_phase": "Input 只能连到阶段节点。",
     "dependency_exists": "这条依赖已经存在。",
-    "output_source_must_be_phase": "Output 只能由相位节点连过来。",
+    "output_source_must_be_phase": "Output 只能由阶段节点连过来。",
     "output_marker_exists": "这个 output 标记已经存在。",
-    "connect_boundary_direction": "边界只能这样连：Input → 相位，或相位 → Output。",
-    "disconnect_endpoints_must_be_phases": "这条边的两端都必须是相位节点。",
-    "input_source_must_be_phase": "Input 只能与相位节点断开。",
+    "connect_boundary_direction": "边界只能这样连：Input → 阶段，或阶段 → Output。",
+    "disconnect_endpoints_must_be_phases": "这条边的两端都必须是阶段节点。",
+    "input_source_must_be_phase": "Input 只能与阶段节点断开。",
     "input_dependency_missing": "这条边背后没有对应的 input 依赖。",
-    "output_disconnect_source_must_be_phase": "Output 只能与相位节点断开。",
+    "output_disconnect_source_must_be_phase": "Output 只能与阶段节点断开。",
     "output_marker_missing": "这条边背后没有对应的 output 标记。",
-    "disconnect_boundary_direction": "边界只能这样断开：Input → 相位，或相位 → Output。",
-    "phase_dependency_missing": "这条边背后没有对应的相位依赖。",
-    "phase_id_required": "缺少相位 id。",
-    "phase_not_found": "找不到这个相位。",
-    "select_phase_to_rename": "先选中一个相位节点再重命名。",
-    "phase_not_in_graph": "选中的相位不在 GRAPH.md 里。",
-    "reconnect_endpoints_must_be_phases": "只有相位节点之间的边才能重连。",
+    "disconnect_boundary_direction": "边界只能这样断开：Input → 阶段，或阶段 → Output。",
+    "phase_dependency_missing": "这条边背后没有对应的阶段依赖。",
+    "phase_id_required": "缺少阶段 id。",
+    "phase_not_found": "找不到这个阶段。",
+    "select_phase_to_rename": "先选中一个阶段节点再重命名。",
+    "phase_not_in_graph": "选中的阶段不在 GRAPH.md 里。",
+    "reconnect_endpoints_must_be_phases": "只有阶段节点之间的边才能重连。",
     "reconnect_no_op": "这条边重连回了原来的两端。"
   },
   "status": {
@@ -98,6 +98,6 @@
     "reconnectDependencyFailed": "依赖没能重连",
     "disconnectDependencyFailed": "依赖没能断开",
     "deleteNodeFailed": "节点没能删除",
-    "createPhaseFailed": "相位没能创建"
+    "createPhaseFailed": "阶段没能创建"
   }
 }

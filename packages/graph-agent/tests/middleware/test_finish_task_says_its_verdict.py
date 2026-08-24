@@ -72,8 +72,8 @@ def test_the_verdict_narrates_its_pipeline_like_print() -> None:
 
     叙述里的每一步都必须是**这道闸真的跑过**的一步。原来还有第三步「业务校验器
     的结论」,而这道闸从来就没有业务校验器可调(台账 E16),于是那一步说的是一件
-    没发生的事;相位真正的业务规则在它自己的 `validator.py` 里,由 `PhaseWrapper`
-    在相位跑完之后执行、失败即致命,与这道闸无关。
+    没发生的事;阶段真正的业务规则在它自己的 `validator.py` 里,由 `PhaseWrapper`
+    在阶段跑完之后执行、失败即致命,与这道闸无关。
     """
     recorder = Recorder()
     middleware = _middleware(recorder)

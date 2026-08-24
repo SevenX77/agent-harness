@@ -285,7 +285,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   - **拒绝 pid 探测**(`os.kill(pid, 0)`):pid 会被复用,一个被回收的 pid 会让死掉的 run
     读起来还活着——那正是这里要消灭的谎言,换个地方重新长出来。
   - **拒绝心跳时间戳**:心跳需要一个"多久算过期"的阈值,而一个正在等慢速 LLM 调用的
-    相位,和一个已经死掉的 worker,在阈值面前长得一模一样。
+    阶段,和一个已经死掉的 worker,在阈值面前长得一模一样。
   - **参考对象在本仓不成立的部分**:PostgreSQL 可以假设一个众所周知的数据目录和一个
     比机器上一切都活得久的 supervisor。本仓没有守护进程——sidecar 随 app 窗口一起死——
     所以既没有那个统一的落锁点,也没有可以问的 supervisor。锁因此落在**每个 run 自己的
@@ -350,19 +350,19 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - 归属: capability `run-execution`(owner);region `center-action-bar` · `canvas` ·
   `timeline`(引)。
 
-### F10. 一次 run 可以停在你指定的相位之前
+### F10. 一次 run 可以停在你指定的阶段之前
 
 - 机制:
-  - **断点是「跑到这个相位之前先停下」**,由用户在画布上对某个相位设下,存在**该 skill 的
+  - **断点是「跑到这个阶段之前先停下」**,由用户在画布上对某个阶段设下,存在**该 skill 的
     工作区**(`.workspace/runtime_config.json`)里,跨多次 run 存活。
-  - **让图停下来的是引擎**:`assemble_graph(..., pause_before=frozenset[str])` 把这些相位名
+  - **让图停下来的是引擎**:`assemble_graph(..., pause_before=frozenset[str])` 把这些阶段名
     交给 LangGraph 的 `builder.compile(interrupt_before=[...])`。
   - **停下来时的现场**(2026-08-21 实测):`graph.invoke(...)` 返回,
-    `graph.get_state(config).next` 是 `("b",)`——即它**将要执行而还没执行**的那个相位;
-    而 `state.interrupts` 是**空的**。再 `graph.invoke(None, config)` 一次,那个相位执行、
+    `graph.get_state(config).next` 是 `("b",)`——即它**将要执行而还没执行**的那个阶段;
+    而 `state.interrupts` 是**空的**。再 `graph.invoke(None, config)` 一次,那个阶段执行、
     `next` 变空、run 跑完。
   - **run 的结局是 `paused`**:它有 checkpoint、能续、还没产出最终输出。
-  - **断点命中时,那个相位一次都还没跑**——`interrupt_before` 停在进入之前,所以画布上
+  - **断点命中时,那个阶段一次都还没跑**——`interrupt_before` 停在进入之前,所以画布上
     该亮的是「停在这里」,不是「这一步做完了」。
 - 决策 RUN_EXECUTION-16(一次 run 的结局里必须有「停住了,还能接着跑」这一档;
   2026-08-21 立,问题台账 C1 ③):
@@ -376,14 +376,14 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     无条件**走「成功收尾」的,所以 resume 撞上同一个断点也会被记成跑完。判据统一成一句:
     **`get_state(config).next` 非空 = 这一次没跑到头**;非空且带 `__interrupt__` 载荷 =
     在等人回答,非空且没有载荷 = 停在断点上。
-  - **借 LangGraph 的静态中断,拒绝在相位内部塞动态 `interrupt()`。** 后者要求每个相位
+  - **借 LangGraph 的静态中断,拒绝在阶段内部塞动态 `interrupt()`。** 后者要求每个阶段
     自己去查一遍「我是不是断点」,于是**断点的存在与否改变了被观察者的代码路径**——
     而断点是外部观察手段,不该改变它观察的东西。代价照实写:`interrupt_before` 是
     **编译期**参数,所以 run 起飞之后新设的断点对**这一次**不生效,下一次才生效;
     这一点要让用户看得见,不能让他对着一个不生效的断点等。
   - **引擎收的是一个显式参数,不是去 `runtime_config` 里翻键。** `assemble_graph` 已经
     收着 `runtime_config`,让它顺手读一个 `breakpoints` 键更省事——但那等于把 Studio 的
-    存储格式焊进引擎契约。引擎该知道的只有「这些相位之前停下」(显式优于隐式)。
+    存储格式焊进引擎契约。引擎该知道的只有「这些阶段之前停下」(显式优于隐式)。
   - **复用 `InterruptedEvent`,并让它说出停下来的**理由**。** 它已经带着这次停顿需要的
     全部字段(`phase_name` + checkpoint 三件套 + 可选 `question`),另造一个平行事件会让
     每一个消费者把同一件事处理两遍。但**不能靠「`question` 是空的」来区分**:那既可能是
@@ -457,7 +457,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
   - **停住的 run 谁来接手:谁续跑它、谁看着它,谁就在这里持有它。**(2026-08-22 真机走查补)
     上一条(「一次停顿不结束这个 run 的事件流」)保住的是**内存里那条记录**的流,而记录只
     活在起这个 run 的那个进程里,进程一没它就没了。**关掉 app 再打开、对着一个停住的 run
-    按 Resume**,走的就是另一条路:磁盘上这个 run 往前跑了一个相位、正确地结束了,而屏幕上
+    按 Resume**,走的就是另一条路:磁盘上这个 run 往前跑了一个阶段、正确地结束了,而屏幕上
     什么都没动,直到再重开一次 app。原因是 `observe_resumed_run` 找不到记录就返回 `None`
     (事件无处可送),`record_resume_result` 也因为没有记录而不发 gate(结束无人知晓)。
     **`stop_run` 早就学会了只凭 run 目录结束一个本 sidecar 没起过的 run**(台账 C1 ④),
@@ -530,8 +530,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     方的是封盘**之后**的那份记录,不是交进去的那份。
   - **一次 run 的 trace 和它的账,都属于这个 run,不属于某一段。**(2026-08-22 真机
     走查补,C1 ③ 收官)读一次「停在断点 → 续跑 → 跑完」的 run 的 `trace.jsonl`:里面
-    **只有第二段**。断点之前跑过的那些相位——包括产出了续跑所依赖的那份上下文的那个
-    相位——一个字都没有。原因是写 trace 的水槽**一打开就把文件清空**
+    **只有第二段**。断点之前跑过的那些阶段——包括产出了续跑所依赖的那份上下文的那个
+    阶段——一个字都没有。原因是写 trace 的水槽**一打开就把文件清空**
     (`callbacks/emit.py` 的 `_TraceJsonlSink.__init__`),而 `resume_skill` 会为**同一个
     run 目录**再开一个水槽。清空是「我在开始一次 run」的动作;续跑不是新的 run:同一个
     run id、同一个目录、同一批读的人。这和「续跑不重发 run 的档案」是同一个错落到下一层。
@@ -561,16 +561,16 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
     过之后 `time.monotonic() - clock_origin` 在三处都是 run 的总时长,不存在「忘了加」的
     那个出口。
   - **边界节点不能带「断点」这个词。**(2026-08-22 真机走查补)Output 端点按「产出它的
-    相位里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
-    可断点是设在**相位**上的,端点不是相位,谁也没法在它上面设断点。端点上成立的是
+    阶段里最坏的那个」取状态,于是继承了 `breakpoint`,屏幕上写着 Output 是个断点——
+    可断点是设在**阶段**上的,端点不是阶段,谁也没法在它上面设断点。端点上成立的是
     底下那句更一般的话:**没有东西到达,也没有东西在执行**,那就是 `paused`。边的状态
     表早就这么收(`buildEdges` 的 `breakpoint: 'paused'`),这一步只是让同一条规则走到
     边所通向的那个端点。
   - **整图 iterate 的 skill 直接拒绝断点。** graph 级 `iterate` 是「整张图每个 item 跑
     一遍」,而且那些轮次是由 iterate wrapper 自己驱动的:停在某一轮里既报不出去也
-    续不回来,而「停在相位 X 之前」也说不清是哪个 item 的 X。`assemble_graph` 在收到
+    续不回来,而「停在阶段 X 之前」也说不清是哪个 item 的 X。`assemble_graph` 在收到
     非空 `pause_before` 且 manifest 带 graph 级 iterate 时**当场报错**——交回一个
-    永远不会触发的断点比报错更坏(fail fast,在边界校验)。相位级 iterate 不受影响:
+    永远不会触发的断点比报错更坏(fail fast,在边界校验)。阶段级 iterate 不受影响:
     那是一个节点内部循环,停在它**之前**含义明确。
 - 原话/来源: 用户 2026-08-19「运行时观测」模块拆解(台账 C1 ③「节点级暂停缺」)。
 - 测试: 引擎——`packages/graph-agent/tests/core/test_a_graph_stops_before_the_phases_you_named.py`

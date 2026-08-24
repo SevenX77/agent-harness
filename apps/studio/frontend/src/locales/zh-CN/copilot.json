@@ -150,7 +150,7 @@
       "more": "还有 {{count}} 条",
       "kind": {
         "file": "文件",
-        "phase": "相位",
+        "phase": "阶段",
         "dot": "黑板键",
         "error": "诊断",
         "trace": "运行事件"

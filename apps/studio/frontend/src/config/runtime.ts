@@ -106,12 +106,32 @@ export async function initializeRuntimeConfig(options: RuntimeOptions = {}): Pro
  * the dev backend URL.
  */
 export async function restartSidecar(options: RuntimeOptions = {}): Promise<SidecarConfig> {
+  return performShellRestart('restart_sidecar', options)
+}
+
+/**
+ * dead-sidecar-says-so — the bounded-loop counterpart to `restartSidecar`,
+ * called by `RuntimeGate`'s own automatic recovery attempts (never by a
+ * person pressing Retry, which stays on `restartSidecar` above). Invokes a
+ * DIFFERENT Rust command (`restart_sidecar_automatic`) so
+ * `SidecarSupervisor::restart_automatic` can enforce its attempt/window
+ * budget independently — a manual Retry must never be refused by that budget,
+ * so it cannot share the same command.
+ *
+ * Outside Tauri there is no shell-side budget to enforce (no shell to ask at
+ * all), so this falls back to the same dev-backend re-read as `restartSidecar`.
+ */
+export async function restartSidecarAutomatic(options: RuntimeOptions = {}): Promise<SidecarConfig> {
+  return performShellRestart('restart_sidecar_automatic', options)
+}
+
+async function performShellRestart(command: string, options: RuntimeOptions): Promise<SidecarConfig> {
   if (!isTauriRuntime(options.windowRef)) {
     return initializeRuntimeConfig(options)
   }
   const invoke = options.invoke ?? (await loadTauriInvoke())
   try {
-    const config = normalizeSidecarConfig(await invoke<SidecarConfig>('restart_sidecar'))
+    const config = normalizeSidecarConfig(await invoke<SidecarConfig>(command))
     applySidecarConfig(config)
     return config
   } catch (error) {

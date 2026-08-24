@@ -2322,13 +2322,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [activeFileDetails, currentSkillId, mutateRuntimeConfig, mutateSkillDetail])
 
-  useStudioEventStream({
+  // `connectionLost` is also CenterActionBar's backend-reachability signal
+  // (dead-sidecar-says-so "功能面带原因置灰") — the SAME hub SettingsPage's own
+  // `backendReachable` already reads (SettingsPage.tsx), reused here rather
+  // than opening a second subscription to the one shared WebSocket.
+  const { connectionLost: studioEventStreamConnectionLost } = useStudioEventStream({
     onRegistryChanged: ignoreStudioEvent,
     onRolesChanged: ignoreStudioEvent,
     onRuntimeConfigChanged: handleRuntimeConfigChangedEvent,
     onSkillChanged: handleSkillChangedEvent,
     onSkillGate: applyGateEvent,
   }, { enabled: Boolean(currentSkillId) })
+  const centerActionBarBackendReachable = !studioEventStreamConnectionLost
 
 
   const activeLint = useMemo(
@@ -3180,6 +3185,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   />
                   <CenterActionBar
                     stage={deriveBuildStage(currentSkillId)}
+                    backendReachable={centerActionBarBackendReachable}
                     onCompile={handleCompile}
                     onPredict={handlePredict}
                     onRun={handleRun}

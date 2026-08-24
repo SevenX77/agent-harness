@@ -1300,6 +1300,51 @@ fn restart_sidecar(
     Ok(runtime_config)
 }
 
+/// Bounded counterpart to `restart_sidecar` for RuntimeGate's own automatic
+/// recovery loop (frontend backoff: 1s/4s/16s, at most
+/// `sidecar::AUTO_RESTART_MAX_ATTEMPTS` attempts — see
+/// `apps/studio/frontend/src/components/RuntimeGate.tsx`). The SUPERVISOR
+/// enforces the count/window ceiling independently of this command
+/// (`SidecarSupervisor::restart_automatic` doc), so calling this again after
+/// the budget is spent costs nothing — it refuses immediately instead of
+/// spawning anything.
+///
+/// Trigger: RuntimeGate noticing the sidecar died on its own (the shared
+/// WebSocket event stream reports `connectionLost`, or an HTTP call gets no
+/// response at all) — never a person pressing Retry, which stays on
+/// `restart_sidecar` above and is never subject to this budget.
+#[tauri::command]
+fn restart_sidecar_automatic(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, SidecarAppState>,
+) -> Result<sidecar::SidecarRuntimeConfig, String> {
+    match supervisor(&state)?.restart_automatic() {
+        sidecar::AutoRestartOutcome::Restarted(runtime_config) => {
+            if let Err(err) = app_handle.emit(sidecar::SIDECAR_RESTARTED_EVENT, &runtime_config) {
+                log::error!(
+                    "phase=sidecar-restart action=emit-failed trigger=automatic event={} error={err}",
+                    sidecar::SIDECAR_RESTARTED_EVENT
+                );
+            } else {
+                log::info!(
+                    "phase=sidecar-restart action=emit-ok trigger=automatic event={} port={}",
+                    sidecar::SIDECAR_RESTARTED_EVENT,
+                    runtime_config.port
+                );
+            }
+            Ok(runtime_config)
+        }
+        sidecar::AutoRestartOutcome::BudgetExhausted => {
+            log::warn!("phase=sidecar-restart action=refused trigger=automatic reason=budget-exhausted");
+            Err("automatic restart budget exhausted — press Retry".to_string())
+        }
+        sidecar::AutoRestartOutcome::Failed(error) => {
+            log::warn!("phase=sidecar-restart action=failed trigger=automatic error={error}");
+            Err(error)
+        }
+    }
+}
+
 #[tauri::command]
 fn get_sidecar_stderr(state: tauri::State<'_, SidecarAppState>) -> Vec<String> {
     match state.supervisor.as_ref() {
@@ -4349,6 +4394,7 @@ pub fn run() {
             get_sidecar_stderr,
             confirm_quit_ready,
             restart_sidecar,
+            restart_sidecar_automatic,
             select_directory,
             select_file,
             reveal_in_file_manager,

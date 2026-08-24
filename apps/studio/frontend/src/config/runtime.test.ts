@@ -13,6 +13,7 @@ import {
   isTauriRuntime,
   resolveRuntimeConfig,
   restartSidecar,
+  restartSidecarAutomatic,
   subscribeToSidecarRestart,
 } from './runtime'
 
@@ -226,6 +227,71 @@ describe('retrying asks the shell for a sidecar, not for its config', () => {
 
   it('outside Tauri there is no shell to ask, so it re-reads the dev backend', async () => {
     const config = await restartSidecar({
+      windowRef: {},
+      fallbackBaseURL: 'http://localhost:8787/api',
+    })
+
+    expect(config.baseURL).toBe('http://localhost:8787/api')
+  })
+})
+
+/**
+ * dead-sidecar-says-so — RuntimeGate's bounded automatic-restart loop calls a
+ * DIFFERENT shell command than a manual Retry, so the Rust-side supervisor can
+ * bound automatic attempts independently without ever refusing a person
+ * pressing Retry (`SidecarSupervisor::restart_automatic` vs `::restart`).
+ */
+describe('restartSidecarAutomatic — the bounded-loop counterpart to restartSidecar', () => {
+  const restarted = {
+    port: 41235,
+    baseURL: 'http://127.0.0.1:41235/api',
+    wsURL: 'ws://127.0.0.1:41235/ws',
+    resourceDir: '/resources',
+    configDir: '/config',
+    api_token: 'token-from-the-automatically-restarted-sidecar',
+  }
+
+  it('calls restart_sidecar_automatic, not restart_sidecar', async () => {
+    const commands: string[] = []
+
+    const config = await restartSidecarAutomatic({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(command: string): Promise<T> => {
+        commands.push(command)
+        return restarted as T
+      },
+    })
+
+    expect(commands).toEqual(['restart_sidecar_automatic'])
+    expect(config.port).toBe(41235)
+  })
+
+  it('applies the fresh config on success, same as a manual restart', async () => {
+    await restartSidecarAutomatic({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(): Promise<T> => restarted as T,
+    })
+
+    expect(getRuntimeStatus({ __TAURI_INTERNALS__: {} }).sidecar).toBe('ready')
+    expect(api.defaults.baseURL).toBe('http://127.0.0.1:41235/api')
+    expect(currentApiTokenIsSet()).toBe(true)
+  })
+
+  it('surfaces a refusal (budget exhausted) the same way it surfaces a real failure', async () => {
+    await expect(
+      restartSidecarAutomatic({
+        windowRef: { __TAURI_INTERNALS__: {} },
+        invoke: async <T,>(): Promise<T> => {
+          throw new Error('automatic restart budget exhausted — press Retry')
+        },
+      }),
+    ).rejects.toThrow('budget exhausted')
+
+    expect(getRuntimeStatus({ __TAURI_INTERNALS__: {} }).message).toContain('budget exhausted')
+  })
+
+  it('outside Tauri there is no shell to ask, so it re-reads the dev backend', async () => {
+    const config = await restartSidecarAutomatic({
       windowRef: {},
       fallbackBaseURL: 'http://localhost:8787/api',
     })

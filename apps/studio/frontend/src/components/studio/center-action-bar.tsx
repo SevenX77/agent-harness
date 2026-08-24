@@ -20,6 +20,15 @@ export type SkillBuildStage =
 
 interface CenterActionBarProps {
   stage: SkillBuildStage
+  /**
+   * dead-sidecar-says-so (2026-08-24): `false` while RuntimeGate has detected
+   * the backend is unreachable — every button in this bar calls into the
+   * sidecar (compile/predict/run/pause/resume/stop), so every one of them
+   * disables WITH a reason (not a silent grey button — the same lock-reason
+   * affordance already used for the compile/predict/run stage gates below).
+   * `undefined`/`true` leaves the normal stage-driven gating untouched.
+   */
+  backendReachable?: boolean
   onCompile?: () => void
   onPredict?: () => void
   onRun?: () => void
@@ -41,6 +50,7 @@ interface ButtonDerivation {
 // product's English surface. Shown when a gate keeps the button locked.
 const PREDICT_LOCK_REASON = "Compile must pass first"
 const RUN_LOCK_REASON = "Predict must pass first"
+const BACKEND_UNAVAILABLE_REASON = "Backend unavailable — reconnecting"
 
 function deriveButtons(stage: SkillBuildStage): ButtonDerivation {
   if (stage === "idle" || stage === "compiling" || stage === "compile-fail") {
@@ -100,8 +110,33 @@ function LockableButton({ disabled, lockReason, children }: LockableButtonProps)
   )
 }
 
-export function CenterActionBar({ stage, onCompile, onPredict, onRun, onPause, onResume, onStop }: CenterActionBarProps) {
-  const d = deriveButtons(stage)
+export function CenterActionBar({
+  stage,
+  backendReachable,
+  onCompile,
+  onPredict,
+  onRun,
+  onPause,
+  onResume,
+  onStop,
+}: CenterActionBarProps) {
+  const staged = deriveButtons(stage)
+  // The backend-unavailable override always wins: every button in the bar
+  // calls the sidecar, so none of them can stay live while it's unreachable,
+  // regardless of what stage the build happens to be in.
+  const backendUnavailable = backendReachable === false
+  const d: ButtonDerivation = backendUnavailable
+    ? {
+        compileHighlight: staged.compileHighlight,
+        compileDisabled: true,
+        predictHighlight: staged.predictHighlight,
+        predictDisabled: true,
+        runHighlight: staged.runHighlight,
+        runDisabled: true,
+      }
+    : staged
+  const predictLockReason = backendUnavailable ? BACKEND_UNAVAILABLE_REASON : PREDICT_LOCK_REASON
+  const runLockReason = backendUnavailable ? BACKEND_UNAVAILABLE_REASON : RUN_LOCK_REASON
   const barRef = useRef<HTMLDivElement>(null)
   // Its own width, published so the clamp below can reason about its edges.
   // Measured rather than assumed: the bar's labels change with the stage.
@@ -129,17 +164,19 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun, onPause, o
         )`,
       }}
     >
-      <Button
-        variant="ghost"
-        size="default"
-        disabled={d.compileDisabled}
-        onClick={onCompile}
-        className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.compileHighlight ? "studio-center-action-button--active" : ""}`}
-      >
-        <Hammer className="size-3.5" />
-        Compile
-      </Button>
-      <LockableButton disabled={d.predictDisabled} lockReason={PREDICT_LOCK_REASON}>
+      <LockableButton disabled={backendUnavailable} lockReason={BACKEND_UNAVAILABLE_REASON}>
+        <Button
+          variant="ghost"
+          size="default"
+          disabled={d.compileDisabled}
+          onClick={onCompile}
+          className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.compileHighlight ? "studio-center-action-button--active" : ""}`}
+        >
+          <Hammer className="size-3.5" />
+          Compile
+        </Button>
+      </LockableButton>
+      <LockableButton disabled={d.predictDisabled} lockReason={predictLockReason}>
         <Button
           variant="ghost"
           size="default"
@@ -160,50 +197,62 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun, onPause, o
         // routing "stop" through a pause the reader never asked for was the UI
         // inventing a detour the run itself does not require.
         <>
-          <Button
-            variant="ghost"
-            size="default"
-            onClick={onPause}
-            className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
-          >
-            <Pause fill="currentColor" className="size-3.5" />
-            Pause
-          </Button>
-          <Button
-            variant="ghost"
-            size="default"
-            onClick={onStop}
-            className="studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs"
-          >
-            <Square fill="currentColor" className="size-3.5" />
-            Stop
-          </Button>
+          <LockableButton disabled={backendUnavailable} lockReason={BACKEND_UNAVAILABLE_REASON}>
+            <Button
+              variant="ghost"
+              size="default"
+              disabled={backendUnavailable}
+              onClick={onPause}
+              className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
+            >
+              <Pause fill="currentColor" className="size-3.5" />
+              Pause
+            </Button>
+          </LockableButton>
+          <LockableButton disabled={backendUnavailable} lockReason={BACKEND_UNAVAILABLE_REASON}>
+            <Button
+              variant="ghost"
+              size="default"
+              disabled={backendUnavailable}
+              onClick={onStop}
+              className="studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs"
+            >
+              <Square fill="currentColor" className="size-3.5" />
+              Stop
+            </Button>
+          </LockableButton>
         </>
       ) : stage === "paused" ? (
         // A paused run has two futures and both are offered outright: carry on
         // from the checkpoint, or end it here. Neither is implied by the other.
         <>
-          <Button
-            variant="ghost"
-            size="default"
-            onClick={onResume}
-            className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
-          >
-            <Play fill="currentColor" className="size-3.5" />
-            Resume
-          </Button>
-          <Button
-            variant="ghost"
-            size="default"
-            onClick={onStop}
-            className="studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs"
-          >
-            <Square fill="currentColor" className="size-3.5" />
-            Stop
-          </Button>
+          <LockableButton disabled={backendUnavailable} lockReason={BACKEND_UNAVAILABLE_REASON}>
+            <Button
+              variant="ghost"
+              size="default"
+              disabled={backendUnavailable}
+              onClick={onResume}
+              className="studio-center-action-button studio-center-action-button--active h-10 gap-1.5 rounded-full px-4 text-xs"
+            >
+              <Play fill="currentColor" className="size-3.5" />
+              Resume
+            </Button>
+          </LockableButton>
+          <LockableButton disabled={backendUnavailable} lockReason={BACKEND_UNAVAILABLE_REASON}>
+            <Button
+              variant="ghost"
+              size="default"
+              disabled={backendUnavailable}
+              onClick={onStop}
+              className="studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs"
+            >
+              <Square fill="currentColor" className="size-3.5" />
+              Stop
+            </Button>
+          </LockableButton>
         </>
       ) : (
-        <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
+        <LockableButton disabled={d.runDisabled} lockReason={runLockReason}>
           <Button
             variant="ghost"
             size="default"

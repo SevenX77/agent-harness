@@ -289,13 +289,100 @@ impl SidecarManager {
 /// destroyed the only means of trying again, and the app's Retry button had
 /// nothing to call (problem ledger P2).
 ///
-/// Deliberately NOT borrowed from those systems: automatic restart policies
-/// (`Restart=always`, restart intensity limits). The trigger here is a person
-/// pressing Retry. Auto-retrying a permanent failure — a missing vendor
-/// snapshot, a broken interpreter — would only bury the error it needs to show.
+/// Corrected 2026-08-24 (dead-sidecar-says-so): this comment used to read
+/// "Deliberately NOT borrowed from those systems: automatic restart policies
+/// (`Restart=always`, restart intensity limits)." That was too broad. The
+/// reasoning it gave — "the trigger here is a person pressing Retry; a
+/// permanent failure would only get buried" — is a real objection to
+/// `Restart=always` (retry forever, silently, hiding the error). It is NOT an
+/// objection to an intensity limit, because a limit does the opposite of
+/// hiding a permanent failure: it runs out and lands on a VISIBLE terminal
+/// state with the failure's own text still attached. That is exactly what
+/// `StartLimitBurst`/`StartLimitIntervalSec` (systemd) and `max_restarts`/
+/// `max_seconds` (Erlang/OTP) are for — let a transient blip heal itself, then
+/// stop and surface a permanent one instead of retrying it forever.
+///
+/// So `restart_automatic` below DOES borrow that half: at most
+/// `AUTO_RESTART_MAX_ATTEMPTS` attempts inside `AUTO_RESTART_WINDOW`, then it
+/// refuses outright until something resets the budget — no unbounded retry
+/// loop ever runs, and RuntimeGate's persistent banner keeps showing the last
+/// attempt's real error the whole time.
+///
+/// One thing is still deliberately NOT borrowed, and this is a genuine
+/// departure from both reference systems rather than an oversight: systemd's
+/// `StartLimitBurst` also blocks a subsequent MANUAL `systemctl restart` until
+/// an operator runs `systemctl reset-failed`, and OTP escalates a spent budget
+/// to the supervisor's own supervisor. Neither fits here — there is no second
+/// operator and no supervisor above this one, only the same person looking at
+/// the same Retry button that is on screen precisely so pressing it does
+/// something. A manual `restart()` is therefore ALWAYS attempted (never
+/// refused by the automatic budget) and resets that budget for a fresh
+/// episode, so pressing Retry is never a dead click.
 pub struct SidecarSupervisor {
     launch: SidecarLaunchConfig,
     state: Mutex<SupervisedSidecar>,
+    /// Bookkeeping for `restart_automatic` ONLY — a manual `restart()` always
+    /// attempts and resets this (see the struct doc above).
+    auto_restart_budget: Mutex<AutoRestartBudget>,
+}
+
+/// At most this many AUTOMATIC restart attempts (see `restart_automatic`)
+/// inside `AUTO_RESTART_WINDOW`. Fixed backoff delays between attempts
+/// (1s/4s/16s) are the CALLER's concern (RuntimeGate, in TypeScript) — this
+/// module only enforces the count/window ceiling, independent of how fast or
+/// slow the caller asks, exactly like a systemd unit's own start-limit is
+/// independent of what is asking for the restart.
+const AUTO_RESTART_MAX_ATTEMPTS: usize = 3;
+/// Rolling ceiling on one automatic-restart episode. This does NOT renew once
+/// spent — see `AutoRestartBudget::record_attempt_if_allowed` — so a sidecar
+/// that is permanently broken gets exactly `AUTO_RESTART_MAX_ATTEMPTS` quiet
+/// attempts and then stays in a visible failed state for good, until a person
+/// presses Retry.
+const AUTO_RESTART_WINDOW: Duration = Duration::from_secs(120);
+
+/// Tracks one automatic-restart episode. `record_attempt_if_allowed` is the
+/// only mutator: it either admits the attempt (incrementing the counter, and
+/// opening the window on the first admitted attempt) or refuses outright,
+/// leaving the counter untouched — a caller that keeps asking after being
+/// refused keeps getting refused, it can never sneak in "one more" by asking
+/// again immediately.
+#[derive(Debug, Clone, Copy, Default)]
+struct AutoRestartBudget {
+    attempts_used: usize,
+    window_started_at: Option<Instant>,
+}
+
+impl AutoRestartBudget {
+    /// Admits the attempt and returns `true`, or refuses and returns `false`.
+    /// Refusal is permanent for this episode: once the attempt cap or the
+    /// window is hit, EVERY later call (even long after the window would have
+    /// "reset") keeps refusing. The window is an early-exit on top of the
+    /// attempt cap, not a rate limiter that reopens on a timer — reopening on
+    /// a timer is exactly the quiet-forever-retry shape the struct doc above
+    /// rejects. Only `SidecarSupervisor::restart` (a manual retry) resets it.
+    fn record_attempt_if_allowed(&mut self, now: Instant) -> bool {
+        if self.attempts_used >= AUTO_RESTART_MAX_ATTEMPTS {
+            return false;
+        }
+        let window_start = *self.window_started_at.get_or_insert(now);
+        if now.duration_since(window_start) >= AUTO_RESTART_WINDOW {
+            return false;
+        }
+        self.attempts_used += 1;
+        true
+    }
+}
+
+/// What one `restart_automatic` call produced, for the Tauri command layer to
+/// translate into whatever the frontend contract needs.
+#[derive(Debug)]
+pub enum AutoRestartOutcome {
+    /// A real attempt was made and it produced a running sidecar.
+    Restarted(SidecarRuntimeConfig),
+    /// The budget was already spent — no process was touched at all.
+    BudgetExhausted,
+    /// A real attempt was made (the budget admitted it) and it failed.
+    Failed(String),
 }
 
 /// Either there is a sidecar, or there isn't and this is what the last attempt
@@ -326,6 +413,7 @@ impl SidecarSupervisor {
         Self {
             launch,
             state: Mutex::new(state),
+            auto_restart_budget: Mutex::new(AutoRestartBudget::default()),
         }
     }
 
@@ -340,7 +428,48 @@ impl SidecarSupervisor {
     /// start the first one. Either way the outcome REPLACES what is recorded,
     /// so whatever a caller reads afterwards is this attempt's own result and
     /// not a verdict frozen at boot.
+    ///
+    /// A person pressing Retry. ALWAYS attempts — never refused by the
+    /// automatic budget (struct doc above) — and resets that budget, so this
+    /// is also how a fresh automatic-restart episode begins after one ran out.
     pub fn restart(&self) -> Result<SidecarRuntimeConfig, String> {
+        *self
+            .auto_restart_budget
+            .lock()
+            .expect("sidecar auto-restart budget poisoned") = AutoRestartBudget::default();
+        self.perform_restart()
+    }
+
+    /// Studio's OWN bounded recovery attempt after the sidecar goes down
+    /// without anyone touching Retry (RuntimeGate's WS-drop / HTTP-failure
+    /// liveness signals — `apps/studio/frontend/src/components/RuntimeGate.tsx`).
+    /// The frontend already paces these with its own 1s/4s/16s backoff and
+    /// stops asking after `AUTO_RESTART_MAX_ATTEMPTS`; this method enforces the
+    /// SAME ceiling independently of that caller, exactly like a systemd unit's
+    /// start-limit is enforced by the unit rather than by whoever asked for the
+    /// restart — see the struct doc for why that borrowing stops at the count/
+    /// window ceiling and does not extend to blocking a manual retry.
+    pub fn restart_automatic(&self) -> AutoRestartOutcome {
+        let admitted = {
+            let mut budget = self
+                .auto_restart_budget
+                .lock()
+                .expect("sidecar auto-restart budget poisoned");
+            budget.record_attempt_if_allowed(Instant::now())
+        };
+        if !admitted {
+            return AutoRestartOutcome::BudgetExhausted;
+        }
+        match self.perform_restart() {
+            Ok(runtime_config) => AutoRestartOutcome::Restarted(runtime_config),
+            Err(error) => AutoRestartOutcome::Failed(error),
+        }
+    }
+
+    /// The actual restart-or-start attempt, shared by `restart` and
+    /// `restart_automatic` — everything above this line is only about WHETHER
+    /// an attempt is allowed, never about how the attempt itself works.
+    fn perform_restart(&self) -> Result<SidecarRuntimeConfig, String> {
         let mut state = self.state.lock().expect("sidecar state poisoned");
         let attempt = match &*state {
             SupervisedSidecar::Running(manager) => manager
@@ -896,6 +1025,117 @@ mod tests {
         // spawned there is no captured output, only the failure to report.
         let supervisor = SidecarSupervisor::start(unstartable_launch_config());
         assert!(!supervisor.recent_stderr().is_empty());
+    }
+
+    // --- dead-sidecar-says-so: bounded automatic restart ---------------------
+
+    #[test]
+    fn auto_restart_budget_admits_up_to_the_attempt_cap_then_refuses() {
+        let mut budget = AutoRestartBudget::default();
+        let t0 = Instant::now();
+        for i in 0..AUTO_RESTART_MAX_ATTEMPTS {
+            assert!(
+                budget.record_attempt_if_allowed(t0 + Duration::from_secs(i as u64)),
+                "attempt {i} should have been admitted"
+            );
+        }
+        // The (N+1)th ask, still well inside the window, is refused outright.
+        assert!(!budget.record_attempt_if_allowed(
+            t0 + Duration::from_secs(AUTO_RESTART_MAX_ATTEMPTS as u64)
+        ));
+    }
+
+    #[test]
+    fn auto_restart_budget_refuses_once_the_window_elapses_even_under_the_attempt_cap() {
+        // Two attempts used — one under the three-attempt cap — but the third
+        // ask lands after the 2-minute window since the FIRST attempt. Still
+        // refused: the window is a hard ceiling on one episode, not a per-
+        // attempt cooldown that a slow caller could dodge by waiting.
+        let mut budget = AutoRestartBudget::default();
+        let t0 = Instant::now();
+        assert!(budget.record_attempt_if_allowed(t0));
+        assert!(budget.record_attempt_if_allowed(t0 + Duration::from_secs(30)));
+        assert!(!budget.record_attempt_if_allowed(t0 + AUTO_RESTART_WINDOW + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn auto_restart_budget_does_not_renew_after_being_exhausted() {
+        // "到限就停,不再试" — exhausting the attempt cap is a TERMINAL state for
+        // this episode, not a rate limiter that reopens next window. Unlike
+        // `Restart=always`, nothing here retries again on its own; only a
+        // manual restart() (tested below, on the supervisor) starts a fresh
+        // episode.
+        let mut budget = AutoRestartBudget::default();
+        let t0 = Instant::now();
+        for i in 0..AUTO_RESTART_MAX_ATTEMPTS {
+            assert!(budget.record_attempt_if_allowed(t0 + Duration::from_secs(i as u64)));
+        }
+        // Long after the window would have elapsed, still refused — no renewal.
+        assert!(!budget.record_attempt_if_allowed(t0 + AUTO_RESTART_WINDOW * 100));
+    }
+
+    #[test]
+    fn automatic_restart_is_bounded_and_then_refuses_without_spawning_anything() {
+        let supervisor = SidecarSupervisor::start(unstartable_launch_config());
+
+        for attempt in 0..AUTO_RESTART_MAX_ATTEMPTS {
+            match supervisor.restart_automatic() {
+                AutoRestartOutcome::Failed(error) => {
+                    assert!(
+                        error.contains("failed to spawn"),
+                        "attempt {attempt} should report a real (failed) spawn: {error}"
+                    );
+                }
+                other => panic!("attempt {attempt}: expected a real attempt, got {other:?}"),
+            }
+        }
+
+        // The budget is spent: the next automatic ask must not touch the
+        // process at all — it comes back immediately as BudgetExhausted, not
+        // another Failed (which would mean it tried again).
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::BudgetExhausted => {}
+            other => panic!("expected the budget to refuse a 4th automatic attempt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_manual_retry_is_never_refused_by_the_spent_automatic_budget() {
+        let supervisor = SidecarSupervisor::start(unstartable_launch_config());
+        for _ in 0..AUTO_RESTART_MAX_ATTEMPTS {
+            let _ = supervisor.restart_automatic();
+        }
+        assert!(matches!(
+            supervisor.restart_automatic(),
+            AutoRestartOutcome::BudgetExhausted
+        ));
+
+        // A person pressing Retry must still get a REAL attempt. A Retry
+        // button that silently does nothing once the auto-budget is spent
+        // would leave the user with no way out — worse than the bug this
+        // fixes (a dead sidecar with no visible recourse at all).
+        let error = supervisor.restart().expect_err("still unstartable");
+        assert!(
+            error.contains("failed to spawn"),
+            "manual retry should attempt, not refuse: {error}"
+        );
+    }
+
+    #[test]
+    fn a_manual_retry_resets_the_automatic_budget_for_a_fresh_episode() {
+        let supervisor = SidecarSupervisor::start(unstartable_launch_config());
+        for _ in 0..AUTO_RESTART_MAX_ATTEMPTS {
+            let _ = supervisor.restart_automatic();
+        }
+
+        let _ = supervisor.restart(); // manual retry: fresh episode
+
+        // The automatic budget is live again — the very next automatic ask
+        // gets a real attempt, not an immediate refusal.
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::Failed(_) => {}
+            other => panic!("expected the reset budget to allow a real attempt, got {other:?}"),
+        }
     }
 
     #[test]

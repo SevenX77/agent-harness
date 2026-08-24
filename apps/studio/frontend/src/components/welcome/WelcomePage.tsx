@@ -175,8 +175,13 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
   // First-run community-sharing consent (design: docs/studio/mvp1/01_workflows/00_settings.md
   // §3.0): fires once, exactly while the choice is "unset" — never while settings are
   // still loading (that would flash the dialog open even for an install that already
-  // answered, since the optimistic default settings snapshot also reads "unset").
+  // answered, since the optimistic default settings snapshot also reads "unset"), and
+  // never while the last read FAILED (J-02.A, PROBLEM_LEDGER.md): a failed read leaves
+  // `settings` on an untrustworthy placeholder that also reads "unset", and firing the
+  // dialog there risks a "Not now" click writing "declined" over a real "shared"/
+  // "declined" choice the server actually holds — silent data loss from a network blip.
   const communitySharingConsentOpen = !appSettings.isLoading
+    && !appSettings.error
     && appSettings.settings.community_sharing_choice === 'unset'
 
   // Recent is a pure MRU projection (D11/D-1-1): each card is one entry from the

@@ -1631,7 +1631,7 @@ function ActionsField({
         actions
         <HelpTooltip label="About actions">
           The deterministic functions this logic node runs, in order. Each action is one
-          <span className="font-mono"> def &lt;name&gt;(context)</span> in <span className="font-mono">actions/&lt;name&gt;.py</span>;
+          <span className="font-mono"> def &lt;name&gt;(inputs)</span> in <span className="font-mono">actions/&lt;name&gt;.py</span>;
           the frontmatter list and body <span className="font-mono">&lt;action&gt;</span> tags are kept in sync for you.
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
@@ -1812,7 +1812,7 @@ function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name
               onChange={(event) => setDraft(event.currentTarget.value)}
             />
             <FieldDescription>
-              A Python identifier — becomes <span className="font-mono">def &lt;name&gt;(context)</span>.
+              A Python identifier — becomes <span className="font-mono">def &lt;name&gt;(inputs)</span>.
             </FieldDescription>
             {invalid ? (
               <p className="text-xs text-destructive">Use letters, digits, underscore; not starting with a digit.</p>

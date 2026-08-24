@@ -25,11 +25,17 @@ describe("phase-actions helpers", () => {
     expect(isValidActionName("has space")).toBe(false)
   })
 
-  it("generates a load-safe stub following the action convention", () => {
+  it("generates a load-safe stub following the engine entrypoint contract", () => {
+    // Ground truth (docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md:234 + engine
+    // loader.py `_validate_action_signature`): the sole parameter must be named
+    // `inputs`, never `context`/`ctx` — a stub using the wrong name fails compile
+    // the moment it is scaffolded ([F-v3-logic-action-entrypoint-missing]).
     const stub = actionStubContent("strip_noise")
     expect(stub).toContain("from __future__ import annotations")
-    expect(stub).toContain("def strip_noise(context) -> dict:")
+    expect(stub).toContain("def strip_noise(inputs) -> dict:")
     expect(stub).toContain("return {}")
+    expect(stub).not.toContain("context")
+    expect(stub).not.toMatch(/\bctx\b/)
   })
 
   it("reads the canonical action list from frontmatter", () => {

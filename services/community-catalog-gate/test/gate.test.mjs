@@ -11,11 +11,13 @@ import { UPLOADABLE_TRUST_STATE, WIRE_EVIDENCE_TYPE } from '../src/redaction.mjs
 function kv() {
   return {
     store: {},
+    puts: [], // {key, value, options} — records every put() call so tests can pin TTL args
     async get(k) {
       return Object.prototype.hasOwnProperty.call(this.store, k) ? this.store[k] : null;
     },
-    async put(k, v) {
+    async put(k, v, options) {
       this.store[k] = v;
+      this.puts.push({ key: k, value: v, options });
     },
   };
 }
@@ -87,4 +89,34 @@ test('withdraw is recorded with NO Authorization header (open API)', async () =>
   const body = await res.json();
   assert.equal(body.status, 'withdrawal_recorded');
   assert.equal(await env.WITHDRAWN.get('rcpt-xyz'), '1');
+});
+
+// The publishing Action holds only a READ-ONLY KV token (drain-kv.mjs: list +
+// get, zero delete calls) — a deliberate choice to cap the blast radius of a
+// leaked Action secret. That rules out "consumer deletes after ack" (the
+// Cloudflare Queues / SQS pattern), so both write-side namespaces must instead
+// self-expire via TTL, same as the existing IDEMPOTENCY entries, or they grow
+// forever. These two tests pin that every BUFFER/WITHDRAWN write carries the
+// 30-day TTL — regression coverage for the unbounded-growth defect.
+const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
+
+test('accepted batch entries are buffered with a 30-day TTL (KV-as-queue, no delete power downstream)', async () => {
+  const env = baseEnv();
+  const res = await handleBatch(batchRequest([validRecord()]), env);
+  assert.equal(res.status, 200);
+  assert.equal(env.BUFFER.puts.length, 1);
+  assert.equal(env.BUFFER.puts[0].options?.expirationTtl, THIRTY_DAYS_SECONDS);
+});
+
+test('withdrawal receipts are recorded with the same 30-day TTL as the buffer entry they mark', async () => {
+  const env = baseEnv();
+  const req = new Request('https://gate.example/v1/evidence/withdraw', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ receipt_token: 'rcpt-xyz' }),
+  });
+  const res = await handleWithdraw(req, env);
+  assert.equal(res.status, 200);
+  assert.equal(env.WITHDRAWN.puts.length, 1);
+  assert.equal(env.WITHDRAWN.puts[0].options?.expirationTtl, THIRTY_DAYS_SECONDS);
 });

@@ -99,6 +99,27 @@ sanitized evidence to the gate — on by default, no token, the user perceives
 nothing. Unreachable-gate batches are parked in a local offline queue and
 retried, preserving their idempotency key.
 
+## Operations
+
+- **Changing `src/` requires a redeploy — merging the PR is not enough.** The
+  live Worker only picks up `src/gate.mjs` (or any other `src/` file) after
+  someone with Cloudflare credentials runs `wrangler deploy` from this
+  directory. There is no CD pipeline for the gate itself (only the *publishing*
+  Action in the catalog repo is automated); a merged fix sits inert until then.
+- **KV entries self-expire after 30 days, but only going forward.** `BUFFER`
+  (`pending/*`) and `WITHDRAWN` entries carry `expirationTtl` (see
+  `PENDING_ENTRY_TTL_SECONDS` in `src/gate.mjs`) so the namespaces no longer
+  grow without bound — added 2026-08-24 after both were found accumulating
+  indefinitely (no prior TTL, no consumer with delete power; see the comment at
+  that constant for why a delete-on-drain design does not fit here). The TTL is
+  **not retroactive**: any `pending/*` / `WITHDRAWN` key written before the fix
+  deployed has no expiry and keeps sitting in KV. Clearing that backlog is a
+  **one-off manual sweep** (e.g. `wrangler kv key list` + `wrangler kv key
+  delete` per stale key, or recreate the namespace) run by whoever holds
+  Cloudflare account access — it needs a WRITE-capable KV token, which neither
+  the gate Worker nor the publishing Action holds by design (see the Write
+  path / Security model sections above), so it cannot be automated from either.
+
 ## Test
 
 ```bash

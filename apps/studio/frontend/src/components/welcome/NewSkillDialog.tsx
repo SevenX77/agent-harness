@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react'
 import { FolderOpen, Sparkles } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Button } from '../ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Input } from '../ui/input'
@@ -37,6 +38,7 @@ export function NewSkillDialog({
   onSubmit,
   onSubmitWithWizard,
 }: NewSkillDialogProps) {
+  const { t } = useTranslation('welcome')
   const currentParentDirectory = parentDirectory ?? defaultParentDirectory ?? ''
   const nameMissing = !newSkillName.trim()
 
@@ -45,21 +47,18 @@ export function NewSkillDialog({
       <DialogContent className="w-[min(calc(100vw-2rem),52rem)] rounded-md border border-border bg-popover p-4 shadow-xl ring-0 sm:max-w-3xl">
         <form onSubmit={(event) => void onSubmit(event)}>
           <DialogHeader>
-            <DialogTitle>New skill</DialogTitle>
-            <DialogDescription>
-              Create the folder with starter files, or plan the skill out first and
-              let the folder follow from that.
-            </DialogDescription>
+            <DialogTitle>{t('dialog.title')}</DialogTitle>
+            <DialogDescription>{t('dialog.description')}</DialogDescription>
           </DialogHeader>
           <div className="my-4 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="new-skill-name">Skill name</Label>
+              <Label htmlFor="new-skill-name">{t('dialog.nameLabel')}</Label>
               <Input
                 id="new-skill-name"
                 autoFocus
                 value={newSkillName}
                 onChange={(event) => onNewSkillNameChange(event.target.value)}
-                placeholder="my-new-skill"
+                placeholder={t('dialog.namePlaceholder')}
                 aria-invalid={Boolean(newSkillError)}
                 disabled={creating}
               />
@@ -69,19 +68,19 @@ export function NewSkillDialog({
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Folder name: <span className="font-mono">{normalizeSkillId(newSkillName || 'new-skill')}</span>
+                  {t('dialog.folderNameLabel')} <span className="font-mono">{normalizeSkillId(newSkillName || 'new-skill')}</span>
                 </p>
               )}
             </div>
             <div className="space-y-2">
-              <Label>Parent folder</Label>
+              <Label>{t('dialog.parentLabel')}</Label>
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                 <Input
                   readOnly
                   value={currentParentDirectory}
-                  placeholder="Select a parent folder"
+                  placeholder={t('dialog.parentPlaceholder')}
                   className="min-w-0 font-mono text-xs"
-                  aria-label="Parent folder"
+                  aria-label={t('dialog.parentLabel')}
                 />
                 <Button
                   type="button"
@@ -90,7 +89,7 @@ export function NewSkillDialog({
                   disabled={creating || selectingParentDirectory}
                 >
                   <FolderOpen />
-                  {selectingParentDirectory ? 'Choosing' : 'Choose folder'}
+                  {selectingParentDirectory ? t('dialog.choosing') : t('dialog.chooseFolder')}
                 </Button>
               </div>
             </div>
@@ -98,7 +97,7 @@ export function NewSkillDialog({
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={creating}>
-                Cancel
+                {t('dialog.cancel')}
               </Button>
             </DialogClose>
             <Button
@@ -108,10 +107,10 @@ export function NewSkillDialog({
               disabled={creating || nameMissing}
             >
               <Sparkles />
-              Plan it together
+              {t('dialog.planTogether')}
             </Button>
             <Button type="submit" disabled={creating || nameMissing}>
-              {creating ? 'Creating' : 'Create'}
+              {creating ? t('dialog.creating') : t('dialog.create')}
             </Button>
           </DialogFooter>
         </form>

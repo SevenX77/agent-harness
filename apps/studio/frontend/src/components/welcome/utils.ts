@@ -1,9 +1,10 @@
+import i18n from '../../i18n'
 import type { SkillSummary } from '../../api/types'
 import { dateAndTime } from '../../utils/wall-clock'
 
 export function formatLastRun(value: string | null) {
   if (!value) {
-    return 'No runs yet'
+    return i18n.t('home.recent.noRunsYet', { ns: 'welcome' })
   }
 
   return dateAndTime(value)
@@ -34,7 +35,7 @@ export function normalizeSkillId(value: string) {
 
 export function shortPath(path: string | null) {
   if (!path) {
-    return 'AgentStudio/Skills'
+    return i18n.t('home.newSkill.defaultPathFallback', { ns: 'welcome' })
   }
   const parts = path.split(/[\\/]/).filter(Boolean)
   return parts.length > 3 ? `.../${parts.slice(-3).join('/')}` : path

@@ -9,10 +9,9 @@ import {
   formatImportSkillError,
   RecentSkeleton,
   registeredSkillIdForImport,
-  REMOVE_ACTION_LABEL,
-  REVEAL_ACTION_LABEL,
   WelcomePage,
 } from './WelcomePage'
+import i18n from '../../i18n'
 import type { RecentWorkspaceEntry } from '../../hooks/useRecentSkills'
 import type { SkillSummary } from '../../api/types'
 
@@ -94,6 +93,13 @@ afterEach(() => {
   recentMocks.recentError = null
 })
 
+// Tests below switch the shared i18n singleton to exercise zh-CN rendering;
+// reset it so every other test in this file (and any file run after it in the
+// same worker) keeps seeing the 'en' default it was written against.
+afterEach(async () => {
+  await i18n.changeLanguage('en')
+})
+
 function renderHome() {
   return renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
 }
@@ -133,15 +139,16 @@ describe('WelcomePage', () => {
     // The Recent card carries a ⋮ action-menu trigger. Radix portals the menu
     // content only once it is opened, so the closed SSR markup shows the trigger
     // but not the item labels — the item itself is contract-locked via the
-    // exported label below and exercised interactively by the home Playwright
-    // e2e, per the repo's "static render + e2e for interaction" convention.
+    // `welcome` namespace's English copy below and exercised interactively by
+    // the home Playwright e2e, per the repo's "static render + e2e for
+    // interaction" convention.
     expect(html).toContain('aria-label="More actions for Demo skill"')
 
     // The remove action is MRU-only: the wording says "from recent", and it is
     // wired to the recent-store `removeWorkspace` hook (see handleRemove), NOT
     // to skill deletion. The destructive `DELETE /api/skills` action that #163
     // retired stays retired — removing a card never deletes the skill on disk.
-    expect(REMOVE_ACTION_LABEL).toBe('Remove from recent')
+    expect(i18n.t('home.recent.removeFromRecent', { ns: 'welcome', lng: 'en' })).toBe('Remove from recent')
   })
 
   it('renders Open folder as the local workspace entry point', () => {
@@ -242,7 +249,7 @@ describe('WelcomePage', () => {
   })
 
   it('uses a short reveal action label in wider action menus', () => {
-    expect(REVEAL_ACTION_LABEL).toBe('Show in folder')
+    expect(i18n.t('home.recent.showInFolder', { ns: 'welcome', lng: 'en' })).toBe('Show in folder')
     expect(ACTION_MENU_CLASSNAME).toBe('w-48')
   })
 
@@ -388,6 +395,32 @@ describe('WelcomePage', () => {
 
     expect(formatImportSkillError(error)).not.toContain('/skills API contract')
     expect(formatImportSkillError(error)).not.toContain('Cannot import this folder')
+  })
+})
+
+describe('WelcomePage speaks the reader\'s language', () => {
+  // Proves the co-located `welcome` namespace is actually wired into the
+  // shared i18next instance via `src/i18n/namespaces.ts` — not just present
+  // as a JSON file nobody registered. If registration were missing or the
+  // namespace name were misspelled, i18next would silently fall back to
+  // echoing the raw key ('home.subtitle') instead of throwing, so asserting
+  // real Chinese prose (not just "not English") is the only check that would
+  // actually fail on a broken registration chain.
+  it('renders home-screen copy in zh-CN once the language switches', async () => {
+    await i18n.changeLanguage('zh-CN')
+    const html = renderHome()
+
+    expect(html).toContain('打开一个 skill 开始编辑。')
+    expect(html).toContain('>最近<')
+    expect(html).not.toContain('Open a skill to start editing.')
+  })
+
+  it('keeps "GSkill Studio" and the domain word "skill" unromanized in zh-CN, per the no-translate list', async () => {
+    await i18n.changeLanguage('zh-CN')
+    const html = renderHome()
+
+    expect(html).toContain('GSkill Studio')
+    expect(html).toContain('新建 skill')
   })
 })
 

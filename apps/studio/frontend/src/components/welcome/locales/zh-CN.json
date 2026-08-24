@@ -1,0 +1,49 @@
+{
+  "home": {
+    "title": "GSkill Studio",
+    "subtitle": "打开一个 skill 开始编辑。",
+    "newSkill": {
+      "button": "新建 skill",
+      "buttonCreating": "创建中",
+      "defaultHint": "默认：{{path}}",
+      "defaultPathFallback": "AgentStudio/Skills"
+    },
+    "openFolder": {
+      "button": "打开文件夹",
+      "buttonOpening": "打开中",
+      "hint": "选择任意本地文件夹"
+    },
+    "openFolderFailedToast": "打开文件夹失败",
+    "recent": {
+      "heading": "最近",
+      "loadErrorTitle": "无法加载最近的 skill",
+      "emptyTitle": "还没有最近的 skill",
+      "emptyDescription": "新建一个 skill 或打开一个文件夹即可开始。",
+      "noRunsYet": "还没有运行记录",
+      "moreActionsAriaLabel": "{{name}} 的更多操作",
+      "showInFolder": "在文件夹中显示",
+      "removeFromRecent": "从最近记录中移除",
+      "removedToast": "已从最近记录中移除 {{name}}"
+    }
+  },
+  "dialog": {
+    "title": "新建 skill",
+    "description": "创建带初始文件的文件夹，或者先把 skill 规划清楚，再让文件夹跟着生成。",
+    "nameLabel": "skill 名称",
+    "namePlaceholder": "my-new-skill",
+    "nameRequired": "请填写名称。",
+    "folderNameLabel": "文件夹名称：",
+    "parentLabel": "父文件夹",
+    "parentPlaceholder": "选择一个父文件夹",
+    "chooseFolder": "选择文件夹",
+    "choosing": "选择中",
+    "cancel": "取消",
+    "planTogether": "一起规划",
+    "create": "创建",
+    "creating": "创建中",
+    "errors": {
+      "alreadyExists": "无法创建「{{skillId}}」：已经存在同名的 skill，换一个名字。",
+      "invalidDirectory": "无法创建「{{skillId}}」：{{reason}}"
+    }
+  }
+}

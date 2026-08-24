@@ -791,7 +791,24 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       `04_platform/i18n.md` §4.1 并重钉 FROZEN 哈希),**zh-CN 真机抽验通过**(首页+新建对话框全中文,
       skill/GSkill 按术语规则不译;共享 ui 层「Close」标签仍英文,记横切)。
       模块二 D7 由「不符→已派修」翻**已修并真机验证**;**D2–D9 其余「部分」项随横切补齐后终收口**。
-- [ ] 模块三 · 搭图与编辑(02_authoring)
+- [x] **模块三 · 搭图与编辑**(02_authoring)—— D1 完成(2026-08-24,一次性配置真机):
+      TB 布局 / 图级 frontmatter 表单落 Properties(#219 裁决在活,MacroContractDrawer 未复活)/
+      T4 新建 LOGIC+SUBGRAPH 脚手架(白名单合规 + GRAPH.md 注册 + 子图目录脚手架)/
+      T1 连线写 depends_on / T2 菜单断开 + 拖脱断开 / 实时 lint 节点徽章 / Compile 抽屉全量聚合
+      (引擎 [F-v3-*] 码)/ Add action 三件套联动(frontmatter+正文 tag+stub 同事务)/
+      Predict-Run 串行门三态(绿解锁 Predict、Run 仍锁、新错回锁)/ agent 相位 13 字段白名单零越界 /
+      F5 L3 步骤画布内联(Add step 写 SKILL.md 正文)/ T5 内联展开真数据 / T6 下钻+面包屑返回 /
+      F4 path 失效可见 + 文件夹重连自愈(不许手敲)/ io 面板(实例预览 + Blackboard context 列首 +
+      Import 内联 + 输出区)/ 环路降级渲染 + 引擎 [F-v3-graph-phase-cycle] 聚合报错,
+      共 **18 项实测通过、1 项未实测**(ConflictDialog,未布现场,代码+vitest 为间接证据)、
+      **2 个新缺陷**:J-03.A(Add action 脚手架生成 `def <name>(context)` 违反引擎 `inputs`
+      入口契约,生成即编译失败——已派修)、J-03.B(外部修复转绿后节点徽章/Properties lint
+      投影不收敛 + 同一诊断重复两行——未修)。报告 Artifact `14a32e87`。
+      三路 agent 并行已派:J-03.A 修复(TDD 跨层契约测试)/ 02_authoring.md 16 处过期行回填 /
+      Properties+IO 面板 i18n(panels namespace,照 #1026 共置范式)。D2 记 D12 缺口:
+      GRAPH.md 拓扑序列化(serializeSkillGraph)与 runtime_config.json 写入仍纯 Python,
+      与「Rust 是 skill 文件唯一写入方」裁决相悖(随文档回填记账);macroform/ 死代码待清
+      (#219 证据坐实)。**D2–D9 其余随横切补齐后终收口**。
 - [ ] 模块四 · 编译与诊断(03_compile)
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)

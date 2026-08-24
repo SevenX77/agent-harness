@@ -2,14 +2,18 @@ import { parsePhaseFrontmatter, serializePhaseMarkdown } from "./phase-frontmatt
 
 // LOGIC action authoring helpers.
 //
-// Ground truth (docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md §1/§3 + engine
-// loader.py `_load_action_dir`): a LOGIC phase's actions live in
-// `phases/<phase_id>/actions/`, the action *name is the Python function name*,
-// the function's first parameter must be `context`/`ctx`, and the frontmatter
-// `actions:` list MUST stay identical to the body `<action>` tags. Studio adopts
-// the project convention (copilot.py) of one action per file: each action
-// `<name>` is the single `def <name>(context)` in `actions/<name>.py`. That makes
-// list / edit / delete / add pure file operations with no Python parsing.
+// Ground truth (docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md:16 and :234 +
+// engine loader.py `_validate_action_signature`): a LOGIC phase's actions live
+// in `phases/<phase_id>/actions/`, the action *name is the Python function
+// name*, the function's sole parameter must be named `inputs` (never
+// `context`/`ctx` — the engine rejects both) and be dict-compatible, `inputs`
+// is a read-only snapshot, and the only output channel is the returned dict —
+// its keys must be declared in the phase `io.outputs.properties`. The
+// frontmatter `actions:` list MUST stay identical to the body `<action>` tags.
+// Studio adopts the project convention (copilot.py) of one action per file:
+// each action `<name>` is the single `def <name>(inputs)` in
+// `actions/<name>.py`. That makes list / edit / delete / add pure file
+// operations with no Python parsing.
 
 const ACTION_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
@@ -24,20 +28,26 @@ export function isValidActionName(name: string): boolean {
 }
 
 /**
- * Load-safe stub for a new action file, following the mature-skill convention
- * (`from __future__ import annotations`, a typed `def <name>(context) -> dict`
- * with a docstring, reads via context / returns a dict). There is no engine-
- * enforced fixed header; this is the idiomatic starting point the author fills.
+ * Load-safe stub for a new action file, matching the engine entrypoint
+ * contract (`from __future__ import annotations`, a typed
+ * `def <name>(inputs) -> dict` with a docstring, reads via `inputs[...]`,
+ * returns a dict). There is no engine-enforced fixed header beyond the
+ * signature; this is the idiomatic starting point the author fills.
+ *
+ * Kept in sync by hand with `_studio_action_stub_content` in
+ * apps/studio/backend/tests/test_action_stub_engine_contract.py — that test
+ * feeds this exact template to the engine's compile gate so a future edit
+ * here that breaks the entrypoint contract fails CI instead of shipping.
  */
 export function actionStubContent(name: string): string {
   return [
     "from __future__ import annotations",
     "",
     "",
-    `def ${name}(context) -> dict:`,
+    `def ${name}(inputs) -> dict:`,
     `    """TODO: describe what ${name} does."""`,
-    "    # Read inputs from the blackboard with context.get(\"field\").",
-    "    # Write this phase's declared io.outputs (or return them as a dict).",
+    "    # Read this phase's inputs via inputs[\"field\"] (inputs is read-only).",
+    "    # Return only keys declared in this phase's io.outputs.properties.",
     "    return {}",
     "",
   ].join("\n")

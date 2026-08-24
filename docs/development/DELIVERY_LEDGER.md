@@ -784,8 +784,13 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       Recent 卡片重开 / D2 任意文件夹不被拒 / R1 失效路径 hydrate 自动剪除(store 文件同步剪)/
       Settings 不卸载工作区 / D3 无外部 IDE 跳转 / down 窗口壳与 FS 可用,共 14 条实测通过、
       0 不符;D8 copilot 恢复=持久化目录已建、行为验证留模块十一。新发现 J-02.A(失败读取编造默认值,未修)。
-      顺带完成:J-01.H 真机复验、#1021 第三次自动恢复证据。01_init.md 状态列回填与 welcome 模块 i18n
-      已派 agent(PR 待落)。**D2–D9 其余维度随横切补齐后收口**。
+      顺带完成:J-01.H 真机复验、#1021 第三次自动恢复证据。**收尾已落(2026-08-24)**:
+      01_init.md 状态列回填合并(#1025:旧「架构错配」警示撤销——GET /skills 聚合端点已从后端整体移除,
+      D8 改判机制已接线,新记孤儿嫌疑 Python POST/DELETE /skills 待裁);welcome 模块 i18n 合并
+      (#1026:35 词条、`src/i18n/namespaces.ts` 显式注册表、模块共置首例、共置范式已写回
+      `04_platform/i18n.md` §4.1 并重钉 FROZEN 哈希),**zh-CN 真机抽验通过**(首页+新建对话框全中文,
+      skill/GSkill 按术语规则不译;共享 ui 层「Close」标签仍英文,记横切)。
+      模块二 D7 由「不符→已派修」翻**已修并真机验证**;**D2–D9 其余「部分」项随横切补齐后终收口**。
 - [ ] 模块三 · 搭图与编辑(02_authoring)
 - [ ] 模块四 · 编译与诊断(03_compile)
 - [ ] 模块五 · 试飞 predict(04 §B)
@@ -821,6 +826,9 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       (J-X.2/J-X.4)。
 - [ ] **i18n 分模块落地**。runtime 在 studio,翻译内容与模块代码同处以便整体迁走;
       领域专有名词不翻译(清单见规则 D7)。点到哪个模块顺带做掉哪个模块。
+      **模块二(welcome)已落**(#1026,2026-08-24):共置范式首例 + 显式注册表建立,
+      架构裁决写回 `docs/studio/mvp1/04_platform/i18n.md` §4.1;后续模块照此办理。
+      待迁存量:旧集中式 5 个 namespace(settings/errors/canvas/copilot/trace)。
 - [ ] **从零环境复现**。`STUDIO_CONFIG_DIR` 指到一次性目录,key 取 `/d/coding/.env`,
       按当前配置从零走一遍。`.env` 覆盖 8 个 provider(五官方 + Qiniu / WaveSpeed / Jiekou),
       **缺 OpenRouter**,所以只能复现现有 9 张卡里的 8 张。这个环境同时承担"人为制造每一种

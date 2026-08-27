@@ -3170,18 +3170,21 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     errors={currentCompileErrors}
                     open={compileDrawerOpen && currentCompileErrors.length > 0}
                     onOpenChange={setCompileDrawerOpen}
+                    canvasHostElement={hostRef.current}
                   />
                   <CompileErrorDrawer
                     errors={predictErrors}
                     open={predictDrawerOpen && predictErrors.length > 0}
                     onOpenChange={setPredictDrawerOpen}
                     kind="predict"
+                    canvasHostElement={hostRef.current}
                   />
                   <CompileErrorDrawer
                     errors={runErrors}
                     open={runDrawerOpen && runErrors.length > 0}
                     onOpenChange={setRunDrawerOpen}
                     kind="run"
+                    canvasHostElement={hostRef.current}
                   />
                   <CenterActionBar
                     stage={deriveBuildStage(currentSkillId)}

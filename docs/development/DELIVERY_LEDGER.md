@@ -847,8 +847,30 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       豁免入 onInteractOutside;前两轮各被真机点验推翻一半,jsdom 两次测错层——命中测试与
       body 锁都测不出,真机命中链是唯一判据);#1040 门禁映射(**J-04.C** 新缺陷,#1038 复验
       顺链发现:lint passed→idle 自 #219、设计说「lint 通过自动驱动 compile-pass」,同日修复
-      ✅ Predict 随 lint 结算解锁/回锁)。**compile 面 i18n 已派出**(抽屉文件稳定后放行)。
+      ✅ Predict 随 lint 结算解锁/回锁)。**compile 面 i18n 已合并并真机复验(#1043,22 词条 studioShell/runtimeGate 共置)**;遗留:reconnecting chip 中英混排(「reconnecting · 1 秒后重试」)、Toggle theme/Settings aria-label 未译、完整不可用横幅因 #1021 自动恢复过快(~11s)无法截获(观察非缺陷)。
       **D2–D9 随横切补齐后终收口**。
+      **fresh 环境重验轮(2026-08-27,用户指令:社区闭环证实 + 日志点验 + 干净环境 + 每步截图,
+      重验前四模块;主线原则同日追加:报告按旅程步序写、一个功能多条路径时以 Copilot/CLI 为主线
+      先测、配置必须被后续使用消费)**:一次性 `STUDIO_CONFIG_DIR` 全新目录、CDP 真窗口、36 张截图。
+      ①**社区共享闭环两向证实**:下行——首启 sync 42 条 `merged=0`(routes 空)、配 key+Test 建
+      3 routes、重启后 `merged=6`,`deepseek-v4-flash` 未经本地实测转蓝(2 条 `provenance=
+      community-catalog` 证据),对照组 vision-exp 保持灰;上行——manual probe 后 `autoshare_uploaded`
+      accepted 2 / rejected 0 / receipt_token 在手,记录 16 字段无密钥泄漏(#1020 明细日志核验通过)。
+      ②**runtime activity 日志详尽性合格**:25 条覆盖 init/sync(含 catalog_routes 全量列表)/
+      upsert/endpoint_test(probe_attempts+discovered_models)/model_list_observed/reconcile_fixed_roles/
+      manual_model_probe/autoshare 全链,64KB 截断护栏在。③**Copilot 主线端到端**:Plan it together →
+      brainstorming 两问一确认 → 6 次 write_skill_file 审批 → 三 phase 落盘(io 契约与确认稿一致、
+      主动删 init 避 F-v3-graph-phase-name-mismatch)→ stub predict 通过 → 我独立点 Compile 复核 ok
+      (哈希 toast);CLI 主线:Open in CLI 自动升级 CLI(2.1.229→2.1.247)→ 面板内 Claude Code
+      (Opus 5)一句话指令落盘 NOTES.md → /exit 干净退出。④**模块四错误面 fresh 复核**:盘上破坏
+      GRAPH.md → 4s 内画布重渲染(#1038 watcher 链)→ Compile 抽屉报 `[F-v3-graph-phase-name-mismatch]`
+      单条精确诊断 → 还原复绿。⑤**新立案 7 行**:J-01.I(同步只有启动触发器,闭环断在当场性)、
+      J-01.J(同意零反馈)、J-01.K(registry 副本同屏分叉,J-01.H 同型复发)、J-01.L(DeepSeek 卡
+      chip 写 OpenAI)、J-X.6(golden 回填文案病+Confirm 无产物)、J-X.7(嵌入式 CLI 默认 bypass
+      permissions,待裁决)、J-X.8(cross-session socket 警告)。⑥范围注:fresh 轮重点在闭环/日志/
+      主线,OpenAI/Gemini/Ark/第三方卡与 Properties-IO 明细未在 fresh 环境重走(原轮已验);
+      Anthropic 官方卡用 .env 错身份 key(sk-or-*)真实覆盖了 failed 红态路径。
+      本机时区实测为 Pacific(UTC-7),时间戳核对一致,非缺陷。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)

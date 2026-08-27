@@ -840,7 +840,15 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       compile 面 i18n(抽屉/横幅/左栏 aria-label)排在抽屉布局修复合并后(同文件避撞)。
       **文档回填候选**:compile-lint/mvp1-alignment.md 现状 frontmatter 仍写抽屉/上下文标
       「未落地」,与真机相反(A3–A6 均 live),随修复 PR 合并后回填。
-      报告 Artifact `a23c5c2c`。**D2–D9 随横切补齐后终收口**。
+      报告 Artifact `a23c5c2c`。
+      **修复轮收口(2026-08-27,六个 PR 全部合并 + 真机逐项复验)**:#1037 引擎聚合
+      (J-04.B ✅,三相位同病同修 + vendor 已重建);#1038 诊断收敛(J-03.B ✅,外部改盘
+      t+2s 徽章自收敛、计数一致);#1036→#1039→#1041 抽屉三轮(J-04.A ✅,几何 → 非模态 →
+      豁免入 onInteractOutside;前两轮各被真机点验推翻一半,jsdom 两次测错层——命中测试与
+      body 锁都测不出,真机命中链是唯一判据);#1040 门禁映射(**J-04.C** 新缺陷,#1038 复验
+      顺链发现:lint passed→idle 自 #219、设计说「lint 通过自动驱动 compile-pass」,同日修复
+      ✅ Predict 随 lint 结算解锁/回锁)。**compile 面 i18n 已派出**(抽屉文件稳定后放行)。
+      **D2–D9 随横切补齐后终收口**。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)
@@ -880,7 +888,8 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       IoConfigDialog / TestInputsSection / Panels,namespace `panels` 共置于 `components/studio/panels/locales/`;
       领域名词与 frontmatter 字段名按规则不译。**已知剩余**:`role-test-status.ts` 约 15 处状态文案
       (被两份单测钉住,单独一轮)、编译抽屉、左侧栏 aria-label、画布刷新失败提示、冷启动英文闪现。
-      **compile 面一轮已排期**(2026-08-27):等 J-04.A 抽屉布局修复合并后再做,避免同文件冲突。
+      **compile 面一轮已派出**(2026-08-27,抽屉三轮布局修复 #1041 合并后放行):抽屉文案、
+      左栏 aria-label、画布刷新失败提示、sidecar 不可用横幅;剪贴板导出格式不译(机器可读契约)。
       待迁存量:旧集中式 5 个 namespace(settings/errors/canvas/copilot/trace)。
 - [ ] **从零环境复现**。`STUDIO_CONFIG_DIR` 指到一次性目录,key 取 `/d/coding/.env`,
       按当前配置从零走一遍。`.env` 覆盖 8 个 provider(五官方 + Qiniu / WaveSpeed / Jiekou),

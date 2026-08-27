@@ -822,7 +822,25 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       **留给模块四判读**:编译失败后展开的诊断抽屉占据窗口下部约四成、模糊整个工作区并遮住底部
       action bar(Compile/Predict/Run 不可见亦不可点),是否符合 `01_workflows/03_compile.md` 的设计意图。
       **D2–D9 其余随横切补齐后终收口**。
-- [ ] 模块四 · 编译与诊断(03_compile)
+- [x] **模块四 · 编译与诊断**(03_compile)—— D1 完成(2026-08-27,一次性配置真机):
+      绿灯编译请求纪律(单次 POST /compile、无跟随广拉,2026-07-07 裁决实测成立)/
+      A1+A5 实时 lint(Monaco 模型编辑→防抖 1548ms 一次 POST /lint,徽章+编辑器行内 marker
+      同帧落位、零 toast)/ A3 徽章 tooltip 悬停展开 / A4 字段级锚定(max_iterations 错误落
+      Properties 对应行 + 徽章报行号)/ A13 菜单断线→1.6s 孤岛徽章(无需开编辑器)/
+      F6 多缺陷共存(两节点徽章并存、抽屉一次响应聚合 3 条)/ F4.1 preflight
+      (STUDIO_RUNTIME_INPUT_MISSING 与引擎错误合并同列)/ A6 抽屉自动弹 + Copy all
+      剪贴板全格式 / A2+A8 门禁串行三态复核 / A11 sidecar 死亡退路(3.6s 横幅+toast,
+      Retry 6s 恢复;注:本轮首杀即预算耗尽,与 08-24 首杀自动恢复不同,终态正确,
+      记为观察非缺陷),共 **11 项实测通过**;A12 空内容→idle 未布现场、A9 predict-pass
+      桩留模块五。**2 个新缺陷 + 1 个根因定位**:J-04.A(抽屉全宽盖 action bar 与侧栏下段,
+      违 FROZEN「只盖画布不挡侧栏」,rect+elementFromPoint 实测为证)、J-04.B(引擎单文件
+      解析遮蔽「修一个冒一个」+ 校验器自吞文案)、J-03.B 根因坐实(skill_changed 事件
+      零消费 + 投影累加不替换,详见问题台账)。**三路修复 agent 并行已派**(2026-08-27):
+      J-03.B 诊断收敛 / J-04.B 引擎(合并后需 vendor 重建)/ J-04.A 抽屉布局;
+      compile 面 i18n(抽屉/横幅/左栏 aria-label)排在抽屉布局修复合并后(同文件避撞)。
+      **文档回填候选**:compile-lint/mvp1-alignment.md 现状 frontmatter 仍写抽屉/上下文标
+      「未落地」,与真机相反(A3–A6 均 live),随修复 PR 合并后回填。
+      报告 Artifact `a23c5c2c`。**D2–D9 随横切补齐后终收口**。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)
@@ -862,6 +880,7 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       IoConfigDialog / TestInputsSection / Panels,namespace `panels` 共置于 `components/studio/panels/locales/`;
       领域名词与 frontmatter 字段名按规则不译。**已知剩余**:`role-test-status.ts` 约 15 处状态文案
       (被两份单测钉住,单独一轮)、编译抽屉、左侧栏 aria-label、画布刷新失败提示、冷启动英文闪现。
+      **compile 面一轮已排期**(2026-08-27):等 J-04.A 抽屉布局修复合并后再做,避免同文件冲突。
       待迁存量:旧集中式 5 个 namespace(settings/errors/canvas/copilot/trace)。
 - [ ] **从零环境复现**。`STUDIO_CONFIG_DIR` 指到一次性目录,key 取 `/d/coding/.env`,
       按当前配置从零走一遍。`.env` 覆盖 8 个 provider(五官方 + Qiniu / WaveSpeed / Jiekou),

@@ -308,12 +308,18 @@ class AgentNodeAST(_BaseNodeAST):
     @classmethod
     def _validate_max_iterations(cls, value: Any) -> Any:
         if value is not None:
+            # Type conversion and range are two independent defects with two
+            # different causes; the range check must not sit inside the
+            # int(value) try block, or its own except (ValueError, TypeError)
+            # swallows the "out of range" ValueError it just raised and
+            # re-reports it as "not an integer" — wrong for an input (e.g.
+            # -1) that IS a valid integer.
             try:
                 val = int(value)
-                if not (1 <= val <= 50):
-                    raise ValueError("[F-v3-agent-max-iterations-invalid] max_iterations must be between 1 and 50")
             except (ValueError, TypeError) as err:
                 raise ValueError("[F-v3-agent-max-iterations-invalid] max_iterations must be an integer") from err
+            if not (1 <= val <= 50):
+                raise ValueError("[F-v3-agent-max-iterations-invalid] max_iterations must be between 1 and 50")
         return value
 
     # Priority switch: true makes the graph-level default llm_role win over

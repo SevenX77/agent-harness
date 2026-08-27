@@ -1,12 +1,16 @@
 ---
+doc: skill-spec-index
+role: index
 status: living
 ssot: graph_skill_format_templates
-updated: 2026-06-28
+updated: 2026-08-27
 ---
 
 # Skill Spec 文档入口
 
-`docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` 是 `graph_skill` 文件格式模板的唯一真相源。
+[`00-FORMAT-GROUND-TRUTH.md`](./00-FORMAT-GROUND-TRUTH.md) 是当前实现接受的 `graph_skill` 文件格式模板唯一真相源。它的状态是 `FROZEN`，仍被代码与 contract maps 消费。
+
+独立 Graph Skill Runtime 的[未来 v1 格式目标](../graph-skill-runtime/v1-alignment.md)目前为 `drafted`。它提出根 `SKILL.md` + `graph.yaml` + phase `AGENT.md` + `graphs/` registry，但尚未实现，也没有替代当前 `00`。只有实现、迁移验证和引用重钉完成后的显式 cutover，才可以更换当前格式 SSOT。
 
 当前规则：
 

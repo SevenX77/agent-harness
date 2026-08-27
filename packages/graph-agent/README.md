@@ -1,219 +1,145 @@
 # graph_agent
 
-Document-driven multi-phase Agent orchestration engine, distributed as the `graph-agent` Python package.
+`graph_agent` is the current document-driven Python engine in this monorepo. The workspace distribution is `graph-agent` 0.3.1 and requires Python 3.11 or newer.
 
-Its sole responsibility: execute SKILL.md-described workflows reliably. The agent loop is built on **LangGraph + LangChain native `create_agent`**. The outer layer is `GraphAgentHarness` for phase orchestration, cognitive constraints, validation/retry, tracing, and I/O boundaries.
+This README describes the package that exists today. The proposed standalone `graph-skill-runtime` distribution, `graph_skill_runtime` import, `gskill` CLI, Agent Skills entry, and host-native executor are a [drafted future target](../../docs/engine/graph-skill-runtime/v1-alignment.md), not current package features.
 
----
+## Current responsibility
 
-## Core Principles
+The engine compiles a skill directory into a typed graph and executes or predicts it. It owns aggregated compile diagnostics, `LOGIC` / `AGENT` / `SUBGRAPH` execution, typed blackboard and I/O, iterate, checkpoints and resume, typed events and traces, artifacts, golden evaluation, resolution, and structured errors.
 
-1. **Document-driven, not code-driven**
-   PMs author skills as `SKILL.md` files (YAML frontmatter + Markdown body). The framework compiles these into LangGraph state machines at runtime.
+The current file-format contract is the FROZEN [`00-FORMAT-GROUND-TRUTH.md`](../../docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md). In that contract, the skill root contains `GRAPH.md`; phase files are `LOGIC.md`, `SUBGRAPH.md`, or `SKILL.md`; nested graphs use the root `subgraph/` layout. Pass the skill root directory to the SDK. Do not infer the current format from the drafted extraction target.
 
-2. **Framework layer contains no business logic**
-   `graph_agent` only provides general orchestration: Phase, tool wrappers, model resolution, tracing, context compression, validation/retry. Business-specific tools, field semantics, and domain rules belong in the skill directory.
+Business rules and domain tools belong to the user-owned skill or the host application. The engine supplies domain-agnostic compilation and orchestration. Persistence, model execution, registry truth, and product UI remain explicit host boundaries.
 
-3. **Kitchen-pass pattern**
-   Phase results are written to `WorkflowState.context` first. Persistence is delegated to `IOManager` through `file` output or `artifact_saver` injected by the caller. The framework prepares the "food" without depending on the host project's file-management implementation.
+## Install in this workspace
 
-4. **Hexagonal SDK boundary**
-   Only the names listed in "Public API" are part of the stable API surface. Internal modules (`core.*`, `io.*`, `models.*`, etc.) can be re-organised without breaking downstream consumers.
-
-5. **Engine ships only domain-agnostic orchestration tools**
-   `tools/` provides only orchestration builtins (reference/example/file reading, `parallel_map`, clarification, working-memory/artifact access). Domain- or vendor-specific capabilities (text-to-speech, image/video generation, etc.) do **not** live in the engine — skills bring their own tools. This keeps the engine reusable by any app.
-
----
-
-## Quick Start
-
-### 1. Install (uv workspace)
-
-In the agent-harness monorepo root:
+From the agent-harness repository root:
 
 ```bash
-uv sync
+uv sync --all-packages --all-extras --group dev
 ```
 
-This installs `graph-agent` as a workspace member alongside `studio-backend`.
+`graph-agent` is currently a monorepo workspace package. It is not yet published under the future `graph-skill-runtime` PyPI name.
 
-For external host projects (downstream):
+## Use the current SDK
 
-```bash
-# Pin via git+ssh
-pip install git+ssh://git@github.com/SevenX77/agent-harness.git@v0.2.0#subdirectory=packages/graph-agent
-```
+`workspace_dir` is a required, absolute path for `run_skill`, `predict_skill`, and `resume_skill`. A caller can use the default local resolver for a direct skill path or pass `LocalWorkspaceResolver` when it owns search roots.
 
-**Python Version**: 3.11+.
+```python
+from pathlib import Path
 
-### 2. Provide Configuration
+from graph_agent import compile_skill, run_skill
 
-Minimum required:
-- `config/llm_roles.yaml` — role-to-provider mapping
-- `.env` — API keys
+skill_root = Path("/absolute/path/to/my-skill").resolve()
+workspace_dir = (skill_root / ".workspace").resolve()
 
-`llm_roles.yaml` lookup order:
-1. Environment variable `GRAPH_AGENT_ROLES_PATH`
-2. Upward search for `config/llm_roles.yaml` from CWD
-3. Built-in minimal default config
+# The compile path does not run a model.
+compile_result = compile_skill(skill_root)
 
-### 3. Verify Installation
-
-Run the hello_world example from repo root:
-
-```bash
-uv run python3 -c "
-from graph_agent import run_skill
-
-result = run_skill(
-    'path/to/v030-skill-root',
-    user_name='Developer',
+# This form is sufficient for a graph whose executed path has no AGENT phase.
+run_result = run_skill(
+    skill_root,
+    workspace_dir=workspace_dir,
+    user_name="Developer",
 )
-print('Success:', result.success)
-"
 ```
 
-### 4. Choose Entry Point
+For an executed `AGENT` phase, the host must supply model execution explicitly. Pass either an `llm_provider` adapter or a `model_resolver` through the current SDK:
 
-- `run_skill(...)` — Most common entry point for direct V0.3 skill-root execution; uses a local resolver by default, or accepts `skill_resolver=...` when a host owns the skill registry.
-- `compile_skill(...)` — Static validation; used by Studio Frontend's lint flow.
-- `LocalWorkspaceResolver(...)` — Standard local filesystem resolver for CLI-like and host-project usage.
+```python
+from pathlib import Path
 
----
+from graph_agent import RunResult, run_skill
+
+
+def run_with_host_provider(llm_provider) -> RunResult:
+    skill_root = Path("/absolute/path/to/my-skill").resolve()
+    workspace_dir = (skill_root / ".workspace").resolve()
+    return run_skill(
+        skill_root,
+        workspace_dir=workspace_dir,
+        llm_provider=llm_provider,
+        user_name="Developer",
+    )
+```
+
+The example leaves the provider parameter unannotated because the current provider protocol is not a complete top-level public export. In production, pass the concrete provider adapter owned by the host. The engine does not discover an implicit `config/llm_roles.yaml`, built-in role map, or `.env` model route on behalf of SDK callers.
 
 ## Public API
 
-The stable names re-exported from `graph_agent`:
+`graph_agent.__all__` currently contains exactly 24 exports:
 
-| Name | Purpose |
-|---|---|
-| `run_skill` | High-level execution entry point |
-| `predict_skill` | High-level prediction/mocking entry point |
-| `RunResult` | Unified return result contract (source="run" or "predict") |
-| `PathDiff` | Unified prediction path comparison diagnostics |
-| `PhaseRecord` | Unified single phase execution diagnostic record |
-| `compile_skill` | Static skill validation |
-| `CompileResult` | Legacy compile diagnostic container |
+| Name | Current purpose |
+| --- | --- |
+| `run_skill` | Compile and execute a skill root |
+| `predict_skill` | Compile and predict a skill path with controlled model interception |
+| `resume_skill` | Resume a checkpointed run |
+| `evaluate_golden_baseline` | Evaluate prediction output against golden cases |
+| `RunResult` | Unified run/predict result contract |
+| `PathDiff` | Predicted-path comparison diagnostics |
+| `PhaseRecord` | Per-phase execution or prediction record |
+| `compile_artifact` | Compile a skill into a productization artifact |
+| `run_artifact` | Execute a compiled artifact |
+| `predict_artifact` | Predict a compiled artifact |
+| `compile_skill` | Compile and validate a skill with aggregated diagnostics |
+| `CompileResult` | Compile diagnostic container |
+| `SkillManifest` | Current manifest schema model |
+| `serialize_skill` | Serialize a current manifest |
 | `assemble_graph` | Assemble a compiled skill into a runnable graph |
 | `CompiledSkill` | Compiled skill model |
 | `CompiledStateGraph` | Assembled graph wrapper |
-| `BlackboardState` | Runtime blackboard state |
-| `LocalWorkspaceResolver` | Local filesystem skill-id resolver |
-| `SkillManifest` | Pydantic schema for SKILL.md / GRAPH.md |
-| `serialize_skill` | Stable skill serialization helper |
-| `GraphAgentError` | Base exception for all graph agent errors |
-| `GraphCompileError` | Subclass: compilation, validation, reference, schema/contract errors |
-| `GraphExecutionError` | Subclass: runtime execution, state, tool, checkpointer errors |
-| `ModelProviderError` | Subclass: gateway, model role resolver, LLM service provider errors |
-| `ResourceNotFoundError` | Subclass: workspace, skill, resolver path resolution failures |
+| `BlackboardState` | Typed runtime blackboard state |
+| `LocalWorkspaceResolver` | Filesystem resolver for local skill roots |
+| `GraphAgentError` | Base graph-agent exception |
+| `GraphCompileError` | Compile, validation, reference, or contract error |
+| `GraphExecutionError` | Runtime, state, tool, or checkpoint error |
+| `ModelProviderError` | Model provider or resolver error |
+| `ResourceNotFoundError` | Workspace, skill, or resolver resource error |
 
-Internal helpers (`Phase`, `WorkflowState`, `IOManager`, `ContextResolver`, `ModelResolver`, etc.) are reachable through their sub-module paths but are **not** part of the SDK contract.
+Internal modules under `graph_agent.core`, `graph_agent.io`, `graph_agent.models`, and similar packages are not top-level SDK commitments. `CallbackEvent`, the complete error catalog, runtime config, and executor seams exist internally but have not yet been promoted into a complete standalone public contract.
 
----
+## Current CLI
 
-## Directory Structure
+The package has no `[project.scripts]` entry. Its legacy argparse surface is available only through:
+
+```bash
+python -m graph_agent --help
+```
+
+This module entry is not the future `gskill` console contract. Scripts that need a stable integration today should prefer the 24 exported Python names and pin the current package revision.
+
+## Source layout
 
 ```text
 graph_agent/
-├── __init__.py              # public re-exports
-├── py.typed                 # PEP 561 type marker
-│
-├── core/                    # Core orchestration engine
-│   ├── harness.py           # GraphAgentHarness
-│   ├── runner.py            # run_skill + predict_skill
-│   ├── result.py            # RunResult + PhaseRecord + PathDiff
-│   ├── loader.py            # load_workflow_from_md (internal)
-│   ├── compiler.py          # compile_skill
-│   ├── manifest.py          # SkillManifest schema
-│   ├── exceptions.py        # GraphAgentError hierarchy
-│   ├── checkpointer.py      # LangGraph checkpoint plumbing
-│   └── ...
-│
-├── callbacks/               # Observability & Tracing Sink (internal)
-│   ├── events.py            # CallbackEvent definitions
-│   └── ...
-│
-├── cognitive/               # Cognitive control
-│   ├── finish.py            # finish_task + nudges
-│   ├── memory.py            # update_working_memory
-│   ├── middlewares.py       # PAOR / WorkingMemory / DeadEnd
-│   └── ...
-│
-├── io/                      # Declarative I/O
-│   ├── manager.py           # IOManager
-│   └── context_resolver.py
-│
-├── models/                  # Model resolution
-│   └── resolver.py          # ModelResolver
-│
-├── tools/                   # Orchestration builtins (domain-agnostic)
-│   ├── builtin/             # read_reference / read_example / read_file / parallel_map / ask_clarification / ...
-│   ├── dynamic_schema.py
-│   └── md_to_json.py
-│
-├── skills/                  # Built-in skills (compiler etc.)
-└── examples/                # Runnable examples
-    └── hello_world/
+├── __init__.py          # the 24 top-level exports
+├── __main__.py          # legacy python -m graph_agent entry
+├── py.typed             # PEP 561 marker
+├── core/                # compiler, assembler, runner, resolver, errors, checkpoints
+├── callbacks/           # typed events and event sinks
+├── runtime/             # runtime state
+├── io/                  # run layout, artifacts, and I/O adapters
+├── cognitive/           # current embedded agent-loop controls
+├── middleware/          # current embedded execution middleware
+├── models/              # model-resolution internals
+├── tools/               # domain-agnostic orchestration tools
+├── tracing/             # trace support
+├── skills/              # engine-owned internal skills
+└── examples/            # package examples and fixtures
 ```
 
----
+There is no `GraphAgentHarness` public export and no `core/harness.py` in the current package.
 
-## Migrating to a New Project (host integration)
+## Verification and design references
 
-```python
-# 1. Install via uv workspace OR git+ssh pin
-# 2. Import only public API
-from pathlib import Path
+The package ships `py.typed`, and CI runs `mypy --strict` over its source in addition to ruff, tests, manifest validation, and dependency audit.
 
-from graph_agent import GraphCompileError, GraphExecutionError, LocalWorkspaceResolver
-from graph_agent import RunResult, run_skill
-
-# 3. Run. The SDK supplies a local resolver by default; host integrations can
-# override it when they own registry/search-path policy.
-resolver = LocalWorkspaceResolver(search_paths=[Path.cwd(), Path.cwd() / "skills"])
-
-def my_subscriber(event):
-    print("Received event:", event.event_type)
-
-result: RunResult = run_skill(
-    "path/to/v030-skill-root",
-    skill_resolver=resolver,
-    event_subscriber=my_subscriber,
-    **{...},
-)
-```
-
-`skill_resolver` is optional for direct SDK use. When omitted, engine builds a
-`LocalWorkspaceResolver` rooted around the skill path and common local folders
-such as `skills/` and `registry/`. Studio and other host integrations should
-still pass an explicit resolver when they own registry truth or workspace
-boundaries.
-
-Do not import from internal sub-modules (`graph_agent.core.*`, `graph_agent.io.*`, etc.) in production host code; those are subject to change.
-
----
-
-## Type Safety
-
-`graph_agent` ships `py.typed` for PEP 561 compliance. Use with `mypy --strict`:
-
-```bash
-uv run mypy --strict packages/graph-agent/src
-```
-
-The package is verified clean under `mypy --strict` (143 source files, 0 errors as of v0.2.0).
-
----
-
-## Extended Documentation
-
-- `docs/skills/SKILL_AUTHORING_GUIDE.md` — How to write SKILL.md
-- `docs/engine/INTEGRATION_GUIDE.md` — Integration into host projects
-- `docs/engine/COGNITIVE_LOOP_GUIDE.md` — Cognitive control architecture
-- `docs/architecture/REPO_SPLIT_AND_SDK_PLAN.md` — V2 monorepo + SDK contract
-
----
+- [Current engine MVP1 design index](../../docs/engine/mvp1/INDEX.md)
+- [Current FROZEN file-format contract](../../docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md)
+- [Standalone extraction baseline](../../docs/engine/graph-skill-runtime/baseline.md)
+- [Drafted standalone v1 target](../../docs/engine/graph-skill-runtime/v1-alignment.md)
 
 ## License
 
-Apache-2.0 (see repo root `LICENSE`).
+Apache-2.0; see the repository root `LICENSE`.

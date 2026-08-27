@@ -7,6 +7,12 @@
 > 维护规则:每合并一个在册 PR,同 PR(或紧随其后的台账 PR)更新对应行状态;状态翻转只增写不删史(旧状态留在 git 历史)。
 > 状态词汇:`待开工` / `进行中(分支名)` / `✅ 已合并(#PR)` / `阻塞(原因)` / `已搁置(重启条件)`。
 
+## 当前活动：Graph Skill Runtime 独立化设计（2026-08-27）
+
+- **状态**：进行中(`docs/graph-skill-runtime-design`)。
+- **范围**：建立 `docs/engine/graph-skill-runtime/` 的 drafted baseline/alignment 与权威索引，并校正当前 engine package README、MVP1/skill-spec 指针和 MoirAI 命名叙事的时态事实。
+- **边界**：本活动只产出设计与文档校正，不表示独立仓库、PyPI 包、`gskill` CLI、新 skill 格式或 executor 已实现；当前 FROZEN format ground truth 保持不变。
+
 ## 当前冲刺:Copilot 闭环(决议 2026-07-30)
 
 ### 决议(用户裁决,2026-07-30)

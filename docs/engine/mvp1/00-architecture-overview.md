@@ -1,10 +1,14 @@
 ---
 doc: 00-architecture-overview
+role: summary
 status: living
-updated: 2026-06-28
+authority: ./INDEX.md
+updated: 2026-08-27
 ---
 
 # Graph Agent MVP1 架构总览
+
+本文是**当前 Graph Agent MVP1** 的一页摘要，权威模块地图是 [`INDEX.md`](./INDEX.md)。它不定义独立拆仓后的未来包名、文件格式或 executor 契约。
 
 Engine MVP1 文档按三层组织：
 
@@ -13,6 +17,8 @@ Engine MVP1 文档按三层组织：
 3. API contract layer: engine 与 Studio 的操作边界。
 
 完整模块列表见 [`INDEX.md`](./INDEX.md)。
+
+独立 Python runtime/PyPI 包的未来目标见 [`docs/engine/graph-skill-runtime/v1-alignment.md`](../graph-skill-runtime/v1-alignment.md)。该文档目前为 `drafted`，尚未替代本页描述的当前 MVP1。
 
 ## Format SSOT
 

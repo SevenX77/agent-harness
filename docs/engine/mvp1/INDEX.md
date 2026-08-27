@@ -1,12 +1,15 @@
 ---
 doc: INDEX
+role: index
 status: living
-updated: 2026-06-28
+updated: 2026-08-27
 ---
 
 # Graph Agent MVP1 文档索引
 
 本文是 engine MVP1 文档入口。历史迁移目录 `docs/engine/mvp1/_migration-src/` 已在 2026-06-28 删除；已迁内容以正式模块文档为准，需要历史记录时看 git 历史。
+
+本文只索引**当前 engine MVP1 契约**。将 engine 提炼为独立 Python runtime/PyPI 包的未来目标另见 [Graph Skill Runtime 文档索引](../graph-skill-runtime/README.md)。该目标目前为 `drafted`，尚未替代本目录或当前 FROZEN skill format。
 
 ## 1. 三层结构
 
@@ -59,3 +62,4 @@ updated: 2026-06-28
 - Skill file templates: [`docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`](../skill-spec/00-FORMAT-GROUND-TRUTH.md).
 - MVP1 syntax alignment links to the skill-spec template and must not duplicate YAML examples.
 - `_migration-src` is no longer part of the live doc set.
+- Future extraction target: [`docs/engine/graph-skill-runtime/v1-alignment.md`](../graph-skill-runtime/v1-alignment.md). It remains drafted until implementation, migration verification, and reference cutover are complete.

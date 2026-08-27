@@ -6,7 +6,7 @@ import {
   compileErrorsByNode,
   lintErrorToCompileError,
   lintErrorsByNode,
-  mergeNodeErrors,
+  selectActiveNodeErrors,
 } from "./node-compile-errors"
 
 function err(file: string | null, severity: CompileError["severity"] = "fatal"): CompileError {
@@ -321,41 +321,30 @@ describe("activeLintErrors (N3 atom #4 — first-screen vs realtime override)", 
   })
 })
 
-describe("mergeNodeErrors (N3 atom #4 — compile + lint without dropping either)", () => {
-  it("concatenates compile and lint errors per node, keeping both channels", () => {
-    const compileByNode = { draft: [err("phases/draft/SKILL.md")] }
-    const lintByNode = {
-      draft: [lintErrorToCompileError(lintErr("phases/draft/SKILL.md", { message: "lint" }))],
-      review: [lintErrorToCompileError(lintErr("phases/review/LOGIC.md", { message: "lint-review" }))],
-    }
-    const merged = mergeNodeErrors(compileByNode, lintByNode)
-    expect(merged.draft).toHaveLength(2)
-    expect(merged.draft.map((error) => error.message).sort()).toEqual(["boom", "lint"])
-    expect(merged.review).toHaveLength(1)
-    expect(merged.review[0].message).toBe("lint-review")
+describe("selectActiveNodeErrors (J-03.B — latest pass replaces, no union)", () => {
+  const compileByNode = { draft: [err("phases/draft/SKILL.md")] }
+  const lintByNode = {
+    draft: [lintErrorToCompileError(lintErr("phases/draft/SKILL.md", { message: "lint" }))],
+    review: [lintErrorToCompileError(lintErr("phases/review/LOGIC.md", { message: "lint-review" }))],
+  }
+
+  it("returns the compile-channel map wholesale when source is compile", () => {
+    expect(selectActiveNodeErrors("compile", compileByNode, lintByNode)).toBe(compileByNode)
   })
 
-  it("dedupes the same engine diagnostic when manual Compile and active lint report it together", () => {
-    const diagnostic = {
-      file: "phases/review/SKILL.md",
-      line: 2,
-      field: "review.io.inputs.properties.chapter_lines",
-      severity: "fatal",
-      message: "phase 'review' input 'chapter_lines' has no root, upstream, or runtime input provider",
-      error_code: "F-v3-graph-dataflow-source-missing",
-    } satisfies CompileError
-
-    const merged = mergeNodeErrors({ review: [diagnostic] }, { review: [diagnostic] })
-
-    expect(merged.review).toHaveLength(1)
+  it("returns the lint-channel map wholesale when source is lint", () => {
+    expect(selectActiveNodeErrors("lint", compileByNode, lintByNode)).toBe(lintByNode)
   })
 
-  it("returns compile-only nodes untouched when there is no lint", () => {
-    const merged = mergeNodeErrors({ draft: [err("phases/draft/SKILL.md")] }, {})
-    expect(merged.draft).toHaveLength(1)
+  it("does not carry a node from the other channel into the selected one", () => {
+    // "review" only exists in the lint channel — selecting compile must not
+    // surface it, proving this is a replace, not a merge of the two node sets.
+    const selected = selectActiveNodeErrors("compile", compileByNode, lintByNode)
+    expect(selected.review).toBeUndefined()
   })
 
-  it("returns an empty map when both sources are empty", () => {
-    expect(mergeNodeErrors({}, {})).toEqual({})
+  it("returns an empty map when the active channel is empty, even if the other channel has errors", () => {
+    expect(selectActiveNodeErrors("compile", {}, lintByNode)).toEqual({})
+    expect(selectActiveNodeErrors("lint", compileByNode, {})).toEqual({})
   })
 })

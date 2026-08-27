@@ -9,6 +9,7 @@ import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import type { EventEnvelope, LintError, RunDetail, RunMetadata, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 import { BackendUnavailableError } from '@/utils/errors'
 import { INPUT_ID } from '@/components/nodes'
+import { LINT_DEBOUNCE_MS, lintResultEvent } from '@/hooks/useDebouncedLint'
 
 // React 19's act() warns unless the environment opts in.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -257,6 +258,7 @@ vi.mock('@/hooks/useStudioEventStream', async () => {
 })
 
 vi.mock('@/hooks/useDebouncedLint', () => ({
+  LINT_DEBOUNCE_MS: 800,
   lintStatusEvent: 'studio-lint-status-changed',
   lintResultEvent: 'studio-lint-result-changed',
   readLintStatus: () => mocks.lintStatus,
@@ -1393,6 +1395,226 @@ describe('Workspace WS-1 local writer contracts', () => {
       expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('remote graph\n')
       expect(mocks.conflictDialogProps?.conflict).toBeNull()
       expect(mocks.mutateSkillDetail).toHaveBeenCalledWith(updatedDetail, { revalidate: false })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  // J-03.B fix ①: an external skill_changed event (a backend post-commit
+  // domain event for the exact skill dataset, per AGENTS.md's SSOT closed
+  // trigger set) must relint the on-disk skill, exactly like a Studio-driven
+  // canvas write already does (03_compile A13). Before the fix, nothing
+  // consumed skill_changed for lint purposes at all.
+  it('debounces a relint of the on-disk skill after an external skill_changed event (J-03.B)', async () => {
+    vi.useFakeTimers()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
+        )
+        await Promise.resolve()
+      })
+
+      mocks.relintSkillFromDisk.mockClear()
+
+      act(() => {
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'phases/draft/SKILL.md',
+        })
+      })
+
+      // Nothing fires before the debounce window elapses.
+      expect(mocks.relintSkillFromDisk).not.toHaveBeenCalled()
+
+      await act(async () => {
+        vi.advanceTimersByTime(LINT_DEBOUNCE_MS)
+        await Promise.resolve()
+      })
+
+      expect(mocks.relintSkillFromDisk).toHaveBeenCalledTimes(1)
+      expect(mocks.relintSkillFromDisk).toHaveBeenCalledWith('writer-smoke', null)
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      vi.useRealTimers()
+    }
+  })
+
+  it('coalesces a burst of external skill_changed events into a single relint call (J-03.B)', async () => {
+    vi.useFakeTimers()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
+        )
+        await Promise.resolve()
+      })
+
+      mocks.relintSkillFromDisk.mockClear()
+
+      act(() => {
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'phases/draft/SKILL.md',
+        })
+      })
+      act(() => {
+        vi.advanceTimersByTime(LINT_DEBOUNCE_MS / 2)
+      })
+      act(() => {
+        // A second file lands mid-debounce -- an external tool saving several
+        // files in one batch. This must reset the window, not fire twice.
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'phases/review/LOGIC.md',
+        })
+      })
+
+      await act(async () => {
+        vi.advanceTimersByTime(LINT_DEBOUNCE_MS)
+        await Promise.resolve()
+      })
+
+      expect(mocks.relintSkillFromDisk).toHaveBeenCalledTimes(1)
+      expect(mocks.relintSkillFromDisk).toHaveBeenCalledWith('writer-smoke', null)
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      vi.useRealTimers()
+    }
+  })
+
+  // J-03.B fix ②: context-marking surfaces (canvas node badge, Properties
+  // field tooltip) must project the LATEST settled pass wholesale, never a
+  // union of manual Compile with lint -- a stale channel's leftover error
+  // must not keep contributing once a fresher pass has settled for the same
+  // skill, even when the two passes disagree about what is currently wrong.
+  it('replaces a settled manual-Compile projection with the next lint pass instead of unioning them (J-03.B)', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      mocks.compileSkill.mockResolvedValueOnce({
+        code: 'compile_failed',
+        detail: 'compile failed',
+        errors: [{
+          file: 'phases/draft/SKILL.md',
+          line: 3,
+          field: null,
+          severity: 'fatal',
+          message: 'draft phase missing <goal> block',
+          error_code: 'F-v3-agent-goal-missing',
+        }],
+      })
+
+      await act(async () => {
+        root.render(
+          createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
+        )
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
+      })
+
+      expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.draft).toHaveLength(1)
+      expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.draft?.[0]).toMatchObject({
+        message: 'draft phase missing <goal> block',
+      })
+
+      // A later pass settles for the same skill (here: relintSkillFromDisk's own
+      // publishLintResult broadcast, mocked away in this test file, so the test
+      // dispatches the same window event it would fire). The on-disk goal block
+      // was fixed, but max_iterations is now invalid -- a DIFFERENT defect, not
+      // the one manual Compile reported.
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent(lintResultEvent, {
+          detail: {
+            skillId: 'writer-smoke',
+            result: {
+              status: 'failed',
+              errors: [{
+                file: 'phases/draft/SKILL.md',
+                line: 5,
+                column: null,
+                phase_name: 'draft',
+                field_path: 'max_iterations',
+                severity: 'error',
+                error_code: 'F-v3-agent-max-iterations-invalid',
+                message: 'max_iterations must be a positive integer',
+              }],
+              phases_summary: null,
+            },
+          },
+        }))
+        await Promise.resolve()
+      })
+
+      // Only the fresher pass's error shows -- the stale compile error is gone,
+      // not unioned alongside it.
+      expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.draft).toHaveLength(1)
+      expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.draft?.[0]).toMatchObject({
+        message: 'max_iterations must be a positive integer',
+      })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('clears the node badge once a Compile pass settles clean, even after a prior failing pass (J-03.B)', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      mocks.compileSkill.mockResolvedValueOnce({
+        code: 'compile_failed',
+        detail: 'compile failed',
+        errors: [{
+          file: 'phases/draft/SKILL.md',
+          line: 3,
+          field: null,
+          severity: 'fatal',
+          message: 'draft phase missing <goal> block',
+          error_code: 'F-v3-agent-goal-missing',
+        }],
+      })
+
+      await act(async () => {
+        root.render(
+          createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
+        )
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
+      })
+
+      expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.draft).toHaveLength(1)
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
+      })
+
+      expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.draft ?? []).toHaveLength(0)
     } finally {
       act(() => {
         root.unmount()

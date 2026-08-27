@@ -16,7 +16,8 @@ import { CopilotPanelMorph } from "@/components/copilot/copilot-panel-morph"
 import { defaultFabPosition, headerLogoTarget, panelRect, type Point, type Rect } from "@/components/copilot/copilot-fab-geometry"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { useCopilot } from "@/hooks/useCopilot"
-import { lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
+import { useDebouncedCallback } from "@/hooks/useDebouncedCallback"
+import { LINT_DEBOUNCE_MS, lintResultEvent, lintStatusEvent, readLintStatus, relintSkillFromDisk } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { STUDIO_TRUTH_SWR_CONFIG } from "@/hooks/studio-swr-policy"
@@ -54,9 +55,9 @@ import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@
 import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, endsTheRun, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
-import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
+import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, selectActiveNodeErrors } from "./node-compile-errors"
 import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
-import { fieldDiagnosticsForPanels } from "./field-compile-errors"
+import { selectActiveFieldErrors } from "./field-compile-errors"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -589,6 +590,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // first realtime lint resolves for the active skill; once present it overlays the
   // first-screen SkillDetail lint onto the canvas-node / properties projection.
   const [realtimeLint, setRealtimeLint] = useState<LintResult | null>(null)
+  // J-03.B: which pass most recently SETTLED for a skill -- manual Compile, or
+  // lint (editor typing debounce / canvas-topology relint / an external
+  // skill_changed relint). Context-marking surfaces (canvas node badge,
+  // Properties/input field tooltip) must project ONLY this pass's
+  // diagnostics, replacing the other channel's leftover wholesale
+  // (compile-lint F1/F6, 03_compile.md A13) instead of unioning both --
+  // see `selectActiveNodeErrors`/`selectActiveFieldErrors`. A skill with no
+  // entry here has had neither pass run yet, so `activeLint`'s first-screen
+  // fallback is what a fresh "lint" default resolves to.
+  const [contextDiagnosticsSource, setContextDiagnosticsSource] = useState<Record<string, "compile" | "lint">>({})
   // F4: the test input selected in the i/o panel feeds Predict/Run (null = the
   // prior empty-payload behaviour). Reset when the active skill changes.
   const [selectedTestInputId, setSelectedTestInputId] = useState<string | null>(null)
@@ -659,6 +670,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const detail = (event as CustomEvent<{ skillId?: string; result?: LintResult | null }>).detail
       if (detail?.skillId === currentSkillId) {
         setRealtimeLint(detail.result ?? null)
+        // J-03.B: a lint pass just settled for this skill (whatever triggered
+        // it) -- it now owns the context-marker projection, replacing any
+        // leftover manual-Compile projection wholesale.
+        setContextDiagnosticsSource((current) => ({ ...current, [currentSkillId]: "lint" }))
       }
     }
     window.addEventListener(lintResultEvent, handler)
@@ -728,6 +743,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
       if (effect.gate === "compile") {
         setCompileErrors((current) => ({ ...current, [event.skillId]: effect.errors }))
+        // J-03.B: a manual Compile pass just settled -- it now owns the
+        // context-marker projection, replacing any leftover lint projection.
+        setContextDiagnosticsSource((current) => ({ ...current, [event.skillId]: "compile" }))
         setCompileDrawerOpen(true)
       } else if (effect.gate === "predict") {
         setPredictErrors(effect.errors)
@@ -1451,6 +1469,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           contentHash: result.artifact_ref.content_hash,
         })
         setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+        // J-03.B: this passing compile pass just settled -- it owns the
+        // context-marker projection now, clearing any leftover lint errors
+        // from before the fix (an empty compile pass IS the fresh truth).
+        setContextDiagnosticsSource((current) => ({ ...current, [targetSkillId]: "compile" }))
         toast.success(
           `Compiled ${result.manifest_name} (${shortHash(result.artifact_ref.content_hash)}, fp ${shortHash(result.execution_fingerprint)})`,
         )
@@ -1469,6 +1491,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         ...current,
         [targetSkillId]: [diagnosticError(message, errorDiagnosticDetails(error))],
       }))
+      setContextDiagnosticsSource((current) => ({ ...current, [targetSkillId]: "compile" }))
       setCompileDrawerOpen(true)
       toast.error(message)
     }
@@ -2252,9 +2275,33 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [currentSkillId, mutateRuntimeConfig])
 
+  // J-03.B fix ①: skill_changed is a backend post-commit domain event for the
+  // exact skill dataset -- one of the SSOT closed trigger set's legitimate
+  // revalidation triggers (AGENTS.md "event-driven revalidation"). Before this,
+  // nothing consumed it for lint/compile purposes at all, so an external edit
+  // (or the same edit re-observed after a Studio write already relinted once)
+  // left the lint/compile projection permanently diverged from disk truth.
+  // Debounced with the SAME window realtime lint already uses for editor
+  // typing (LINT_DEBOUNCE_MS): a burst of external writes dispatches one
+  // skill_changed per file, and this must coalesce them into one relint, not
+  // fire a lint request per file in the burst.
+  const skillChangedRelint = useDebouncedCallback(
+    (targetSkillId: string, workspaceRoot: string | null) => {
+      refreshLintAfterSourceWrite(targetSkillId, workspaceRoot)
+    },
+    LINT_DEBOUNCE_MS,
+  )
+
   const handleSkillChangedEvent = useCallback((event: { skillId: string; path: string }) => {
     try {
       if (event.skillId !== currentSkillId || !event.path) return
+      // Relint the on-disk skill regardless of which file changed: runtime
+      // config, an IO document (GRAPH.md/SUBGRAPH.md), and an ordinary phase
+      // file can all flip a compile/lint verdict (F4.1's runtime_config
+      // interaction; F5's dataflow diagnostics keyed off phase files). The
+      // conflict/skill-detail handling below is orthogonal -- it keeps the
+      // editor buffer and file tree in sync, not the diagnostics projection.
+      skillChangedRelint.schedule(currentSkillId, currentWorkspaceRoot ?? null)
       const normalizedChangedPath = event.path.replace(/\\/g, "/")
       if (
         normalizedChangedPath.startsWith(".workspace/import_files/")
@@ -2320,7 +2367,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } catch {
       toast.error("Could not process file change event")
     }
-  }, [activeFileDetails, currentSkillId, mutateRuntimeConfig, mutateSkillDetail])
+  }, [activeFileDetails, currentSkillId, currentWorkspaceRoot, mutateRuntimeConfig, mutateSkillDetail, skillChangedRelint])
 
   // `connectionLost` is also CenterActionBar's backend-reachability signal
   // (dead-sidecar-says-so "功能面带原因置灰") — the SAME hub SettingsPage's own
@@ -2891,8 +2938,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     for (const [nodeId, errors] of Object.entries(lintByNode)) {
       lintAsCompileByNode[nodeId] = errors.map(lintErrorToCompileError)
     }
-    return mergeNodeErrors(compileByNode, lintAsCompileByNode)
-  }, [activeLint, compileErrors, currentSkillId])
+    const source = currentSkillId ? contextDiagnosticsSource[currentSkillId] ?? "lint" : "lint"
+    return selectActiveNodeErrors(source, compileByNode, lintAsCompileByNode)
+  }, [activeLint, compileErrors, contextDiagnosticsSource, currentSkillId])
   // The canvas routes overwrite conflicts from the diagnostics themselves, not
   // from the node projection: a conflict inside a child skill belongs to no root
   // node, so projecting first drops exactly the case the routing exists for
@@ -2920,12 +2968,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [resumeValidity],
   )
   // Field-axis source for the Properties/Input panels (N3 atom #5): manual Compile and
-  // first-screen/realtime lint are both engine-owned diagnostics. Project both onto the
-  // same LintError field_path axis so a clean realtime lint pass cannot erase manual
-  // Compile failures from the side panels while the drawer still shows them.
+  // first-screen/realtime lint are both engine-owned diagnostics, projected onto the
+  // same LintError field_path axis. J-03.B: this projects whichever pass most recently
+  // settled (see `contextDiagnosticsSource`), not a union of both -- the same selection
+  // `compileErrorsByNodeId` above makes, so the node badge and the field tooltip always
+  // agree on which pass is authoritative right now.
   const propertiesFieldErrors = useMemo(() => {
-    return fieldDiagnosticsForPanels(currentSkillId ? compileErrors[currentSkillId] : [], activeLint)
-  }, [activeLint, compileErrors, currentSkillId])
+    const source = currentSkillId ? contextDiagnosticsSource[currentSkillId] ?? "lint" : "lint"
+    return selectActiveFieldErrors(source, currentSkillId ? compileErrors[currentSkillId] : [], activeLint)
+  }, [activeLint, compileErrors, contextDiagnosticsSource, currentSkillId])
 
   const leftPanelOverlay = activePanel ? (
     <WorkspaceLeftPanelOverlay

@@ -97,6 +97,22 @@ interface WorkspaceProps {
 
 const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
 
+/**
+ * J-04.C: the compile TIER of the build-stage machine -- the only stages a
+ * background lint pass may ever compete for. Once the gate machine has
+ * advanced to a predict/run-tier stage (predicting/predict-fail/predict-pass
+ * /running/paused, per `gate-state.ts` STAGE_BY_OUTCOME), that stage is owned
+ * exclusively by explicit compile/predict/run gate events -- a lint pass
+ * settling afterward (e.g. an edit made while a run is in flight) must never
+ * yank the action bar backward out of a stage the user already advanced past.
+ */
+const COMPILE_TIER_STAGES: ReadonlySet<SkillBuildStage> = new Set([
+  "idle",
+  "compiling",
+  "compile-fail",
+  "compile-pass",
+])
+
 function isIoDocumentPath(path: string) {
   return path === "GRAPH.md" || /^phases\/[^/]+\/SUBGRAPH\.md$/.test(path)
 }
@@ -2503,17 +2519,33 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const deriveBuildStage = useCallback((id: string): SkillBuildStage => {
     const compileStage = compileStages[id]
-    if (compileStage) return compileStage
+    // Predict/run-tier stages are never contested by lint -- see
+    // COMPILE_TIER_STAGES. Only the compile tier below is shared ground
+    // between manual Compile and lint.
+    if (compileStage && !COMPILE_TIER_STAGES.has(compileStage)) return compileStage
     // lintTick: bumped by the lint-event subscriber so a passed realtime lint re-derives
     // the stage. readLintStatus reads sessionStorage (not React state), so this read is
     // the dependency that re-runs the derivation when lint status changes.
     void lintTick
+    // J-04.C: within the compile tier, manual Compile and lint are two routes
+    // to the SAME verdict (compile-lint interface contract: both hit the one
+    // engine compile_skill exit). "最新一轮结算胜出" (J-03.B's rule for the
+    // diagnostics projection) applies here too, reusing the exact same "who
+    // settled last" signal (`contextDiagnosticsSource`) instead of a second,
+    // competing freshness mechanism. A stale manual compileStage must not
+    // permanently mask a fresher lint pass, and vice versa.
+    const source = contextDiagnosticsSource[id] ?? "lint"
+    if (source === "compile" && compileStage) return compileStage
     const lint = readLintStatus(id)
     if (lint === "checking") return "compiling"
     if (lint === "failed") return "compile-fail"
-    if (lint === "passed") return "idle"
-    return "idle"
-  }, [compileStages, lintTick])
+    // 03_compile.md:18 (A2) + :34 ("实时 lint 通过自动驱动 compile-pass"): a
+    // passing lint alone unlocks Predict, no manual Compile click required.
+    if (lint === "passed") return "compile-pass"
+    // No lint has resolved for this skill yet -- fall back to whatever
+    // (stale-but-still-in-tier) manual compile stage is on record, else idle.
+    return compileStage ?? "idle"
+  }, [compileStages, contextDiagnosticsSource, lintTick])
 
   // The one replica of "which nodes this skill stops before": the runtime
   // config the canvas already holds, revalidated by the precise

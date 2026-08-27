@@ -2026,12 +2026,18 @@ describe('Workspace WS-1 local writer contracts', () => {
     }
   })
 
-  it('does not treat a passing realtime lint as a manual compile pass', () => {
+  // J-04.C: 03_compile.md:18 (A2, "lint 状态 → build stage ... passed→通过")
+  // + :34 ("实时 lint 通过自动驱动 compile-pass") say a passing realtime lint
+  // alone -- no manual Compile click required -- drives compile-pass and
+  // unlocks Predict. The prior "idle" mapping here (#219, c1c1b208) never
+  // implemented that decision; this test used to enshrine the bug as
+  // intended behaviour.
+  it('a passing realtime lint alone drives compile-pass and unlocks Predict', () => {
     mocks.lintStatus = 'passed'
 
     renderWorkspace()
 
-    expect(mocks.centerActionBarProps?.stage).toBe('idle')
+    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
   })
 
   it('keeps the build stage idle while no lint has passed', () => {
@@ -2040,6 +2046,125 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace()
 
     expect(mocks.centerActionBarProps?.stage).toBe('idle')
+  })
+
+  // J-04.C: "最新一轮结算胜出" (J-03.B's diagnostics rule) applies to the build
+  // stage too -- a manual Compile failure must not permanently mask a FRESHER
+  // lint pass. Reuses `contextDiagnosticsSource` (the same "who settled last"
+  // signal J-03.B introduced) rather than a second, competing mechanism.
+  it('unlocks Predict once a fresher lint pass settles after a stale manual Compile failure', async () => {
+    vi.useFakeTimers()
+    mocks.compileSkill.mockResolvedValueOnce({
+      code: 'compile_failed',
+      detail: 'compile failed',
+      errors: [{
+        file: 'phases/draft/SKILL.md',
+        line: 3,
+        field: null,
+        severity: 'fatal',
+        message: 'draft phase missing <goal> block',
+        error_code: 'F-v3-agent-goal-missing',
+      }],
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
+        )
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
+      })
+      expect(mocks.centerActionBarProps?.stage).toBe('compile-fail')
+
+      // External fix lands on disk; skill_changed (J-03.B) debounce-relints.
+      act(() => {
+        mocks.studioEventStreamSubscribers.at(-1)?.current.onSkillChanged?.({
+          skillId: 'writer-smoke',
+          path: 'phases/draft/SKILL.md',
+        })
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(LINT_DEBOUNCE_MS)
+        await Promise.resolve()
+      })
+
+      // The relint call itself is mocked away (module-level relintSkillFromDisk
+      // mock) -- simulate its resolution the same way the real function would
+      // publish it, exactly like the J-03.B tests above do.
+      mocks.lintStatus = 'passed'
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent(lintResultEvent, {
+          detail: { skillId: 'writer-smoke', result: { status: 'passed', errors: [], phases_summary: null } },
+        }))
+        await Promise.resolve()
+      })
+
+      expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      vi.useRealTimers()
+    }
+  })
+
+  // A8 "回锁不回退": a regression in the compile tier must re-lock Predict, but
+  // (per the tests above and the "Workspace adopts the run..." suite) this
+  // must never reach into a stage the gate machine has already advanced past
+  // (predicting/predict-pass/running/paused) -- this test only exercises the
+  // still-in-compile-tier case.
+  it('re-locks Predict when a fresh lint pass fails after an earlier pass had unlocked it', async () => {
+    mocks.lintStatus = 'passed'
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
+        )
+        await Promise.resolve()
+      })
+      expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+
+      mocks.lintStatus = 'failed'
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent(lintResultEvent, {
+          detail: {
+            skillId: 'writer-smoke',
+            result: {
+              status: 'failed',
+              errors: [{
+                file: 'phases/draft/SKILL.md',
+                line: 3,
+                column: null,
+                phase_name: 'draft',
+                field_path: null,
+                severity: 'error',
+                error_code: 'F-v3-agent-goal-missing',
+                message: 'draft phase missing <goal> block',
+              }],
+              phases_summary: null,
+            },
+          },
+        }))
+        await Promise.resolve()
+      })
+
+      expect(mocks.centerActionBarProps?.stage).toBe('compile-fail')
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 
   // N4 #4: a 2xx predict response carries PredictDiagnosticExport.status. A 'failed'
@@ -3059,11 +3184,16 @@ describe('Workspace adopts the run the server says is under way (integration)', 
     expect(mocks.centerActionBarProps?.stage).toBe('paused')
   })
 
-  it('leaves the bar alone when every run of this skill has ended', () => {
+  // J-04.C: an abandoned run adopts no live run stage (compileStages stays
+  // unset for this skill), so the bar falls through to whatever lint already
+  // settled -- this suite's beforeEach seeds `lintStatus = 'passed'`, so the
+  // correct resting stage is compile-pass, not idle (idle was only ever the
+  // "passed lint maps to idle" bug, not this test's own subject).
+  it('falls through to the settled lint stage when every run of this skill has ended', () => {
     mocks.runHistoryList = [serverRun('abandoned')]
 
     mountFresh()
 
-    expect(mocks.centerActionBarProps?.stage).toBe('idle')
+    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
   })
 })

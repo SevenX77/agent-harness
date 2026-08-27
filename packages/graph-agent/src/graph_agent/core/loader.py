@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any, Literal, NoReturn, get_origin
+from typing import Any, Literal, NoReturn, TypeVar, get_origin
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
@@ -2753,36 +2753,56 @@ def _build_phase_document(
     if is_agent:
         data = _normalize_skill_node_frontmatter(path, data)
 
-    try:
-        if mode == "logic":
-            data.setdefault("actions", _extract_logic_actions(path, body))
-            logic_ast = LogicNodeAST.model_validate(data)
-            _validate_logic_actions_declared(path, logic_ast, body)
-            ast: PhaseAST = logic_ast
-        elif mode == "subgraph":
-            if "target_skill" in data:
-                target_skill = data["target_skill"]
-                _fatal(
+    # Body-structure diagnostics (missing <goal>, empty <action>, deprecated
+    # target_skill, ...) and frontmatter schema diagnostics (pydantic
+    # model_validate) used to be two sequential steps that could each abort
+    # this file's compile independently — whichever ran first won, and the
+    # other's defect in the SAME file only surfaced on the NEXT compile after
+    # the first was fixed. That is the exact PM complaint F6 names ("将role
+    # 补上,goal的报错才出现"): docs/studio/mvp1/02_capabilities/compile-lint/
+    # mvp1-alignment.md F6. Each branch below collects its own body-structure
+    # diagnostics instead of raising them immediately, then hands them to
+    # ``_validate_phase_ast`` to merge with any schema diagnostics from the
+    # SAME model_validate call before raising once.
+    if mode == "logic":
+        actions, action_diags = _extract_logic_actions_collecting(path, body)
+        # An empty/absent <action> defect is already reported via
+        # action_diags; feed the schema a non-empty placeholder so its own
+        # min_length=1 check does not ALSO flag it under a generic code.
+        data.setdefault("actions", actions or ["(no action tags)"])
+        logic_ast = _validate_phase_ast(LogicNodeAST, data, path, mode, frontmatter, action_diags)
+        _validate_logic_actions_declared(path, logic_ast, body)
+        ast: PhaseAST = logic_ast
+    elif mode == "subgraph":
+        subgraph_diags: list[_Diag] = []
+        if "target_skill" in data:
+            target_skill = data.pop("target_skill")
+            subgraph_diags.append(
+                _make_diag(
                     path,
                     _frontmatter_key_line(path, "target_skill"),
                     "[F-v3-subgraph-target-skill-invalid] "
                     f"SUBGRAPH.md target_skill={target_skill!r} is deprecated; migrate to a path "
                     "relative to the skill root (e.g. path: subskills/<child>) or an absolute path",
                 )
-            ast = SubgraphNodeAST.model_validate(data)
-        elif is_agent:
-            data.update(_parse_agent_body(path, body, blocks))
-            ast = AgentNodeAST.model_validate(data)
-            _validate_agent_mentions(path, ast, body)
-        else:
-            _fatal(
-                path,
-                1,
-                f"unsupported phase file {path.name}",
-                code="[F-v3-graph-phase-node-missing]",
             )
-    except ValidationError as exc:
-        _phase_validation_fatal(path, mode, frontmatter, exc)
+            # Deprecated key already reported above; placeholder keeps the
+            # required `path` field satisfied unless a real one was also
+            # given (setdefault leaves an existing `path` untouched).
+            data.setdefault("path", "(deprecated target_skill)")
+        ast = _validate_phase_ast(SubgraphNodeAST, data, path, mode, frontmatter, subgraph_diags)
+    elif is_agent:
+        body_fields, body_diags = _parse_agent_body(path, body, blocks)
+        data.update(body_fields)
+        ast = _validate_phase_ast(AgentNodeAST, data, path, mode, frontmatter, body_diags)
+        _validate_agent_mentions(path, ast, body)
+    else:
+        _fatal(
+            path,
+            1,
+            f"unsupported phase file {path.name}",
+            code="[F-v3-graph-phase-node-missing]",
+        )
 
     _validate_phase_io_schemas(path, mode, ast)
     return PhaseDocument(
@@ -2815,12 +2835,36 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
     )
 
 
-def _phase_validation_fatal(
+_PhaseModelT = TypeVar("_PhaseModelT", bound=BaseModel)
+
+
+def _validate_phase_ast(
+    model_cls: type[_PhaseModelT],
+    data: dict[str, Any],
+    path: Path,
+    mode: str,
+    frontmatter: dict[str, Any],
+    pre_diags: list[_Diag],
+) -> _PhaseModelT:
+    """Run one phase file's frontmatter schema validation, merged with any
+    body-structure diagnostics the caller already collected for the SAME
+    file (``pre_diags``) — so neither kind of defect hides the other (F6).
+    """
+    try:
+        validated = model_cls.model_validate(data)
+    except ValidationError as exc:
+        _raise_diags(pre_diags + _phase_validation_diags(path, mode, frontmatter, exc))
+    if pre_diags:
+        _raise_diags(pre_diags)
+    return validated
+
+
+def _phase_validation_diags(
     path: Path,
     mode: str,
     frontmatter: dict[str, Any],
     exc: ValidationError,
-) -> NoReturn:
+) -> list[_Diag]:
     diags: list[_Diag] = []
     domain = {"agent": "agent", "logic": "logic", "subgraph": "subgraph"}.get(mode, "graph")
     for error in exc.errors():
@@ -2850,9 +2894,17 @@ def _phase_validation_fatal(
             match = re.search(r"\[(F-v3-[a-z0-9-]+)\]", msg)
             if match:
                 code = f"[{match.group(1)}]"
-                clean_msg = msg.replace(code, "").strip()
+                # Strip pydantic's "Value error, " wrapper BEFORE removing the
+                # code substring. The code sits between a leading and a
+                # trailing space in the raw message, so removing it first
+                # leaves two adjacent spaces; the fixed-length prefix strip
+                # then only eats 13 of them, leaving clean_msg starting with
+                # a stray space (real symptom: the message column in the
+                # compile drawer showed " max_iterations must be...").
+                clean_msg = msg
                 if clean_msg.startswith("Value error, "):
                     clean_msg = clean_msg[len("Value error, ") :]
+                clean_msg = clean_msg.replace(code, "").strip()
 
         if code is None:
             code = f"[F-v3-{domain}-schema-unknown-field]"
@@ -2867,29 +2919,48 @@ def _phase_validation_fatal(
             )
         )
 
-    _raise_diags(diags)
+    return diags
 
 
-def _extract_logic_actions(path: Path, body: str) -> list[str]:
+def _extract_logic_actions_collecting(path: Path, body: str) -> tuple[list[str], list[_Diag]]:
+    """Like ``_extract_logic_actions`` but collects defects instead of
+    raising, so a body-structure defect (empty/absent ``<action>``) can be
+    merged with an independent frontmatter schema defect from the SAME file
+    into one compile report (F6 aggregation completeness) instead of
+    aborting before the schema ever gets checked.
+    """
     actions: list[str] = []
+    diags: list[_Diag] = []
     pattern = re.compile(r"<action\b[^>]*>(.*?)</action>", re.IGNORECASE | re.DOTALL)
     for match in pattern.finditer(body):
         action = match.group(1).strip()
         if not action:
             # Mirror the agent's strict role/goal check: an empty <action></action>
             # is itself a defect even when other actions are filled.
-            _fatal(
-                path,
-                _body_file_line(path, body, match.start()),
-                "[F-v3-logic-actions-empty] LOGIC.md <action> tags must not be empty",
+            diags.append(
+                _make_diag(
+                    path,
+                    _body_file_line(path, body, match.start()),
+                    "[F-v3-logic-actions-empty] LOGIC.md <action> tags must not be empty",
+                )
             )
+            continue
         actions.append(action)
     if not actions:
-        _fatal(
-            path,
-            _body_file_line(path, body, 0),
-            "[F-v3-logic-actions-empty] LOGIC.md requires <action> tags",
+        diags.append(
+            _make_diag(
+                path,
+                _body_file_line(path, body, 0),
+                "[F-v3-logic-actions-empty] LOGIC.md requires <action> tags",
+            )
         )
+    return actions, diags
+
+
+def _extract_logic_actions(path: Path, body: str) -> list[str]:
+    actions, diags = _extract_logic_actions_collecting(path, body)
+    if diags:
+        _raise_diags(diags)
     return actions
 
 
@@ -2907,7 +2978,18 @@ def _parse_agent_body(
     path: Path,
     body: str,
     blocks: dict[str, str],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[_Diag]]:
+    """Extract Agent body fields, collecting (not raising) role/goal-missing
+    defects so the caller (``_build_phase_document``) can merge them with any
+    frontmatter schema defect from the SAME file into one compile report
+    (F6 aggregation completeness) instead of aborting before the schema is
+    ever checked.
+
+    Genuinely unreadable markup (unknown top-level tag, the deprecated steps
+    wrapper tag, ``<exit_contract>``) still aborts immediately: unlike a
+    missing block, a malformed tag soup gives ``extract_raw_blocks`` no
+    reliable body to keep parsing from.
+    """
     allowed_tags = {"role", "goal", "step", "protocol", "example"}
     for match in re.finditer(r"</?([A-Za-z_][\w:-]*)\b", body):
         tag = match.group(1).lower()
@@ -2942,6 +3024,12 @@ def _parse_agent_body(
                 "[F-v3-agent-role-missing] Agent body requires <role>",
             )
         )
+        # AgentNodeAST.role has its own min_length=1 check; feed it a
+        # placeholder so it does not ALSO flag the same defect under a
+        # generic code. The placeholder never reaches a caller: a non-empty
+        # block_diags always ends this phase file's compile in a raise
+        # (see _validate_phase_ast).
+        role = "(missing role)"
     if not goal:
         block_diags.append(
             _make_diag(
@@ -2950,15 +3038,14 @@ def _parse_agent_body(
                 "[F-v3-agent-goal-missing] Agent body requires <goal>",
             )
         )
-    if block_diags:
-        _raise_diags(block_diags)
+        goal = "(missing goal)"
     return {
         "role": role,
         "goal": goal,
         "steps": _extract_agent_steps(path, body),
         "protocols": _extract_agent_protocols(path, body),
         "examples_inline": _extract_agent_examples(path, body),
-    }
+    }, block_diags
 
 
 def _extract_agent_steps(path: Path, body: str) -> list[dict[str, str]]:

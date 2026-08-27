@@ -1,0 +1,24 @@
+{
+  "compileDrawer": {
+    "title_one": "{{count}} {{kind}} error",
+    "title_other": "{{count}} {{kind}} errors",
+    "copyAll": "Copy all errors",
+    "copyAllAriaLabel": "Copy all {{kind}} errors",
+    "copied": "Copied",
+    "closeAriaLabel": "Close {{kind}} errors"
+  },
+  "rail": {
+    "assets": "Assets",
+    "properties": "Properties",
+    "io": "I/O",
+    "trace": "Trace",
+    "localHistory": "Local History"
+  },
+  "header": {
+    "backToHome": "Back to Home"
+  },
+  "editor": {
+    "splitAriaLabel": "Split editor",
+    "closeAriaLabel": "Close editor"
+  }
+}

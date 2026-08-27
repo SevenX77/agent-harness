@@ -85,6 +85,9 @@
     "inspectFlowing": "点开看流过这条边的上下文",
     "viewInferred": "点开看这条路径上推断出的字段"
   },
+  "banner": {
+    "refreshFailed": "画布刷新失败 —— 正在显示上一次成功加载的图。"
+  },
   "toast": {
     "breakpointNextRun": "这次已经在跑了，断点从下一次开始生效。",
     "sequentialOverwriteUnresolved": "顺序覆盖还没解决。编译前先调整这个节点，或者允许覆盖。",

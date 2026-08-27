@@ -1,0 +1,8 @@
+{
+  "banner": {
+    "connecting": "正在连接后端…",
+    "unavailablePrefix": "后端不可用 —— 部分功能已禁用。",
+    "retry": "重试",
+    "connectionLostReconnecting": "后端连接已断开，正在重新连接…"
+  }
+}

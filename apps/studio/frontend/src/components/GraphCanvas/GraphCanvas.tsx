@@ -737,6 +737,7 @@ export function GraphCanvas({
   resumeLoading = false,
   onResumeNode,
 }: GraphCanvasProps) {
+  const { t } = useTranslation('canvas')
   const workspace = useOptionalWorkspaceContext()
   const workspaceRef = useRef(workspace)
   useEffect(() => {
@@ -2508,7 +2509,7 @@ export function GraphCanvas({
           className="absolute top-4 z-10 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-sm"
           style={{ right: 'calc(var(--studio-canvas-right-safe-area, 0px) + 1rem)' }}
         >
-          Graph refresh failed — showing the last loaded graph.
+          {t('banner.refreshFailed')}
         </div>
       ) : null}
 

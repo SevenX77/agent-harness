@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronDown, Layers, Loader2, Package } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { toast, type ExternalToast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -81,6 +82,7 @@ export function Header({
   onSyncSuccess,
   onOpenSettings,
 }: HeaderProps) {
+  const { t } = useTranslation("studioShell")
   const skillSync = useSkillSync(skillId, { onSyncSuccess })
   const publish = usePublishSkill(skillId, onOpenSettings)
   const [isPackaging, setIsPackaging] = useState(false)
@@ -163,13 +165,13 @@ export function Header({
             <button
               type="button"
               onClick={onHome}
-              aria-label="Back to Home"
+              aria-label={t("header.backToHome")}
               className="flex size-6 items-center justify-center rounded-md bg-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Layers className="size-3.5 text-background" strokeWidth={2} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Back to Home</TooltipContent>
+          <TooltipContent>{t("header.backToHome")}</TooltipContent>
         </Tooltip>
         <span className="text-sm font-semibold tracking-tight text-foreground">
           GSkill Studio

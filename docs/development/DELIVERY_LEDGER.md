@@ -867,7 +867,7 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       单条精确诊断 → 还原复绿。⑤**新立案 7 行**:J-01.I(同步只有启动触发器,闭环断在当场性)、
       J-01.J(同意零反馈)、J-01.K(registry 副本同屏分叉,J-01.H 同型复发)、J-01.L(DeepSeek 卡
       chip 写 OpenAI)、J-X.6(golden 回填文案病+Confirm 无产物)、J-X.7(嵌入式 CLI 默认 bypass
-      permissions,待裁决)、J-X.8(cross-session socket 警告)。⑥范围注:fresh 轮重点在闭环/日志/
+      permissions——用户同日裁决:有意,护栏未来在 ah 沙箱层实现)、J-X.8(cross-session socket 警告)。⑥范围注:fresh 轮重点在闭环/日志/
       主线,OpenAI/Gemini/Ark/第三方卡与 Properties-IO 明细未在 fresh 环境重走(原轮已验);
       Anthropic 官方卡用 .env 错身份 key(sk-or-*)真实覆盖了 failed 红态路径。
       本机时区实测为 Pacific(UTC-7),时间戳核对一致,非缺陷。

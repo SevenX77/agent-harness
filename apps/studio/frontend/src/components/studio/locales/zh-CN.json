@@ -1,0 +1,23 @@
+{
+  "compileDrawer": {
+    "title_other": "{{count}} 个 {{kind}} 错误",
+    "copyAll": "复制全部错误",
+    "copyAllAriaLabel": "复制全部 {{kind}} 错误",
+    "copied": "已复制",
+    "closeAriaLabel": "关闭 {{kind}} 错误"
+  },
+  "rail": {
+    "assets": "资源",
+    "properties": "属性",
+    "io": "I/O",
+    "trace": "运行轨迹",
+    "localHistory": "本地历史"
+  },
+  "header": {
+    "backToHome": "返回主页"
+  },
+  "editor": {
+    "splitAriaLabel": "拆分编辑器",
+    "closeAriaLabel": "关闭编辑器"
+  }
+}

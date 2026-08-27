@@ -85,6 +85,9 @@
     "inspectFlowing": "Click to inspect flowing context",
     "viewInferred": "Click to view inferred fields on this path"
   },
+  "banner": {
+    "refreshFailed": "Graph refresh failed — showing the last loaded graph."
+  },
   "toast": {
     "breakpointNextRun": "This run is already going — the breakpoint takes effect on the next one.",
     "sequentialOverwriteUnresolved": "Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.",

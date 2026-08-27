@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 import {
   initializeRuntimeConfig,
   restartSidecar,
@@ -32,6 +34,7 @@ interface RuntimeShellProps {
 // 不需要 bootstrap"). Sidecar/runtime startup is surfaced as a non-blocking
 // banner — a failed sidecar shows scoped errors, it never hides the whole UI.
 export function RuntimeShell({ status, message, onRetry, children }: RuntimeShellProps): ReactElement {
+  const { t } = useTranslation('runtimeGate')
   return (
     <>
       {children}
@@ -42,11 +45,11 @@ export function RuntimeShell({ status, message, onRetry, children }: RuntimeShel
           className="fixed bottom-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-border bg-background/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
         >
           {status === 'loading' ? (
-            <span className="text-muted-foreground">Connecting to backend…</span>
+            <span className="text-muted-foreground">{t('banner.connecting')}</span>
           ) : (
             <>
               <span className="text-destructive">
-                Backend unavailable — some features are disabled.
+                {t('banner.unavailablePrefix')}
                 {message ? ` (${message})` : ''}
               </span>
               <button
@@ -54,7 +57,7 @@ export function RuntimeShell({ status, message, onRetry, children }: RuntimeShel
                 onClick={onRetry}
                 className="rounded border border-border px-2 py-0.5 font-medium text-foreground hover:bg-accent"
               >
-                Retry
+                {t('banner.retry')}
               </button>
             </>
           )}
@@ -67,7 +70,13 @@ export function RuntimeShell({ status, message, onRetry, children }: RuntimeShel
 // Shown the instant liveness fails, before the first automatic attempt below
 // has reported anything of its own — replaced by that attempt's real error
 // text (or by nothing at all, on success) within `AUTO_RESTART_DELAYS_MS[0]`.
-const BACKEND_DOWN_INITIAL_MESSAGE = 'Backend connection lost. Reconnecting…'
+// Read at call time (not module-load time) via `i18n.t` — not a hook, since
+// this constant is consumed inside `useBackendDownSignal`'s callback rather
+// than during render — so a language switch between renders is reflected the
+// next time the sidecar actually goes down, not baked in at import time.
+function backendDownInitialMessage(): string {
+  return i18n.t('banner.connectionLostReconnecting', { ns: 'runtimeGate' })
+}
 
 export function RuntimeGate({ children }: RuntimeGateProps) {
   const [status, setStatus] = useState<RuntimeStatus>('loading')
@@ -158,7 +167,7 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
   // what lets the hook re-arm for the NEXT episode once we return to 'ready'.
   useBackendDownSignal(status === 'ready', () => {
     setStatus('error')
-    setMessage(BACKEND_DOWN_INITIAL_MESSAGE)
+    setMessage(backendDownInitialMessage())
     autoRestartStateRef.current = initialAutoRestartState()
     scheduleAutoRestart()
   })

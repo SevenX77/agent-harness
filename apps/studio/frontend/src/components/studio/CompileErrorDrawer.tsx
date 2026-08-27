@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react"
 import { Check, Copy, X } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -211,6 +212,7 @@ export function CompileErrorDrawer({
   kind = "compile",
   canvasHostElement,
 }: CompileErrorDrawerProps) {
+  const { t } = useTranslation("studioShell")
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -234,7 +236,6 @@ export function CompileErrorDrawer({
   }
 
   const errorCount = errors.length
-  const errorLabel = `${kind} error${errorCount === 1 ? "" : "s"}`
 
   return (
     // modal={false}: see the module docstring above — the default modal Dialog
@@ -260,7 +261,7 @@ export function CompileErrorDrawer({
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
           <SheetTitle className="text-sm font-medium text-destructive">
-            {errorCount} {errorLabel}
+            {t("compileDrawer.title", { count: errorCount, kind })}
           </SheetTitle>
           <div className="flex items-center gap-1">
             <Button
@@ -268,17 +269,17 @@ export function CompileErrorDrawer({
               variant="outline"
               size="sm"
               onClick={handleCopyAll}
-              aria-label={`Copy all ${kind} errors`}
+              aria-label={t("compileDrawer.copyAllAriaLabel", { kind })}
             >
               {copied ? <Check /> : <Copy />}
-              {copied ? "Copied" : "Copy all errors"}
+              {copied ? t("compileDrawer.copied") : t("compileDrawer.copyAll")}
             </Button>
             <SheetClose asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Close ${kind} errors`}
+                aria-label={t("compileDrawer.closeAriaLabel", { kind })}
               >
                 <X />
               </Button>

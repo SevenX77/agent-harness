@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Columns2, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { writeSkillFile } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
@@ -140,6 +141,7 @@ export function LazyMonacoPanel({
   onClose,
   onSplit,
 }: LazyMonacoPanelProps) {
+  const { t } = useTranslation('studioShell')
   const [draft, setDraft] = useState(value)
   // Server-confirmed read-only: set when an autosave is refused with 403 SKILL_READ_ONLY
   // (a bundled/public skill outside the writable workspace). Distinct from the caller's
@@ -319,7 +321,7 @@ export function LazyMonacoPanel({
             <Button
               type="button"
               onClick={onSplit}
-              aria-label="Split editor"
+              aria-label={t('editor.splitAriaLabel')}
               variant="ghost"
               size="icon"
               className="text-muted-foreground/70 hover:text-muted-foreground"
@@ -331,7 +333,7 @@ export function LazyMonacoPanel({
             <Button
               type="button"
               onClick={onClose}
-              aria-label="Close editor"
+              aria-label={t('editor.closeAriaLabel')}
               variant="ghost"
               size="icon"
               className="text-muted-foreground/70 hover:text-muted-foreground"

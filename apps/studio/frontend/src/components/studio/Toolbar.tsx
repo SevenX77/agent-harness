@@ -1,4 +1,5 @@
 import { Activity, FileInput, Files, History, Moon, Settings, Settings2, Sun } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -13,19 +14,20 @@ interface ToolbarProps {
   onSettingsToggle: () => void
 }
 
-const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut: string }> = [
-  { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
-  { id: "properties", icon: Settings2, label: "Properties", shortcut: "2" },
-  { id: "input", icon: FileInput, label: "I/O", shortcut: "3" },
-  // One trace surface, named after what it holds (decision 2026-08-09 D1). The
-  // second slot used to be "Full Trace"; the trace itself now reads end to end,
-  // so a document view of the same events was the same thing twice.
-  { id: "trace", icon: Activity, label: "Trace", shortcut: "4" },
-  { id: "local-history", icon: History, label: "Local History", shortcut: "5" },
-]
-
 export function Toolbar({ activePanel, onPanelChange, settingsOpen, onSettingsToggle }: ToolbarProps) {
   const theme = useThemeValue()
+  const { t } = useTranslation("studioShell")
+
+  const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut: string }> = [
+    { id: "assets", icon: Files, label: t("rail.assets"), shortcut: "1" },
+    { id: "properties", icon: Settings2, label: t("rail.properties"), shortcut: "2" },
+    { id: "input", icon: FileInput, label: t("rail.io"), shortcut: "3" },
+    // One trace surface, named after what it holds (decision 2026-08-09 D1). The
+    // second slot used to be "Full Trace"; the trace itself now reads end to end,
+    // so a document view of the same events was the same thing twice.
+    { id: "trace", icon: Activity, label: t("rail.trace"), shortcut: "4" },
+    { id: "local-history", icon: History, label: t("rail.localHistory"), shortcut: "5" },
+  ]
 
   return (
     <aside className="z-10 flex w-12 shrink-0 flex-col items-center border-r border-border bg-sidebar px-2 py-3">

@@ -1,10 +1,24 @@
+---
+doc: moirai-copilot-persona-narrative
+role: guide
+status: living
+updated: 2026-08-27
+---
+
 # MoirAI — copilot 人格叙事 & 选名研究(完整版)
 
 > **日期**: 2026-07-03
 > **用途**: Studio copilot 的 agent 人格「MoirAI」的**完整命名叙事** + **选名过程全记录**(候选、取舍、词源、读音、重名排查、研究方法)。
-> **和设计源的关系**: 设计落点(身份标、开合交互等硬约束)在
-> `docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md` 的 **F1·R5-E** 约束条目——那里只存**压缩结论**。
-> 本文是叙事与研究的**完整档案**;要"为什么叫这个、还考虑过谁、怎么排查的",看这里。
+> **权威边界**: 本文只回答“为什么叫 MoirAI、三位人格怎样形成这套叙事”，不是能力、实现、工具数量或交付状态的真相源。当前能力与完成状态以
+> [requirements](../../.kiro/specs/studio-moirai-agent-system/requirements.md)、
+> [design](../../.kiro/specs/studio-moirai-agent-system/design.md)、
+> [tasks](../../.kiro/specs/studio-moirai-agent-system/tasks.md)、
+> [golden authoring decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-07-golden-case-authoring.md)、
+> [terminal output decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-07-run-terminal-output-contract-and-cli-read-tier.md)与
+> [runtime dispatch decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-15-per-runtime-dispatch-operating-rules.md)为准；活资产在 `apps/studio/backend/app/agents/`。独立 runtime 的未来集成目标见
+> [Graph Skill Runtime v1 alignment](../engine/graph-skill-runtime/v1-alignment.md)，该目标仍是 `drafted`。
+> **和 Studio 设计源的关系**: 身份标、开合交互等 UI 硬约束在
+> `docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md` 的 **F1·R5-E** 约束条目。本文是叙事与研究档案；要查当前产品行为，应沿上述权威指针核验，不从叙事推断实现状态。
 > **配套**: `investor-pitch-positioning.md`(产品对外定位)· `2026-05-30-build-vs-adopt-decision.md`(竞品/护城河)。
 
 ---
@@ -25,7 +39,7 @@ MoirAI 这个名字,取自古希腊命运三女神 Moirai。神话里,每个生�
 
 名字里还藏着一层意思:Moir-AI——词尾正好是 AI。三位女神纺的、量的、剪的那根线,在这里就是一条由 AI 驱动、既能被设计也能被审判的生产流水线。
 
-今天,三姐妹里只有 Clotho 落座——你现在在 Studio 里对话的这个 copilot,就是那只纺线的手,帮你把意图纺成 skill。Lachesis 与 Atropos 已经命名、已经划好各自的职责,但还没实现;等它们落地,这条线的「量」与「剪」两段才真正有人接手。在那之前,界面上只露 MoirAI 这一个名字。
+在这套人格叙事中，MoirAI 是三姐妹的统称与对话入口：Clotho 对应“纺”，Lachesis 对应“量”，Atropos 对应“剪”。角色当前是否落地、由哪些 tools 与 skills 支撑、界面显示哪一种身份，属于会随实现变化的产品事实，必须查本文开头指向的当前能力权威，不能由这段叙事推断。
 
 ---
 
@@ -41,9 +55,7 @@ MoirAI 这个名字,取自古希腊命运三女神 Moirai。神话里,每个生�
 
 这套分工和一条 skill 的生命周期**同构**,所以它不是牵强的比喻,而是把"谁管哪一段"讲清楚。Atropos 的终判**不是** golden eval 的逐样例对拍,而是对**整张图运行结果**的整体评估;终判反馈**回流 Clotho**,让 skill 被重新设计——这就闭成了**迭代循环**。
 
-> **今天只有 Clotho 这只手落座。** 你现在在 Studio 里对话的这个 copilot,就是 Clotho——帮你把意图纺成 skill。**Lachesis** 和 **Atropos** 是**已命名、已划好职责、但还没实现**的两个保留席位。
->
-> **纪律**:界面上现在只露 **MoirAI** 一个名字,**不凭空显示还没造出来的角色**。等 Lachesis / Atropos 真正落地,再让它们在 UI 上现身。
+> **叙事与状态分离**：三位角色的神话映射是稳定的命名决定；角色是否可调度、当前 UI 如何呈现、具体能力是否完成是时态事实。后者只由当前 requirements/design/tasks、dated decisions 与活代码证明，本文不维护一份并行状态表。
 
 ---
 
@@ -89,16 +101,16 @@ MoirAI 这个名字,取自古希腊命运三女神 Moirai。神话里,每个生�
 
 ---
 
-## 七、边界纪律(和产品实现挂钩,防止叙事跑偏成 UI)
+## 七、边界纪律(防止叙事越权成产品契约)
 
-1. **UI 只露实现了的角色**:现在只有 Clotho 席落地 → 界面只显示 **MoirAI**;Lachesis / Atropos **不显示**,直到真正实现。
-2. **术语不改**:Copilot tab / `copilot_*` role key / API 路径不动(见上)。
-3. **身份标**:一形三读的自绘 SVG——**仙后座(Cassiopeia)五星连线**,同时读作字母 **M** / **星座** / **节点+边的图(DAG)**;`currentColor` 主题化。具体图标、画布 FAB、开合动画等交互硬约束以设计源 **R5-E** 为准,本文不复述。
+1. **叙事不声明实现状态**：UI 显示哪些角色、调度如何工作、工具是否可用，以当前产品设计与活代码为准。
+2. **命名不改系统术语**：历史命名决定没有自动改写 Copilot tab、`copilot_*` role key 或 API 路径；若未来要改，必须在相应契约中单独裁决。
+3. **身份标只记录意象**：一形三读的自绘 SVG——**仙后座(Cassiopeia)五星连线**，同时读作字母 **M**、星座、节点与边的图。具体图标、画布 FAB、开合动画等交互硬约束以 Studio 设计源 **R5-E** 为准，本文不复制。
 
 ---
 
 ## 八、研究方法(留痕)
 
 - **检索工具**:用 Studio 内配置的 **`gemini-official`** 凭证走 **Gemini**,对候选名做神话/词源检索与重名排查;辅以 GitHub、同类产品搜索。
-- **决策归属**:名字方向与最终定名由**用户拍板**(需求 + 方向归 PM);本文档负责把过程与依据**记录留痕**,避免下次再从零讨论。
+- **决策归属**:名字方向与最终定名由**用户拍板**(需求 + 方向归 PM);本文档负责把过程与依据**记录留痕**,避免下次再从零讨论。它不据此取得能力设计或交付状态的所有权。
 - **为什么单独立档**:设计源里 R5-E 只存压缩结论(一句话塞进约束条目),**叙事全文和选名研究一旦不落档就会随对话丢失**——本文即为此而设,后续命名/叙事的补充都往这里写。

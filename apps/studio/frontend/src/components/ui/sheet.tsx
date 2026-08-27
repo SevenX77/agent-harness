@@ -49,14 +49,32 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  container,
+  overlayClassName,
+  overlayStyle,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /**
+   * Portal target for the overlay + content, forwarded to Radix's `Portal`
+   * (default: `document.body`, same as before when omitted). Added for
+   * CompileErrorDrawer (COMPILE_LINT-1, J-04.A): the default portal escapes
+   * into a DOM subtree that never sees a host's inline-set CSS custom
+   * properties (e.g. Workspace's `--studio-canvas-*-safe-area`), which a
+   * sheet confined to something narrower than the full viewport needs to
+   * inherit. Passing a node inside that host's own subtree fixes both the
+   * variable inheritance and gives `position: absolute` overrides (via
+   * `className`/`style`) a sane containing block.
+   */
+  container?: HTMLElement | null
+  /** Same idea as `className`, but for the internal overlay. */
+  overlayClassName?: string
+  overlayStyle?: React.CSSProperties
 }) {
   return (
-    <SheetPortal>
-      <SheetOverlay />
+    <SheetPortal container={container}>
+      <SheetOverlay className={overlayClassName} style={overlayStyle} />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         data-side={side}

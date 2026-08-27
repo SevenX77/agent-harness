@@ -14,7 +14,9 @@ import { formatDiagnosticCode } from "./field-compile-errors"
 
 /**
  * Compile-error drawer (N3 · COMPILE_LINT-1, geometry fixed under J-04.A,
- * hit-testing fixed under the J-04.A real-machine retry).
+ * hit-testing fixed under the J-04.A real-machine retry, outside-dismissal
+ * exemption fixed under a third J-04.A real-machine round — see
+ * `isOutsideDismissExempt` below for that one).
  *
  * When `compile-skill` returns a 422 `CompileFailure`, its `CompileError[]` are
  * surfaced here as a bottom drawer that **auto-opens on compile failure** and
@@ -65,9 +67,9 @@ import { formatDiagnosticCode } from "./field-compile-errors"
  * scrim would have to re-solve the exact "block the canvas without blocking
  * the action bar" problem this fix removes — so this drops the scrim rather
  * than rebuilding it by hand. "Click the blank canvas closes the drawer" still
- * holds without one: Radix's outside-pointerdown detection
- * (`isOutsideDismissExempt` below) is a DOM-event listener, not something the
- * overlay element implements by being clicked.
+ * holds without one: Radix's outside-interaction detection
+ * (`isOutsideDismissExempt` below) is a set of DOM-event listeners, not
+ * something the overlay element implements by being clicked.
  */
 
 /**
@@ -113,15 +115,37 @@ const OUTSIDE_DISMISS_EXEMPT_SELECTORS = [
 ]
 
 /**
- * Radix's dismiss-on-outside-pointerdown fires for ANY pointerdown outside
+ * Radix's dismiss-on-outside-interaction fires for ANY interaction outside
  * the drawer's own Content node — including the center action bar and the
  * two side panels, which sit outside Content regardless of how tightly the
- * drawer's own box is scoped. Left alone, clicking Compile while the drawer
- * is open would close the drawer as a side effect of every retry. Exempting
- * these three regions (the same `data-studio-*` markers center-action-bar.tsx
- * / WorkspaceLeftPanelOverlay / WorkspaceRightPanelOverlay already carry)
- * keeps the drawer open while the user operates them — dismissal is still one
- * click away, on the dimmed canvas backdrop, or Escape.
+ * drawer's own box is scoped. Left alone, operating them while the drawer is
+ * open would close it as a side effect of every fix. Exempting these three
+ * regions (the same `data-studio-*` markers center-action-bar.tsx /
+ * WorkspaceLeftPanelOverlay / WorkspaceRightPanelOverlay already carry) keeps
+ * the drawer open while the user operates them — dismissal is still one click
+ * away, on the blank canvas, or Escape.
+ *
+ * "ANY interaction" is not just pointerdown. A 2026-08-27 real-machine retry
+ * (round 3) found clicking a FOCUSABLE element inside the exempt regions —
+ * an Assets tree row, opening GRAPH.md into the editor — still closed the
+ * drawer, even with the pointerdown channel exempted. Reading
+ * @radix-ui/react-dismissable-layer's source (installed at
+ * node_modules/@radix-ui/react-dialog's dependency) explains why:
+ * `DismissableLayer` runs TWO independent outside-detection paths —
+ * `usePointerDownOutside` (document `pointerdown`) and `useFocusOutside`
+ * (document `focusin`, for focus moved via keyboard OR by a mouse click
+ * landing on a focusable element) — and EITHER one calls `onDismiss()` on its
+ * own if not prevented. `onPointerDownOutside` only intercepts the first
+ * path; clicking a tree row moves DOM focus there, which the second path
+ * treats as an independent dismiss trigger jsdom's `.click()` never exercised
+ * (it does not reliably move `document.activeElement` the way a real pointer
+ * click does). Both paths funnel through `onInteractOutside` before checking
+ * `event.defaultPrevented` — `pointerDownOutside`'s handler runs
+ * `onPointerDownOutside?.(event); onInteractOutside?.(event); if
+ * (!event.defaultPrevented) onDismiss?.()`, and `focusOutside`'s handler runs
+ * the same shape with `onFocusOutside` in place of `onPointerDownOutside` —
+ * so intercepting on `onInteractOutside` alone (instead of duplicating this
+ * check across `onPointerDownOutside` AND `onFocusOutside`) covers both.
  */
 export function isOutsideDismissExempt(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
@@ -227,7 +251,7 @@ export function CompileErrorDrawer({
         data-slot={`${kind}-drawer-content`}
         container={canvasHostElement}
         style={canvasScopedContentStyle}
-        onPointerDownOutside={(event) => {
+        onInteractOutside={(event) => {
           if (isOutsideDismissExempt(event.target)) {
             event.preventDefault()
           }

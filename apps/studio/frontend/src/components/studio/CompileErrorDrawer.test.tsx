@@ -436,6 +436,97 @@ describe("CompileErrorDrawer keeps the center action bar operable while open", (
 
     canvasNode.remove()
   })
+
+  // Round 3 (2026-08-27 real-machine retry): clicking a FOCUSABLE row inside
+  // an exempt region — an Assets tree folder/file — still closed the drawer
+  // even with the pointerdown channel exempted, because Radix's
+  // DismissableLayer runs a SEPARATE `useFocusOutside` path (document
+  // `focusin`) that calls its own `onDismiss()` independently of the
+  // pointerdown path. jsdom's `.click()` does not reliably move
+  // `document.activeElement` the way a real mouse click does, so these tests
+  // drive the focus shift explicitly via `.focus()` — the previous suite's
+  // exemption tests never exercised this channel at all, which is exactly why
+  // the real machine caught something jsdom didn't.
+  function dispatchRealClickThatMovesFocus(target: HTMLElement) {
+    act(() => {
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }))
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
+      target.focus()
+      target.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }))
+      target.click()
+    })
+  }
+
+  it("stays open when a focusable row inside the left (Assets) overlay is clicked, and the row's own click still fires", async () => {
+    const onOpenChange = vi.fn()
+    const onFolderClick = vi.fn()
+    const leftOverlay = document.createElement("div")
+    leftOverlay.setAttribute("data-studio-left-overlay", "true")
+    const folderRow = document.createElement("button")
+    folderRow.textContent = "phases"
+    folderRow.addEventListener("click", onFolderClick)
+    leftOverlay.appendChild(folderRow)
+    document.body.appendChild(leftOverlay)
+
+    act(() => {
+      root.render(<CompileErrorDrawer errors={errors} open onOpenChange={onOpenChange} />)
+    })
+    await flushOutsidePointerDownListenerAttachment()
+
+    dispatchRealClickThatMovesFocus(folderRow)
+
+    expect(onFolderClick).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+    leftOverlay.remove()
+  })
+
+  it("stays open when a focusable row inside the right (Copilot/Properties) overlay is clicked, and the row's own click still fires", async () => {
+    const onOpenChange = vi.fn()
+    const onModelCardClick = vi.fn()
+    const rightOverlay = document.createElement("div")
+    rightOverlay.setAttribute("data-studio-right-overlay", "true")
+    const modelCard = document.createElement("button")
+    modelCard.textContent = "gpt-5"
+    modelCard.addEventListener("click", onModelCardClick)
+    rightOverlay.appendChild(modelCard)
+    document.body.appendChild(rightOverlay)
+
+    act(() => {
+      root.render(<CompileErrorDrawer errors={errors} open onOpenChange={onOpenChange} />)
+    })
+    await flushOutsidePointerDownListenerAttachment()
+
+    dispatchRealClickThatMovesFocus(modelCard)
+
+    expect(onModelCardClick).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+    rightOverlay.remove()
+  })
+
+  it("control: focusing an unrelated (non-exempt) element still dismisses the drawer via the focus channel", async () => {
+    // Proves the focus-channel exemption is narrow and the test harness
+    // genuinely reaches Radix's real onFocusOutside path — mirrors the
+    // pointerdown control test above for the separate channel round 3 found.
+    const onOpenChange = vi.fn()
+    const editorSurface = document.createElement("button")
+    editorSurface.textContent = "GRAPH.md editor"
+    document.body.appendChild(editorSurface)
+
+    act(() => {
+      root.render(<CompileErrorDrawer errors={errors} open onOpenChange={onOpenChange} />)
+    })
+    await flushOutsidePointerDownListenerAttachment()
+
+    act(() => {
+      editorSurface.focus()
+    })
+
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+
+    editorSurface.remove()
+  })
 })
 
 describe("CompileErrorDrawer copy behavior", () => {

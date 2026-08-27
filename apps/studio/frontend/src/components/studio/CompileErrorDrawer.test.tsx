@@ -170,37 +170,66 @@ describe("CompileErrorDrawer rendering", () => {
     expect(selectable?.textContent).toContain("Unknown model alias")
   })
 
-  it("confines the dim overlay and the panel to the canvas's own horizontal bounds, not the full viewport", () => {
+  it("confines the panel to the canvas's own horizontal bounds, not the full viewport", () => {
     // J-04.A (2026-08-27 real-machine measurement): the old `fixed inset-0`
     // treatment covered the Assets tree, the Copilot/Properties dock, AND the
-    // center action bar — this asserts the fix, not the old defect. Both the
-    // overlay and the content anchor their left/right edges to the same
+    // center action bar — this asserts the fix, not the old defect. The
+    // content anchors its left/right edges to the same
     // `--studio-canvas-*-safe-area` custom properties center-action-bar.tsx
     // already clamps its own horizontal position against (published by
     // Workspace's canvas host), instead of the viewport-spanning `inset-x-0`.
+    // Real-machine confirmation (1400x900, journey-m4-verify fixture): content
+    // rect (456,444,548,360) sits strictly inside the canvas — left panel ends
+    // at x=444, right panel starts at x=1016.
     render(true)
-    const overlay = document.body.querySelector('[data-slot="sheet-overlay"]') as HTMLElement | null
     const content = document.body.querySelector('[data-slot="compile-drawer-content"]') as HTMLElement | null
-    expect(overlay).not.toBeNull()
     expect(content).not.toBeNull()
-    for (const node of [overlay, content]) {
-      expect(node?.style.position).toBe("absolute")
-      expect(node?.style.left).toBe("var(--studio-canvas-left-safe-area, 0px)")
-      expect(node?.style.right).toBe("var(--studio-canvas-right-safe-area, 0px)")
-    }
+    expect(content?.style.position).toBe("absolute")
+    expect(content?.style.left).toBe("var(--studio-canvas-left-safe-area, 0px)")
+    expect(content?.style.right).toBe("var(--studio-canvas-right-safe-area, 0px)")
     expect(content?.getAttribute("data-side")).toBe("bottom")
   })
 
   it("stops short of the true bottom edge so the center action bar band stays uncovered", () => {
-    // The action bar floats at `bottom-6` inside the same canvas host; both the
-    // overlay and the content reserve the same clearance above it so neither
-    // dims nor overlaps the Compile/Predict/Run pill.
+    // The action bar floats at `bottom-6` inside the same canvas host; the
+    // content reserves clearance above it so it never overlaps the
+    // Compile/Predict/Run pill. Real-machine confirmation: content bottom
+    // edge (804px) sits above the action bar's top (831px) at 1400x900.
     render(true)
-    const overlay = document.body.querySelector('[data-slot="sheet-overlay"]') as HTMLElement | null
     const content = document.body.querySelector('[data-slot="compile-drawer-content"]') as HTMLElement | null
-    expect(overlay?.style.bottom).not.toBe("0px")
-    expect(overlay?.style.bottom).toBe(content?.style.bottom)
-    expect(overlay?.style.top).toBe("0px")
+    expect(content?.style.bottom).not.toBe("0px")
+    expect(content?.style.bottom).toBe("6rem")
+  })
+
+  it("renders no dim overlay — modal={false} makes Radix's Dialog.Overlay a no-op by design", () => {
+    // @radix-ui/react-dialog's DialogOverlay is `context.modal ? <Impl/> : null`
+    // unconditionally, regardless of any className/style passed to it — so a
+    // non-modal Sheet (see below) never puts a scrim in the DOM at all. This
+    // pins that as an intended consequence, not a regression to chase: the
+    // FROZEN design only requires the drawer PANEL to cover the canvas, and a
+    // still-present scrim would have to re-solve the exact "block the canvas
+    // without blocking the action bar" problem modal={false} removes.
+    render(true)
+    expect(document.body.querySelector('[data-slot="sheet-overlay"]')).toBeNull()
+  })
+
+  it("never locks the page: does not set document.body.style.pointerEvents to \"none\" while open", () => {
+    // The real-machine regression this test stands in for: Radix's default
+    // `modal={true}` Dialog disables outside pointer events via
+    // `document.body.style.pointerEvents = "none"`
+    // (@radix-ui/react-dismissable-layer's `disableOutsidePointerEvents`
+    // effect) — a real DOM mutation jsdom faithfully reproduces. A real mouse
+    // click's coordinate-based hit-testing respects that lock (the action bar
+    // becomes hit-test-invisible, so the click falls through to whatever
+    // canvas element underneath keeps its own `pointer-events: auto`); jsdom's
+    // `dispatchEvent`/`.click()` do not do coordinate-based hit-testing at
+    // all, which is exactly why the PREVIOUS suite's click-through test could
+    // not catch this — it dispatched straight at the target element,
+    // bypassing the one CSS property the real bug lived in. This assertion
+    // checks that literal property directly instead.
+    expect(document.body.style.pointerEvents).not.toBe("none")
+    render(true)
+    expect(document.body.style.pointerEvents).not.toBe("none")
   })
 
   it("portals into the supplied canvas host element instead of always defaulting to document.body", () => {
@@ -334,7 +363,31 @@ describe("CompileErrorDrawer keeps the center action bar operable while open", (
     document.body.innerHTML = ""
   })
 
-  it("still fires the action bar button's own click handler, and does not dismiss the drawer, when clicked while open", () => {
+  // Radix's DismissableLayer (@radix-ui/react-dismissable-layer) attaches its
+  // document-level outside-pointerdown listener inside a `setTimeout(fn, 0)`
+  // — deliberately, so the SAME click that opened the dialog is not
+  // immediately seen as "outside". A synchronous test that renders open and
+  // dispatches in the same tick never lets that macrotask run, so Radix's
+  // listener is not attached yet: the dispatch reaches the button directly
+  // and proves nothing about Radix's own dismiss behavior either way. Flushing
+  // one real macrotask after render is what makes these tests exercise the
+  // actual mechanism instead of a no-op.
+  async function flushOutsidePointerDownListenerAttachment() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+
+  function dispatchRealClick(target: HTMLElement) {
+    act(() => {
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }))
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
+      target.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }))
+      target.click()
+    })
+  }
+
+  it("still fires the action bar button's own click handler, and does not dismiss the drawer, when clicked while open", async () => {
     const onOpenChange = vi.fn()
     const onCompileClick = vi.fn()
     const actionBar = document.createElement("div")
@@ -349,22 +402,39 @@ describe("CompileErrorDrawer keeps the center action bar operable while open", (
       root.render(<CompileErrorDrawer errors={errors} open onOpenChange={onOpenChange} />)
     })
     expect(document.body.querySelector('[data-slot="compile-drawer-content"]')).not.toBeNull()
+    await flushOutsidePointerDownListenerAttachment()
 
     // Same dispatch idiom CommunitySharingConsentDialog.test.tsx uses for a
     // real Radix outside-pointerdown sequence — jsdom lacks PointerEvent, but
     // Radix's DismissableLayer listens by event *type*, which a plain
     // MouseEvent constructed with that type still satisfies.
-    act(() => {
-      compileButton.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }))
-      compileButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
-      compileButton.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }))
-      compileButton.click()
-    })
+    dispatchRealClick(compileButton)
 
     expect(onCompileClick).toHaveBeenCalledTimes(1)
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
 
     actionBar.remove()
+  })
+
+  it("control: a click on an unrelated (non-exempt) outside element still dismisses the drawer", async () => {
+    // Proves the exemption is narrow, not a side effect of the test harness
+    // failing to reach Radix's real dismiss path at all — if this control
+    // did not close, the "stays open" assertion above would be meaningless.
+    const onOpenChange = vi.fn()
+    const canvasNode = document.createElement("div")
+    canvasNode.setAttribute("data-testid", "react-flow__node-globalOutput")
+    document.body.appendChild(canvasNode)
+
+    act(() => {
+      root.render(<CompileErrorDrawer errors={errors} open onOpenChange={onOpenChange} />)
+    })
+    await flushOutsidePointerDownListenerAttachment()
+
+    dispatchRealClick(canvasNode)
+
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+
+    canvasNode.remove()
   })
 })
 

@@ -50,8 +50,6 @@ function SheetContent({
   side = "right",
   showCloseButton = true,
   container,
-  overlayClassName,
-  overlayStyle,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
@@ -68,13 +66,10 @@ function SheetContent({
    * `className`/`style`) a sane containing block.
    */
   container?: HTMLElement | null
-  /** Same idea as `className`, but for the internal overlay. */
-  overlayClassName?: string
-  overlayStyle?: React.CSSProperties
 }) {
   return (
     <SheetPortal container={container}>
-      <SheetOverlay className={overlayClassName} style={overlayStyle} />
+      <SheetOverlay />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         data-side={side}

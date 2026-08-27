@@ -13,7 +13,8 @@ import type { CompileError } from "@/api/types"
 import { formatDiagnosticCode } from "./field-compile-errors"
 
 /**
- * Compile-error drawer (N3 · COMPILE_LINT-1, geometry fixed under J-04.A).
+ * Compile-error drawer (N3 · COMPILE_LINT-1, geometry fixed under J-04.A,
+ * hit-testing fixed under the J-04.A real-machine retry).
  *
  * When `compile-skill` returns a 422 `CompileFailure`, its `CompileError[]` are
  * surfaced here as a bottom drawer that **auto-opens on compile failure** and
@@ -32,16 +33,41 @@ import { formatDiagnosticCode } from "./field-compile-errors"
  * drawer's own scroll region, so a failed compile made retrying impossible
  * without first closing the drawer.
  *
- * Fixed by confining both the overlay and the content horizontally to the
- * canvas's own bounds and vertically to stop above the action bar band,
- * rather than teaching the canvas to shrink around an open drawer (VS Code's
- * Problems panel does the latter — compresses the editor's content area — but
- * that would mean threading a new "drawer open" safe-area into GraphCanvas's
- * fit-view math for a purely cosmetic z-order fix, a much larger blast radius
- * for what is really a two-element positioning conflict). See
- * `canvasScopedContentStyle` / `canvasScopedOverlayStyle` below for the exact
- * geometry, and `isOutsideDismissExempt` for why the action bar and side
- * panels also need to opt out of Radix's default outside-click dismissal.
+ * First pass confined the content horizontally to the canvas's own bounds and
+ * vertically to stop above the action bar band (`canvasScopedContentStyle`
+ * below) — geometry a second real-machine pass confirmed correct (content
+ * rect strictly inside the canvas, bottom edge above the action bar's top).
+ * But that pass ALSO found a second, independent bug the first pass's jsdom
+ * tests could not see: Radix's Dialog defaults to `modal={true}`, which sets
+ * `document.body.style.pointerEvents = "none"` while open (see
+ * `@radix-ui/react-dismissable-layer`'s `disableOutsidePointerEvents` effect).
+ * That lock makes the action bar (an ordinary DOM element with no explicit
+ * pointer-events override) hit-test-invisible to a REAL mouse click — the
+ * browser resolves the click to whatever's underneath that DOES keep
+ * `pointer-events: auto` (a ReactFlow canvas node, in the reported case),
+ * which then swallowed the click **and** got selected, while the drawer
+ * closed as an unrelated side effect of that same click landing "outside"
+ * Content. jsdom's `dispatchEvent`/`.click()` target an element directly and
+ * never perform coordinate-based hit-testing, so a jsdom test asserting "the
+ * button's onClick fired" cannot fail this way regardless of the pointer-events
+ * lock — the previous suite's integration test was passing for the wrong
+ * reason. `modal={false}` (below) removes the lock at its source instead of
+ * patching around it: VS Code's Problems panel and Radix's own docs both
+ * treat a non-blocking side panel as the non-modal case, not a modal dialog
+ * with a hole punched in it.
+ *
+ * `modal={false}` also has a side effect worth naming: Radix's `Dialog.Overlay`
+ * unconditionally renders nothing when non-modal (it's an
+ * `context.modal ? <Impl/> : null` branch inside `@radix-ui/react-dialog`
+ * itself, not something this component's own props can override), so the dim
+ * backdrop is gone. The FROZEN design text ("只盖画布…自动弹") only requires the
+ * drawer PANEL to cover the canvas, not a separate scrim, and a still-rendered
+ * scrim would have to re-solve the exact "block the canvas without blocking
+ * the action bar" problem this fix removes — so this drops the scrim rather
+ * than rebuilding it by hand. "Click the blank canvas closes the drawer" still
+ * holds without one: Radix's outside-pointerdown detection
+ * (`isOutsideDismissExempt` below) is a DOM-event listener, not something the
+ * overlay element implements by being clicked.
  */
 
 /**
@@ -56,8 +82,8 @@ const CANVAS_LEFT_SAFE_AREA = "var(--studio-canvas-left-safe-area, 0px)"
 const CANVAS_RIGHT_SAFE_AREA = "var(--studio-canvas-right-safe-area, 0px)"
 
 /**
- * Vertical clearance above the true canvas bottom, reserved so neither the
- * dim overlay nor the content panel ever reaches the center action bar.
+ * Vertical clearance above the true canvas bottom, reserved so the content
+ * panel never reaches the center action bar.
  *
  * This is a static value, not a measured one — unlike the action bar's WIDTH
  * (genuinely variable per stage's button labels, and measured at runtime in
@@ -66,7 +92,9 @@ const CANVAS_RIGHT_SAFE_AREA = "var(--studio-canvas-right-safe-area, 0px)"
  * than one line) and does not change at runtime, so measuring it would just
  * be a slower way of writing the same constant. The bar sits `bottom-6`
  * (24px) off the canvas floor with a ~50px pill height (40px buttons + 8px
- * padding + ~2px border); 6rem (96px) clears that with margin to spare.
+ * padding + ~2px border); 6rem (96px) clears that with margin to spare — a
+ * 2026-08-27 real-machine pass confirmed the resulting content bottom edge
+ * (804px) sits above the action bar's top (831px) at a 1400x900 viewport.
  */
 const ACTION_BAR_CLEARANCE = "6rem"
 
@@ -75,14 +103,6 @@ const canvasScopedContentStyle: CSSProperties = {
   left: CANVAS_LEFT_SAFE_AREA,
   right: CANVAS_RIGHT_SAFE_AREA,
   top: "auto",
-  bottom: ACTION_BAR_CLEARANCE,
-}
-
-const canvasScopedOverlayStyle: CSSProperties = {
-  position: "absolute",
-  left: CANVAS_LEFT_SAFE_AREA,
-  right: CANVAS_RIGHT_SAFE_AREA,
-  top: 0,
   bottom: ACTION_BAR_CLEARANCE,
 }
 
@@ -149,13 +169,13 @@ type CompileErrorDrawerProps = {
   /**
    * The canvas host element to portal into instead of `document.body` (see
    * `SheetContent`'s `container` prop). Needed so the `--studio-canvas-*
-   * -safe-area` custom properties `canvasScopedContentStyle` /
-   * `canvasScopedOverlayStyle` reference actually inherit down to the
-   * portaled node — they're set via inline style on that host, which
-   * `document.body` is not a descendant of. Undefined/null falls back to
-   * `document.body` (matches this component's own pre-J-04.A behavior),
-   * which only matters for the first paint before Workspace's canvas-host
-   * ref is attached — no drawer is ever open that early.
+   * -safe-area` custom properties `canvasScopedContentStyle` references
+   * actually inherit down to the portaled node — they're set via inline
+   * style on that host, which `document.body` is not a descendant of.
+   * Undefined/null falls back to `document.body` (matches this component's
+   * own pre-J-04.A behavior), which only matters for the first paint before
+   * Workspace's canvas-host ref is attached — no drawer is ever open that
+   * early.
    */
   canvasHostElement?: HTMLElement | null
 }
@@ -193,14 +213,19 @@ export function CompileErrorDrawer({
   const errorLabel = `${kind} error${errorCount === 1 ? "" : "s"}`
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    // modal={false}: see the module docstring above — the default modal Dialog
+    // locks `document.body.style.pointerEvents = "none"` while open, which a
+    // real mouse click's hit-testing respects but jsdom's direct-dispatch
+    // tests cannot see. Non-modal removes that lock at its source (Radix's own
+    // distinction for a panel meant to stay usable alongside the page, not a
+    // blocking dialog) rather than trying to carve a hole in it.
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         side="bottom"
         showCloseButton={false}
         aria-describedby={undefined}
         data-slot={`${kind}-drawer-content`}
         container={canvasHostElement}
-        overlayStyle={canvasScopedOverlayStyle}
         style={canvasScopedContentStyle}
         onPointerDownOutside={(event) => {
           if (isOutsideDismissExempt(event.target)) {

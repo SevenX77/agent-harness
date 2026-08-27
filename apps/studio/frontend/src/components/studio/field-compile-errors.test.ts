@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest"
 import type { CompileError, LintError } from "@/api/types"
 import {
   boundaryFieldErrorsByKey,
-  fieldDiagnosticsForPanels,
   fieldErrorsByKey,
   formatDiagnosticCode,
   lintErrorsForBoundary,
   lintErrorsForFile,
   lintErrorsForPhase,
   lintErrorsToMarkers,
+  selectActiveFieldErrors,
 } from "./field-compile-errors"
 
 function lintErr(overrides: Partial<LintError>): LintError {
@@ -323,54 +323,48 @@ describe("formatDiagnosticCode", () => {
   })
 })
 
-describe("fieldDiagnosticsForPanels", () => {
-  it("keeps manual Compile diagnostics even after realtime lint has settled clean", () => {
-    const manual: CompileError[] = [
-      {
-        file: ".workspace/runtime_config.json",
-        line: null,
-        field: "chapter",
-        severity: "fatal",
-        message: "Graph input schema requires runtime input field 'chapter'",
-        error_code: "STUDIO_RUNTIME_INPUT_MISSING",
-      },
-    ]
+describe("selectActiveFieldErrors (J-03.B — latest pass replaces, no union)", () => {
+  const manual: CompileError[] = [
+    {
+      file: ".workspace/runtime_config.json",
+      line: null,
+      field: "chapter",
+      severity: "fatal",
+      message: "missing chapter",
+      error_code: "STUDIO_RUNTIME_INPUT_MISSING",
+    },
+  ]
+  const lint: LintError[] = [
+    lintErr({
+      file: "phases/review/SKILL.md",
+      line: 7,
+      error_code: "F-v3-schema",
+      message: "review field is invalid",
+      phase_name: "review",
+      field_path: "review.io.inputs.properties.chapter",
+    }),
+  ]
 
-    expect(fieldDiagnosticsForPanels(manual, [])).toMatchObject([
-      {
-        file: ".workspace/runtime_config.json",
-        field_path: "chapter",
-        message: "Graph input schema requires runtime input field 'chapter'",
-      },
+  it("returns the compile-channel diagnostics, adapted to the field axis, when source is compile", () => {
+    expect(selectActiveFieldErrors("compile", manual, lint).map((error) => error.message)).toEqual([
+      "missing chapter",
     ])
   })
 
-  it("merges manual Compile and lint diagnostics on the same field axis", () => {
-    const manual: CompileError[] = [
-      {
-        file: ".workspace/runtime_config.json",
-        line: null,
-        field: "chapter",
-        severity: "fatal",
-        message: "missing chapter",
-        error_code: "STUDIO_RUNTIME_INPUT_MISSING",
-      },
-    ]
-    const lint: LintError[] = [
-      lintErr({
-        file: "phases/review/SKILL.md",
-        line: 7,
-        error_code: "F-v3-schema",
-        message: "review field is invalid",
-        phase_name: "review",
-        field_path: "review.io.inputs.properties.chapter",
-      }),
-    ]
-
-    expect(fieldDiagnosticsForPanels(manual, lint).map((error) => error.message)).toEqual([
-      "missing chapter",
+  it("returns the lint-channel diagnostics verbatim when source is lint", () => {
+    expect(selectActiveFieldErrors("lint", manual, lint).map((error) => error.message)).toEqual([
       "review field is invalid",
     ])
+  })
+
+  it("discards the other channel entirely -- no union even when both carry errors", () => {
+    expect(selectActiveFieldErrors("compile", manual, lint)).toHaveLength(1)
+    expect(selectActiveFieldErrors("lint", manual, lint)).toHaveLength(1)
+  })
+
+  it("returns an empty list when the active channel has no errors, even if the other channel does", () => {
+    expect(selectActiveFieldErrors("lint", manual, [])).toEqual([])
+    expect(selectActiveFieldErrors("compile", [], lint)).toEqual([])
   })
 })
 

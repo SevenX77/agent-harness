@@ -106,33 +106,21 @@ export function compileErrorsToFieldLintErrors(
   }))
 }
 
-function fieldLintErrorKey(error: LintError): string {
-  return [
-    error.file ?? "",
-    error.line ?? "",
-    error.column ?? "",
-    error.field_path ?? "",
-    error.error_code ?? "",
-    error.severity,
-    error.message,
-  ].join("\u0000")
-}
-
-export function fieldDiagnosticsForPanels(
+/**
+ * Select the field-grained diagnostics of whichever pass most recently
+ * SETTLED for this skill instead of unioning manual Compile with lint
+ * (ledger J-03.B) -- the Properties/input field-tooltip sibling of
+ * {@link import("./node-compile-errors").selectActiveNodeErrors}. See that
+ * function doc for why replacing (never merging) the two channels is
+ * correct: a settled pass replaces the prior projection wholesale, so the
+ * channel that did not just settle never contributes leftover diagnostics.
+ */
+export function selectActiveFieldErrors(
+  source: "compile" | "lint",
   compileErrors: readonly CompileError[] | null | undefined,
   lintErrors: readonly LintError[] | null | undefined,
 ): LintError[] {
-  const merged: LintError[] = []
-  const seen = new Set<string>()
-  for (const error of [...compileErrorsToFieldLintErrors(compileErrors), ...(lintErrors ?? [])]) {
-    const key = fieldLintErrorKey(error)
-    if (seen.has(key)) {
-      continue
-    }
-    seen.add(key)
-    merged.push(error)
-  }
-  return merged
+  return source === "compile" ? compileErrorsToFieldLintErrors(compileErrors) : [...(lintErrors ?? [])]
 }
 
 /**

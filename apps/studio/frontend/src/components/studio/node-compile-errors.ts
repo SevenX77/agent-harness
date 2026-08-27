@@ -137,17 +137,6 @@ function lintErrorKey(error: LintError): string {
   ].join("\u0000")
 }
 
-function compileErrorKey(error: CompileError): string {
-  return [
-    error.file ?? "",
-    error.line ?? "",
-    error.field ?? "",
-    error.error_code ?? "",
-    error.severity,
-    error.message,
-  ].join("\u0000")
-}
-
 function uniqueLintErrors(errors: readonly LintError[]): LintError[] {
   const seen = new Set<string>()
   const unique: LintError[] = []
@@ -160,15 +149,6 @@ function uniqueLintErrors(errors: readonly LintError[]): LintError[] {
     unique.push(error)
   }
   return unique
-}
-
-function pushUniqueCompileError(bucket: CompileError[], seen: Set<string>, error: CompileError): void {
-  const key = compileErrorKey(error)
-  if (seen.has(key)) {
-    return
-  }
-  seen.add(key)
-  bucket.push(error)
 }
 
 interface ActiveLintSources {
@@ -185,32 +165,23 @@ export function activeLintErrors({ firstScreenLint, manifestErrors, realtime }: 
 }
 
 /**
- * Merge node diagnostics from the two engine-backed channels:
- * manual Compile and first-screen/realtime lint.
+ * Select the node-grouped diagnostics of whichever pass most recently SETTLED
+ * for this skill instead of unioning manual Compile with lint (ledger J-03.B).
  *
- * Missing blackboard supply is not synthesized from graph_topology.field_supply
- * here. It must arrive as an engine compile/lint diagnostic so the canvas,
- * editor, properties panel, and Compile drawer all project the same source.
+ * compile-lint F1/F6 + 03_compile.md A13: a settled pass (manual Compile, or
+ * lint from typing / canvas-topology relint / an external skill_changed
+ * relint) REPLACES the prior context-marker projection wholesale. The
+ * channel that did not just settle is discarded even when it still holds
+ * errors -- those errors may already be stale (e.g. fixed on disk by
+ * whatever produced the fresher pass), and a stale + fresh union is exactly
+ * the defect this replaces: a badge counting errors from two different
+ * moments in time, and the same diagnostic appearing twice because the two
+ * channels keyed it differently.
  */
-export function mergeNodeErrors(
+export function selectActiveNodeErrors(
+  source: "compile" | "lint",
   compileByNode: Record<string, CompileError[]>,
   lintByNode: Record<string, CompileError[]>,
 ): Record<string, CompileError[]> {
-  const merged: Record<string, CompileError[]> = {}
-  const seenByNode: Record<string, Set<string>> = {}
-  for (const [nodeId, errors] of Object.entries(compileByNode)) {
-    const bucket = merged[nodeId] ?? (merged[nodeId] = [])
-    const seen = seenByNode[nodeId] ?? (seenByNode[nodeId] = new Set())
-    for (const error of errors) {
-      pushUniqueCompileError(bucket, seen, error)
-    }
-  }
-  for (const [nodeId, errors] of Object.entries(lintByNode)) {
-    const bucket = merged[nodeId] ?? (merged[nodeId] = [])
-    const seen = seenByNode[nodeId] ?? (seenByNode[nodeId] = new Set())
-    for (const error of errors) {
-      pushUniqueCompileError(bucket, seen, error)
-    }
-  }
-  return merged
+  return source === "compile" ? compileByNode : lintByNode
 }

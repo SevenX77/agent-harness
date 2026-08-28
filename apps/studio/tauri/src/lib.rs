@@ -5942,8 +5942,15 @@ mod tests {
         // copy:包装器先写正文再写 seq。
         std::fs::write(dir.join("copy.txt"), "https://example.com/auth").unwrap();
         std::fs::write(dir.join("copy.seq"), "1").unwrap();
+        // ack 的契约是「内容到达 seq」,不是「文件存在」:看护线程用 fs::write 落 ack,
+        // 创建与写入之间有空窗,只等存在就读会读到空串(CI 实测,2026-08-28 #1051)。
+        // 包装器侧的 wait_ack 本来就是轮询内容,这里对齐同一读法。
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !dir.join("copy.ack").is_file() && Instant::now() < deadline {
+        while std::fs::read_to_string(dir.join("copy.ack"))
+            .map(|content| content.trim() != "1")
+            .unwrap_or(true)
+            && Instant::now() < deadline
+        {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(

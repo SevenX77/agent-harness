@@ -83,3 +83,30 @@ export function updateStableLayoutPositionsFromNodeChanges(
   }
   return nextPositions ?? new Map(previousPositions)
 }
+
+export const FIT_VIEW_PADDING_BASE_PX = 32
+
+// 取景选项(用户裁决 2026-08-27「启动时改为100%,不要放大」):fit 只负责把
+// 大图缩小装进可视区,绝不把小图放大过 100%——启动看到的是 1:1 的画布,不是
+// 被放大的特写。手动「适应视图」与整理后的重新取景走同一条规则,行为一致。
+type FitViewPaddingPx = `${number}px`
+
+export function canvasFitViewOptions(insets: { left: number; right: number; top: number }): {
+  maxZoom: number
+  padding: {
+    top: FitViewPaddingPx
+    left: FitViewPaddingPx
+    right: FitViewPaddingPx
+    bottom: FitViewPaddingPx
+  }
+} {
+  return {
+    maxZoom: 1,
+    padding: {
+      top: `${insets.top + FIT_VIEW_PADDING_BASE_PX}px`,
+      left: `${insets.left + FIT_VIEW_PADDING_BASE_PX}px`,
+      right: `${insets.right + FIT_VIEW_PADDING_BASE_PX}px`,
+      bottom: `${FIT_VIEW_PADDING_BASE_PX}px`,
+    },
+  }
+}

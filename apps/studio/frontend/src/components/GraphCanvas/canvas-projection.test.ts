@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import type { GraphCanvasNode, SkillGraphNode } from '@/components/nodes'
 import {
+  canvasFitViewOptions,
   canvasLayoutSignature,
   layoutCanvasHeightForMode,
   mergeLayoutPositions,
@@ -204,5 +205,21 @@ describe('canvas projection contracts', () => {
       initialFitStarted: false,
       viewportReady: true,
     })).toBe(false)
+  })
+})
+
+describe('canvasFitViewOptions', () => {
+  it('caps fit-view zoom at 100% so a small graph is never magnified (功能 8, 用户裁决 2026-08-27)', () => {
+    expect(canvasFitViewOptions({ left: 0, right: 0, top: 0 }).maxZoom).toBe(1)
+  })
+
+  it('adds the live overlay insets to the base breathing room, per side', () => {
+    const options = canvasFitViewOptions({ left: 320, right: 40, top: 200 })
+    expect(options.padding).toEqual({
+      top: '232px',
+      left: '352px',
+      right: '72px',
+      bottom: '32px',
+    })
   })
 })

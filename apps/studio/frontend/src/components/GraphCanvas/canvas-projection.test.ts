@@ -104,6 +104,18 @@ describe('canvas projection contracts', () => {
       .not.toBe(canvasLayoutSignature([...nodes, skillNode('publish')], [edge('draft', 'review')]))
   })
 
+  it('changes the layout signature when the auto-arrange tick advances (功能 5, 用户裁决 2026-08-27)', () => {
+    // Auto-arrange throws sticky positions away and re-runs dagre on the same
+    // topology — the tick is the only input that changes, so it must be part
+    // of the signature or the cached layout would be served back unchanged.
+    const nodes = [skillNode('draft'), skillNode('review', { dependsOn: ['draft'] })]
+
+    expect(canvasLayoutSignature(nodes, [], { arrangeTick: 0 }))
+      .not.toBe(canvasLayoutSignature(nodes, [], { arrangeTick: 1 }))
+    expect(canvasLayoutSignature(nodes, []))
+      .toBe(canvasLayoutSignature(nodes, [], { arrangeTick: 0 }))
+  })
+
   it('does not let normal canvas resizes become layout inputs', () => {
     expect(layoutCanvasHeightForMode(900, 0)).toBe(0)
     expect(layoutCanvasHeightForMode(320, 0.2)).toBe(320)

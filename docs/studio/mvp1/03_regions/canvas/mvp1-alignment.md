@@ -270,6 +270,21 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design(2026-08-20 立)。
 - 归属: region `canvas`; capability `run-execution`.
 
+### F10. Auto Arrange(自动整理)
+
+- 机制: 右键菜单「自动整理」丢弃全部 sticky/手动节点位置,对**当前可见拓扑**整体重跑
+  dagre 布局(与首屏同一套 `getAutoLayoutedElements`,TB 方向),完成后重新 fit 视口。
+  画布锁定时置灰。菜单专供,**不配快捷键**——整理会不可撤销地丢掉手排布局,误触代价高。
+- 决策: sticky 位置是常态特性(图被增删时既有节点原地不动);但 Copilot 逐步改写拓扑时,
+  旧 sticky 位置与新节点的 dagre 槽位会叠置(2026-08-27 真机实测:Output 与其他节点重叠)。
+  自动整理是用户显式触发的整体重排逃生口,不自动触发、不猜测时机。
+- 原话/来源: 用户 2026-08-27:「graph节点图为什么显示的乱七八糟的?output和其他节点叠在
+  一起…增加一个自动整理的功能,右键菜单里也加一个」。
+- 测试: 菜单项存在且锁定时禁用;触发后布局签名变化(`arrangeTick` 进入
+  `canvasLayoutSignature`)、sticky 位置清空、重排后 fit 视口。
+- Status: live(2026-08-27)。
+- 归属: region `canvas`; capability `graph-authoring`。
+
 ## 3. 接口契约
 - Inputs: skill detail, selected node id, status map, compile diagnostics, trace dot data references.
 - Outputs: node selection, file open requests, topology mutation requests, active panel changes.

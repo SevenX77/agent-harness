@@ -1058,6 +1058,20 @@ export function GraphCanvas({
   const handleToggleCanvasLock = useCallback(() => {
     setCanvasLocked((locked) => !locked)
   }, [])
+  // 自动整理(用户裁决 2026-08-27):丢掉全部 sticky/手动位置,让 dagre 对当前
+  // 拓扑从零重排,然后重新 fit 视口。sticky 位置是常态特性(图在变、节点原地不
+  // 动),但图被 Copilot 逐步改写后,旧位置 + 新 dagre 槽位会叠出一团——整理是
+  // 用户显式要求的逃生口,菜单专供、无快捷键(误触会无可撤销地毁掉手排布局)。
+  const [arrangeTick, setArrangeTick] = useState(0)
+  const handleAutoArrange = useCallback(() => {
+    stableLayoutPositionsRef.current = new Map()
+    layoutCacheRef.current = null
+    setArrangeTick((tick) => tick + 1)
+    // rAF: 等重排后的节点提交渲染,再 fit——立即 fit 只会对着旧位置取景。
+    window.requestAnimationFrame(() => {
+      void (fitViewRef.current?.() ?? runFitView())
+    })
+  }, [runFitView])
   // #3.2: keyboard shortcuts for the high-frequency canvas actions (shown in the
   // right-click menu). Window-level but ignored while typing in a field; zoom/fit
   // honor the canvas lock (the lock toggle itself always works). Modified combos
@@ -1519,8 +1533,8 @@ export function GraphCanvas({
   )
   const layoutCanvasHeight = layoutCanvasHeightForMode(canvasHeight, compactRatio)
   const layoutSignature = useMemo(
-    () => canvasLayoutSignature(rawNodes, [], { canvasHeight: layoutCanvasHeight, compactRatio }),
-    [compactRatio, layoutCanvasHeight, rawNodes],
+    () => canvasLayoutSignature(rawNodes, [], { canvasHeight: layoutCanvasHeight, compactRatio, arrangeTick }),
+    [arrangeTick, compactRatio, layoutCanvasHeight, rawNodes],
   )
   const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
     const cached = layoutCacheRef.current
@@ -2685,6 +2699,7 @@ export function GraphCanvas({
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onFitView={handleFitView}
+        onAutoArrange={handleAutoArrange}
         onToggleCanvasLock={handleToggleCanvasLock}
         onCreatePhase={canEditCanvas ? handleOpenCreatePhaseDialog : undefined}
         onDeletePhase={handleMenuDeletePhase}
@@ -2749,6 +2764,7 @@ export function CanvasContextMenuContent({
   onZoomIn,
   onZoomOut,
   onFitView,
+  onAutoArrange,
   onToggleCanvasLock,
   onCreatePhase,
   onDeletePhase,
@@ -2764,6 +2780,7 @@ export function CanvasContextMenuContent({
   onZoomIn?: () => void
   onZoomOut?: () => void
   onFitView?: () => void
+  onAutoArrange?: () => void
   onToggleCanvasLock?: () => void
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onDeletePhase?: (phaseId: string) => Promise<void> | void
@@ -2796,6 +2813,12 @@ export function CanvasContextMenuContent({
       <ContextMenuItem onSelect={onFitView} disabled={canvasLocked}>
         {t('menu.fitView')}
         <ContextMenuShortcut>{SHORTCUT_MOD}0</ContextMenuShortcut>
+      </ContextMenuItem>
+      {/* Auto-arrange re-runs the full dagre layout, discarding manual node
+          positions — menu-only on purpose (no shortcut): an accidental key
+          combo would irreversibly destroy a hand-arranged layout. */}
+      <ContextMenuItem onSelect={onAutoArrange} disabled={canvasLocked}>
+        {t('menu.autoArrange')}
       </ContextMenuItem>
       <ContextMenuItem onSelect={onToggleCanvasLock}>
         {canvasLocked ? t('menu.unlockCanvas') : t('menu.lockCanvas')}

@@ -1,6 +1,6 @@
 ---
 name: agent-prompt-design
-description: Author and repair agent-phase SKILL.md prompts — which body tag owns which content, brevity discipline for role/goal, protocols as the single rule authority, and the anti-patterns that corrupt the runtime template.
+description: Author and repair the prompt body of an agent-phase SKILL.md — which body tag owns which content, brevity discipline for role/goal, protocols as the single rule authority. Use when writing a new agent phase's prompt, when an agent phase misbehaves because of its instructions, or when reviewing SKILL.md prompt quality.
 ---
 
 # Skill: Agent Node Prompt Design (SKILL.md authoring)

@@ -247,8 +247,13 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
   ——原话说的是「一个类似 brainstorming 的 skill」,没有指定它必须是 graph skill;
   「graph skill」是上一轮设计写下的实现选择,本轮按上述两条证据改判。
 - **status**：live(2026-08-22)。
+- **修订(用户裁决 2026-08-27)**:New Skill 入口预填的开场白**不得点名任何技能资产**
+  (旧实现写「用 brainstorming 技能带我…」)——新用户不知道存在哪些技能,该用哪个技能由
+  agent 依技能描述自行判断;开场白按真实新用户的口吻写(说清哪个 skill、现在是空壳、
+  要一步步问、最后落盘可编译)。两个入口自此走同一条路:**都靠 brainstorming 资产的
+  description 匹配路由**,资产描述因此要精确写明适用场景(空壳新技能待设计)。
 - **测试点**：两入口都进向导;产出合 FROZEN 骨架(GRAPH.md+logic/agent)可直接编译;
-  默认新建那条路不受影响(不开 copilot、直接铺模板)。
+  默认新建那条路不受影响(不开 copilot、直接铺模板);预填开场白不含技能资产名。
 - **归属**：copilot-assist 拥有向导资产与两个入口;产出落盘 [[skill-workspace]] + [[native-fs]]。
 
 ### F7 judge / 打磨 / commit-msg + 分析 bar（跨能力载体）

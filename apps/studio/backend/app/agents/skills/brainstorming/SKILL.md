@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: Guide someone from a vague idea to a compiling graph skill skeleton, one question at a time — use when a new skill is being started from the New Skill wizard, or when the user asks for help building a skill ("help me build an X", "帮我建个 X").
+description: Guide someone from a vague idea to a compiling graph skill skeleton, one question at a time. Use when a new skill was just created and is still an empty scaffold, or when the user asks to design or build a skill and does not yet have a design ("help me build an X", "帮我把这个 skill 设计出来").
 ---
 
 # Skill: New Skill Wizard

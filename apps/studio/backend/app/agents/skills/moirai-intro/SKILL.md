@@ -1,6 +1,6 @@
 ---
 name: moirai-intro
-description: Introduce MoirAI's protocol, identify active workspace facts, and report the status and duties of the three specialized hands (Clotho, Lachesis, Atropos).
+description: Introduce MoirAI's protocol, identify active workspace facts, and report the status and duties of the three specialized hands (Clotho, Lachesis, Atropos). Use when the user asks who the agent is, what it can do, or how work gets delegated.
 ---
 
 # Skill: MoirAI Self-Introduction Protocol

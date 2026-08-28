@@ -1,6 +1,6 @@
 ---
 name: compile-error-repair
-description: Debug and repair compilation or linting errors (identifying [F-v3-*] error codes, locating root causes, and applying minimal fixes) for a graph_skill.
+description: Debug and repair compile, lint, or predict diagnostics for a graph skill — read [F-v3-*] error codes, locate the root cause, apply the minimal fix. Use when Compile or Predict fails, when the error drawer lists diagnostics, or when the user pastes a compile error and asks to fix it.
 ---
 
 # Skill: Compilation Error Repair

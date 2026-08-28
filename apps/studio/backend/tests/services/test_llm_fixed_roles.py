@@ -99,7 +99,7 @@ def _haiku_deepseek_credentials() -> LLMCredentialsFile:
 
 
 def _copilot_credentials() -> LLMCredentialsFile:
-    """Opus 4.8 (official + third-party) + DeepSeek V4 Flash (third-party) routes."""
+    """Opus 5 (official + third-party) + DeepSeek V4 Flash (third-party) routes."""
     return LLMCredentialsFile(
         provider_endpoints={
             "anthropic-official": ProviderEndpoint(
@@ -128,19 +128,19 @@ def _copilot_credentials() -> LLMCredentialsFile:
             ),
         },
         provider_routes={
-            "anthropic-official:claude-opus-4.8": ProviderRoute(
-                route_id="anthropic-official:claude-opus-4.8",
+            "anthropic-official:claude-opus-5": ProviderRoute(
+                route_id="anthropic-official:claude-opus-5",
                 endpoint_id="anthropic-official",
-                route_slug="claude-opus-4.8",
-                provider_model_id="claude-opus-4.8",
-                canonical_id="claude-opus-4.8",
+                route_slug="claude-opus-5",
+                provider_model_id="claude-opus-5",
+                canonical_id="claude-opus-5",
             ),
-            "wavespeed:anthropic.claude-opus-4.8": ProviderRoute(
-                route_id="wavespeed:anthropic.claude-opus-4.8",
+            "wavespeed:anthropic.claude-opus-5": ProviderRoute(
+                route_id="wavespeed:anthropic.claude-opus-5",
                 endpoint_id="wavespeed",
-                route_slug="anthropic.claude-opus-4.8",
-                provider_model_id="anthropic/claude-opus-4.8",
-                canonical_id="anthropic.claude-opus-4.8",
+                route_slug="anthropic.claude-opus-5",
+                provider_model_id="anthropic/claude-opus-5",
+                canonical_id="anthropic.claude-opus-5",
             ),
             "qiniu:deepseek.deepseek-v4-flash": ProviderRoute(
                 route_id="qiniu:deepseek.deepseek-v4-flash",
@@ -164,20 +164,20 @@ def test_fast_is_derived_from_engine_builtin_md_patch() -> None:
 def test_copilot_roles_are_fixed() -> None:
     # 内置 copilot 角色也是固定角色(不可删/不可改名)。
     roles = fixed_role_names()
-    assert "copilot_claude_opus_4_8" in roles
+    assert "copilot_claude_opus_5" in roles
     assert "copilot_deepseek_v4_flash" in roles
-    assert is_fixed_role("copilot_claude_opus_4_8") is True
+    assert is_fixed_role("copilot_claude_opus_5") is True
     assert is_fixed_role("copilot_deepseek_v4_flash") is True
 
 
 def test_copilot_default_role_entry_has_copilot_kind_and_all_endpoints() -> None:
     credentials = _copilot_credentials()
-    opus = default_role_entry("copilot_claude_opus_4_8", credentials)
+    opus = default_role_entry("copilot_claude_opus_5", credentials)
     assert opus.role_kind == "copilot"
-    assert [group.display_name for group in opus.model_groups] == ["Claude Opus 4.8"]
+    assert [group.display_name for group in opus.model_groups] == ["Claude Opus 5"]
     assert {pm.route_id for pm in opus.model_groups[0].provider_models} == {
-        "anthropic-official:claude-opus-4.8",
-        "wavespeed:anthropic.claude-opus-4.8",
+        "anthropic-official:claude-opus-5",
+        "wavespeed:anthropic.claude-opus-5",
     }
 
     deepseek = default_role_entry("copilot_deepseek_v4_flash", credentials)

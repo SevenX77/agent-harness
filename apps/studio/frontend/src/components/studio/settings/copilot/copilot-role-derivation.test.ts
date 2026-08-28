@@ -67,7 +67,7 @@ describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
   it("puts deepseek-v4-flash first across families (PM 决策 2026-08-06: copilot 默认模型)", () => {
     const candidates = deriveCopilotCandidateGroups(
       [
-        group("claude-opus-4.8", "Claude Opus 4.8"),
+        group("claude-opus-5", "Claude Opus 5"),
         group("deepseek-v4-flash", "DeepSeek V4 Flash"),
         group("deepseek-v4-pro", "DeepSeek V4 Pro"),
       ],
@@ -75,33 +75,33 @@ describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
     )
     expect(pickDefaultCopilotGroupIds(candidates)).toEqual([
       "deepseek-v4-flash",
-      "claude-opus-4.8",
+      "claude-opus-5",
     ])
   })
 
-  it("prefers opus-4.8 over 4.7 when both are present", () => {
+  it("floats opus-5 as the only Claude candidate even when older generations exist", () => {
     const candidates = deriveCopilotCandidateGroups(
-      [group("claude-opus-4.8", "Claude Opus 4.8"), group("claude-opus-4.7", "Claude Opus 4.7")],
+      [group("claude-opus-5", "Claude Opus 5"), group("claude-opus-4.8", "Claude Opus 4.8")],
       anthropicCredentials,
     )
-    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-4.8"])
+    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-5"])
   })
 
-  it("falls back to opus-4.7 when 4.8 is absent", () => {
-    const candidates = deriveCopilotCandidateGroups([group("claude-opus-4.7", "Claude Opus 4.7")], anthropicCredentials)
-    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-4.7"])
+  it("does not fall back to an older Claude generation when opus-5 is absent (用户裁决 2026-08-27: 内置 Claude 角色 = Opus 5,旧梯队整体删除)", () => {
+    const candidates = deriveCopilotCandidateGroups([group("claude-opus-4.8", "Claude Opus 4.8")], anthropicCredentials)
+    expect(pickDefaultCopilotGroupIds(candidates)).toEqual([])
   })
 
   it("DeepSeek pro 梯队不再浮出(2026-08-06 裁决:v4 pro 退出内置,flash 是唯一 DeepSeek 默认)", () => {
     const candidates = deriveCopilotCandidateGroups(
       [
-        group("claude-opus-4.8", "Claude Opus 4.8"),
+        group("claude-opus-5", "Claude Opus 5"),
         group("deepseek-v4-pro", "DeepSeek V4 Pro"),
         group("deepseek-v3.2-pro", "DeepSeek V3.2 Pro"),
       ],
       anthropicCredentials,
     )
-    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-4.8"])
+    expect(pickDefaultCopilotGroupIds(candidates)).toEqual(["claude-opus-5"])
   })
 
   it("floats nothing when neither family has a ladder model", () => {
@@ -113,12 +113,12 @@ describe("pickDefaultCopilotGroupIds — family preference ladder", () => {
 describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, single source of truth)", () => {
   it("marks the floated default as built_in and a non-floated ladder peer as third_party", () => {
     const candidates = deriveCopilotCandidateGroups(
-      [group("claude-opus-4.8", "Claude Opus 4.8"), group("claude-opus-4.7", "Claude Opus 4.7")],
+      [group("claude-opus-5", "Claude Opus 5"), group("claude-opus-4.7", "Claude Opus 4.7")],
       anthropicCredentials,
     )
     const byId = Object.fromEntries(candidates.map((c) => [c.id, c]))
-    // 4.8 is floated → built_in; 4.7 is a canonical model but NOT the floated default → third_party
-    expect(byId["claude-opus-4.8"].source).toBe("built_in")
+    // opus-5 is floated → built_in; 4.7 is a canonical model but NOT the floated default → third_party
+    expect(byId["claude-opus-5"].source).toBe("built_in")
     expect(byId["claude-opus-4.7"].source).toBe("third_party")
   })
 
@@ -128,18 +128,18 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
   })
 
   it("derives description from the normalized display_name, not a Claude/DeepSeek family template", () => {
-    const candidates = deriveCopilotCandidateGroups([group("claude-opus-4.8", "Claude Opus 4.8")], anthropicCredentials)
+    const candidates = deriveCopilotCandidateGroups([group("claude-opus-5", "Claude Opus 5")], anthropicCredentials)
     expect(candidates[0].description).not.toBe("Anthropic Claude reasoning agent")
-    expect(candidates[0].description).toBe("Claude Opus 4.8")
+    expect(candidates[0].description).toBe("Claude Opus 5")
   })
 
   it("filters a route with an explicit non-Anthropic call method", () => {
     // A verified non-Anthropic method is stronger evidence than endpoint-level
     // protocol metadata, so this route cannot be driven by Claude Agent SDK.
     const openaiOnlyGroup = {
-      canonical_id: "claude-opus-4.8",
-      display_name: "Claude Opus 4.8",
-      provider_models: [route("anthropic-official", "claude-opus-4.8", "ready", "openai_chat_completions", {}, [], false)],
+      canonical_id: "claude-opus-5",
+      display_name: "Claude Opus 5",
+      provider_models: [route("anthropic-official", "claude-opus-5", "ready", "openai_chat_completions", {}, [], false)],
       status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {
         capability_known_count: 1,
@@ -266,9 +266,9 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
   it("accepts ark/deepseek/openrouter anthropic-messages variants alongside the official call method", () => {
     // R-F8: the whitelist covers all four anthropic-messages call methods.
     const arkGroup = {
-      canonical_id: "claude-opus-4.8",
-      display_name: "Claude Opus 4.8",
-      provider_models: [route("ark-official", "claude-opus-4.8", "ready", "ark_anthropic_messages")],
+      canonical_id: "claude-opus-5",
+      display_name: "Claude Opus 5",
+      provider_models: [route("ark-official", "claude-opus-5", "ready", "ark_anthropic_messages")],
       status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {
         capability_known_count: 1,
@@ -286,13 +286,13 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
 
   it("filters routes whose explicit capability evidence says the SDK-required tool loop is unsupported", () => {
     const mixedGroup = {
-      canonical_id: "claude-opus-4.8",
-      display_name: "Claude Opus 4.8",
+      canonical_id: "claude-opus-5",
+      display_name: "Claude Opus 5",
       provider_models: [
-        route("anthropic-official", "claude-opus-4.8", "ready", "anthropic_messages", {
+        route("anthropic-official", "claude-opus-5", "ready", "anthropic_messages", {
           tools: { value: true, source: "probed_verified" },
         }),
-        route("no-tools-endpoint", "claude-opus-4.8", "ready", null, {
+        route("no-tools-endpoint", "claude-opus-5", "ready", null, {
           tools: { value: false, source: "probed_verified" },
         }, [], true),
       ],
@@ -317,12 +317,12 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
 
     expect(candidates).toHaveLength(1)
     expect(candidates[0].availableRoutes.map((r) => r.id)).toEqual([
-      "anthropic-official:claude-opus-4.8",
+      "anthropic-official:claude-opus-5",
     ])
   })
 
   it("keeps unknown tool capability routes visible so the SDK test can collect evidence", () => {
-    const untested = route("anthropic-official", "claude-opus-4.8", "untested", "anthropic_messages", {})
+    const untested = route("anthropic-official", "claude-opus-5", "untested", "anthropic_messages", {})
 
     expect(routeSupportsCopilotSdk(untested)).toBe(true)
   })
@@ -330,13 +330,13 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
 
 describe("buildCopilotRoleEntry — materialize a floated/selected group into a persistable copilot role", () => {
   it("builds a copilot role from the group's ready routes", () => {
-    const [candidate] = deriveCopilotCandidateGroups([group("claude-opus-4.8", "Claude Opus 4.8")], anthropicCredentials)
+    const [candidate] = deriveCopilotCandidateGroups([group("claude-opus-5", "Claude Opus 5")], anthropicCredentials)
     const entry = buildCopilotRoleEntry(candidate)
     expect(entry.role_kind).toBe("copilot")
-    expect(entry.active_model).toBe("claude-opus-4.8")
-    expect(entry.models["claude-opus-4.8"].providers).toEqual(["anthropic-official:claude-opus-4.8"])
+    expect(entry.active_model).toBe("claude-opus-5")
+    expect(entry.models["claude-opus-5"].providers).toEqual(["anthropic-official:claude-opus-5"])
     expect(entry.fallback_chain).toEqual([
-      { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+      { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
     ])
   })
 
@@ -345,22 +345,22 @@ describe("buildCopilotRoleEntry — materialize a floated/selected group into a 
     // routes must be in the chain so the user can drive Test against them;
     // otherwise no route ever gets to ready.
     const [candidate] = deriveCopilotCandidateGroups(
-      [group("claude-opus-4.8", "Claude Opus 4.8", "untested")],
+      [group("claude-opus-5", "Claude Opus 5", "untested")],
       anthropicCredentials,
     )
     const entry = buildCopilotRoleEntry(candidate)
     expect(entry.fallback_chain).toEqual([
-      { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+      { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
     ])
   })
 
   it("R-F4: keeps both ready and non-ready routes when a group mixes states", () => {
     const mixedGroup = {
-      canonical_id: "claude-opus-4.8",
-      display_name: "Claude Opus 4.8",
+      canonical_id: "claude-opus-5",
+      display_name: "Claude Opus 5",
       provider_models: [
-        route("anthropic-official", "claude-opus-4.8", "ready"),
-        route("qiniu-anthropic", "claude-opus-4.8", "untested"),
+        route("anthropic-official", "claude-opus-5", "ready"),
+        route("qiniu-anthropic", "claude-opus-5", "untested"),
       ],
       status_summary: { ready: 1, untested: 1, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
       capability_summary: {
@@ -381,12 +381,12 @@ describe("buildCopilotRoleEntry — materialize a floated/selected group into a 
     const [candidate] = deriveCopilotCandidateGroups([mixedGroup], twoKeyCredentials)
     const entry = buildCopilotRoleEntry(candidate)
     expect(entry.fallback_chain).toEqual([
-      { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
-      { route_id: "qiniu-anthropic:claude-opus-4.8", runtime_settings: {} },
+      { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
+      { route_id: "qiniu-anthropic:claude-opus-5", runtime_settings: {} },
     ])
-    expect(entry.models["claude-opus-4.8"].providers).toEqual([
-      "anthropic-official:claude-opus-4.8",
-      "qiniu-anthropic:claude-opus-4.8",
+    expect(entry.models["claude-opus-5"].providers).toEqual([
+      "anthropic-official:claude-opus-5",
+      "qiniu-anthropic:claude-opus-5",
     ])
   })
 })
@@ -414,15 +414,15 @@ describe("applyCopilotModelGroupSelection — selecting a group keeps the copilo
   }
 
   it("preserves the copilot_ role key and role_kind, and writes the chosen group (no graph-agent misfile)", () => {
-    const [candidate] = deriveCopilotCandidateGroups([group("claude-opus-4.8", "Claude Opus 4.8")], anthropicCredentials)
+    const [candidate] = deriveCopilotCandidateGroups([group("claude-opus-5", "Claude Opus 5")], anthropicCredentials)
     const next = applyCopilotModelGroupSelection(emptyDraftRoles(), "copilot_custom_1", candidate.id, candidate.availableRoutes)
 
     // Role key is NOT renamed to the model-group id (the old prefix bug).
     expect(Object.keys(next.roles)).toEqual(["copilot_custom_1"])
     const role = next.roles.copilot_custom_1
     expect(role.role_kind).toBe("copilot")
-    expect(role.active_model).toBe("claude-opus-4.8")
-    expect(role.models["claude-opus-4.8"].providers).toEqual(["anthropic-official:claude-opus-4.8"])
+    expect(role.active_model).toBe("claude-opus-5")
+    expect(role.models["claude-opus-5"].providers).toEqual(["anthropic-official:claude-opus-5"])
   })
 })
 
@@ -434,7 +434,7 @@ describe("resolveCopilotSendRole", () => {
       { id: "anthropic-official", name: "Anthropic Official", provider_type: "anthropic_compatible", api_key: "***" },
     ],
   }
-  const groups = [group("claude-opus-4.8", "Claude Opus 4.8")]
+  const groups = [group("claude-opus-5", "Claude Opus 5")]
 
   function rolesData(roles: RolesData["roles"]): RolesData {
     return { models: {}, providers: {}, roles }
@@ -442,22 +442,22 @@ describe("resolveCopilotSendRole", () => {
 
   it("passes a persisted role key through untouched", () => {
     const data = rolesData({
-      copilot_claude_opus_4_8: {
+      copilot_claude_opus_5: {
         role_kind: "copilot",
         system_prompt_prefix: "",
         model_fallback_enabled: true,
-        active_model: "claude-opus-4.8",
-        models: { "claude-opus-4.8": { providers: ["anthropic-official:claude-opus-4.8"] } },
-        fallback_chain: [{ route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} }],
+        active_model: "claude-opus-5",
+        models: { "claude-opus-5": { providers: ["anthropic-official:claude-opus-5"] } },
+        fallback_chain: [{ route_id: "anthropic-official:claude-opus-5", runtime_settings: {} }],
       },
     })
 
     expect(resolveCopilotSendRole(
       data,
-      { role: "copilot_claude_opus_4_8", persisted: true, modelGroupId: "claude-opus-4.8" },
+      { role: "copilot_claude_opus_5", persisted: true, modelGroupId: "claude-opus-5" },
       groups,
       anthropicCredentials,
-    )).toEqual({ roleKey: "copilot_claude_opus_4_8", nextRoles: null })
+    )).toEqual({ roleKey: "copilot_claude_opus_5", nextRoles: null })
   })
 
   it("materializes a floated built-in under copilot_<slug> with the full eligible chain", () => {
@@ -465,44 +465,44 @@ describe("resolveCopilotSendRole", () => {
 
     const resolution = resolveCopilotSendRole(
       data,
-      { role: "claude-opus-4.8", persisted: false, modelGroupId: "claude-opus-4.8" },
+      { role: "claude-opus-5", persisted: false, modelGroupId: "claude-opus-5" },
       groups,
       anthropicCredentials,
     )
 
-    expect(resolution.roleKey).toBe("copilot_claude_opus_4_8")
-    const entry = resolution.nextRoles?.roles.copilot_claude_opus_4_8
+    expect(resolution.roleKey).toBe("copilot_claude_opus_5")
+    const entry = resolution.nextRoles?.roles.copilot_claude_opus_5
     expect(entry?.role_kind).toBe("copilot")
-    expect(entry?.active_model).toBe("claude-opus-4.8")
+    expect(entry?.active_model).toBe("claude-opus-5")
     expect(entry?.fallback_chain).toEqual([
-      { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+      { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
     ])
   })
 
   it("reuses an already-persisted copilot_<slug> entry instead of rewriting it", () => {
     const data = rolesData({
-      copilot_claude_opus_4_8: {
+      copilot_claude_opus_5: {
         role_kind: "copilot",
         system_prompt_prefix: "",
         model_fallback_enabled: true,
-        active_model: "claude-opus-4.8",
-        models: { "claude-opus-4.8": { providers: ["anthropic-official:claude-opus-4.8"] } },
-        fallback_chain: [{ route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} }],
+        active_model: "claude-opus-5",
+        models: { "claude-opus-5": { providers: ["anthropic-official:claude-opus-5"] } },
+        fallback_chain: [{ route_id: "anthropic-official:claude-opus-5", runtime_settings: {} }],
       },
     })
 
     expect(resolveCopilotSendRole(
       data,
-      { role: "claude-opus-4.8", persisted: false, modelGroupId: "claude-opus-4.8" },
+      { role: "claude-opus-5", persisted: false, modelGroupId: "claude-opus-5" },
       groups,
       anthropicCredentials,
-    )).toEqual({ roleKey: "copilot_claude_opus_4_8", nextRoles: null })
+    )).toEqual({ roleKey: "copilot_claude_opus_5", nextRoles: null })
   })
 })
 
 describe("copilotKeyForGroupId", () => {
   it("derives the yaml-safe copilot_ key", () => {
-    expect(copilotKeyForGroupId("claude-opus-4.8")).toBe("copilot_claude_opus_4_8")
+    expect(copilotKeyForGroupId("claude-opus-5")).toBe("copilot_claude_opus_5")
     expect(copilotKeyForGroupId("DeepSeek V3.2-Pro")).toBe("copilot_deepseek_v3_2_pro")
     expect(copilotKeyForGroupId("a:b/c.d")).toBe("copilot_a_b_c_d")
   })

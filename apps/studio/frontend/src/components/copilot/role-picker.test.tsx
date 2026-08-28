@@ -101,7 +101,7 @@ const credentials: CredentialsState = {
 }
 
 const modelGroups = [
-  routeGroup('claude-opus-4.8', 'Claude Opus 4.8'),
+  routeGroup('claude-opus-5', 'Claude Opus 5'),
   routeGroup('claude-opus-4.7', 'Claude Opus 4.7'),
 ]
 
@@ -118,12 +118,12 @@ describe('copilotRoleOptions', () => {
       models: {},
       providers: {},
       roles: {
-        copilot_claude_opus_4_8: role('copilot', {
-          active_model: 'claude-opus-4.8',
+        copilot_claude_opus_5: role('copilot', {
+          active_model: 'claude-opus-5',
           models: {
-            'claude-opus-4.8': { providers: ['anthropic-official:claude-opus-4.8'] },
+            'claude-opus-5': { providers: ['anthropic-official:claude-opus-5'] },
           },
-          fallback_chain: [{ route_id: 'anthropic-official:claude-opus-4.8', runtime_settings: {} }],
+          fallback_chain: [{ route_id: 'anthropic-official:claude-opus-5', runtime_settings: {} }],
         }),
         copilot_claude_opus_4_7: role('copilot', {
           active_model: 'claude-opus-4.7',
@@ -145,13 +145,13 @@ describe('copilotRoleOptions', () => {
     const options = copilotRoleOptions(settingsRoles, modelGroups, credentials)
 
     expect(options.map(({ role: id, label, persisted }) => ({ role: id, label, persisted }))).toEqual([
-      { role: 'copilot_claude_opus_4_8', label: 'Claude Opus 4.8', persisted: true },
+      { role: 'copilot_claude_opus_5', label: 'Claude Opus 5', persisted: true },
       { role: 'copilot_claude_opus_4_7', label: 'Claude Opus 4.7', persisted: true },
     ])
     expect(options[0].fallbackChain).toEqual([
-      { route_id: 'anthropic-official:claude-opus-4.8', runtime_settings: {} },
+      { route_id: 'anthropic-official:claude-opus-5', runtime_settings: {} },
     ])
-    expect(options[0].modelGroupId).toBe('claude-opus-4.8')
+    expect(options[0].modelGroupId).toBe('claude-opus-5')
   })
 
   it('excludes copilot roles that have no bound model group', () => {
@@ -210,10 +210,10 @@ describe('copilotRoleOptions', () => {
     const options = copilotRoleOptions(noCopilotRoles, modelGroups, credentials)
 
     expect(options.map(({ role: id, label, persisted, modelGroupId }) => ({ role: id, label, persisted, modelGroupId }))).toEqual([
-      { role: 'claude-opus-4.8', label: 'Claude Opus 4.8', persisted: false, modelGroupId: 'claude-opus-4.8' },
+      { role: 'claude-opus-5', label: 'Claude Opus 5', persisted: false, modelGroupId: 'claude-opus-5' },
     ])
     expect(options[0].fallbackChain).toEqual([
-      { route_id: 'anthropic-official:claude-opus-4.8', runtime_settings: {} },
+      { route_id: 'anthropic-official:claude-opus-5', runtime_settings: {} },
     ])
   })
 })
@@ -236,7 +236,7 @@ type MenuItemElement = ReactElement<{
 
 describe('RolePicker', () => {
   const options = [
-    option('copilot_claude_opus_4_8', 'Claude Opus 4.8'),
+    option('copilot_claude_opus_5', 'Claude Opus 5'),
     option('copilot_claude_opus_4_7', 'Claude Opus 4.7'),
   ]
 
@@ -244,12 +244,12 @@ describe('RolePicker', () => {
     const html = renderToStaticMarkup(
       <RolePicker
         options={options}
-        selectedRole="copilot_claude_opus_4_8"
+        selectedRole="copilot_claude_opus_5"
         onSelect={() => undefined}
       />,
     )
 
-    expect(html).toContain('Claude Opus 4.8')
+    expect(html).toContain('Claude Opus 5')
     expect(html).toContain('Claude Opus 4.7')
     expect(html).toContain('Copilot role')
   })
@@ -260,14 +260,14 @@ describe('RolePicker', () => {
   it('still shows the single role as a visible anchor (never vanishes)', () => {
     const html = renderToStaticMarkup(
       <RolePicker
-        options={[option('copilot_claude_opus_4_8', 'Claude Opus 4.8')]}
-        selectedRole="copilot_claude_opus_4_8"
+        options={[option('copilot_claude_opus_5', 'Claude Opus 5')]}
+        selectedRole="copilot_claude_opus_5"
         onSelect={() => undefined}
       />,
     )
 
     expect(html).not.toBe('')
-    expect(html).toContain('Claude Opus 4.8')
+    expect(html).toContain('Claude Opus 5')
   })
 
   // R6-1: with zero configured/floated roles the anchor still renders an
@@ -285,7 +285,7 @@ describe('RolePicker', () => {
     const onSelect = vi.fn()
     const element = RolePickerView({
       options,
-      selectedRole: 'copilot_claude_opus_4_8',
+      selectedRole: 'copilot_claude_opus_5',
       onSelect,
       copy: {
         loading: 'Loading copilot role',

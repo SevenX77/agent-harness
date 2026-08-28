@@ -220,11 +220,10 @@ export function pickDefaultCopilotGroupIds(candidates: CopilotRolePreview[]): st
     defaults.push('deepseek-v4-flash')
   }
 
-  // Claude 优先级
-  if (ids.includes('claude-opus-4.8')) {
-    defaults.push('claude-opus-4.8')
-  } else if (ids.includes('claude-opus-4.7')) {
-    defaults.push('claude-opus-4.7')
+  // Claude 候选 = Opus 5(用户裁决 2026-08-27,取代 4.8;固定 copilot 角色只绑
+  // 推荐模型,旧代次的浮层梯队随之整体删除——no-backward-compat,不留别名分支)。
+  if (ids.includes('claude-opus-5')) {
+    defaults.push('claude-opus-5')
   }
 
   return defaults

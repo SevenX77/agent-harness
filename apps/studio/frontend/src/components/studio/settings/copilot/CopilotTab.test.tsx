@@ -133,16 +133,16 @@ function openAiModelGroup(): ModelGroup {
 
 function mixedSdkCompatibilityModelGroup(): ModelGroup {
   return {
-    canonical_id: "claude-opus-4.8",
-    display_name: "Claude Opus 4.8",
+    canonical_id: "claude-opus-5",
+    display_name: "Claude Opus 5",
     section_label: "anthropic",
     provider_models: [
       {
-        route_id: "anthropic-official:claude-opus-4.8",
+        route_id: "anthropic-official:claude-opus-5",
         endpoint_id: "anthropic-official",
         provider_label: "Anthropic Official",
         provider_kind: "official",
-        provider_model_id: "claude-opus-4.8",
+        provider_model_id: "claude-opus-5",
         ui_state: "ready",
         ui_detail: null,
         retry_at: null,
@@ -155,11 +155,11 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
         copilot_sdk_compatible: true,
       },
       {
-        route_id: "openai-compat:claude-opus-4.8",
+        route_id: "openai-compat:claude-opus-5",
         endpoint_id: "openai-compat",
         provider_label: "OpenAI Compat",
         provider_kind: "third_party",
-        provider_model_id: "claude-opus-4.8",
+        provider_model_id: "claude-opus-5",
         ui_state: "ready",
         ui_detail: null,
         retry_at: null,
@@ -172,11 +172,11 @@ function mixedSdkCompatibilityModelGroup(): ModelGroup {
         copilot_sdk_compatible: false,
       },
       {
-        route_id: "anthropic-no-tools:claude-opus-4.8",
+        route_id: "anthropic-no-tools:claude-opus-5",
         endpoint_id: "anthropic-no-tools",
         provider_label: "Anthropic No Tools",
         provider_kind: "third_party",
-        provider_model_id: "claude-opus-4.8",
+        provider_model_id: "claude-opus-5",
         ui_state: "ready",
         ui_detail: null,
         retry_at: null,
@@ -334,20 +334,20 @@ function rolesWithMixedSdkCompatibilityRoutes(): RolesData {
         model_fallback_enabled: true,
         intent: { provider_preference: "manual_order" },
         model_groups: [],
-        active_model: "claude-opus-4.8",
+        active_model: "claude-opus-5",
         models: {
-          "claude-opus-4.8": {
+          "claude-opus-5": {
             providers: [
-              "anthropic-official:claude-opus-4.8",
-              "openai-compat:claude-opus-4.8",
-              "anthropic-no-tools:claude-opus-4.8",
+              "anthropic-official:claude-opus-5",
+              "openai-compat:claude-opus-5",
+              "anthropic-no-tools:claude-opus-5",
             ],
           },
         },
         fallback_chain: [
-          { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
-          { route_id: "openai-compat:claude-opus-4.8", runtime_settings: {} },
-          { route_id: "anthropic-no-tools:claude-opus-4.8", runtime_settings: {} },
+          { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
+          { route_id: "openai-compat:claude-opus-5", runtime_settings: {} },
+          { route_id: "anthropic-no-tools:claude-opus-5", runtime_settings: {} },
         ],
         lint_requirements: {},
       },
@@ -417,20 +417,20 @@ describe("CopilotTab order truth", () => {
           ],
           lint_requirements: {},
         },
-        copilot_claude_opus_4_8: {
+        copilot_claude_opus_5: {
           role_kind: "copilot",
           system_prompt_prefix: "",
           model_fallback_enabled: true,
           intent: { provider_preference: "manual_order" },
           model_groups: [],
-          active_model: "claude-opus-4.8",
+          active_model: "claude-opus-5",
           models: {
-            "claude-opus-4.8": {
-              providers: ["anthropic-official:claude-opus-4.8"],
+            "claude-opus-5": {
+              providers: ["anthropic-official:claude-opus-5"],
             },
           },
           fallback_chain: [
-            { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+            { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
           ],
           lint_requirements: {},
         },
@@ -446,7 +446,7 @@ describe("CopilotTab order truth", () => {
     )
     const roleIds = [...html.matchAll(/data-copilot-role-id="([^"]+)"/g)].map((match) => match[1])
 
-    expect(roleIds.slice(0, 2)).toEqual(["copilot_deepseek_v4_flash", "copilot_claude_opus_4_8"])
+    expect(roleIds.slice(0, 2)).toEqual(["copilot_deepseek_v4_flash", "copilot_claude_opus_5"])
   })
 
   it("renders configured route chips in fallback_chain order before model-group provider order", () => {
@@ -640,9 +640,9 @@ function rolesWithDraft(): RolesData {
 describe("CopilotTab #56 dynamic float of built-in defaults", () => {
   it("floats the family-ladder built-in default when no copilot role exists", () => {
     const html = renderToStaticMarkup(
-      <CopilotTab data={emptyRoles()} credentials={credentials()} modelGroups={[opusGroup("claude-opus-4.8", "Claude Opus 4.8")]} />,
+      <CopilotTab data={emptyRoles()} credentials={credentials()} modelGroups={[opusGroup("claude-opus-5", "Claude Opus 5")]} />,
     )
-    expect(html).toContain("Claude Opus 4.8")
+    expect(html).toContain("Claude Opus 5")
     expect(html).toContain('data-copilot-role-source="built_in"')
     expect(html).toContain("Built-in")
   })
@@ -652,12 +652,12 @@ describe("CopilotTab #56 dynamic float of built-in defaults", () => {
       <CopilotTab
         data={emptyRoles()}
         credentials={credentials()}
-        modelGroups={[opusGroup("claude-opus-4.7", "Claude Opus 4.7"), opusGroup("claude-opus-4.8", "Claude Opus 4.8")]}
+        modelGroups={[opusGroup("claude-opus-4.7", "Claude Opus 4.7"), opusGroup("claude-opus-5", "Claude Opus 5")]}
       />,
     )
-    expect(html).toContain("Claude Opus 4.8")
+    expect(html).toContain("Claude Opus 5")
     // 4.7 remains visible in the right-side model library, but it is NOT surfaced as a built-in role card.
-    expect(html).toContain('data-role-name="claude-opus-4.8"')
+    expect(html).toContain('data-role-name="claude-opus-5"')
     expect(html).not.toContain('data-role-name="claude-opus-4.7"')
   })
 
@@ -691,12 +691,12 @@ describe("CopilotTab broken-legacy copilot record skip (no group binding + has f
       },
     }
     const html = renderToStaticMarkup(
-      <CopilotTab data={brokenLegacy} credentials={credentials()} modelGroups={[opusGroup("claude-opus-4.7", "Claude Opus 4.7")]} />,
+      <CopilotTab data={brokenLegacy} credentials={credentials()} modelGroups={[opusGroup("claude-opus-5", "Claude Opus 5")]} />,
     )
     // The broken legacy record's title 'Copilot Opus 4 7' must not appear; the
     // float-default Built-in card with the canonical display name does.
     expect(html).not.toContain("Copilot Opus 4 7")
-    expect(html).toContain("Claude Opus 4.7")
+    expect(html).toContain("Claude Opus 5")
     expect(html).toContain('data-copilot-role-source="built_in"')
   })
 
@@ -710,9 +710,29 @@ describe("CopilotTab broken-legacy copilot record skip (no group binding + has f
 
 describe("CopilotTab #61 model-group remove control", () => {
   it("shows the remove control only on third-party roles; built-in fixed-model cards get none (2026-08-06)", () => {
-    // 内置角色 = 固定模型:roles() 的组是阶梯浮出的 canonical(built_in),不给移除钮。
+    // 内置角色 = 固定模型:绑定浮出 canonical(claude-opus-5)的角色是 built_in,不给移除钮。
+    const builtinData: RolesData = {
+      ...emptyRoles(),
+      roles: {
+        copilot_claude_opus_5: {
+          role_kind: "copilot",
+          system_prompt_prefix: "",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [],
+          active_model: "claude-opus-5",
+          models: {
+            "claude-opus-5": { providers: ["anthropic-official:claude-opus-5"] },
+          },
+          fallback_chain: [
+            { route_id: "anthropic-official:claude-opus-5", runtime_settings: {} },
+          ],
+          lint_requirements: {},
+        },
+      },
+    }
     const builtinHtml = renderToStaticMarkup(
-      <CopilotTab data={roles()} credentials={credentials()} modelGroups={registryModelGroups()} />,
+      <CopilotTab data={builtinData} credentials={credentials()} modelGroups={[opusGroup("claude-opus-5", "Claude Opus 5")]} />,
     )
     expect(builtinHtml.match(/data-copilot-model-group-remove="true"/)).toBeNull()
 
@@ -808,9 +828,9 @@ describe("CopilotTab available model drag-in", () => {
       />,
     )
 
-    expect(html).toContain('data-copilot-route-id="anthropic-official:claude-opus-4.8"')
-    expect(html).not.toContain('data-copilot-route-id="openai-compat:claude-opus-4.8"')
-    expect(html).not.toContain('data-copilot-route-id="anthropic-no-tools:claude-opus-4.8"')
+    expect(html).toContain('data-copilot-route-id="anthropic-official:claude-opus-5"')
+    expect(html).not.toContain('data-copilot-route-id="openai-compat:claude-opus-5"')
+    expect(html).not.toContain('data-copilot-route-id="anthropic-no-tools:claude-opus-5"')
     expect(html).toContain("1/1 SDK Ready")
   })
 
@@ -910,8 +930,8 @@ describe("R-F5 copilot yaml key helpers", () => {
   // B1: yaml keys must match `[a-z][a-z0-9_]*` so a model-group id with
   // hyphens or dots can't be used directly. The helper canonicalizes via
   // `replace(/[^a-zA-Z0-9]+/g,'_').toLowerCase()` and prepends `copilot_`.
-  it("copilotKeyForGroupId — turns 'claude-opus-4.8' into 'copilot_claude_opus_4_8'", () => {
-    expect(copilotKeyForGroupId("claude-opus-4.8")).toBe("copilot_claude_opus_4_8")
+  it("copilotKeyForGroupId — turns 'claude-opus-5' into 'copilot_claude_opus_5'", () => {
+    expect(copilotKeyForGroupId("claude-opus-5")).toBe("copilot_claude_opus_5")
     expect(copilotKeyForGroupId("DeepSeek V3.2-Pro")).toBe("copilot_deepseek_v3_2_pro")
     expect(copilotKeyForGroupId("a:b/c.d")).toBe("copilot_a_b_c_d")
   })
@@ -961,10 +981,10 @@ describe("R-F12 empty-state CTA + per-card untested warning", () => {
   it("renders per-card 'N routes untested' chip when readyCount === 0 but routes exist", () => {
     // Single untested route → ready=0, total=1 → chip appears.
     const untestedGroup: ModelGroup = {
-      ...opusGroup("claude-opus-4.8", "Claude Opus 4.8"),
+      ...opusGroup("claude-opus-5", "Claude Opus 5"),
       provider_models: [
         {
-          ...opusGroup("claude-opus-4.8", "Claude Opus 4.8").provider_models[0],
+          ...opusGroup("claude-opus-5", "Claude Opus 5").provider_models[0],
           ui_state: "untested",
         },
       ],

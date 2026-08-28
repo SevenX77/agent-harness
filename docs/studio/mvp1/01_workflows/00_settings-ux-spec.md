@@ -195,6 +195,13 @@ role: workflow-record
 
 > **为什么取消 `needs_setup`**（PM 裁定）：①「配置缺口」本质是一种 failure，和 `failed` 同族；②灰色会和 `untested`（没测、中性）混淆，弱化"这是致命错误"；③现码 `_setup_reason`（`llm_state_projection.py:49-56`）反而把真·测试失败（endpoint/route failed）也揉进 `needs_setup` 显灰——双重混淆。**裁定：取消 `needs_setup`，统一 `failed`（红）+ `reason`（`missing_config` / `endpoint_unreachable` / `model_failed`）**。颜色心智：**红=出错要你修；灰=非错误的不可用（untested 没测 / cooling 熔断中 / off 关了）；绿=好；蓝=以前好。**
 
+> **固定角色的显示名与「缺少推荐模型」提示（用户裁决 2026-08-27）**：固定角色可带
+> 本地化显示名——`fast` 显示为「轻量任务」（en: Lightweight Tasks）；角色 id 不变，
+> skill 里的 `llm_role: fast` 引用与 API 键不受影响。「缺少推荐模型」警告只在固定
+> 角色**一个模型都没有**（冷态空角色）时出现并列出全部推荐模型；角色已绑定任一模型
+> （含非推荐模型）即视为可用，不再逐个提示缺哪个推荐模型。`fast` 的默认推荐候选 =
+> Claude Haiku 4.5 + DeepSeek V4 Flash（后者 2026-08-27 确认在列）。
+
 ### 2.2 配 role 的步骤
 1. **新建 role**（弹框命名，允许建无模型空壳）。
 2. **拖动 model group 到 role card**：

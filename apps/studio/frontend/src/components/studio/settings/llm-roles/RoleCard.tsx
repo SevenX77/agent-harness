@@ -174,6 +174,11 @@ export const RoleCard = memo(function RoleCard({
   const fixedRoleDescription = isFixed
     ? t(`llmRoles.fixedRole.${roleName}.description`, { defaultValue: "" })
     : ""
+  // 固定角色可带本地化显示名(如 fast → 「轻量任务」,用户裁决 2026-08-27);
+  // 角色 id 本身不改 —— skill 里的 llm_role 引用与 API 键都还是原名。
+  const fixedRoleTitle = isFixed
+    ? t(`llmRoles.fixedRole.${roleName}.title`, { defaultValue: "" })
+    : ""
 
   const handleRunTestChain = useCallback(() => {
     onRunTestChain(roleName)
@@ -271,7 +276,7 @@ export const RoleCard = memo(function RoleCard({
               data-role-title-icon="true"
               className="size-3.5 shrink-0 text-muted-foreground"
             />
-            <CardTitle className="min-w-0 break-all">{roleName}</CardTitle>
+            <CardTitle className="min-w-0 break-all">{fixedRoleTitle || roleName}</CardTitle>
             {isFixed && fixedRoleStatus ? (
               <TooltipProvider>
                 <Tooltip>

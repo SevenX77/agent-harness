@@ -12,19 +12,20 @@ export function normalizeModelGroupKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
 }
 
-// Which recommended models a fixed role is still missing — computed from the
-// role's CURRENT in-memory model groups (identity display names + canonical
-// ids), NOT a backend round-trip, so the warning clears the instant the user
-// drags a matching model in (no stale-disk race). A recommended model counts as
-// present if any present group key matches its canonical id or display name.
+// Which recommended models a fixed role should still be nagged about —
+// computed from the role's CURRENT in-memory model groups, NOT a backend
+// round-trip, so the warning clears the instant the user drags a model in
+// (no stale-disk race). 用户裁决 2026-08-27: a fixed role that already has
+// ANY bound model is usable and gets no warning — the warning's only job is
+// rescuing a cold EMPTY role, where it lists the full recommended set.
 export function missingRecommendedModels(
   recommended: readonly FixedRoleRecommendedModel[],
   presentGroupKeys: ReadonlySet<string>,
 ): FixedRoleRecommendedModel[] {
-  return recommended.filter((model) => (
-    !presentGroupKeys.has(normalizeModelGroupKey(model.canonicalId))
-    && !presentGroupKeys.has(normalizeModelGroupKey(model.displayName))
-  ))
+  if (presentGroupKeys.size > 0) {
+    return []
+  }
+  return [...recommended]
 }
 
 export function visibleRoleNames(data: RolesData): string[] {

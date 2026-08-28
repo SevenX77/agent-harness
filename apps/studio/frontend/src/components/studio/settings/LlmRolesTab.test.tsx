@@ -3095,31 +3095,27 @@ describe("fixed-role missing-recommended-model computation", () => {
     expect(normalizeModelGroupKey("claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5-20251001")
   })
 
-  it("reports a recommended model missing when no present group matches it", () => {
+  it("suppresses the missing warning once the role has ANY bound model (用户裁决 2026-08-27)", () => {
     const recommended = [
       { canonicalId: "claude-haiku-4.5", displayName: "Claude Haiku 4.5" },
       { canonicalId: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash" },
     ]
-    // Role only has DeepSeek (present key from its display name).
-    const presentKeys = new Set([normalizeModelGroupKey("DeepSeek V4 Flash")])
-
-    const missing = missingRecommendedModels(recommended, presentKeys)
-
-    expect(missing.map((model) => model.canonicalId)).toEqual(["claude-haiku-4.5"])
+    // Role only has DeepSeek — it is usable, so no nag about the other
+    // recommended model.
+    expect(missingRecommendedModels(recommended, new Set([normalizeModelGroupKey("DeepSeek V4 Flash")]))).toEqual([])
+    // Even a non-recommended model counts: one bound model = usable = quiet.
+    expect(missingRecommendedModels(recommended, new Set([normalizeModelGroupKey("My Private Model")]))).toEqual([])
   })
 
-  it("counts a recommended model present when matched by DISPLAY NAME even if the canonical differs (dragged-in route)", () => {
-    // This is the point-6 fix: a Haiku group dragged from Available Models has a
-    // release-stamped canonical (claude-haiku-4-5-20251001) that does NOT match
-    // the recommended canonical, but its identity display name does — so the
-    // warning must clear.
-    const recommended = [{ canonicalId: "claude-haiku-4.5", displayName: "Claude Haiku 4.5" }]
-    const presentKeys = new Set([
-      normalizeModelGroupKey("claude-haiku-4-5-20251001"),
-      normalizeModelGroupKey("Claude Haiku 4.5"),
-    ])
+  it("reports every recommended model when the role is empty — rescuing a cold role is the warning's only job", () => {
+    const recommended = [
+      { canonicalId: "claude-haiku-4.5", displayName: "Claude Haiku 4.5" },
+      { canonicalId: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash" },
+    ]
 
-    expect(missingRecommendedModels(recommended, presentKeys)).toEqual([])
+    const missing = missingRecommendedModels(recommended, new Set())
+
+    expect(missing.map((model) => model.canonicalId)).toEqual(["claude-haiku-4.5", "deepseek-v4-flash"])
   })
 
   it("returns nothing when there are no recommended models", () => {

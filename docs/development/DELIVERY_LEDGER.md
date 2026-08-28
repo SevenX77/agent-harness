@@ -878,6 +878,27 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       主线,OpenAI/Gemini/Ark/第三方卡与 Properties-IO 明细未在 fresh 环境重走(原轮已验);
       Anthropic 官方卡用 .env 错身份 key(sk-or-*)真实覆盖了 failed 红态路径。
       本机时区实测为 Pacific(UTC-7),时间戳核对一致,非缺陷。
+      **用户批示轮(2026-08-28,九条批示 → 7 个 PR 全并 + 真机逐项复验 + 报告合一)**:
+      ①#1048 Copilot 默认 Claude 角色 Opus 4.8→Opus 5(真机 Test 走真实 ClaudeSDKClient,
+      1/1 SDK Ready);②#1052 fast 角色显示名「轻量任务 / Lightweight Tasks」+ 有绑定模型即
+      不再提示缺推荐(deepseek-v4-flash 核实本就在默认候选,无需改);③#1049 向导开场白改拟
+      新用户口吻(不点名任何技能资产,路由交给 agent 按 description 判断)+ 技能 description
+      精炼匹配场景;④#1051 画布右键菜单新增 Auto-arrange(清 sticky 位置 → dagre 重排 →
+      重新取景;真机拖乱 init 后精确回位,无快捷键防误触);⑤#1050 编译抽屉垂直改判:用户
+      裁决 action bar 属画布、抽屉允许盖住它,直落窗口真实下缘;侧栏豁免保留,宽度随侧栏
+      收展自适应实测(548→956);⑥#1054 启动取景 100%(fitView maxZoom:1,真机 transform
+      scale(1))+ 设计源 canvas/mvp1-alignment.md 新增 F11「Fit Never Zooms In」并重钉哈希;
+      ⑦#1053 login-bridge Windows smoke flaky 修正(测试改为等 ack 内容而非文件存在,
+      对齐生产 wait_ack 语义)。批示第 7 条(CLI 面板)逐面板真机实测合格:依赖链逐项版本 +
+      Outdated/Update 引导、双 CLI 登录态带真实账号、Session defaults(模型/effort)与
+      MoirAI 三工位覆盖;依赖缺失态未布现场(需卸载本机真实 WSL,破坏不对等,报告如实标注)、
+      CLI 会话端到端引用 fresh 轮既有证据(本轮未触及启动链)。**报告合一(批示第 9 条
+      「不要做什么详报,就放在一个页面里面」)**:五份详报(模块一/二/三/四 + fresh 轮)全文
+      并入时间轴单页各站的「展开完整点验记录」折叠区,修复轮 15 行五列 + 10 截图为第 14 站;
+      五个旧详报 Artifact 覆盖为指路墓碑(历史可在版本记录回看)。总报告 Artifact
+      `52ddeb64`(唯一入口)。**点验中新立案 J-01.M**(Copilot 页角色删除只删前端副本,
+      零后端请求,重进复活——UI/活动日志/磁盘三处对照)+ 1 条观察(开着抽屉点左 rail 图标
+      抽屉被关,#1050 之前即如此,留裁决 rail 是否并入豁免)。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)

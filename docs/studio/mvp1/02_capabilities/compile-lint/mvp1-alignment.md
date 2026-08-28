@@ -159,7 +159,7 @@ not synthesize node compile errors from it.
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| COMPILE_LINT-1 | 错误呈现(drawer) | 单元 `compile-lint-structured-error`；**为什么**：错误要可一键复制喂 Copilot + 只盖画布不挡侧栏，底部 drawer 自动弹比 toast/浮层更可操作 |
+| COMPILE_LINT-1 | 错误呈现(drawer) | 单元 `compile-lint-structured-error`；**为什么**：错误要可一键复制喂 Copilot + 只盖画布不挡侧栏，底部 drawer 自动弹比 toast/浮层更可操作。**边界澄清（用户裁决 2026-08-27）**：画布内的中央 action bar（Compile/Predict/Run）属于画布，drawer 盖到画布真实下缘、连同 action bar 一起盖住——不给它留露出一条的空隙；「不挡」只指两侧侧栏 |
 | COMPILE_LINT-2 | 上下文定位 | 单元 `compile-lint-structured-error`；**为什么**：错误要出现在能改它的地方(canvas 节点 / Properties·input 字段 / Monaco 行)，而非只在中心按钮变色 |
 | COMPILE_LINT-3 | stage gate | 单元 `compile-stage-gate`；**为什么**：warning 不阻塞 Predict、只 error 阻塞；Run 必须 structure + predict 双过才解锁，防跑废 |
 

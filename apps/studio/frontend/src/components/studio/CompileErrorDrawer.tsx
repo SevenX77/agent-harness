@@ -37,10 +37,14 @@ import { formatDiagnosticCode } from "./field-compile-errors"
  * without first closing the drawer.
  *
  * First pass confined the content horizontally to the canvas's own bounds and
- * vertically to stop above the action bar band (`canvasScopedContentStyle`
- * below) — geometry a second real-machine pass confirmed correct (content
- * rect strictly inside the canvas, bottom edge above the action bar's top).
- * But that pass ALSO found a second, independent bug the first pass's jsdom
+ * vertically to stop above the action bar band — the vertical clearance was
+ * later REMOVED by user ruling (2026-08-27): the center action bar is part of
+ * the canvas, the drawer covers the canvas, so it covers the bar too; a
+ * drawer floating a band's height above the true bottom edge just looks
+ * broken. Retrying Compile while the drawer is open goes through closing it
+ * first (Escape, X, or a click on the blank canvas). The HORIZONTAL
+ * confinement stays — the side panels are not canvas.
+ * But the second real-machine pass ALSO found an independent bug the first pass's jsdom
  * tests could not see: Radix's Dialog defaults to `modal={true}`, which sets
  * `document.body.style.pointerEvents = "none"` while open (see
  * `@radix-ui/react-dismissable-layer`'s `disableOutsidePointerEvents` effect).
@@ -84,47 +88,34 @@ import { formatDiagnosticCode } from "./field-compile-errors"
 const CANVAS_LEFT_SAFE_AREA = "var(--studio-canvas-left-safe-area, 0px)"
 const CANVAS_RIGHT_SAFE_AREA = "var(--studio-canvas-right-safe-area, 0px)"
 
-/**
- * Vertical clearance above the true canvas bottom, reserved so the content
- * panel never reaches the center action bar.
- *
- * This is a static value, not a measured one — unlike the action bar's WIDTH
- * (genuinely variable per stage's button labels, and measured at runtime in
- * center-action-bar.tsx), its HEIGHT is fixed by its own Tailwind classes
- * (one row of `h-10` buttons in a `p-1 border rounded-full` pill, never more
- * than one line) and does not change at runtime, so measuring it would just
- * be a slower way of writing the same constant. The bar sits `bottom-6`
- * (24px) off the canvas floor with a ~50px pill height (40px buttons + 8px
- * padding + ~2px border); 6rem (96px) clears that with margin to spare — a
- * 2026-08-27 real-machine pass confirmed the resulting content bottom edge
- * (804px) sits above the action bar's top (831px) at a 1400x900 viewport.
- */
-const ACTION_BAR_CLEARANCE = "6rem"
-
 const canvasScopedContentStyle: CSSProperties = {
   position: "absolute",
   left: CANVAS_LEFT_SAFE_AREA,
   right: CANVAS_RIGHT_SAFE_AREA,
   top: "auto",
-  bottom: ACTION_BAR_CLEARANCE,
+  // The true canvas bottom (user ruling 2026-08-27): the center action bar
+  // belongs to the canvas and gets covered along with it — no reserved
+  // clearance band peeking out underneath the sheet.
+  bottom: 0,
 }
 
 const OUTSIDE_DISMISS_EXEMPT_SELECTORS = [
-  '[data-studio-center-action-bar="true"]',
   '[data-studio-left-overlay="true"]',
   '[data-studio-right-overlay="true"]',
 ]
 
 /**
  * Radix's dismiss-on-outside-interaction fires for ANY interaction outside
- * the drawer's own Content node — including the center action bar and the
- * two side panels, which sit outside Content regardless of how tightly the
- * drawer's own box is scoped. Left alone, operating them while the drawer is
- * open would close it as a side effect of every fix. Exempting these three
- * regions (the same `data-studio-*` markers center-action-bar.tsx /
- * WorkspaceLeftPanelOverlay / WorkspaceRightPanelOverlay already carry) keeps
- * the drawer open while the user operates them — dismissal is still one click
- * away, on the blank canvas, or Escape.
+ * the drawer's own Content node — including the two side panels, which sit
+ * outside Content regardless of how tightly the drawer's own box is scoped.
+ * Left alone, operating them while the drawer is open would close it as a
+ * side effect of every fix. Exempting the two panel regions (the same
+ * `data-studio-*` markers WorkspaceLeftPanelOverlay /
+ * WorkspaceRightPanelOverlay already carry) keeps the drawer open while the
+ * user operates them — dismissal is still one click away, on the blank
+ * canvas, or Escape. (The center action bar used to be a third exempt region;
+ * since the 2026-08-27 ruling the drawer covers it outright, so a click can
+ * never land there while the drawer is open.)
  *
  * "ANY interaction" is not just pointerdown. A 2026-08-27 real-machine retry
  * (round 3) found clicking a FOCUSABLE element inside the exempt regions —

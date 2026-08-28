@@ -25,7 +25,7 @@ export function layoutCanvasHeightForMode(canvasHeight: number, compactRatio: nu
 export function canvasLayoutSignature(
   nodes: readonly GraphCanvasNode[],
   _edges: readonly Edge<ContextEdgeData>[],
-  options: { canvasHeight?: number; compactRatio?: number } = {},
+  options: { canvasHeight?: number; compactRatio?: number; arrangeTick?: number } = {},
 ): string {
   const nodeSignature = nodes
     .map((node) => `${node.id}:${node.type ?? ''}:${node.position.x},${node.position.y}`)
@@ -34,6 +34,10 @@ export function canvasLayoutSignature(
     nodeSignature,
     `height=${options.canvasHeight ?? 0}`,
     `compact=${options.compactRatio ?? 0}`,
+    // Auto-arrange re-lays-out the SAME topology, so the tick is the only
+    // signature input that moves — without it the layout cache would answer
+    // the arrange request with the identical cached result.
+    `arrange=${options.arrangeTick ?? 0}`,
   ].join('::')
 }
 

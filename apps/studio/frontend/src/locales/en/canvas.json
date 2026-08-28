@@ -3,6 +3,7 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "fitView": "Fit view",
+    "autoArrange": "Auto-arrange",
     "lockCanvas": "Lock canvas",
     "unlockCanvas": "Unlock canvas",
     "disconnect": "Disconnect",

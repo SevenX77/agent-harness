@@ -3,6 +3,7 @@
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "fitView": "适应视图",
+    "autoArrange": "自动整理",
     "lockCanvas": "锁定画布",
     "unlockCanvas": "解锁画布",
     "disconnect": "断开连接",

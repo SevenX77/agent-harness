@@ -14,7 +14,7 @@ import { INPUT_ID, OUTPUT_ID, type GlobalNodeData } from './nodes'
 
 const { reactFlowPropsRef, contextMenuItems, setEdgesMock, setNodesMock } = vi.hoisted(() => ({
   reactFlowPropsRef: { current: null as null | Record<string, unknown> },
-  contextMenuItems: [] as Array<{ label: string; onSelect?: () => void }>,
+  contextMenuItems: [] as Array<{ label: string; onSelect?: () => void; disabled?: boolean }>,
   setEdgesMock: vi.fn(),
   setNodesMock: vi.fn(),
 }))
@@ -70,7 +70,7 @@ vi.mock('@/components/ui/popover', () => ({
 vi.mock('@/components/ui/context-menu', () => ({
   ContextMenu: ({ children }: { children: ReactNode }) => <div data-testid="context-menu">{children}</div>,
   ContextMenuContent: ({ children }: { children: ReactNode }) => <div data-testid="context-menu-content">{children}</div>,
-  ContextMenuItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => {
+  ContextMenuItem: ({ children, onSelect, disabled }: { children: ReactNode; onSelect?: () => void; disabled?: boolean }) => {
     const labelFromNode = (node: ReactNode): string => {
       if (Array.isArray(node)) {
         return node.map(labelFromNode).join('')
@@ -81,7 +81,7 @@ vi.mock('@/components/ui/context-menu', () => ({
       return ''
     }
     const label = labelFromNode(children)
-    contextMenuItems.push({ label, onSelect })
+    contextMenuItems.push({ label, onSelect, disabled })
     return <button type="button">{children}</button>
   },
   ContextMenuLabel: ({ children }: { children: ReactNode }) => <div data-testid="context-menu-label">{children}</div>,
@@ -665,6 +665,32 @@ describe('GraphCanvas', () => {
     expect(onZoomOut).toHaveBeenCalled()
     expect(onFitView).toHaveBeenCalled()
     expect(onToggleCanvasLock).toHaveBeenCalled()
+  })
+
+  it('offers auto-arrange in the context menu, disabled while the canvas is locked (用户裁决 2026-08-27)', () => {
+    const onAutoArrange = vi.fn()
+    contextMenuItems.length = 0
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        canvasLocked={false}
+        onAutoArrange={onAutoArrange}
+      />,
+    )
+    const arrange = contextMenuItems.find((item) => item.label === 'Auto-arrange')
+    expect(arrange).toBeDefined()
+    arrange?.onSelect?.()
+    expect(onAutoArrange).toHaveBeenCalledTimes(1)
+
+    contextMenuItems.length = 0
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        canvasLocked
+        onAutoArrange={onAutoArrange}
+      />,
+    )
+    expect(contextMenuItems.find((item) => item.label === 'Auto-arrange')?.disabled).toBe(true)
   })
 
   it('persists valid phase node connections', () => {

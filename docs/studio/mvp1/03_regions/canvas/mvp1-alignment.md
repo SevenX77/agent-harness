@@ -285,6 +285,22 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: live(2026-08-27)。
 - 归属: region `canvas`; capability `graph-authoring`。
 
+### F11. Fit Never Zooms In(整图取景不放大,启动即 100%)
+
+- 机制: 所有**整图**取景——首屏初始 fit、右键「适应视图」、自动整理(F10)后的重新取景——
+  共用纯函数 `canvasFitViewOptions(insets)`(`canvas-projection.ts`):`maxZoom: 1`,各侧
+  padding = 面板 inset + 32px 基础留白。大图缩小装进可视区;小图保持 1:1,绝不放大过
+  100%。ReactFlow 实例自身的 maxZoom(1.4)只约束**手动**缩放,不参与取景。
+- 决策: 取景的职责是「装得下」,不是「占得满」——此前 fit 会把小图放大到充满视口,启动
+  看到的是被放大的特写。单节点显露 `focusNodeOnCanvas` 是另一份契约(锁定当前 zoom、
+  只平移/缩小),不并入本单元。
+- 原话/来源: 用户 2026-08-27:「启动时的画布是不是放大过?策略是不是fit?启动时改为
+  100%,不要放大」。
+- 测试: `canvasFitViewOptions` 返回 `maxZoom: 1`;padding 按 inset+32px 逐侧计算;
+  `runFitView` 消费该选项且三条整图路径都经由它。
+- Status: live(2026-08-27)。
+- 归属: region `canvas`; capability `graph-authoring`。
+
 ## 3. 接口契约
 - Inputs: skill detail, selected node id, status map, compile diagnostics, trace dot data references.
 - Outputs: node selection, file open requests, topology mutation requests, active panel changes.

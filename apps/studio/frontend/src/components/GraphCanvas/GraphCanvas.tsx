@@ -79,6 +79,7 @@ import {
   type OverwriteConflict,
 } from './sequential-overwrite-routing'
 import {
+  canvasFitViewOptions,
   canvasLayoutSignature,
   layoutCanvasHeightForMode,
   mergeStableLayoutPositions,
@@ -1036,21 +1037,14 @@ export function GraphCanvas({
     void reactFlowInstanceRef.current?.zoomOut()
   }, [])
   // Fit the graph into the area NOT covered by the open panel / copilot / editor
-  // overlays. Base breathing room plus the live overlay insets, per side.
+  // overlays. Options (padding math + the 100% zoom cap) live in
+  // canvasFitViewOptions — see there for the 2026-08-27 no-magnification ruling.
   const runFitView = useCallback(() => {
     const instance = reactFlowInstanceRef.current
     if (!instance) return
     const host = canvasRef.current
     const insets = host ? readCanvasSafeInsets(host) : { left: 0, right: 0, top: 0 }
-    const BASE = 32
-    return instance.fitView({
-      padding: {
-        top: `${insets.top + BASE}px`,
-        left: `${insets.left + BASE}px`,
-        right: `${insets.right + BASE}px`,
-        bottom: `${BASE}px`,
-      },
-    })
+    return instance.fitView(canvasFitViewOptions(insets))
   }, [])
   const handleFitView = useCallback(() => {
     void (fitViewRef.current?.() ?? runFitView())

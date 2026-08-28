@@ -190,15 +190,14 @@ describe("CompileErrorDrawer rendering", () => {
     expect(content?.getAttribute("data-side")).toBe("bottom")
   })
 
-  it("stops short of the true bottom edge so the center action bar band stays uncovered", () => {
-    // The action bar floats at `bottom-6` inside the same canvas host; the
-    // content reserves clearance above it so it never overlaps the
-    // Compile/Predict/Run pill. Real-machine confirmation: content bottom
-    // edge (804px) sits above the action bar's top (831px) at 1400x900.
+  it("extends to the true bottom edge, covering the center action bar band (用户裁决 2026-08-27)", () => {
+    // The action bar belongs to the canvas, and the drawer covers the canvas
+    // — so it covers the bar too. The previous 6rem clearance band left the
+    // Compile/Predict/Run pill peeking out under the sheet, which reads as a
+    // layout bug rather than a design choice.
     render(true)
     const content = document.body.querySelector('[data-slot="compile-drawer-content"]') as HTMLElement | null
-    expect(content?.style.bottom).not.toBe("0px")
-    expect(content?.style.bottom).toBe("6rem")
+    expect(content?.style.bottom).toBe("0px")
   })
 
   it("renders no dim overlay — modal={false} makes Radix's Dialog.Overlay a no-op by design", () => {
@@ -306,10 +305,12 @@ describe("CompileErrorDrawer rendering", () => {
 
 describe("isOutsideDismissExempt", () => {
   // Radix's dismiss-on-outside-pointerdown fires for ANY click outside the
-  // drawer's own Content node, regardless of whether the (now-scoped) overlay
-  // visually covers that spot. Exempting the action bar and the two side
-  // panels keeps the drawer open while the user operates them — the same
-  // `data-studio-*` markers those three components already carry.
+  // drawer's own Content node, regardless of whether the drawer visually
+  // covers that spot. Exempting the two side panels keeps the drawer open
+  // while the user operates them — the same `data-studio-*` markers those
+  // components already carry. The center action bar is deliberately NOT
+  // exempt any more: since the 2026-08-27 ruling the drawer covers it, so no
+  // click can land there while the drawer is open.
   function elementWithMarker(selectorAttr: string): HTMLElement {
     const marker = document.createElement("div")
     marker.setAttribute(selectorAttr, "true")
@@ -323,8 +324,8 @@ describe("isOutsideDismissExempt", () => {
     document.body.innerHTML = ""
   })
 
-  it("exempts a click inside the center action bar", () => {
-    expect(isOutsideDismissExempt(elementWithMarker("data-studio-center-action-bar"))).toBe(true)
+  it("does not exempt the center action bar — the drawer covers it (用户裁决 2026-08-27)", () => {
+    expect(isOutsideDismissExempt(elementWithMarker("data-studio-center-action-bar"))).toBe(false)
   })
 
   it("exempts a click inside the left (Assets) overlay", () => {
@@ -347,7 +348,7 @@ describe("isOutsideDismissExempt", () => {
   })
 })
 
-describe("CompileErrorDrawer keeps the center action bar operable while open", () => {
+describe("CompileErrorDrawer keeps the side panels operable while open", () => {
   let container: HTMLDivElement
   let root: Root
 
@@ -387,16 +388,20 @@ describe("CompileErrorDrawer keeps the center action bar operable while open", (
     })
   }
 
-  it("still fires the action bar button's own click handler, and does not dismiss the drawer, when clicked while open", async () => {
+  it("stays open when a plain element inside the left (Assets) overlay is clicked, and its click still fires", async () => {
+    // Same dispatch idiom CommunitySharingConsentDialog.test.tsx uses for a
+    // real Radix outside-pointerdown sequence — jsdom lacks PointerEvent, but
+    // Radix's DismissableLayer listens by event *type*, which a plain
+    // MouseEvent constructed with that type still satisfies.
     const onOpenChange = vi.fn()
-    const onCompileClick = vi.fn()
-    const actionBar = document.createElement("div")
-    actionBar.setAttribute("data-studio-center-action-bar", "true")
-    const compileButton = document.createElement("button")
-    compileButton.textContent = "Compile"
-    compileButton.addEventListener("click", onCompileClick)
-    actionBar.appendChild(compileButton)
-    document.body.appendChild(actionBar)
+    const onRowClick = vi.fn()
+    const leftOverlay = document.createElement("div")
+    leftOverlay.setAttribute("data-studio-left-overlay", "true")
+    const row = document.createElement("div")
+    row.textContent = "GRAPH.md"
+    row.addEventListener("click", onRowClick)
+    leftOverlay.appendChild(row)
+    document.body.appendChild(leftOverlay)
 
     act(() => {
       root.render(<CompileErrorDrawer errors={errors} open onOpenChange={onOpenChange} />)
@@ -404,16 +409,12 @@ describe("CompileErrorDrawer keeps the center action bar operable while open", (
     expect(document.body.querySelector('[data-slot="compile-drawer-content"]')).not.toBeNull()
     await flushOutsidePointerDownListenerAttachment()
 
-    // Same dispatch idiom CommunitySharingConsentDialog.test.tsx uses for a
-    // real Radix outside-pointerdown sequence — jsdom lacks PointerEvent, but
-    // Radix's DismissableLayer listens by event *type*, which a plain
-    // MouseEvent constructed with that type still satisfies.
-    dispatchRealClick(compileButton)
+    dispatchRealClick(row)
 
-    expect(onCompileClick).toHaveBeenCalledTimes(1)
+    expect(onRowClick).toHaveBeenCalledTimes(1)
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
 
-    actionBar.remove()
+    leftOverlay.remove()
   })
 
   it("control: a click on an unrelated (non-exempt) outside element still dismisses the drawer", async () => {

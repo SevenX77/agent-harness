@@ -420,6 +420,7 @@
       "missingWarning": "缺少推荐模型",
       "dragInHint": "拖入：{{models}}",
       "fast": {
+        "title": "轻量任务",
         "description": "引擎内部子任务固定使用的角色（例如 md-patch 对 md2json 校验失败项做外科式修补），追求快速响应，建议配置小/快模型。"
       },
       "copilot_claude_opus_5": {

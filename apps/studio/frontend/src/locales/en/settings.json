@@ -420,6 +420,7 @@
       "missingWarning": "Missing recommended model",
       "dragInHint": "Drag in: {{models}}",
       "fast": {
+        "title": "Lightweight Tasks",
         "description": "Fixed role used by the engine's internal sub-tasks (e.g. md-patch, which surgically repairs md2json validation failures). It favors fast responses — best paired with small, fast models."
       },
       "copilot_claude_opus_5": {

@@ -3122,3 +3122,33 @@ describe("fixed-role missing-recommended-model computation", () => {
     expect(missingRecommendedModels([], new Set())).toEqual([])
   })
 })
+
+describe("fixed-role display name (用户裁决 2026-08-27:fast → Lightweight Tasks/轻量任务)", () => {
+  const emptyRole = { model_fallback_enabled: true, active_model: null, models: {} }
+  const emptyFastData: RolesData = { models: {}, providers: {}, roles: { fast: emptyRole, my_custom_role: emptyRole } }
+  const cardProps = {
+    data: emptyFastData,
+    category: "graph-agent" as const,
+    credentialsByCode: new Map(),
+    modelDisplayNamesByCode: new Map(),
+    ownedProviderCodesByModel: new Map(),
+    roleName: "fast",
+    testStatuses: {},
+    testChainRunning: false,
+    onRunTestChain: vi.fn(),
+    getActiveAvailableModelDragId: () => null,
+    getAvailableModelGroup: () => null,
+    onChange: vi.fn(),
+    onDeleteRole: vi.fn(),
+  }
+
+  it("renders the localized title for the built-in fast role, keeping the role id out of the card title", () => {
+    const html = renderToStaticMarkup(<RoleCard {...cardProps} isFixed />)
+    expect(html).toContain("Lightweight Tasks")
+  })
+
+  it("falls back to the raw role name when no localized title exists", () => {
+    const html = renderToStaticMarkup(<RoleCard {...cardProps} roleName="my_custom_role" />)
+    expect(html).toContain("my_custom_role")
+  })
+})

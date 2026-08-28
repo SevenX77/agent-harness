@@ -3124,12 +3124,12 @@ describe("fixed-role missing-recommended-model computation", () => {
 })
 
 describe("fixed-role display name (用户裁决 2026-08-27:fast → Lightweight Tasks/轻量任务)", () => {
-  const emptyRole = { model_fallback_enabled: true, active_model: null, models: {} }
+  const emptyRole = { model_fallback_enabled: true, active_model: "", models: {} }
   const emptyFastData: RolesData = { models: {}, providers: {}, roles: { fast: emptyRole, my_custom_role: emptyRole } }
   const cardProps = {
     data: emptyFastData,
     category: "graph-agent" as const,
-    credentialsByCode: new Map(),
+    credentialsByCode: {},
     modelDisplayNamesByCode: new Map(),
     ownedProviderCodesByModel: new Map(),
     roleName: "fast",

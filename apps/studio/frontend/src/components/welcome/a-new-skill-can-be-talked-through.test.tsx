@@ -96,11 +96,14 @@ describe('the New Skill dialog offers both ways in', () => {
 })
 
 describe('what the wizard opens with', () => {
-  it('names the skill it is about and the asset that runs the conversation', () => {
+  it('names the skill it is about but no agent-skill asset — routing is by description (用户裁决 2026-08-27)', () => {
+    // A real new user does not know which agent skills exist; the canned
+    // opener must read like their own ask, and the agent picks the wizard
+    // asset by its description — naming it here would mask routing failures.
     const draft = buildSkillWizardDraft({ skillId: 'invoice-reader' })
 
     expect(draft).toContain('invoice-reader')
-    expect(draft).toContain('brainstorming')
+    expect(draft).not.toContain('brainstorming')
   })
 
   it('asks for one question at a time rather than a questionnaire', () => {

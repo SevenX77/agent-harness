@@ -1,6 +1,6 @@
 ---
 name: domain-analysis
-description: Analyze unstructured domain documents and structure them into a formal domain framework (entities, workflows, rules, glossaries, and open questions) before starting graph design.
+description: Analyze unstructured domain material (documents, notes, examples the user brings) into a formal domain framework (entities, workflows, rules, glossaries, open questions). Use before graph design when the user supplies raw domain sources, or asks what structure their material implies.
 ---
 
 # Skill: Domain Analysis

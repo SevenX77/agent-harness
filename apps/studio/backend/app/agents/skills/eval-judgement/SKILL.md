@@ -1,6 +1,6 @@
 ---
 name: eval-judgement
-description: Analyze predict or run outputs against target evaluation baselines, delivering pass/rework conclusions and attributing root-cause failures.
+description: Judge predict or run outputs against golden baselines and deliver a pass/rework conclusion with root-cause attribution. Use after a predict or run completes when the user asks whether the output is good enough, why it failed, or whether a phase's result matches its golden.
 ---
 
 # Skill: Evaluation Judgment

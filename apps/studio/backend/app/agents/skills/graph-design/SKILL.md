@@ -1,6 +1,6 @@
 ---
 name: graph-design
-description: Design and construct a graph_skill (partitioning phases, connecting the DAG, and defining I/O schemas) when creating new skills or refactoring existing graph structures.
+description: Design or restructure a graph skill's topology — partition phases, connect the DAG, define per-phase I/O schemas. Use when adding phases to an existing skill, splitting or merging phases, or turning an agreed domain design into a concrete graph structure.
 ---
 
 # Skill: Graph Skill Design

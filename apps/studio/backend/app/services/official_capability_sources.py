@@ -205,7 +205,9 @@ def provider_doc_limit_rules(
                 message="OpenAI model docs list this GPT-5 text/reasoning max output limit.",
             ),
         }
-    if provider_key == "claude" and model.startswith(("claude-opus-4-8", "claude-sonnet-4-6")):
+    if provider_key == "claude" and model.startswith(
+        ("claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6")
+    ):
         urls = official_doc_source_urls(provider_key, model_type="language_reasoning")
         return {
             "max_input_tokens": OfficialCapabilityRule(
@@ -215,7 +217,7 @@ def provider_doc_limit_rules(
                 message="Anthropic model docs list this Claude family with a 1M-token context window.",
             ),
             "max_output_tokens": OfficialCapabilityRule(
-                value=128_000 if model.startswith("claude-opus-4-8") else 64_000,
+                value=128_000 if model.startswith(("claude-opus-5", "claude-opus-4-8")) else 64_000,
                 source="provider_doc",
                 source_urls=urls,
                 message="Anthropic model docs list this Claude family max output token limit.",

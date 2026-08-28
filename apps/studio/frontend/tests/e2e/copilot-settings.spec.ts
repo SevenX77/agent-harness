@@ -19,7 +19,7 @@ const credentials = {
       last_test_message: "",
       last_error_code: "",
       available_sdks: ["anthropic_compatible"],
-      available_models: [{ id: "claude-opus-4.8", capabilities: { thinking: true } }],
+      available_models: [{ id: "claude-opus-5", capabilities: { thinking: true } }],
     },
   ],
 }
@@ -75,7 +75,7 @@ const registry = {
   provider_routes: {},
   runtime_policy: { provider_down_ttl_seconds: 60, probe_timeout_seconds: 5, token_escalation_rounds: 2 },
   model_profiles: {},
-  model_groups: [modelGroup("claude-opus-4.8", "Claude Opus 4.8")],
+  model_groups: [modelGroup("claude-opus-5", "Claude Opus 5")],
   roles: {},
   canonical_groups: [],
   lint_results: [],
@@ -106,15 +106,15 @@ const rolesWithEmptyDraft = {
 
 const rolesWithCopilot = {
   ...emptyRoles,
-  models: { "claude-opus-4.8": { name: "claude-opus-4.8", providers: { anthropic: "claude-opus-4.8" } } },
+  models: { "claude-opus-5": { name: "claude-opus-5", providers: { anthropic: "claude-opus-5" } } },
   providers: { anthropic: { name: "Anthropic Official", type: "anthropic_compatible" } },
   roles: {
     copilot_custom_1: {
       role_kind: "copilot",
       model_fallback: true,
-      active_model: "claude-opus-4.8",
-      models: { "claude-opus-4.8": { providers: ["anthropic:claude-opus-4.8"] } },
-      fallback_chain: [{ route_id: "anthropic:claude-opus-4.8", runtime_settings: {} }],
+      active_model: "claude-opus-5",
+      models: { "claude-opus-5": { providers: ["anthropic:claude-opus-5"] } },
+      fallback_chain: [{ route_id: "anthropic:claude-opus-5", runtime_settings: {} }],
     },
   },
 }
@@ -196,9 +196,9 @@ test.describe("Copilot settings", () => {
     await expect(search).toBeVisible()
     // Searchable: a non-matching query hides the option, a matching one shows it.
     await search.fill("zzz-no-match")
-    await expect(page.locator('[data-copilot-model-option="claude-opus-4.8"]')).toHaveCount(0)
+    await expect(page.locator('[data-copilot-model-option="claude-opus-5"]')).toHaveCount(0)
     await search.fill("opus")
-    await expect(page.locator('[data-copilot-model-option="claude-opus-4.8"]')).toBeVisible()
+    await expect(page.locator('[data-copilot-model-option="claude-opus-5"]')).toBeVisible()
     await page.screenshot({ path: "test-results/copilot-combobox.png" })
 
     // The selection wiring (applyCopilotModelGroupSelection: keeps the copilot_ role key
@@ -219,7 +219,7 @@ test.describe("Copilot settings", () => {
           result: {
             sdk_evidence: {
               routes: {
-                "anthropic:claude-opus-4.8": { status: "failed" },
+                "anthropic:claude-opus-5": { status: "failed" },
               },
             },
           },

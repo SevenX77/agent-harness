@@ -283,7 +283,7 @@ export function CopilotTab({
   }, [data, allModelGroupPreviewsById])
 
   // #56 dynamic float: when the user has never created a copilot role, surface
-  // the family-ladder defaults (Claude opus-4.8→4.7, DeepSeek v4-pro→v3.2-pro)
+  // the built-in defaults (DeepSeek v4-flash first, then Claude opus-5)
   // as built-in cards. These are RENDERED from candidates, not written to disk —
   // they only enter the save chain when the user acts on one (atom-56 ①).
   const floatedRoles = useMemo(() => {
@@ -560,7 +560,7 @@ export function CopilotTab({
   // A floated built-in default is not persisted until acted on. Any edit (reorder,
   // remove group, test) first materializes it into data.roles via buildCopilotRoleEntry.
   // R-F5: persist under `copilot_<slug>` (yaml-key-safe), not the raw model-group id
-  // which may contain hyphens/dots (e.g. `claude-opus-4.8`).
+  // which may contain hyphens/dots (e.g. `claude-opus-5`).
   function ensureRolePersisted(current: RolesData, roleId: string): RolesData {
     const persistedKey = copilotKeyForGroupId(roleId)
     if (current.roles[persistedKey]) return current
@@ -661,7 +661,7 @@ export function CopilotTab({
 
   async function testRoleRoutes(role: { id: string; title: string }) {
     // A floated built-in default enters the save chain when tested (atom-56 ①).
-    // R-F5: yaml key may differ from the UI role id (e.g. `claude-opus-4.8` → `copilot_claude_opus_4_8`).
+    // R-F5: yaml key may differ from the UI role id (e.g. `claude-opus-5` → `copilot_claude_opus_5`).
     const persistedKey = resolvePersistedKey(data, role.id)
     if (data && !data.roles[persistedKey]) {
       onChange(ensureRolePersisted(data, role.id))

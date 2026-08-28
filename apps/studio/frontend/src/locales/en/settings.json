@@ -422,7 +422,7 @@
       "fast": {
         "description": "Fixed role used by the engine's internal sub-tasks (e.g. md-patch, which surgically repairs md2json validation failures). It favors fast responses — best paired with small, fast models."
       },
-      "copilot_claude_opus_4_8": {
+      "copilot_claude_opus_5": {
         "description": "Built-in coding copilot role, kept in sync with the backend fallback chain."
       },
       "copilot_deepseek_v4_flash": {

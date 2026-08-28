@@ -335,7 +335,8 @@ role: workflow-record
   - **copilot 默认模型 = DeepSeek V4 Flash（PM 裁决 2026-08-06）**：available 里有 `deepseek-v4-flash` → 它浮出且**排位第一**（composer role picker 的初始角色 = 排位第一的浮出组），取代 2026-07-02 的「默认 opus4.8」。
   - Claude：优先 **opus 4.8**，没有则退 **opus 4.7**（再往后退更旧）。
   - DeepSeek 不再有 pro 候选梯队（PM 裁决 2026-08-06「去掉 deepseek v4 pro」：V4 Flash 是唯一的 DeepSeek 内置）。
-  - **固定 copilot 角色 = 固定模型（PM 裁决 2026-08-06）**：内置 copilot 固定角色为 `copilot_claude_opus_4_8` + `copilot_deepseek_v4_flash`（v4 pro 退出）。固定角色的模型组绑定**不可移除、不可换组**——UI 不提供入口（无移除按钮，拖拽换组被拒），写路径（bulk 与单角色 PUT）在边界拒绝（422）；唯一例外是把冷态空绑定修复为推荐模型组（reconcile 负责冷态）。
+  - **固定 copilot 角色 = 固定模型（PM 裁决 2026-08-06）**：内置 copilot 固定角色为 `copilot_claude_opus_5` + `copilot_deepseek_v4_flash`（v4 pro 退出）。固定角色的模型组绑定**不可移除、不可换组**——UI 不提供入口（无移除按钮，拖拽换组被拒），写路径（bulk 与单角色 PUT）在边界拒绝（422）；唯一例外是把冷态空绑定修复为推荐模型组（reconcile 负责冷态）。
+    - **修订（用户裁决 2026-08-27）**：内置 Claude copilot 角色由 `copilot_claude_opus_4_8`（推荐模型 `claude-opus-4.8`）整体替换为 `copilot_claude_opus_5`（推荐模型 `claude-opus-5`），旧角色与浮层里的旧代次 Claude 梯队（4.8→4.7 fallback）一并删除，不留别名；已存盘的旧角色数据按「重新生成」处理（no-backward-compat）。
   - 都没有 → 不浮出默认，用户自建。现码硬编码映射 `copilot_opus_4_7`↔`claude-opus-4.7`（`CopilotTab.tsx:132-133`）需改为此动态择优。
 - **本质（2026-06-18 PM 澄清）：copilot 的"内置角色"= 自动选了一个 canonical model-group**（如名为 `opus4.7` 的组），**复用 model-group 现成的 canonical_id 归一化**（各 provider 五花八门的 opus4.7 model name 归一成同一个标准 name —— 这套 §2.1「相同模型合并 / singleton 按 canonical_id 键」已经有）。所以**「内置 vs 第三方」不需要新的后端 role 元数据契约**：内置 = 自动选了 canonical 组、third-party = 用户自建组；前端**不要靠硬编码 model-id 白名单 + `includes('Claude')` 套模板判定**（现码 #55 的脆做法），而是看这个 copilot role 选的是不是系统按阶梯自动浮出的 canonical 组。
 

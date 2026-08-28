@@ -422,7 +422,7 @@
       "fast": {
         "description": "引擎内部子任务固定使用的角色（例如 md-patch 对 md2json 校验失败项做外科式修补），追求快速响应，建议配置小/快模型。"
       },
-      "copilot_claude_opus_4_8": {
+      "copilot_claude_opus_5": {
         "description": "内置编码 copilot 角色，与后端 fallback 链保持同步。"
       },
       "copilot_deepseek_v4_flash": {

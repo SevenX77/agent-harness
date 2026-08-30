@@ -400,7 +400,7 @@ role: workflow-record
 
 ---
 
-### 3.9 Copilot 页「CLI」区（PM 需求 2026-08-06,提案获批 2026-08-06）
+### 3.9 「CLI 工具」页(原 Copilot 页「CLI」区;PM 需求 2026-08-06,提案获批 2026-08-06;独立成页 2026-08-29)
 
 > 需求原话:「加一个与Claude sdk平行的设置,cli的设置,把在copilot里面使用open in cli
 > 所需要的所有的包安装、登录鉴权等状态和一键安装功能都做上去,还得分不同操作系统。
@@ -411,7 +411,14 @@ role: workflow-record
 > `docs/design/2026-08-12-ah-vendored-auto-deploy.md`(已批——ah 随 app 打包 +
 > 运行期自动布署,ah 行动作改「部署」)。
 
-- **形态**:Copilot 页内与「Claude Agent SDK」并列的 CatalogAccordion section「CLI」。
+- **形态(修订 2026-08-29,用户批示)**:Settings 的**独立第六页**,导航项与页标题
+  「CLI 工具 / CLI Tools」(命名由用户授权执行方定:「我觉得这块是不是单独列一页比较好,
+  名称你想」),tab 值 `cli`,图标 SquareTerminal(lucide)。**原形态废止**:原设计为
+  Copilot 页内与「Claude Agent SDK」并列、默认折叠的 CatalogAccordion section「CLI」——
+  被推翻的实证是 2026-08-28 旅程报告里该区截图只拍到一行折叠的「∨ CLI」,用户批示
+  「cli截图截的什么玩意儿?根本没看到cli」:一整条依赖链/登录态/会话配置塞在默认收起的
+  折叠条里,可发现性为零。页内布局沿用其他设置页范式(SectionTitle + 区身),
+  本节以下各条(探测、版本检查、行内动作、会话配置)全部原样随迁,不因搬家改行为。
 - **依赖与鉴权状态(PR-1)**:Tauri 命令 `cli_dependency_status()` 一次探测整条链——
   Windows:WSL → ah(复用 `run_ah_version`+`ah_version_gate` 唯一定义)→ tmux →
   claude CLI(/mnt Windows-binary 陷阱同 launcher 判据)→ codex CLI → 两个登录态

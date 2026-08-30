@@ -9,7 +9,8 @@
     "apiKeys": "LLM API-Key",
     "llmRoles": "LLM Roles",
     "copilot": "Copilot",
-    "mediaGeneration": "Media Generation"
+    "mediaGeneration": "Media Generation",
+    "cli": "CLI Tools"
   },
   "saveStatus": {
     "pending": "Pending",
@@ -434,7 +435,7 @@
     }
   },
   "cli": {
-    "title": "CLI",
+    "title": "CLI Tools",
     "description": "Everything Open in CLI needs on this machine: runtime chain and sign-in state.",
     "reprobe": "Re-check",
     "probing": "Checking dependencies…",

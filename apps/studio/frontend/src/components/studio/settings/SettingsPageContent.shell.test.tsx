@@ -123,7 +123,32 @@ describe("Settings shell per-tab skeleton gate", () => {
     expect(html).not.toContain('data-settings-tab-panel="api_keys"')
     expect(html).not.toContain('data-settings-tab-panel="llm_roles"')
     expect(html).not.toContain('data-settings-tab-panel="copilot"')
+    expect(html).not.toContain('data-settings-tab-panel="cli"')
     expect(html).toMatch(/data-settings-tab-panel="general"(?![^>]*hidden)/)
+  })
+})
+
+/**
+ * R3-1 (批示轮三, 2026-08-29): the CLI area is its own sixth settings page
+ * ("CLI Tools"), no longer a collapsed accordion inside Copilot — the user
+ * could not even see it there. Authority: 00_settings-ux-spec.md §3.9
+ * (2026-08-29 revision).
+ */
+describe("CLI Tools standalone page", () => {
+  it("renders the CLI section in its own tab panel", () => {
+    const html = render({ activeTab: "cli" })
+    expect(html).toContain('data-settings-tab-panel="cli"')
+    expect(html).toContain('data-cli-section="true"')
+  })
+
+  it("no longer renders the CLI section inside the Copilot tab", () => {
+    const html = render({ activeTab: "copilot", rolesData: emptyRolesData })
+    expect(html).not.toContain("data-cli-section")
+  })
+
+  it("lists CLI Tools in the settings nav", () => {
+    const html = render({ activeTab: "general" })
+    expect(html).toContain("CLI Tools")
   })
 })
 
@@ -142,7 +167,7 @@ describe("Settings shell chrome", () => {
 })
 
 describe("Settings shell error boundaries", () => {
-  const tabs: SettingsTab[] = ["general", "api_keys", "media_generation", "llm_roles", "copilot"]
+  const tabs: SettingsTab[] = ["general", "api_keys", "media_generation", "llm_roles", "copilot", "cli"]
   it.each(tabs)("renders %s tab content without crashing", (activeTab) => {
     const html = render({ activeTab })
     expect(html.length).toBeGreaterThan(0)

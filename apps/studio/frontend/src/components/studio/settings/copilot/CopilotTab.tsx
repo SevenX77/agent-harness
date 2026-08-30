@@ -33,7 +33,6 @@ import {
   useAvailableModelPointerDrag,
 } from "../available-model-pointer-drag"
 import { agentStatusForRoute, CopilotModelGroupCard } from "./CopilotModelGroupCard"
-import { CliSection } from "../cli/CliSection"
 import {
   deriveCopilotCandidateGroups,
   hostFromBaseUrl,
@@ -62,7 +61,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { getRoleTestResults } from "@/api/client"
 import { getFixedRoleNames, getFixedRoleStatus } from "@/api/llm"
 import type { CredentialsState, FixedRoleRecommendedModel, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
-import type { CliSessionSettings } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { errorMessage } from "@/utils/errors"
 
@@ -178,7 +176,6 @@ function copilotPreviewFromModelGroup(
 }
 
 export function CopilotTab({
-  cliSettings,
   data = null,
   credentials = { providers: [] },
   modelGroups = [],
@@ -189,7 +186,6 @@ export function CopilotTab({
   onBeforeRoleTest,
   onNavigateToApiKeys,
 }: {
-  cliSettings?: { value: CliSessionSettings; onChange: (next: CliSessionSettings) => void }
   data?: RolesData | null
   credentials?: CredentialsState
   modelGroups?: ModelGroup[]
@@ -832,14 +828,6 @@ export function CopilotTab({
                 )
               })}
               <AddCopilotModelButton onClick={addDraftCopilotRole} />
-            </CatalogAccordionContent>
-          </CatalogAccordionItem>
-          <CatalogAccordionItem value="cli">
-            <CatalogAccordionTrigger>
-              {t("cli.title")}
-            </CatalogAccordionTrigger>
-            <CatalogAccordionContent className="space-y-4 pb-5">
-              <CliSection settings={cliSettings} />
             </CatalogAccordionContent>
           </CatalogAccordionItem>
         </CatalogAccordion>

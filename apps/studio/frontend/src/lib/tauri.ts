@@ -257,7 +257,7 @@ export async function deployVendoredAh(): Promise<{ row: CliDependencyRow } | { 
   }
 }
 
-/** Settings →「CLI」区的依赖链探测(提案 2026-08-06 §2;owner = Tauri,分 OS)。
+/** Settings →「CLI 工具」页的依赖链探测(提案 2026-08-06 §2;owner = Tauri,分 OS)。
  *  非桌面环境返回 null——组件据此显示 desktop-only 空态,不渲染假数据。 */
 export async function cliDependencyStatus(): Promise<CliDependencyRow[] | null> {
   if (!isTauriRuntime() || !nativeHelpersAreAvailable()) {

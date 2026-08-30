@@ -9,7 +9,8 @@
     "apiKeys": "LLM API-Key",
     "llmRoles": "LLM 角色",
     "copilot": "Copilot",
-    "mediaGeneration": "媒体生成"
+    "mediaGeneration": "媒体生成",
+    "cli": "CLI 工具"
   },
   "saveStatus": {
     "pending": "待保存",
@@ -432,7 +433,7 @@
     }
   },
   "cli": {
-    "title": "CLI",
+    "title": "CLI 工具",
     "description": "Open in CLI 在本机所需的全部依赖:运行链与登录状态。",
     "reprobe": "重新检测",
     "probing": "正在检测依赖…",

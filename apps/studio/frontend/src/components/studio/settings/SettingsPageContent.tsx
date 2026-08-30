@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
-import { Bot, Clapperboard, KeyRound, Plug, Settings, X } from "lucide-react"
+import { Bot, Clapperboard, KeyRound, Plug, Settings, SquareTerminal, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
+import { CliSection } from "./cli/CliSection"
 import { CopilotTab } from "./copilot/CopilotTab"
 import { GeneralTab } from "./GeneralTab"
 import { GeneralTabSkeleton } from "./GeneralTabSkeleton"
@@ -11,7 +12,7 @@ import { LlmRolesTab } from "./LlmRolesTab"
 import { MediaGenerationTab } from "./media-generation/MediaGenerationTab"
 import { RolesTabSkeleton } from "./RolesTabSkeleton"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
-import { NavButton } from "./shared"
+import { NavButton, SectionTitle } from "./shared"
 import type { SettingsPageContentProps, SettingsTab } from "./types"
 
 export function SettingsPageContent({
@@ -99,6 +100,9 @@ export function SettingsPageContent({
           </NavButton>
           <NavButton active={activeTab === "copilot"} icon={<Bot />} onClick={() => onTabChange("copilot")}>
             {t("tabs.copilot")}
+          </NavButton>
+          <NavButton active={activeTab === "cli"} icon={<SquareTerminal />} onClick={() => onTabChange("cli")}>
+            {t("tabs.cli")}
           </NavButton>
         </nav>
 
@@ -211,7 +215,6 @@ export function SettingsPageContent({
                   <RolesTabSkeleton />
                 ) : (
                   <CopilotTab
-                    cliSettings={{ value: appSettings.cliSessions, onChange: appSettings.setCliSessions }}
                     data={rolesData}
                     credentials={credentials}
                     modelGroups={modelGroups}
@@ -232,6 +235,25 @@ export function SettingsPageContent({
               </SettingsErrorBoundary>
             </div>
           </div>
+        ) : null}
+
+        {isMounted("cli") ? (
+          <ScrollArea
+            className="flex-1"
+            data-settings-tab-panel="cli"
+            hidden={activeTab !== "cli"}
+          >
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
+              <SettingsErrorBoundary label="CLI Tools">
+                <div className="max-w-3xl">
+                  <SectionTitle title={t("tabs.cli")} />
+                  <CliSection
+                    settings={{ value: appSettings.cliSessions, onChange: appSettings.setCliSessions }}
+                  />
+                </div>
+              </SettingsErrorBoundary>
+            </div>
+          </ScrollArea>
         ) : null}
       </div>
     </div>

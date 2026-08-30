@@ -104,7 +104,8 @@ function cliRowAction(row: CliDependencyRow): CliRowAction | null {
 }
 
 /**
- * Settings → Copilot →「CLI」区(设计 00_settings-ux-spec.md §3.9,修订 2026-08-12):
+ * Settings →「CLI 工具」独立页(设计 00_settings-ux-spec.md §3.9,修订 2026-08-12;
+ * 独立成页 2026-08-29 用户批示——原 Copilot 页内折叠区可发现性为零):
  * ① Open in CLI 依赖链 + 登录态 + 最新版检查的只读探测(owner = Tauri,分 OS);
  * ② 一键安装 = 拉起真控制台跑仓内安装脚本;行内「更新/登录」= 拉起真控制台跑
  *    对应 CLI 自己的 update/login 命令(交互式 OAuth,只读流不承载);

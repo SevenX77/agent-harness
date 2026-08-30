@@ -29,7 +29,7 @@ Settings 看起来是"前端表单",但它的真相全在后端:一个 provider 
 ### 2.4 数据层永不 Rust 化
 横切铁律 D12 是"本地写全量走 Rust",但它管的是 **skill 源文件**(GRAPH.md / SKILL.md / `.workspace`)。Settings 的凭证与角色数据(`~/.studio/` 下的 credentials / roles)是 **gateway 拥有的服务端数据,永不 Rust 化** —— 读写一律走 gateway Python(经 storage seam 抽象、预留 `user_id`,为未来远端服务化对齐形状)。本节点唯一的本地 OS 操作,是"选默认 skills 目录"的文件夹选择器(native / Rust)。
 
-## 3. 首次征询与五条配置旅程
+## 3. 首次征询与六条配置旅程
 
 > 📋 **每步操作 / 反馈 / 动机的细粒度 UX 规格**（含 draft 赋能写回、model/endpoint 标签表现、测试落点：endpoint 验证在 API key 页、model 保证在 role 页）见 [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)（PM 2026-06-02 口述，权威）。
 
@@ -86,6 +86,12 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 
 > **接线已完成(核验 2026-08-23,逐条对着 `main` 的代码)**:曾经记在这里的四项缺口都不再成立——① 测试走真实 SDK,`apps/studio/backend/app/routers/llm.py:1727` 写着「copilot 的 test 走 copilot 自己的真实 `ClaudeSDKClient` 调用」,`:2052` 是逐 route 的真工具调用测试,`AsyncAnthropic` 在 studio 后端已无任何引用;② mock 驱动已删,`mock-copilot-data` 在前端非测试代码里搜不到;③ `saveStatus` 已接,`CopilotTab.tsx:522` 与 `:752` 渲染 `SaveStatusBadge`;④ `copilot_` 前缀分流已修,`copilot-role-derivation.ts:377` 由 `copilotRoleNameForGroup` 统一产出 `copilot_<slug>`。**留作复核**:当年同段提到的「占位按钮」这一项本轮未逐个复核。
 > **session 持久化(D8)** 属 copilot 聊天(skill 工作台 region),settings §3 只配模型,失败退路见 §5。
+
+### 3.5 CLI 工具 — CLI 依赖、登录与会话配置(独立成页 2026-08-29)
+
+「Open in CLI」在本机能不能跑,取决于一条跨进程依赖链(Windows:WSL → ah → tmux → claude/codex CLI → 登录态)。这一页把链上每一环的探测状态、版本检查、行内动作(更新/登录/部署)、一键安装,以及 claude/codex 会话默认 model/effort 与 MoirAI 各 worker 的覆盖配置,收在一个地方。
+
+> 📋 **细粒度见权威 [`00_settings-ux-spec.md` §3.9](./00_settings-ux-spec.md)。** 该区原设计放在 Copilot 页内的默认折叠 CatalogAccordion section;2026-08-29 用户批示(「根本没看到cli……单独列一页比较好,名称你想」)改为 Settings 独立第六页,导航与页标题「CLI 工具 / CLI Tools」,行为不变、整区随迁——修订记录与被推翻的原形态见 §3.9「形态」条。
 
 ## 4. 测试 → 持久化 → 投影(贯穿四旅程的核心机制)
 

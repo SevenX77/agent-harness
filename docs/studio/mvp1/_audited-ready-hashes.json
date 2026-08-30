@@ -9,7 +9,7 @@
   "hashes": {
     "_design-unit-lock-snapshot.json": "353154a5d96c86f0fb3b9d781c4c23a5d837cad7e16ef985c21ccce28fa64315",
     "02_capabilities/compile-lint/baseline.md": "933e3d1673377db182b4c6b415dfc6d65a64d4b5b1fcb32096f8f00533b78203",
-    "02_capabilities/compile-lint/mvp1-alignment.md": "7cb772194d9578262868c27ee9dd4b9087480981dc48fabcf04725114e674a04",
+    "02_capabilities/compile-lint/mvp1-alignment.md": "ba52fabf56f28a3ad2607484c659b51c56c94a9de1334a6793848738746e058b",
     "02_capabilities/conflict-overwrite/baseline.md": "e380cb51b7488e1f2f0466ecbaef0a86110f8252c8230209d069acb42b76c9db",
     "02_capabilities/conflict-overwrite/mvp1-alignment.md": "6713430a8e1293e96e7b1b472a7b0865140df36c18ef8a32aa377e2c44f9be51",
     "02_capabilities/copilot-assist/baseline.md": "37c9da641b363562b9b831f177d1f0e5a3cf3612ebce7671e1e0fb52b766f8ba",

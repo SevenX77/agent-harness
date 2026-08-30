@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,87 @@ def promote_community_evidence_into_credentials(
     if updated:
         save_credentials(credentials, target)
     return updated
+
+
+async def merge_synced_catalog_into_created_routes(
+    credentials: LLMCredentialsFile,
+    *,
+    created_route_ids: Collection[str],
+    trigger: str,
+) -> int:
+    """J-01.I (批示轮三 R3-4): merge verified community evidence into the caller's
+    IN-MEMORY credentials right after a Test/probe created new routes, so the SAME
+    save that persists the routes also persists their community evidence — the
+    write response already projects Previously-Connected blue, no restart needed.
+
+    Phase 5 keeps no local cache of unmatched evidence, so the records for a route
+    that did not exist at the last sync live only in the remote catalog — this is
+    why the merge must re-fetch here instead of reading anything local. Gating
+    mirrors :func:`sync_verified_community_catalog_into_credentials` (an explicit
+    "declined" stops the read; a missing manifest URL / signing key keeps the
+    whole read path dormant) — a second occurrence, kept inline per the
+    three-strikes rule. Best-effort by design: this call enriches the caller's
+    primary write, so a fetch/verify failure is logged as runtime activity and
+    returns 0 — it must never fail the endpoint test that triggered it. Returns
+    the number of routes whose evidence actually changed.
+    """
+    if not created_route_ids:
+        return 0
+    settings = await get_metadata().read_app_settings()
+    if settings.community_sharing_choice == "declined":
+        return 0
+    cfg = get_backend_config()
+    manifest_url = cfg.community_catalog_manifest_url.strip()
+    public_key_hex = cfg.community_catalog_signing_pubkey.strip()
+    if not manifest_url or not public_key_hex:
+        return 0
+    try:
+        outcome = await sync_verified_catalog(
+            manifest_url=manifest_url,
+            signature_url=f"{manifest_url}.sig",
+            shard_base_url=manifest_url.rsplit("/", 1)[0] + "/",
+            public_key_hex=public_key_hex,
+            client_protocol_major=cfg.community_protocol_major,
+            fetch=make_httpx_fetcher(),
+            prev_etag=(
+                credentials.last_remote_catalog_sync.etag
+                if credentials.last_remote_catalog_sync
+                else None
+            ),
+        )
+    except Exception as error:
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="sync_verified_catalog_failed",
+            message=(
+                "Community catalog fetch after route creation failed; "
+                "the write proceeds without community evidence."
+            ),
+            changes={
+                "trigger": trigger,
+                "error": str(error),
+                "created_route_count": len(created_route_ids),
+            },
+        )
+        return 0
+    merged = merge_community_evidence_into_credentials(credentials, list(outcome.records))
+    credentials.last_remote_catalog_sync = RemoteCatalogSyncMarker(
+        etag=outcome.manifest_etag,
+        generated_at=outcome.generated_at,
+        last_synced_at=datetime.now(tz=UTC).isoformat(),
+    )
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="sync_verified_catalog",
+        message="Merged verified community evidence in the same write that created new routes.",
+        changes={
+            "trigger": trigger,
+            "created_route_count": len(created_route_ids),
+            "merged_route_count": merged,
+            "record_count": outcome.record_count,
+        },
+    )
+    return merged
 
 
 async def sync_verified_community_catalog_into_credentials(*, trigger: str) -> dict[str, Any]:

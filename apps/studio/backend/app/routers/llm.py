@@ -100,7 +100,10 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
-from app.services.community_catalog_runtime import sync_verified_community_catalog_into_credentials
+from app.services.community_catalog_runtime import (
+    merge_synced_catalog_into_created_routes,
+    sync_verified_community_catalog_into_credentials,
+)
 from app.services.community_catalog_sync import (
     VerifiedSyncError,
 )
@@ -892,6 +895,10 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
             tested_endpoint_id=endpoint_id,
             discovered_model_count=0,
         )
+    # J-01.I: remember which routes existed BEFORE this test's upserts, so the
+    # community-catalog merge below only fires when the test actually created
+    # routes (a re-test of already-routed models must not pay a remote fetch).
+    route_ids_before_test = frozenset(latest_credentials.provider_routes)
     endpoint_update: dict[str, Any] = {}
     if model_list_reached:
         # R-E2 auto-revive: get-models succeeded, so the key works again. Clear any
@@ -1115,6 +1122,15 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
     )
     updated = latest_endpoint.model_copy(update=endpoint_update)
     latest_credentials.provider_endpoints[endpoint_id] = updated
+    # J-01.I (批示轮三 R3-4): a test that created routes merges the verified
+    # community catalog into the SAME save, so a fresh install sees the
+    # Previously-Connected blue right in this write's response — not after the
+    # next restart's startup sync.
+    await merge_synced_catalog_into_created_routes(
+        latest_credentials,
+        created_route_ids=set(latest_credentials.provider_routes) - route_ids_before_test,
+        trigger="endpoint_test_route_created",
+    )
     save_credentials(latest_credentials)
     record_runtime_activity(
         source_id="llm_credentials",
@@ -1186,6 +1202,7 @@ async def test_endpoint_models(
         latest_credentials = credentials
         if official_results:
             latest_credentials = load_credentials()
+            route_ids_before_test = frozenset(latest_credentials.provider_routes)
             latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
             if latest_endpoint is None:
                 raise HTTPException(
@@ -1248,6 +1265,13 @@ async def test_endpoint_models(
             # Asking an official route about effort needs those questions carried
             # by `probe_official_call_method` instead — a second executor, so it
             # belongs with P5's rather than bolted on here.
+            # J-01.I: newly created routes get their community evidence in the
+            # same save (see merge_synced_catalog_into_created_routes).
+            await merge_synced_catalog_into_created_routes(
+                latest_credentials,
+                created_route_ids=set(latest_credentials.provider_routes) - route_ids_before_test,
+                trigger="manual_model_test_route_created",
+            )
             save_credentials(latest_credentials)
             record_runtime_activity(
                 source_id="llm_credentials",
@@ -1295,6 +1319,7 @@ async def test_endpoint_models(
     successful_model_ids = [result.model_id for result in probe_results if result.status == "ok"]
     if probe_results:
         latest_credentials = load_credentials()
+        route_ids_before_test = frozenset(latest_credentials.provider_routes)
         latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
         if latest_endpoint is None:
             raise HTTPException(
@@ -1357,6 +1382,13 @@ async def test_endpoint_models(
             }
         )
         latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
+        # J-01.I: newly created routes get their community evidence in the same
+        # save (see merge_synced_catalog_into_created_routes).
+        await merge_synced_catalog_into_created_routes(
+            latest_credentials,
+            created_route_ids=set(latest_credentials.provider_routes) - route_ids_before_test,
+            trigger="manual_model_test_route_created",
+        )
         save_credentials(latest_credentials)
         record_runtime_activity(
             source_id="llm_credentials",

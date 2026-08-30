@@ -120,7 +120,7 @@
     "selectRole": "Select role {{role}}"
   },
   "analysis": {
-    "prompt": "Run finished — fill in the golden the nodes are missing, from this output?",
+    "prompt": "Run finished — fill the missing goldens from this run's output?",
     "confirm": "Confirm",
     "dismiss": "Dismiss analysis",
     "locked": "Golden is locked; nothing was filled in.",

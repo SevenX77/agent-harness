@@ -4,7 +4,7 @@ doc: baseline
 role: baseline
 status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Tauri sidecar/picker/reveal live；Studio 自有 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️；Copilot SDK Write/Edit 为 MVP1 明确例外。）
 binds_alignment: ./mvp1-alignment.md
-binds_code: apps/studio/tauri/src/lib.rs:select_directory · apps/studio/tauri/src/lib.rs:reveal_in_file_manager · apps/studio/tauri/src/lib.rs:open_in_cursor · apps/studio/tauri/src/sidecar.rs:SidecarManager · apps/studio/frontend/src/api/client.ts:writeSkillFile · apps/studio/backend/app/services/artifact_registry.py:build_publish_package
+binds_code: apps/studio/tauri/src/lib.rs:select_directory · apps/studio/tauri/src/lib.rs:reveal_in_file_manager · apps/studio/tauri/src/sidecar.rs:SidecarManager · apps/studio/frontend/src/api/client.ts:writeSkillFile · apps/studio/backend/app/services/artifact_registry.py:build_publish_package
 units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-drilldown, publish-artifact-autocommit, local-history-snapshot, copilot-session-persistence]
 ---
 
@@ -60,8 +60,10 @@ units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-dril
 | sidecar gate | 旧 non-fullscreen gate 引用需对齐 D10 ⚠️ | shell 即时渲染，sidecar 错误局部显示 |
 > **验"是否按目标改了"**：1. 唯一写者；2. 打包写者；3. sidecar gate。
 
+> 修订(2026-08-29,J-X.4):`open_in_cursor` 自 binds_code 与主路径移除——它是 #196(2026-06-23)删除的 D3 外部 IDE 联动死代码,本文此前一直滞后引用;删除是刻意退役,非缺口。
+
 ## 读代码主路径提示
-`apps/studio/tauri/src/lib.rs:select_directory` → `apps/studio/tauri/src/lib.rs:reveal_in_file_manager` → `apps/studio/tauri/src/lib.rs:open_in_cursor` → `apps/studio/tauri/src/sidecar.rs:SidecarManager` → `apps/studio/frontend/src/api/client.ts:writeSkillFile` → `apps/studio/backend/app/services/artifact_registry.py:build_publish_package`。
+`apps/studio/tauri/src/lib.rs:select_directory` → `apps/studio/tauri/src/lib.rs:reveal_in_file_manager` → `apps/studio/tauri/src/sidecar.rs:SidecarManager` → `apps/studio/frontend/src/api/client.ts:writeSkillFile` → `apps/studio/backend/app/services/artifact_registry.py:build_publish_package`。
 
 > 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#04-platform-native-fs)（迁移期安全网，代码实现验证后删）。
 

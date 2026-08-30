@@ -1,5 +1,7 @@
 # skill-compilation (engine) — Baseline (当下代码实现逻辑)
 
+> 注(2026-08-29,J-X.4):本文引用的 `docs.backup-2026-05-20/` 历史树已删除(git 历史即归档,沿用 2026-08-12「不另存 _archive」裁决);其下路径与行号均指删除前最后版本,`git log -- <路径>` 可寻。
+
 > **Status**: Filled by a1 (Codex), 2026-05-20
 > **Scope**: V2.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略
 > **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
@@ -30,7 +32,7 @@ Studio 画布或编辑器可能间接依赖编译结果，但本 baseline 描述
 
 `SkillLoader.compile_skill()` 是实际编译器主体，定义在 `packages/graph-agent/src/graph_agent/core/loader.py:142`。第一步是 `_guard_v21_root(root)`，位置是 `packages/graph-agent/src/graph_agent/core/loader.py:144`。这个守卫要求入口必须是目录，不能是旧的根级 `SKILL.md` 单文件，因为 `_guard_v21_root` 在 `packages/graph-agent/src/graph_agent/core/loader.py:256` 到 `packages/graph-agent/src/graph_agent/core/loader.py:272` 明确检查目录存在、`GRAPH.md` 存在、`phases/` 存在且至少有 phase 子目录。
 
-如果 skill root 里存在旧 schema 2.0 风格的根级 `SKILL.md`，编译器会报 `[F-v21-route]`，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:262` 到 `packages/graph-agent/src/graph_agent/core/loader.py:264`。这就是 audit 里说当前真实支持的是目录型 V2.1 skill，而不是单文件 `SKILL.md` 的原因，背景见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:37`。
+如果 skill root 里存在旧 schema 2.0 风格的根级 `SKILL.md`，编译器会报 `[F-v21-route]`，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:262` 到 `packages/graph-agent/src/graph_agent/core/loader.py:264`。这就是 audit 里说当前真实支持的是目录型 V2.1 skill，而不是单文件 `SKILL.md` 的原因，背景见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:37`。
 
 ### `GRAPH.md` 解析和 manifest 构建
 
@@ -147,15 +149,15 @@ cache 默认目录是 `Path.home() / ".cache" / "graph-agent-v21"`，见 `packag
 
 ### cache snapshot 现状和 P1-1/P2-2
 
-audit P1-1 指出 cache hit 会丢 `subagents_by_phase` 和 `phase_tokens`，问题位置见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:221`。当前代码符合这个描述：`_dehydrate_compiled_skill()` 只写 `raw`、`manifest`、`nodes`，见 `packages/graph-agent/src/graph_agent/core/cache.py:84` 到 `packages/graph-agent/src/graph_agent/core/cache.py:99`；`_rehydrate_compiled_skill()` 只恢复 `actions` 和 `tools`，并构造 `CompiledSkill(raw, manifest, nodes, actions, tools)`，见 `packages/graph-agent/src/graph_agent/core/cache.py:102` 到 `packages/graph-agent/src/graph_agent/core/cache.py:126`。它没有传 `subagents_by_phase` 或 `phase_tokens`，所以 dataclass 默认空值会生效。
+audit P1-1 指出 cache hit 会丢 `subagents_by_phase` 和 `phase_tokens`，问题位置见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:221`。当前代码符合这个描述：`_dehydrate_compiled_skill()` 只写 `raw`、`manifest`、`nodes`，见 `packages/graph-agent/src/graph_agent/core/cache.py:84` 到 `packages/graph-agent/src/graph_agent/core/cache.py:99`；`_rehydrate_compiled_skill()` 只恢复 `actions` 和 `tools`，并构造 `CompiledSkill(raw, manifest, nodes, actions, tools)`，见 `packages/graph-agent/src/graph_agent/core/cache.py:102` 到 `packages/graph-agent/src/graph_agent/core/cache.py:126`。它没有传 `subagents_by_phase` 或 `phase_tokens`，所以 dataclass 默认空值会生效。
 
-audit P2-2 指出 cache 默认写 HOME 且写失败没有降级，问题位置见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:434`。当前 `get_cache_dir()` 和 `save_to_cache()` 的实现分别在 `packages/graph-agent/src/graph_agent/core/cache.py:18` 与 `packages/graph-agent/src/graph_agent/core/cache.py:45`，确实没有把写失败包装成 no-cache 行为。
+audit P2-2 指出 cache 默认写 HOME 且写失败没有降级，问题位置见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:434`。当前 `get_cache_dir()` 和 `save_to_cache()` 的实现分别在 `packages/graph-agent/src/graph_agent/core/cache.py:18` 与 `packages/graph-agent/src/graph_agent/core/cache.py:45`，确实没有把写失败包装成 no-cache 行为。
 
 ### A7/A8 的当前覆盖边界
 
-audit A7 说 agent phase / subagent `SKILL.md` 头部缺少必须声明的 phase-level `io` dict，位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:769`。当前 `SkillNodeAST` 只要求 `system_prompt`、`exit_contract`、`tools`、`subagents`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:83` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:90`；没有 phase-level `io` 字段。因此当下实现只有根级 `io/inputs.json` / `io/outputs.json`，没有每个 agent phase 自己的输入输出字典。
+audit A7 说 agent phase / subagent `SKILL.md` 头部缺少必须声明的 phase-level `io` dict，位置是 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:769`。当前 `SkillNodeAST` 只要求 `system_prompt`、`exit_contract`、`tools`、`subagents`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:83` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:90`；没有 phase-level `io` 字段。因此当下实现只有根级 `io/inputs.json` / `io/outputs.json`，没有每个 agent phase 自己的输入输出字典。
 
-audit A8 说需要图级 IO 数据流校验，位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:812`。当前实现有拓扑校验、JSON Schema 合法性校验、LOGIC action 写键校验，但没有检查 "每个 phase required input 是否由 initial inputs 或 upstream outputs 提供" 这种整图数据流。代码证据是 `_validate_graph_topology()` 只处理 phase id/src/depends_on/环/孤岛/src 路径，见 `packages/graph-agent/src/graph_agent/core/loader.py:730` 到 `packages/graph-agent/src/graph_agent/core/loader.py:771`；`_validate_io_schema()` 只校验 schema 文件自身，见 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。
+audit A8 说需要图级 IO 数据流校验，位置是 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:812`。当前实现有拓扑校验、JSON Schema 合法性校验、LOGIC action 写键校验，但没有检查 "每个 phase required input 是否由 initial inputs 或 upstream outputs 提供" 这种整图数据流。代码证据是 `_validate_graph_topology()` 只处理 phase id/src/depends_on/环/孤岛/src 路径，见 `packages/graph-agent/src/graph_agent/core/loader.py:730` 到 `packages/graph-agent/src/graph_agent/core/loader.py:771`；`_validate_io_schema()` 只校验 schema 文件自身，见 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。
 
 ### 当前编译阶段不会执行的事情
 

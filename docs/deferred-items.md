@@ -178,6 +178,7 @@
 - **2026-06-22 复核（仍阻塞，证据更新）**: `cargo update -p glib --precise 0.20.0` 实测报错——`gtk 0.18.2` 要求 `glib = "^0.18"`，由 `tauri 2.11.1` 锁定（链：glib←atk/gtk 0.18.2←muda/tao/webkit2gtk←tauri）。补充：glib **仅 Linux 构建用到**（macOS 走 WKWebView，`cargo tree -i glib` 默认 target 为空），实际影响面更低。本轮 2026-06-22 又一批 35 条 dependabot 漏洞（npm 30 + pip 4 + rust 1）已清掉 npm/pip 全部 34 条，仅此 1 条（GHSA-wrw7-89jp-8q8g）受上游栈约束阻塞；PM 决定继续 deferred 跟踪、不 dismiss 告警，待 tauri 升级 GTK 0.20 栈再随之修复。
 
 ### DEF-017 — mvp0 `04-subgraph-md-spec` 退役受「引用未清零」阻塞（PM 2026-06-05 三步）
+- **已了结(2026-08-29,J-X.4 分叉副本收敛)**:整棵 `docs/engine/mvp0/skill-spec/` 留底树删除(git 历史即归档,沿用 2026-08-12「不另存 _archive」裁决),三步退役被整树退役取代。当年三项阻塞均已消解:`error_registry.py` 的 doc 指针已在 2026-08-19 错误码收敛(#868 前后)中不再指 skill-spec;`spec/contract_map.yaml` 现指权威树 `docs/engine/skill-spec/`;`test_contract_hash_lock.py` 改钉权威树 `00-FORMAT-GROUND-TRUTH.md`(同 PR)。
 - **日期**: 2026-06-05
 - **事项**: 按 PM 三步退役 `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`：① 去 FROZEN；② 清零引用后盖「废弃」；③ 审计 mvp1 子图设计、绝对没问题后盖 FROZEN。
 - **阻塞（违反第②步「绝对没有引用 mvp0」，grep 全库核实）**：

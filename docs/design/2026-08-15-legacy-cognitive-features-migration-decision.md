@@ -74,7 +74,7 @@ ask_clarification、log_ambiguity、update_working_memory、query_working_memory
 
 七项功能的用户原始决策不在本仓的 Claude Code 会话记录里(本仓会话最早只到 2026-07-02),而在三处更早的档案:
 
-1. **2026-04-27 九轮设计定稿**:`docs.backup-2026-05-20/archive/superpowers_history/2026-04-27-prompt-schema-9round-final-plan.md`。本文中「九轮定稿」「Round N」「P0-x」「P1-x」均指该文档内的轮次与决议编号。
+1. **2026-04-27 九轮设计定稿**:git 历史 `docs.backup-2026-05-20/archive/superpowers_history/2026-04-27-prompt-schema-9round-final-plan.md`。本文中「九轮定稿」「Round N」「P0-x」「P1-x」均指该文档内的轮次与决议编号。
 2. **plan.md**:随 root import 携带进本仓的规划文档。「root import」指本仓以上游仓代码为起点的初始导入;root import 之前的开发历史只存在于上游仓。
 3. **.kiro spec 归档**:`.kiro/specs/` 下的工作规格存档。
 

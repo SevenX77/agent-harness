@@ -3,8 +3,9 @@
 The user ruled this directly in the nine-round finalization, Round 8 item 3:
 
     3. phase 间默认强隔离（`messages = []` by-design）+ 按需挖掘机制（context_access opt-in）
-    -- docs.backup-2026-05-20/archive/superpowers_history/
+    -- git history: docs.backup-2026-05-20/archive/superpowers_history/
        2026-04-27-prompt-schema-9round-final-plan.md:79
+       (backup tree deleted 2026-08-29, J-X.4 — git history is the archive)
 
 and the current migration decision re-states it as binding
 (`docs/design/2026-08-15-legacy-cognitive-features-migration-decision.md:184`:

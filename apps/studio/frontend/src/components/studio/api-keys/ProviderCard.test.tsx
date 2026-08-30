@@ -625,10 +625,10 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(testButton).not.toContain('data-variant="secondary"')
     expect(html).toContain("https://api.qnaigc.com/v1")
     expect(html).toContain("Protocol: OpenAI-compatible")
-    expect(html).toContain("OpenAI / api.qnaigc")
-    expect(html).not.toContain("OpenAI / api.qnaigc.com")
-    expect(html).not.toContain("OpenAI / api.qnaigc Connected")
-    expect(html).not.toContain("OpenAI / api.qnaigc Failed")
+    expect(html).toContain("api.qnaigc · OpenAI-compatible")
+    expect(html).not.toContain("api.qnaigc.com · OpenAI-compatible")
+    expect(html).not.toContain("OpenAI-compatible Connected")
+    expect(html).not.toContain("OpenAI-compatible Failed")
   })
 
   it("shows base URL reachability on each URL row instead of the shared label", () => {

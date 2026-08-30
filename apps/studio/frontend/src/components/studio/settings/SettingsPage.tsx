@@ -16,6 +16,7 @@ import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageController, SettingsPageProps, SettingsPageViewProps, SettingsTab } from "./types"
 import { syncLlmRolesCache } from "../llm-roles-cache"
 import { errorMessage } from "@/utils/errors"
+import { transportLabel } from "@/lib/route-labels"
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
@@ -1398,7 +1399,9 @@ function providerEndpointStepLabel(
   total: number,
 ): string {
   const ordinal = total > 1 ? `${index + 1}/${total} ` : ""
-  return `Testing ${ordinal}${providerTypeShortName(draft.provider_type)} / ${compactProviderHost(draft.base_url)}`
+  // J-01.L (R3-10): provider identity (host) first, protocol family as the
+  // trailing annotation — same vocabulary as the endpoint chips (transportLabel).
+  return `Testing ${ordinal}${transportLabel(draft.provider_type, draft.base_url || draft.id)}`
 }
 
 function providerEndpointProgressLabel(
@@ -1444,13 +1447,6 @@ function providerEndpointFailureSummary(
     return `Checked ${baseUrlStepCount} ${baseUrlStepLabel} and tested ${lines.length} protocol endpoints; none generated successfully. ${preview}${omitted}`
   }
   return `All ${lines.length} endpoints tested; none generated successfully. ${preview}${omitted}`
-}
-
-function providerTypeShortName(providerType: ProviderDraft["provider_type"]): string {
-  if (providerType === "anthropic_compatible") return "Anth"
-  if (providerType === "google_genai") return "Gemini"
-  if (providerType === "ark_runtime") return "Ark"
-  return "OpenAI"
 }
 
 function compactProviderHost(value: string): string {

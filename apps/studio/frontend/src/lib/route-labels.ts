@@ -34,21 +34,29 @@ export function hostLabel(value: string): string {
   }
 }
 
-/** The protocol as a word, in the same vocabulary the API Keys page uses. */
-export function protocolShortLabel(protocol: ProviderType | null | undefined): string {
-  if (protocol === 'anthropic_compatible') return i18n.t('apiKeys.card.protocolShort.anthropic')
-  if (protocol === 'google_genai') return i18n.t('apiKeys.card.protocolShort.gemini')
-  if (protocol === 'openai_compatible') return i18n.t('apiKeys.card.protocolShort.openai')
-  if (protocol === 'ark_runtime') return i18n.t('apiKeys.card.protocolShort.ark')
-  return i18n.t('apiKeys.card.protocolShort.unknown')
+/** The protocol FAMILY as an annotation ("OpenAI-compatible"), never a vendor name. */
+export function protocolFamilyLabel(protocol: ProviderType | null | undefined): string {
+  if (protocol === 'anthropic_compatible') return i18n.t('apiKeys.card.protocolFamily.anthropic')
+  if (protocol === 'google_genai') return i18n.t('apiKeys.card.protocolFamily.gemini')
+  if (protocol === 'openai_compatible') return i18n.t('apiKeys.card.protocolFamily.openai')
+  if (protocol === 'ark_runtime') return i18n.t('apiKeys.card.protocolFamily.ark')
+  return i18n.t('apiKeys.card.protocolFamily.unknown')
 }
 
-/** One transport, said the way the API Keys page says it: `OpenAI / api.qnaigc`. */
+/**
+ * One transport: `api.deepseek · OpenAI-compatible`.
+ *
+ * J-01.L (批示轮三 R3-10): the FIRST name is the provider's identity — its
+ * host — and the protocol family is a trailing annotation. The old order
+ * (`OpenAI / api.deepseek.com`) put the protocol family's vendor word in the
+ * first-name position, so a DeepSeek official card read "OpenAI" to the user
+ * (fresh-journey screenshots f09/f13).
+ */
 export function transportLabel(
   protocol: ProviderType | null | undefined,
   baseUrl: string | null | undefined,
 ): string {
-  return `${protocolShortLabel(protocol)} / ${hostLabel(baseUrl ?? '')}`
+  return `${hostLabel(baseUrl ?? '')} · ${protocolFamilyLabel(protocol)}`
 }
 
 export interface RouteLabelInput {

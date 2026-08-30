@@ -164,11 +164,19 @@ role: workflow-record
 - **标签怎么取**：把 §1.2 的**命名防撞**规则从「一个 endpoint id」推广到「一份列表」——从 provider
   名开始，只补**在同名兄弟之间确实有差异**的字段，顺序是 transport（协议 / 主机）在前、model id
   在后；两者都不足以分开时兜底 route id。同名兄弟之间**没有**差异的字段一概不写:在一行会被截断
-  的列表里，重复每一行都相同的 `OpenAI / api.qnaigc` 花掉的正是那个唯一有差异的字段所需的宽度。
+  的列表里，重复每一行都相同的 `api.qnaigc · OpenAI-compatible` 花掉的正是那个唯一有差异的字段所需的宽度。
   唯一性是这条规则的**后置条件**,不是尽力而为——一份交回两个相同标签的列表没有回答它存在的那个问题。
 - **一处实现，多处使用**：`frontend/src/lib/route-labels.ts::distinguishingRouteLabels`。transport
-  怎么念（`OpenAI / api.qnaigc`）也在这里,由 API Keys 页原来那两个私有函数**搬**过来——两处各念一套,
+  怎么念也在这里,由 API Keys 页原来那两个私有函数**搬**过来——两处各念一套,
   就会出现同一条 endpoint 在两屏上叫两个名字。
+- **transport 的念法:首名 = provider 身份(主机),协议家族只作后缀标注**(修订 2026-08-29,
+  批示轮三 R3-10 / J-01.L,推翻本节旧例 `OpenAI / api.qnaigc` 的词序):一条 transport 念作
+  `api.deepseek · OpenAI-compatible`——主机在前,协议家族带 `-compatible` 后缀(zh:「OpenAI 兼容」)
+  跟在后。原词序把协议家族的厂牌词放在首名位,DeepSeek 官方卡的 endpoint chip 与 Test 进度文案
+  首名读作「OpenAI」,Ark 卡同病(fresh 旅程截图 f09/f13,用户在 DeepSeek 卡里读到别家名字,
+  认知维度缺陷)。协议家族是架构事实,可以展示,但**永远不占首名位**;实现仍单点在
+  `route-labels.ts::transportLabel`,全部消费者(endpoint chip / Available Models 侧栏 /
+  compare 下拉 / Test 进度文案)同一念法。
 - **底层材料**：Studio 后端的 `_provider_model_option` 补出 `base_url` 与 `protocol`。在此之前
   投影里根本没有这两样，所以**任何**界面都不可能说清一条 route 是哪一条——这是先修的那一层。
 - **弃用区按 route 一行一条**：它每一行都带自己的 re-probe 按钮（本节「弃用区」一条），而 re-probe

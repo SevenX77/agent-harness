@@ -34,7 +34,7 @@
 - predict 设计: `docs/studio/mvp1/02_capabilities/predict.md`
 - golden 机制(含状态机/创建两路/失效规则/测试关键点): `docs/studio/mvp1/02_capabilities/golden-eval.md`
 - run 设计: `docs/studio/mvp1/02_capabilities/run-execution.md`
-- 引擎物理/格式契约: `docs/engine/mvp0/skill-spec/`、`docs/engine/mvp0/workspace-spec/baseline.md`
+- 引擎物理/格式契约: `docs/engine/skill-spec/`(2026-08-29 改指,原 mvp0 副本已删)、`docs/engine/mvp0/workspace-spec/baseline.md`
 
 > 若你能读到这些文件,请先简述你读到的"golden 新模型"要点再继续,确认没读偏。
 

@@ -1,5 +1,7 @@
 # agent-cognitive-architecture (architecture) — Baseline (当下代码实现逻辑)
 
+> 注(2026-08-29,J-X.4):本文引用的 `docs.backup-2026-05-20/` 历史树已删除(git 历史即归档,沿用 2026-08-12「不另存 _archive」裁决);其下路径与行号均指删除前最后版本,`git log -- <路径>` 可寻。
+
 > **Status**: Filled by a1 (Codex), 2026-05-20; PR G / round-18 engine cleanup notes synced 2026-05-26
 > **Scope**: baseline: 旧 GraphAgentHarness 单文件线性控制流; MVP0: V0.3.0 LangGraph DAG + LOGIC/SUBGRAPH/Agent 三态心智模型。Studio/root `skills/` corpus 的 V2.1 残留属于 PR G §10 Deferred。
 > **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
@@ -46,7 +48,7 @@ High-002 当前必须暴露：前端 Copilot WebSocket 发送消息时只构造 
 
 Copilot 的 context update 是 REST，chat 是 WebSocket。context update model 是 `ContextUpdateRequest`，见 `apps/studio/backend/app/models/copilot.py:73` 到 `apps/studio/backend/app/models/copilot.py:80`；chat model 是 `CopilotWsRequestPayload`，见 `apps/studio/backend/app/models/copilot.py:21` 到 `apps/studio/backend/app/models/copilot.py:27`。两者分开使得“当前视图”可以进入 prompt，但“用户这句话明确提到哪些文件/节点/trace”仍没有结构化状态。
 
-所以 High-002 的前端结论不是“Copilot 没上下文”，而是“Copilot 有 view context，但没有 mentions payload contract”。旧审计指出的 file mention 形态没有在 `useCopilot.ts` 或 `CopilotWsRequestPayload` 中落地，见 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:29` 到 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:36`。
+所以 High-002 的前端结论不是“Copilot 没上下文”，而是“Copilot 有 view context，但没有 mentions payload contract”。旧审计指出的 file mention 形态没有在 `useCopilot.ts` 或 `CopilotWsRequestPayload` 中落地，见 git 历史 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:29` 到 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:36`。
 
 ## 后端功能
 
@@ -152,7 +154,7 @@ Copilot 的 view context 使用普通 dict 缓存，更新入口是 `set_view_co
 
 与 tracing：V0.3.0 callbacks / trace 事件未完全接入会导致 Studio trace 不能完整覆盖 DAG runtime, 见 [tracing-and-observability baseline](../../engine/tracing-and-observability/baseline.md)。这影响用户对 agent cognition 的观察能力：看到事件不等于看到完整 LangGraph state transition。
 
-与 Copilot High-002 audit：audit 要求暴露 file mentions payload 缺失，见 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:29` 到 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:36`。本文件在 UI、前端、API、Data Model 四个维度都明确写出：当前只有 view context 和 user message/model override，没有 mentions。
+与 Copilot High-002 audit：audit 要求暴露 file mentions payload 缺失，见 git 历史 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:29` 到 `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md:36`。本文件在 UI、前端、API、Data Model 四个维度都明确写出：当前只有 view context 和 user message/model override，没有 mentions。
 
 与 legacy Harness：旧 Harness 不是历史文档残影，而是当前 public code surface。`Harness = GraphAgentHarness` 在 `packages/graph-agent/src/graph_agent/core/harness.py:1150`，runner legacy path 仍加载 cached Harness，见 `packages/graph-agent/src/graph_agent/core/runner.py:288` 到 `packages/graph-agent/src/graph_agent/core/runner.py:307`。所以所有 architecture 结论都必须保留“并存”而不是“已迁移完成”的表述。
 

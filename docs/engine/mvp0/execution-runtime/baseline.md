@@ -1,5 +1,7 @@
 # execution-runtime (engine) — Baseline (当下代码实现逻辑)
 
+> 注(2026-08-29,J-X.4):本文引用的 `docs.backup-2026-05-20/` 历史树已删除(git 历史即归档,沿用 2026-08-12「不另存 _archive」裁决);其下路径与行号均指删除前最后版本,`git log -- <路径>` 可寻。
+
 > **Status**: Filled by a1 (Codex), 2026-05-20
 > **Scope**: Graph 执行装配调度、主入口生命周期 run_skill、节点重试、subagent / call_subgraph 动态工具注入 (audit A4/A5)
 > **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
@@ -24,7 +26,7 @@ React 前端不会直接调用 `assemble_graph()` 或 LangGraph `graph.invoke()`
 
 V0.3 skill root 的真实执行分支是 `_run_v030_skill_dict()`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:468` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。它做的事很直接：接收 callbacks 参数、导入 `compile_skill` 和 `assemble_graph`、根据 `mock_llm` 得到 `chat_model`、编译 skill、装配 graph、再调用 `graph.invoke()`。
 
-这条链路就是 audit 总结的 V2.1 主路径：`run_skill -> compile_skill -> SkillLoader.compile_skill -> assemble_graph -> LangGraph graph.invoke`，背景见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:31`。`CompiledSkill` 的结构和构建细节见 [skill-compilation/baseline.md#后端功能](../skill-compilation/baseline.md#后端功能)。
+这条链路就是 audit 总结的 V2.1 主路径：`run_skill -> compile_skill -> SkillLoader.compile_skill -> assemble_graph -> LangGraph graph.invoke`，背景见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:31`。`CompiledSkill` 的结构和构建细节见 [skill-compilation/baseline.md#后端功能](../skill-compilation/baseline.md#后端功能)。
 
 ### 初始 state
 
@@ -78,11 +80,11 @@ LOGIC node 是确定性 Python action 节点。`_build_logic_node()` 定义在 `
 
 SKILL node 先收集业务 tools、subagent 动态 tools、critic/reviewer/auditor 类 framework tools，再构建 `finish_task`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:226`。`finish_task` 第一次出现时需要定义：它是 LLM phase 的结束工具，LLM 把 Markdown 结果交给它，engine 解析并在成功时写入 `data[phase_id]`。
 
-如果 `chat_model` 是 `None`，SKILL node 会直接抛 `RuntimeError("[F-v21-graph] SKILL phase requires chat_model")`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。这对应 audit P0-1：public `run_skill()` 不传 mock 或真实 model 时，V2.1 SKILL phase 路径跑不起来，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:123`。
+如果 `chat_model` 是 `None`，SKILL node 会直接抛 `RuntimeError("[F-v21-graph] SKILL phase requires chat_model")`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。这对应 audit P0-1：public `run_skill()` 不传 mock 或真实 model 时，V2.1 SKILL phase 路径跑不起来，见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:123`。
 
 有模型时，SKILL node 初始化 `flow` 和 `messages`，把 `SystemMessage(content=phase_ast.system_prompt)` 放在 messages 开头，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:236` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:240`。然后最多循环 `MAX_REACT_TURNS = 8` 轮，常量在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:37`。
 
-每轮会 `inject_exit_contract(messages, phase_ast.exit_contract)`，调用模型，再把 `prompt_messages` 和 response 一起保存回 `messages`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:246`。这就是 audit P1-3 的当前现状：exit_contract 会进入历史并在下一轮重复累积，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:322`。
+每轮会 `inject_exit_contract(messages, phase_ast.exit_contract)`，调用模型，再把 `prompt_messages` 和 response 一起保存回 `messages`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:246`。这就是 audit P1-3 的当前现状：exit_contract 会进入历史并在下一轮重复累积，见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:322`。
 
 如果模型调用普通 tool，runtime 直接 `tool.invoke(call_args)`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:266` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:267`。如果模型调用 subagent tool，则走 `_invoke_subagent_tool_t21()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:256` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:265`。
 
@@ -98,15 +100,15 @@ runtime 侧先把 `compiled.subagents_by_phase` 映射成 tool name，代码在 
 
 批量执行由 `_invoke_subagent_many_t24()` 完成，默认并发是 3，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:418` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:479`。单个子任务 `_invoke_subagent_once_t23()` 的初始 child data 是 `{**before_data, **input_data}`，也就是父图全量 data 加显式 input，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:392` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:410`。
 
-audit P1-2 指出 subagent depth 只写入 child config metadata，没有写回 child flow，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:277`。当前代码证据是 `_subagent_runnable_config()` 在 metadata 写 `"subagent_depth": depth + 1`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`；但 `_invoke_subagent_once_t23()` 传给子图的 `"flow"` 仍是 `parent_state.get("flow", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:404`。
+audit P1-2 指出 subagent depth 只写入 child config metadata，没有写回 child flow，见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:277`。当前代码证据是 `_subagent_runnable_config()` 在 metadata 写 `"subagent_depth": depth + 1`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`；但 `_invoke_subagent_once_t23()` 传给子图的 `"flow"` 仍是 `parent_state.get("flow", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:404`。
 
 ### `call_subgraph` 的当前状态
 
 `call_subgraph` 第一次出现时需要定义：它是指 "LLM 在 SKILL phase 内主动调用一个完整 graph skill" 的工具能力，和固定流程中的 SUBGRAPH phase 不同。当前代码有 SUBGRAPH phase，也有 subagent tool，但没有独立的 `call_subgraph_<name>` 动态工具族。
 
-audit A5 把这个缺口列为 agent phase 需要 call_subgraph 工具，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:675`。当前 `_build_skill_node()` 只把 business tools、critic tools、`finish_task` 放进 `all_tools`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:227`；subagent 工具来自 `compiled.subagents_by_phase`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:301` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:308`。没有同级的 subgraphs registry 或 `call_subgraph` 注入。
+audit A5 把这个缺口列为 agent phase 需要 call_subgraph 工具，见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:675`。当前 `_build_skill_node()` 只把 business tools、critic tools、`finish_task` 放进 `all_tools`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:227`；subagent 工具来自 `compiled.subagents_by_phase`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:301` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:308`。没有同级的 subgraphs registry 或 `call_subgraph` 注入。
 
-audit A4 说 subagent 抽象层级过重，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:625`。当前实现确实要求 subagent path 是完整 skill root 且有 `GRAPH.md`，编译期证据在 `packages/graph-agent/src/graph_agent/core/loader.py:477` 到 `packages/graph-agent/src/graph_agent/core/loader.py:482`，runtime 也按完整图编译和装配，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:388`。
+audit A4 说 subagent 抽象层级过重，见 git 历史 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:625`。当前实现确实要求 subagent path 是完整 skill root 且有 `GRAPH.md`，编译期证据在 `packages/graph-agent/src/graph_agent/core/loader.py:477` 到 `packages/graph-agent/src/graph_agent/core/loader.py:482`，runtime 也按完整图编译和装配，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:388`。
 
 ## API
 

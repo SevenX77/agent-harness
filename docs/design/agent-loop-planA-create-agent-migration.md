@@ -4,7 +4,7 @@ created: 2026-06-01
 updated: 2026-06-02
 owner: Engine (graph-agent)
 aligns_with: ../../.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md (gateway A')
-ground_truth: packages/graph-agent 实际代码 + docs/engine/mvp0/skill-spec (FROZEN)
+ground_truth: packages/graph-agent 实际代码 + docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md (FROZEN;2026-08-29 改指——原 docs/engine/mvp0/skill-spec 留底树已删,J-X.4)
 ---
 
 # Agent Loop 迁回 `create_agent` + middleware — 决策记录（Plan A = 未执行的 PR β）
@@ -15,7 +15,7 @@ ground_truth: packages/graph-agent 实际代码 + docs/engine/mvp0/skill-spec (F
 >
 > **与 gateway 的关系**：本文管 agent loop 的**编排**(手写 ReAct → create_agent + middleware)；gateway 走 A'（`GatewayChatModel` 编排外壳内换原生 ChatX，管单次**调用**）。create_agent 的 `model=` 吃的就是 `GatewayChatModel`，两条迁移方向一致、互补。engine 与 gateway 已独立，文档也已分开（gateway 文档在 `docs/graph-agent-gateway/`，不在本范围）。
 
-铁律：ground truth 只认 `packages/graph-agent` 实际代码 + `docs/engine/mvp0/skill-spec`（FROZEN）。
+铁律：ground truth 只认 `packages/graph-agent` 实际代码 + `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`（FROZEN;2026-08-29 改指,原 mvp0 树已删）。
 
 ---
 
@@ -91,7 +91,7 @@ ground_truth: packages/graph-agent 实际代码 + docs/engine/mvp0/skill-spec (F
 - **丰富版**（`tools/md_to_json.py`，684 行，从 AI-story-forge V1 移植，完整保留）：
   - `diagnose`（逐 item Pydantic 校验）、`error_kind: Literal["structural","semantic"]`（`:108`）、`DiagnosticReport.semantic_only`（`:140`）、`SemanticValidationError`。
   - 决策逻辑 `md_to_json()`：全合格→返回（`:557`）；**`:560` `if report.semantic_only:` → `:566 raise SemanticValidationError`**（语义错如"评分:好"→int **不进 patch、打回主 agent 重生成**）；仅"结构错"才 `:571 _extract_md_excerpt` + `:578 run_skill(md-patch)` 做 **surgical 修复**（只补失败的 ## 块）。
-  - 还有 `schema_to_type_dict`（教 LLM 字段类型约束，正是 `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md:329` 抱怨"prompt 没教格式"的解药）。
+  - 还有 `schema_to_type_dict`（教 LLM 字段类型约束，正是 git 历史 `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md:329`(树已删,2026-08-29)抱怨"prompt 没教格式"的解药）。
 - **简化版**（`cognitive/md2json.py`，185 行）：只有 `parse_finish_markdown:26` + `_coerce_value:88` + jsonschema 校验（`:36-38`），**无 structural/semantic 分类**。
 
 **问题所在**：**live finish_task 接的是简化版**——`finish_task.py:13` + `graph_assembler.py:33` 用 `cognitive/md2json.py`；`graph_assembler.py:645` 把所有 validation_error 一律送 `LLMMdPatchClient` patcher → "评分:好" 也被送去格式修复，而 patcher prompt 只说"修格式和机械类型"、**无反捏造守卫**（`md_patch.py:74-82`）→ 可能瞎编个数字骗过 schema。丰富版 `md_to_json()` 的决策逻辑成了**孤儿**（只有底层 `parse_md` 被 `cognitive_flow.py:41` / `cognitive/finish.py` / md-patch skill 复用）。
@@ -179,7 +179,7 @@ ground_truth: packages/graph-agent 实际代码 + docs/engine/mvp0/skill-spec (F
 **用户的洞察**：
 > "既然rubric能够稳定拦截, 那么提示词就不用一直强调要调用finish task了吧?"
 
-**决策**：§6 的 after_agent 闸结构性保证"不交不让退"后，prompt **不必反复唠叨**"记得调 finish_task"；只需**定义一次**（怎么提交 + 输出格式）。但"输出格式/schema"说明**不可全删**（校验需结构化输入）。**注意：动 prompt = 动 spec 06（FROZEN，`docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md:53,67`），是单独的解冻决策项。**
+**决策**：§6 的 after_agent 闸结构性保证"不交不让退"后，prompt **不必反复唠叨**"记得调 finish_task"；只需**定义一次**（怎么提交 + 输出格式）。但"输出格式/schema"说明**不可全删**（校验需结构化输入）。**注意：动 prompt = 动 spec 06（FROZEN,git 历史 `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md:53,67`,树已删 2026-08-29），是单独的解冻决策项。**
 
 ---
 

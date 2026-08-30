@@ -45,6 +45,8 @@ Studio 每验证一次 provider,就沉淀一条"哪个公开服务的哪个模�
 
 **对话框交互**:复用 `@/components/ui/dialog`(本仓 shadcn 封装,组件 `apps/studio/frontend/src/components/welcome/CommunitySharingConsentDialog.tsx`)。两个按钮——"开启共享"写 `"shared"`,"暂不开启"写 `"declined"`——都是合法的最终答案,因此**没有第三种关闭方式**:不给右上角 X(`showCloseButton={false}`)、不允许点遮罩或按 Escape 关闭。写法沿用本仓已有的必答弹窗惯例(`ConflictDialog`):`<Dialog open={...}>` 不传 `onOpenChange`,Radix Dialog 在这种受控模式下内部的 Escape/outside-dismiss 处理器没有回调可调,因此不生效。答完之后 `community_sharing_choice` 离开 `"unset"`,对话框的开启条件(`choice === "unset" && !isLoading`)恒为假,永不再弹;`isLoading` 那一半防止设置仍在加载时,乐观的默认快照(也读作 `"unset"`)让对话框对一个早已回答过的用户一闪而现。
 
+**答后确认(2026-08-29 补,J-01.J)**:两个按钮都立即冲刷防抖保存(`useAppSettings.save()`),并在**保存真正落盘之后**弹一条 `toast.success` 确认——"开启共享"确认已开启,"暂不开启"确认保持关闭并指路 General 页开关。确认以保存结果为准,不以点击为准:`save()` 失败时解析为 `null`,此时**不弹成功确认**(失败提示由 autosave 自己的错误 toast 负责,成功与失败不许同屏各说各话)。理由:这是全应用唯一一个"回答即落盘的持久选择",探测/编译/保存全都有结果反馈,唯独它没有,用户答完无从知道选择是否生效(J-01.J,PROBLEM_LEDGER.md)。
+
 **界面陈述必须与实际行为一致**:API Keys 页曾经用 `ProbeCatalogSharingSummary`(旧 `apps/studio/backend/app/models/llm_config.py`)硬编码"Local only"徽章与"MVP1 does not auto-upload"文案——`mode`/`auto_upload_enabled`/`message` 都是常量默认值,router 里没有任何覆盖点会去改写它们,却与同一进程里 `_autoshare_after_probe_best_effort` 的真实上传行为直接矛盾。修复时这个模型被整体删除而不是修补(仓规"不留一份并行真值"):唯一真相收敛回 `community_sharing_choice`,前端 API Keys 页与 General 页的开关对同一个状态给出一致陈述,后端不再维护第二份需要手动保持同步的投影。
 
 ### 3.1 General — 身份与产物路径

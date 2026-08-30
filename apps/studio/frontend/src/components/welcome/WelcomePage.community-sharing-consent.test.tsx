@@ -13,6 +13,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { WelcomePage } from './WelcomePage'
 import type { AppSettings } from '../../api/types'
 
@@ -20,6 +21,9 @@ const appSettingsMocks = vi.hoisted(() => ({
   isLoading: false,
   communitySharingChoice: 'unset' as AppSettings['community_sharing_choice'],
   setCommunitySharingChoice: vi.fn(),
+  // J-01.J: the confirmation toast must be driven by the flushed save's real
+  // outcome (settings snapshot = landed, null = failed), never by the click.
+  save: vi.fn(async (): Promise<AppSettings | null> => null),
   // J-02.A: a failed settings read must be distinguishable from a real
   // "unset" snapshot — see the dedicated describe block below.
   error: null as unknown,
@@ -43,7 +47,7 @@ vi.mock('../../hooks/useAppSettings', () => ({
     setLanguage: vi.fn(),
     setCommunitySharingChoice: appSettingsMocks.setCommunitySharingChoice,
     setCliSessions: vi.fn(),
-    save: vi.fn(),
+    save: appSettingsMocks.save,
     error: appSettingsMocks.error,
     lastSaveError: null,
   }),
@@ -177,5 +181,77 @@ describe('WelcomePage community-sharing consent gating', () => {
     })
 
     expect(appSettingsMocks.setCommunitySharingChoice).toHaveBeenCalledWith('declined')
+  })
+})
+
+/**
+ * J-01.J: answering the consent dialog was the one durable choice in the app
+ * with zero feedback — probe, compile and save all toast, this didn't. The
+ * confirmation may only fire after the FLUSHED save lands (save() resolves a
+ * settings snapshot); a failed save (null) already error-toasts inside
+ * performSave and must not also claim success here.
+ */
+describe('WelcomePage community-sharing consent confirmation (J-01.J)', () => {
+  let container: HTMLDivElement
+  let root: Root
+
+  const savedSnapshot = { community_sharing_choice: 'shared' } as AppSettings
+
+  beforeEach(() => {
+    appSettingsMocks.isLoading = false
+    appSettingsMocks.communitySharingChoice = 'unset'
+    appSettingsMocks.error = null
+    appSettingsMocks.setCommunitySharingChoice.mockReset()
+    appSettingsMocks.save.mockReset()
+    appSettingsMocks.save.mockResolvedValue(savedSnapshot)
+    vi.mocked(toast.success).mockReset()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    container.remove()
+    document.body.innerHTML = ''
+  })
+
+  function buttonNamed(pattern: RegExp): HTMLButtonElement | undefined {
+    return [...document.querySelectorAll('button')].find((button) =>
+      pattern.test(button.textContent ?? ''),
+    ) as HTMLButtonElement | undefined
+  }
+
+  async function renderAndAnswer(pattern: RegExp) {
+    act(() => {
+      root.render(<WelcomePage onSelectSkill={vi.fn()} />)
+    })
+    await act(async () => {
+      buttonNamed(pattern)?.click()
+    })
+  }
+
+  it('"Turn on sharing" flushes the save and confirms with a toast', async () => {
+    await renderAndAnswer(/^Turn on sharing$/)
+
+    expect(appSettingsMocks.save).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith('Community sharing is on')
+  })
+
+  it('"Not now" flushes the save and confirms with its own toast', async () => {
+    await renderAndAnswer(/^Not now$/)
+
+    expect(appSettingsMocks.save).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith(
+      'Sharing stays off — you can turn it on anytime in Settings → General',
+    )
+  })
+
+  it('a failed save (null) never claims success', async () => {
+    appSettingsMocks.save.mockResolvedValue(null)
+
+    await renderAndAnswer(/^Turn on sharing$/)
+
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

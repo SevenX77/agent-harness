@@ -331,13 +331,19 @@ function setCliSessions(cliSessions: CliSessionSettings): void {
   updateSettings({ cli_sessions: cliSessions })
 }
 
-async function save(): Promise<AppSettings> {
+/**
+ * Flush the debounced autosave now. Resolves the canonical server snapshot
+ * when the save landed, or `null` when it failed — callers that confirm a
+ * durable choice to the user (e.g. the consent dialog, J-01.J) must gate
+ * their confirmation on a non-null result; the failure toast itself is
+ * already owned by `performSave`.
+ */
+async function save(): Promise<AppSettings | null> {
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null
   }
-  const saved = await performSave(getStoreState().settings)
-  return saved ?? getStoreState().settings
+  return performSave(getStoreState().settings)
 }
 
 /**

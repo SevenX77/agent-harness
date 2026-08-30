@@ -184,6 +184,22 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
     && !appSettings.error
     && appSettings.settings.community_sharing_choice === 'unset'
 
+  // J-01.J (PROBLEM_LEDGER.md): answering this dialog is a durable choice, so it
+  // confirms like every other durable write in the app (probe/compile/save all
+  // toast). The confirmation is gated on the FLUSHED save actually landing —
+  // save() resolves null on failure, and performSave already owns the error
+  // toast for that path, so claiming success here as well would be a lie.
+  const { t: tSettings } = useTranslation('settings')
+  async function answerCommunitySharingConsent(choice: 'shared' | 'declined') {
+    appSettings.setCommunitySharingChoice(choice)
+    const saved = await appSettings.save()
+    if (saved) {
+      toast.success(tSettings(choice === 'shared'
+        ? 'communitySharingConsent.sharedToast'
+        : 'communitySharingConsent.declinedToast'))
+    }
+  }
+
   // Recent is a pure MRU projection (D11/D-1-1): each card is one entry from the
   // Rust native-fs recent_workspaces store, no registry-derived fields and no
   // registry merge.
@@ -507,8 +523,8 @@ export function WelcomePage({ onSelectSkill, onSkillWizardRequested }: WelcomePa
 
       <CommunitySharingConsentDialog
         open={communitySharingConsentOpen}
-        onShare={() => appSettings.setCommunitySharingChoice('shared')}
-        onDecline={() => appSettings.setCommunitySharingChoice('declined')}
+        onShare={() => { void answerCommunitySharingConsent('shared') }}
+        onDecline={() => { void answerCommunitySharingConsent('declined') }}
       />
     </div>
   )

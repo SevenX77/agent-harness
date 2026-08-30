@@ -56,7 +56,9 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   // gets an inline L3 step editor — expand to add / remove / reorder / edit the
   // body's `<step>` blocks right on the canvas (no Properties detour). Logic /
   // subgraph nodes never get it (build-nodes leaves the callbacks undefined).
-  const canEditSteps = kind === 'AGENT' && typeof data.onToggleSteps === 'function' && typeof data.agentBody === 'string'
+  // R3-8: the inline steps are a read-only projection (editing lives in the
+  // editor), so showing them needs only the toggle callback and a body.
+  const canShowSteps = kind === 'AGENT' && typeof data.onToggleSteps === 'function' && typeof data.agentBody === 'string'
   // canvas F7 (4): a SUBGRAPH container reports how far its own graph got, in both
   // states — the chip stays on the board when the container is expanded, so one
   // place carries the count whether the child board is showing or not.
@@ -214,11 +216,11 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           <span className="min-w-0 break-words">Resume unavailable — an upstream edit invalidated this node&apos;s checkpoint</span>
         </div>
       ) : null}
-      {canEditSteps ? (
+      {canShowSteps ? (
         <div className="mt-2">
           <button
             type="button"
-            aria-label={data.isStepsExpanded ? t('node.collapseSteps') : t('node.editSteps')}
+            aria-label={data.isStepsExpanded ? t('node.collapseSteps') : t('node.viewSteps')}
             onClick={(event) => {
               event.stopPropagation()
               data.onToggleSteps?.()
@@ -226,17 +228,14 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
           >
             <ListTree className="size-3" />
-            {data.isStepsExpanded ? t('node.hideSteps') : t('node.editSteps')}
+            {data.isStepsExpanded ? t('node.hideSteps') : t('node.viewSteps')}
           </button>
           {data.isStepsExpanded ? (
             <div
               onClick={(event) => event.stopPropagation()}
               onDoubleClick={(event) => event.stopPropagation()}
             >
-              <AgentStepsInline
-                body={data.agentBody ?? ''}
-                onSave={(nextBody) => data.onStepsSave?.(nextBody)}
-              />
+              <AgentStepsInline body={data.agentBody ?? ''} />
             </div>
           ) : null}
         </div>

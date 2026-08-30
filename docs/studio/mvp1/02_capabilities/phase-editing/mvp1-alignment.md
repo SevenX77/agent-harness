@@ -54,14 +54,15 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 - Status: target-design; current code stale.
 - 归属: capability `phase-editing`; capability `skill-workspace`; region `properties`, `assets`.
 
-### F5. L3 Step Editing
+### F5. L3 Step Projection(原 L3 Step Editing;修订 2026-08-29)
 
-- 机制: agent body 的 steps/actions(正文 XML 结构)以**画布内联子节点**呈现,**在画布上直接拖拽增/删/改/重排**(保留源文本);**不在 Properties 做**——Properties 只管 frontmatter 属性。这些内联子节点正是运行期 debug bar「对话续跑」作用的对象(agent phase 子节点)。
-- 决策: L3 步骤编辑 = **画布内联**(canvas-inline),非 Properties-first;职责切分:Properties=frontmatter,canvas=XML 正文结构(PM 2026-06-04)。
-- 原话/来源: `01_workflows/02_authoring.md:30` defines the L3 add/edit/reorder target.
-- 测试: add step creates body block; reorder preserves content; compile sees the updated body.
-- Status: target-design.
-- 归属: capability `phase-editing`; regions `canvas`, `properties`, `editor`.
+- 机制: agent body 的 steps/actions(正文 XML 结构)以**画布内联子节点只读呈现**(展开/收起);**编辑一律在编辑器改正文**,画布不提供任何增/删/改/重排控件。**不在 Properties 做**——Properties 只管 frontmatter 属性。这些内联子节点正是运行期 debug bar「对话续跑」作用的对象(agent phase 子节点),投影因此保留。
+- 决策: L3 步骤在画布 = **只读投影**;编辑归编辑器。职责切分:Properties=frontmatter,editor=XML 正文结构,canvas=结构只读投影。
+  **修订记录(2026-08-29,用户批示反转)**:原设计(PM 2026-06-04)为「画布内联直接拖拽增/删/改/重排(canvas-inline 编辑)」,已按用户批示撤销:「在画布上加step这个功能去掉吧,很鸡肋,应该让用户在编辑器改」。撤销范围=编辑能力(Add step 按钮、行内改名/改内容输入框、上移/下移/删除按钮与对应的 body 文本变换);保留范围=只读投影(展开/收起与步骤列表展示),理由见机制条(「对话续跑」作用对象)。
+- 原话/来源: `01_workflows/02_authoring.md:30` 原定义 add/edit/reorder 目标,随本修订改为只读投影。
+- 测试: projection renders each step's id/name/content read-only; no mutation controls; the editor path remains the only body writer.
+- Status: live(read-only projection)。
+- 归属: capability `phase-editing`; regions `canvas`, `editor`.
 
 ### F6. Autosave Then Compile Feedback
 
@@ -81,7 +82,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 - Platform links: `native-fs`, `engine`.
 
 ## 4. 设计决策基础（PM 原话）
-- L3 步骤重排 = **画布内联拖拽**(canvas-inline),非 Properties。Properties 只设 frontmatter 属性;正文 XML 结构(L3 步骤)= 画布内联子节点。
+- L3 步骤重排 = **画布内联拖拽**(canvas-inline),非 Properties。Properties 只设 frontmatter 属性;正文 XML 结构(L3 步骤)= 画布内联子节点。**(2026-08-29 撤销编辑半条:画布内联只剩只读投影,增删改序归编辑器——用户批示「在画布上加step这个功能去掉吧,很鸡肋,应该让用户在编辑器改」,见 F5 修订记录。)**
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |

@@ -1160,48 +1160,6 @@ export function GraphCanvas({
     })
   }, [])
 
-  // N2 atom #15: persist an edited agent body through the normal phase-file save
-  // path. The optimistic-lock hash is taken over the CURRENT (pre-edit) body,
-  // the same snapshot the step transforms ran on, so a stale concurrent edit is
-  // rejected by the backend hash guard rather than silently overwritten.
-  const handleStepsSave = useCallback(
-    async (_nodeId: string, filePath: string, currentBody: string, nextBody: string) => {
-      if (!onPhaseFileSave) return
-      // n2-canvas #14: inside an editable drilled child, route the body save to the
-      // child target (read via ref so this stable callback need not depend on the
-      // drill state). At root depth the target is null, so parent save is unchanged.
-      const childArgs = drilledChildTargetRef.current
-        ? ([drilledChildTargetRef.current] as const)
-        : ([] as const)
-      try {
-        const expectedHash = await sha256Hex(currentBody)
-        await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash }, ...childArgs)
-      } catch (saveError) {
-        toast.error(`Could not save steps: ${errorMessage(saveError)}`)
-      }
-    },
-    [onPhaseFileSave],
-  )
-
-  const handleExpandedPreviewStepsSave = useCallback(
-    async (_nodeId: string, filePath: string, currentBody: string, nextBody: string, parentNodeId: string) => {
-      if (!onPhaseFileSave) return
-      const target = expandedChildSaveTarget(parentNodeId)
-      if (!target) {
-        toast.error(i18n.t('toast.childSubgraphNotReady', { ns: 'canvas' }))
-        return
-      }
-      try {
-        const expectedHash = await sha256Hex(currentBody)
-        await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash }, target)
-        updateExpandedPhaseFile(parentNodeId, filePath, nextBody)
-      } catch (saveError) {
-        toast.error(`Could not save steps: ${errorMessage(saveError)}`)
-      }
-    },
-    [expandedChildSaveTarget, onPhaseFileSave, updateExpandedPhaseFile],
-  )
-
   // R9: drill INTO a subgraph node (push a focus level). The drilled child
   // topology is fetched by the effect below.
   const drillInto = useCallback((path: string, label: string) => {
@@ -1427,19 +1385,17 @@ export function GraphCanvas({
   // cannot start a structure edit (the PM read-only block).
   const canEditCanvas = !compact && !(isDrilled && isDrilledChildReadOnly)
 
-  // N2 atom #15: the inline L3 step-editor inputs threaded into AGENT nodes.
-  // compact = read-only projection: withhold the in-node edit callbacks so the
-  // "Edit steps" affordance never renders on the mini-canvas (canEditSteps keys
-  // on onToggleSteps being a function). Only the read-only dirty-downstream
-  // graying is kept; editing the body stays on the main canvas.
+  // The inline L3 step-projection inputs threaded into AGENT nodes (read-only
+  // since R3-8 — the body is edited in the editor). compact withholds the
+  // toggle so the affordance never renders on the mini-canvas; only the
+  // read-only dirty-downstream graying is kept there.
   const agentStepsInputs = useMemo(
     () => ({
       expandedSteps: compact ? undefined : expandedSteps,
       onToggleSteps: compact ? undefined : toggleSteps,
-      onStepsSave: compact ? undefined : handleStepsSave,
       dirtyDownstreamNodeIds: safeDirtyDownstreamNodeIds,
     }),
-    [compact, expandedSteps, toggleSteps, handleStepsSave, safeDirtyDownstreamNodeIds],
+    [compact, expandedSteps, toggleSteps, safeDirtyDownstreamNodeIds],
   )
   const rawNodes = useMemo<GraphCanvasNode[]>(() => {
     // R9 / n2-canvas #14: when focused into a child graph, render its real phases.
@@ -1625,7 +1581,6 @@ export function GraphCanvas({
         onToggleSubgraph: toggleSubgraph,
         expandedSteps,
         onToggleSteps: toggleSteps,
-        onStepsSave: handleExpandedPreviewStepsSave,
         run: runProjection,
         edgeRun: edgeRunProjection,
       })
@@ -1646,7 +1601,6 @@ export function GraphCanvas({
     expandedSteps,
     expandedSubgraphs,
     expandedTopologies,
-    handleExpandedPreviewStepsSave,
     edgeRunProjection,
     runProjection,
     topologyRootSkillId,

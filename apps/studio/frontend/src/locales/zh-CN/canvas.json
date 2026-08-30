@@ -74,7 +74,7 @@
     "errorSummary": "节点错误概要",
     "resumeUnavailable": "无法续跑：上游已改动",
     "collapseSteps": "收起步骤",
-    "editSteps": "编辑步骤",
+    "viewSteps": "查看步骤",
     "hideSteps": "隐藏步骤",
     "collapseSubgraph": "收起子图",
     "expandSubgraph": "展开子图",

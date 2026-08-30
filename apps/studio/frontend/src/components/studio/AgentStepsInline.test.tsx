@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it, vi } from "vitest"
-import { AgentStepsInline, AgentStepsInlineView } from "./AgentStepsInline"
-import { parseAgentSteps } from "@/lib/agent-steps"
+import { describe, expect, it } from "vitest"
+import { AgentStepsInline } from "./AgentStepsInline"
 
 const BODY = `<role>r</role>
 
@@ -14,72 +13,35 @@ Finish it.
 </step>
 `
 
-const noop = () => undefined
-
-describe("AgentStepsInlineView", () => {
-  it("renders each step's id, name and content with edit controls", () => {
-    const html = renderToStaticMarkup(
-      <AgentStepsInlineView
-        steps={parseAgentSteps(BODY)}
-        onMove={noop}
-        onRemove={noop}
-        onRename={noop}
-        onEditContent={noop}
-        onAdd={noop}
-      />,
-    )
+/**
+ * R3-8 (批示轮三 2026-08-29) reverses F5's canvas-inline EDITING: the user
+ * ruled 「在画布上加step这个功能去掉吧,很鸡肋,应该让用户在编辑器改」.
+ * The inline sub-nodes stay as a READ-ONLY projection (the runtime debug
+ * bar's 对话续跑 still targets them); every mutation control is gone —
+ * editing the body happens in the editor.
+ */
+describe("AgentStepsInline (read-only projection)", () => {
+  it("renders each step's id, name and content as plain text", () => {
+    const html = renderToStaticMarkup(<AgentStepsInline body={BODY} />)
     expect(html).toContain("Steps")
     expect(html).toContain("S1")
     expect(html).toContain("read")
     expect(html).toContain("Read it.")
-    expect(html).toContain("Add step")
-    expect(html).toContain("Move step S1 up")
-    expect(html).toContain("Remove step S2")
+    expect(html).toContain("S2")
+    expect(html).toContain("Finish it.")
   })
 
-  it("hides edit controls in readOnly mode", () => {
-    const html = renderToStaticMarkup(
-      <AgentStepsInlineView
-        steps={parseAgentSteps(BODY)}
-        readOnly
-        onMove={noop}
-        onRemove={noop}
-        onRename={noop}
-        onEditContent={noop}
-        onAdd={noop}
-      />,
-    )
-    expect(html).toContain("S1")
+  it("offers no mutation controls and no form fields", () => {
+    const html = renderToStaticMarkup(<AgentStepsInline body={BODY} />)
     expect(html).not.toContain("Add step")
     expect(html).not.toContain("Remove step")
+    expect(html).not.toContain("Move step")
+    expect(html).not.toContain("<input")
+    expect(html).not.toContain("<textarea")
   })
 
   it("shows an empty state when there are no steps", () => {
-    const html = renderToStaticMarkup(
-      <AgentStepsInlineView
-        steps={[]}
-        onMove={noop}
-        onRemove={noop}
-        onRename={noop}
-        onEditContent={noop}
-        onAdd={noop}
-      />,
-    )
+    const html = renderToStaticMarkup(<AgentStepsInline body="<role>r</role>" />)
     expect(html).toContain("No steps yet.")
-  })
-})
-
-describe("AgentStepsInline reorder", () => {
-  it("moving S1 down emits a body with S2 then S1", () => {
-    const onSave = vi.fn()
-    // Render the wrapper to capture the onMove it wires, then invoke it.
-    // (renderToStaticMarkup runs the component body, building the handlers.)
-    const tree = AgentStepsInline({ body: BODY, onSave }) as ReturnType<typeof AgentStepsInlineView>
-    // tree is <AgentStepsInlineView ... onMove=move .../> — pull the wired handler.
-    const move = (tree.props as { onMove: (id: string, dir: "up" | "down") => void }).onMove
-    move("S1", "down")
-    expect(onSave).toHaveBeenCalledTimes(1)
-    const nextBody = onSave.mock.calls[0][0] as string
-    expect(parseAgentSteps(nextBody).map((s) => s.id)).toEqual(["S2", "S1"])
   })
 })

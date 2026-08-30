@@ -133,13 +133,6 @@ export interface SubgraphExpansionOptions {
   edgeRun?: EdgeRunProjection
   expandedSteps?: ReadonlySet<string>
   onToggleSteps?: (nodeId: string) => void
-  onStepsSave?: (
-    nodeId: string,
-    filePath: string,
-    currentBody: string,
-    nextBody: string,
-    parentNodeId: string,
-  ) => void
 }
 
 export interface SubgraphExpansionResult {
@@ -353,7 +346,7 @@ function inlineChildNode(
   const data = node.data as SkillGraphNodeData
   const isSubgraphNode = data.mode === 'subgraph' || Boolean(data.subgraphPath)
   const isAgentNode = data.mode === 'agent' || data.mode === 'skill' || data.mode === 'llm'
-  const canEditSteps = isAgentNode && typeof data.agentBody === 'string'
+  const canShowSteps = isAgentNode && typeof data.agentBody === 'string'
   // The child board is laid out from topology alone (and cached on it), so the
   // run is applied HERE, where the container this copy hangs under is known.
   // Two expansions of the same child skill under different containers are the
@@ -378,12 +371,9 @@ function inlineChildNode(
       onToggleSubgraph: isSubgraphNode && options.onToggleSubgraph
         ? () => options.onToggleSubgraph?.(id)
         : undefined,
-      isStepsExpanded: canEditSteps ? (options.expandedSteps?.has(id) ?? false) : false,
-      onToggleSteps: canEditSteps && options.onToggleSteps
+      isStepsExpanded: canShowSteps ? (options.expandedSteps?.has(id) ?? false) : false,
+      onToggleSteps: canShowSteps && options.onToggleSteps
         ? () => options.onToggleSteps?.(id)
-        : undefined,
-      onStepsSave: canEditSteps && options.onStepsSave && data.filePath
-        ? (nextBody: string) => options.onStepsSave?.(id, data.filePath!, data.agentBody!, nextBody, parentNodeId)
         : undefined,
     },
   } as GraphCanvasNode

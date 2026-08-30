@@ -943,6 +943,10 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       全新 STUDIO_CONFIG_DIR 环境 2 项(R3-4/R3-9)+ 仓库层核验 1 项(R3-14),
       证据全部落报告第 80–95 步(52ddeb64)。点验中新立 J-X.9(失败 run 也弹
       golden 回填条并可种出空 golden),与 J-X.2、J-X.5 一同为在册遗留。
+      **轮后追销(2026-08-30)**:J-X.9 经用户亲裁取口径一「失败 run 不弹条」,#1070 修复
+      (`goldenSeedableRunId` 改收 RunVerdict、仅 success 放行,F7 补 success-only 修订并重钉哈希),
+      真机复验两例通过(crashed 零弹条 / success 弹条如常,报告第 96 步)。复验中新立 J-X.10
+      (引擎默认角色 `graph_agent` 不在角色种子表,向导新建 skill 默认直跑必崩),待裁决。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)

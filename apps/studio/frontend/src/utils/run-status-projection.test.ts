@@ -8,6 +8,7 @@ import {
   deriveNodeRuntimes,
   deriveNodeActivity,
   runningPhaseOf,
+  goldenSeedableRunId,
 } from "./run-status-projection"
 
 function event(partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent {
@@ -424,5 +425,30 @@ describe("deriveNodeActivity names the tool that is still running", () => {
       event({ event_type: "tool_call", phase_name: "draft", tool_call_id: "t1", tool_name: "read_file" }),
     ])
     expect(activity.draft?.toolCalls).toBe(1)
+  })
+})
+
+describe("goldenSeedableRunId", () => {
+  // J-X.6 (批示轮三 R3-11): the copilot analysis bar must only offer to seed
+  // goldens from a REAL run. A predict reaches the live-run seat through server
+  // adoption, and its trace is refused promotion by the backend
+  // (PREDICT_TRACE_CANNOT_BE_GOLDEN) — offering it is a dead-end Confirm that
+  // calls a stub rehearsal "Run finished".
+  it("offers a real run once it has ended", () => {
+    expect(goldenSeedableRunId({ runId: "run-1", runKind: "run", ended: true })).toBe("run-1")
+  })
+
+  it("never offers a predict, ended or not", () => {
+    expect(goldenSeedableRunId({ runId: "pred-1", runKind: "predict", ended: true })).toBeNull()
+    expect(goldenSeedableRunId({ runId: "pred-1", runKind: "predict", ended: false })).toBeNull()
+  })
+
+  it("treats an absent kind as a run (pre-kind rows mean run)", () => {
+    expect(goldenSeedableRunId({ runId: "run-2", runKind: undefined, ended: true })).toBe("run-2")
+  })
+
+  it("offers nothing while the run is still going or absent", () => {
+    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", ended: false })).toBeNull()
+    expect(goldenSeedableRunId({ runId: null, runKind: "run", ended: true })).toBeNull()
   })
 })

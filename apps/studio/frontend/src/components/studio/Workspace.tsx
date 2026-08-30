@@ -52,7 +52,7 @@ import {
   type SkillGateEvent,
 } from "./gate-state"
 import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@/utils/edge-status-projection"
-import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, endsTheRun, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
+import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, endsTheRun, goldenSeedableRunId, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, selectActiveNodeErrors } from "./node-compile-errors"
@@ -778,8 +778,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const isViewingHistory = viewedTrace?.source === "history"
   // F7: a finished run (run_ended in the stream) drives the copilot analysis
   // bar. A run that merely STOPPED has not finished — offering to analyse it
-  // would be offering to analyse work that has not happened yet.
-  const completedRunId = runStream.events.some(endsTheRun) ? runId : null
+  // would be offering to analyse work that has not happened yet. Whether the
+  // finished thing is a RUN at all is decided further down (goldenSeedableRunId),
+  // where the run list that knows its kind is in scope.
+  const liveRunEnded = runStream.events.some(endsTheRun)
   // The run the BACKEND has finished finalizing, which is a strictly later thing
   // than the engine's `run_ended`. Between the two the backend still auto-commits
   // the skill, writes the run metadata and writes `report.md`; a reader that
@@ -865,6 +867,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setLiveRunRecord({ runId: adopted.run_id, metadata: adopted })
     updateStage(adoption.key, adopted.status === "paused" ? "paused" : "running")
   }, [currentSkillId, runId, skillRuns, skillRunsError, skillRunsLoading, updateStage])
+
+  // What KIND of run the live id is (run vs predict) has two readers of the
+  // same server truth: the sealed record fetched at the terminal edge, and the
+  // run list the Timeline shares. Either may know first — the record wins when
+  // it is about THIS id, the list answers otherwise. The verdict on whether a
+  // finished thing may drive the golden-seed bar lives in `goldenSeedableRunId`.
+  const liveRunKind =
+    (liveRunRecord?.runId === runId ? liveRunRecord.metadata.kind : undefined) ??
+    skillRuns?.find((item) => item.run_id === runId)?.kind
+  const completedRunId = goldenSeedableRunId({ runId, runKind: liveRunKind, ended: liveRunEnded })
 
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({

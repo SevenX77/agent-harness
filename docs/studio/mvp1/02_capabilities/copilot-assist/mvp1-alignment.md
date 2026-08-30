@@ -257,11 +257,12 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **归属**：copilot-assist 拥有向导资产与两个入口;产出落盘 [[skill-workspace]] + [[native-fs]]。
 
 ### F7 judge / 打磨 / commit-msg + 分析 bar（跨能力载体）
-- **机制**：judge(artifact vs golden 打分+评述)/打磨/commit-msg 都在 copilot 对话里跑，**数据流归别处**(judge·打磨→[[golden-eval]]，commit-msg→[[publish]])，copilot 只渲染。**分析 bar**：predict/run 跑完 → copilot 输入框上方**瞬时弹窗**「是否自动分析」(样式参考 PM 贴图细长 bar) → 确认 → 无 golden 节点自动写 golden(有的不动) → **确认/忽略后消失**。
+- **机制**：judge(artifact vs golden 打分+评述)/打磨/commit-msg 都在 copilot 对话里跑，**数据流归别处**(judge·打磨→[[golden-eval]]，commit-msg→[[publish]])，copilot 只渲染。**分析 bar**：**run** 跑完(predict 跑完不弹,见下方修订) → copilot 输入框上方**瞬时弹窗**「是否自动分析」(样式参考 PM 贴图细长 bar) → 确认 → 无 golden 节点自动写 golden(有的不动) → **确认/忽略后消失**。
 - **决策+动机**：所有权不变量——数据流归各自能力，copilot 只作 chat 载体+渲染，只链接不重述。分析 bar = F3 主动诊断的具体落点 + **细化 [[golden-eval]] g-e 批量入口**(sonner→弹窗)。
 - **原话**：「每次跑完predict或者run, copilot输入框上方弹出一个小bar: 是否自动分析, 给用户确认. 没有写golden的节点自动写golden」/「这个bar是弹窗, 你确定了之后他就会消失, 我只是让你看下布局样式」
+- **修订(2026-08-29,批示轮三 J-X.6)**：分析 bar 只在 **run** 结束后弹出;predict 结束**不弹**。原文「predict/run 跑完」与体系内更早、专门针对 golden 来源的守卫矛盾:后端 `PREDICT_TRACE_CANNOT_BE_GOLDEN`(`apps/studio/backend/app/services/diagnostic_export.py`,P-T9 裁决 2026-05-07,早于本条 2026-06-05 的正文)与 [[04_run-and-verify]] E8「golden 作者定/手填,非从 predict trace 捕获」都规定 predict 的输出(占位数据,不是真产出)不得写进 golden——predict 后弹「确认→写 golden」等于邀请用户做一个后端注定 409 的动作。按「专门针对该对象且带理由的条目优先」判读,run-only 为准;上一行原话按语境剥离原则留底不改。
 - **status**：judge 现不可达(view='eval' 无人传)= target；分析 bar = target。
-- **测试点**：predict/run 完弹窗；确认→无 golden 节点写 golden；确认后消失；judge/打磨/commit-msg 跑在对话里、数据流落各自能力。
+- **测试点**：run 完弹窗(predict 完不弹)；确认→无 golden 节点写 golden；确认后消失；judge/打磨/commit-msg 跑在对话里、数据流落各自能力。
 - **归属**：copilot-assist 拥有分析弹窗 UI；数据流 [[golden-eval]]/[[publish]]。**回写** g-e + workflow [[04_run-and-verify]]。
 
 ### F8 生命周期（出现 / Home 卸载 / 下钻无缝）

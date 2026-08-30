@@ -488,3 +488,25 @@ export function runningPhaseOf(
     .find(([path, status]) => status === "running" && isRootPhasePath(path))
   return running?.[0] ?? null
 }
+
+/**
+ * The run id the copilot analysis bar may offer to seed goldens from, or null.
+ *
+ * F7's offer is only honest for a REAL run: the seed write path refuses to
+ * promote a predict trace to a golden baseline (backend 409
+ * PREDICT_TRACE_CANNOT_BE_GOLDEN, since P-T9 2026-05-07), and a stub predict's
+ * node outputs are placeholder data — seeding from them manufactures garbage
+ * baselines. A predict still reaches the live-run seat through server adoption
+ * (`nextAdoptedLiveRun` takes any running row, predicts included), so the bar's
+ * derivation must filter it here. An absent kind means "run": the field only
+ * exists on rows written after Timeline F1 introduced it.
+ */
+export function goldenSeedableRunId(args: {
+  runId: string | null
+  runKind: "run" | "predict" | undefined
+  ended: boolean
+}): string | null {
+  if (!args.runId || !args.ended) return null
+  if (args.runKind === "predict") return null
+  return args.runId
+}

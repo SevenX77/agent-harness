@@ -102,6 +102,11 @@ const canvasScopedContentStyle: CSSProperties = {
 const OUTSIDE_DISMISS_EXEMPT_SELECTORS = [
   '[data-studio-left-overlay="true"]',
   '[data-studio-right-overlay="true"]',
+  // The rail is the side panels' own switch (R3-15, 批示轮三): opening or
+  // swapping a panel through it is operating the panels, so it inherits the
+  // same exemption — otherwise every panel switch while triaging errors
+  // closes the drawer as a side effect.
+  '[data-studio-rail="true"]',
 ]
 
 /**
@@ -111,8 +116,9 @@ const OUTSIDE_DISMISS_EXEMPT_SELECTORS = [
  * Left alone, operating them while the drawer is open would close it as a
  * side effect of every fix. Exempting the two panel regions (the same
  * `data-studio-*` markers WorkspaceLeftPanelOverlay /
- * WorkspaceRightPanelOverlay already carry) keeps the drawer open while the
- * user operates them — dismissal is still one click away, on the blank
+ * WorkspaceRightPanelOverlay already carry) plus the rail that switches
+ * them (Toolbar's `data-studio-rail`, R3-15) keeps the drawer open while
+ * the user operates them — dismissal is still one click away, on the blank
  * canvas, or Escape. (The center action bar used to be a third exempt region;
  * since the 2026-08-27 ruling the drawer covers it outright, so a click can
  * never land there while the drawer is open.)

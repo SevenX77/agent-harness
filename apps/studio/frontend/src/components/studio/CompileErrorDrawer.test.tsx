@@ -332,6 +332,13 @@ describe("isOutsideDismissExempt", () => {
     expect(isOutsideDismissExempt(elementWithMarker("data-studio-left-overlay"))).toBe(true)
   })
 
+  // R3-15 (批示轮三): the rail is the side panels' own switch — clicking it
+  // to open/swap a panel must not dismiss the drawer, by the same "the drawer
+  // never blocks the side panels" ruling that exempts the panels themselves.
+  it("exempts a click on the left rail (the panels' switch)", () => {
+    expect(isOutsideDismissExempt(elementWithMarker("data-studio-rail"))).toBe(true)
+  })
+
   it("exempts a click inside the right (Copilot/Properties) overlay", () => {
     expect(isOutsideDismissExempt(elementWithMarker("data-studio-right-overlay"))).toBe(true)
   })

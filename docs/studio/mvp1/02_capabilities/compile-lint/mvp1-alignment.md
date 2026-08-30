@@ -55,7 +55,8 @@ follow a successful Compile with a broad `GET /api/skills/{id}`.
 - 机制: clicking Compile runs full compile and opens a drawer with all errors, copyable details, and no sidebar coverage.
 - 决策: keep the Compile button; change it from bottom floating panel to drawer.
 - 原话/来源: `01_workflows/03_compile.md:18` defines the drawer; `01_workflows/03_compile.md:35` records the PM quote to remove the floating card.
-- 测试: drawer lists every error with file/line/field/message; copy works; drawer does not cover side panels.
+- 修订(2026-08-29,批示轮三 R3-15): "no sidebar coverage" 的留驻语义覆盖**侧栏本体与左 rail**——rail 是侧栏面板的开关,点 rail 图标开/换面板属于"操作侧栏",抽屉必须留驻不关(此前只豁免两个面板区域,点 rail 会把抽屉当外点关掉,批示轮二真机观察)。豁免单点在 `CompileErrorDrawer.isOutsideDismissExempt`(`data-studio-rail` 标记)。点空白画布或 Escape 仍关闭。
+- 测试: drawer lists every error with file/line/field/message; copy works; drawer does not cover side panels; clicking a rail icon while the drawer is open switches the panel and the drawer stays.
 - Status: target-design. Current bottom panel must be removed.
 - 归属: capability `compile-lint`; region `center-action-bar`; component target `Drawer`.
 

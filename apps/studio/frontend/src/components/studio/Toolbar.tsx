@@ -30,7 +30,13 @@ export function Toolbar({ activePanel, onPanelChange, settingsOpen, onSettingsTo
   ]
 
   return (
-    <aside className="z-10 flex w-12 shrink-0 flex-col items-center border-r border-border bg-sidebar px-2 py-3">
+    // data-studio-rail: the compile-error drawer's outside-dismiss gate
+    // (CompileErrorDrawer.isOutsideDismissExempt) treats the rail like the
+    // side panels it switches — clicking here must not close the drawer.
+    <aside
+      data-studio-rail="true"
+      className="z-10 flex w-12 shrink-0 flex-col items-center border-r border-border bg-sidebar px-2 py-3"
+    >
       <div className="flex flex-col gap-1">
         {tools.map((tool) => {
           const isActive = activePanel === tool.id

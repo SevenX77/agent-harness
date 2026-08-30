@@ -21,7 +21,9 @@
     "title": "Share provider parameters with the community?",
     "body": "Every time Studio tests a provider it learns one thing: which model on which public service answered, and what it can do. Those parameters can be traded with the community — share yours and you get to use what others have already verified, instead of testing every model yourself.\n\nWhat gets shared (a locked allowlist in code; no other field can ride along):\n· Service address — the public service's address and a hash fingerprint of it. Only publicly resolvable addresses are uploaded; private addresses, LAN addresses, and addresses carrying credentials are dropped before upload.\n· Model — provider name, model id, route key, call method and request mapping.\n· Capability — capability family, model type, input and output modalities.\n· Outcome — whether this probe succeeded or failed, and when.\n\nWhat is never shared:\n· Your API keys — not in any form, not any fragment.\n· Private or self-hosted endpoints.\n· Your skill content, local files, or account identity.\n\nYou can turn this off at any time in Settings → General. Turning it off stops both reading and sharing.",
     "primaryButton": "Turn on sharing",
-    "secondaryButton": "Not now"
+    "secondaryButton": "Not now",
+    "sharedToast": "Community sharing is on",
+    "declinedToast": "Sharing stays off — you can turn it on anytime in Settings → General"
   },
   "general": {
     "title": "General",

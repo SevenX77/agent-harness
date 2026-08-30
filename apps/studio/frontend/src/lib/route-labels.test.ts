@@ -29,9 +29,16 @@ describe('hostLabel', () => {
 })
 
 describe('transportLabel', () => {
-  it('names the protocol and the host, in that order', () => {
-    expect(transportLabel('openai_compatible', 'https://api.qnaigc.com/v1')).toBe('OpenAI / api.qnaigc')
-    expect(transportLabel('anthropic_compatible', 'https://anthropic.qnaigc.com')).toBe('Anth / anthropic.qnaigc')
+  // J-01.L (批示轮三 R3-10): the first name is the provider's identity (its
+  // host); the protocol FAMILY is a trailing annotation. The old order put
+  // "OpenAI" first on a DeepSeek card, which reads as the wrong vendor.
+  it('names the host first and annotates the protocol family after it', () => {
+    expect(transportLabel('openai_compatible', 'https://api.qnaigc.com/v1')).toBe('api.qnaigc · OpenAI-compatible')
+    expect(transportLabel('anthropic_compatible', 'https://anthropic.qnaigc.com')).toBe('anthropic.qnaigc · Anthropic-compatible')
+  })
+
+  it('never leads with the protocol family on an official vendor host', () => {
+    expect(transportLabel('openai_compatible', 'https://api.deepseek.com')).toBe('api.deepseek · OpenAI-compatible')
   })
 })
 
@@ -58,8 +65,8 @@ describe('distinguishingRouteLabels', () => {
       }),
     ])
 
-    expect(labels.get('qiniu-openai:m')).toBe('Qiniu · OpenAI / api.qnaigc')
-    expect(labels.get('qiniu-anthropic:m')).toBe('Qiniu · Anth / anthropic.qnaigc')
+    expect(labels.get('qiniu-openai:m')).toBe('Qiniu · api.qnaigc · OpenAI-compatible')
+    expect(labels.get('qiniu-anthropic:m')).toBe('Qiniu · anthropic.qnaigc · Anthropic-compatible')
   })
 
   it('adds the model id when the transport is the same and the model is not', () => {

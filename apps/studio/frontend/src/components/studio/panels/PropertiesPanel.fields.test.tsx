@@ -566,12 +566,12 @@ describe('PropertiesPanel - node compare model group picker', () => {
     expect(modelGroupRouteOptions(group)).toEqual([
       {
         value: 'route:qiniu-main:llama3',
-        label: 'Qiniu \u00b7 OpenAI / api.qnaigc',
+        label: 'Qiniu \u00b7 api.qnaigc \u00b7 OpenAI-compatible',
         detail: 'Endpoint: qiniu-main\nModel: llama3\nRoute: qiniu-main:llama3',
       },
       {
         value: 'route:qiniu-backup:llama3',
-        label: 'Qiniu \u00b7 Anth / anthropic.qnaigc',
+        label: 'Qiniu \u00b7 anthropic.qnaigc \u00b7 Anthropic-compatible',
         detail: 'Endpoint: qiniu-backup\nModel: llama3\nRoute: qiniu-backup:llama3',
       },
     ])

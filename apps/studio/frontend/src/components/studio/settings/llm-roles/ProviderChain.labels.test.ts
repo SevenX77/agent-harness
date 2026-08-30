@@ -69,7 +69,7 @@ describe('chainEntries', () => {
     const labels = chainEntries(['qiniu-openai:m', 'qiniu-anthropic:m'], data, models)
       .map((entry) => entry.label)
 
-    expect(labels).toEqual(['Qiniu · OpenAI / api.qnaigc', 'Qiniu · Anth / anthropic.qnaigc'])
+    expect(labels).toEqual(['Qiniu · api.qnaigc · OpenAI-compatible', 'Qiniu · anthropic.qnaigc · Anthropic-compatible'])
   })
 
   it('still names a route the registry no longer lists', () => {

@@ -141,11 +141,11 @@ describe("apiKeys.card i18n bundle contract", () => {
   // Values that are legitimately identical across languages: technical/brand
   // tokens, URLs, and a CJK-free protocol short labels block.
   const sharedTokenPaths = new Set([
-    "protocolShort.anthropic",
-    "protocolShort.gemini",
-    "protocolShort.openai",
-    "protocolShort.ark",
-    "protocolShort.unknown",
+    "protocolFamily.anthropic",
+    "protocolFamily.gemini",
+    "protocolFamily.openai",
+    "protocolFamily.ark",
+    "protocolFamily.unknown",
     "protocol.google",
     "baseUrlPlaceholder1",
     "baseUrlPlaceholder2",

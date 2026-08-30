@@ -298,12 +298,12 @@
         "openai": "OpenAI-compatible",
         "unknown": "Unknown"
       },
-      "protocolShort": {
-        "anthropic": "Anth",
-        "gemini": "Gemini",
-        "openai": "OpenAI",
-        "ark": "Ark",
-        "unknown": "Endpoint"
+      "protocolFamily": {
+        "anthropic": "Anthropic-compatible",
+        "gemini": "Gemini-compatible",
+        "openai": "OpenAI-compatible",
+        "ark": "Ark-compatible",
+        "unknown": "Unknown protocol"
       },
       "capability": {
         "textChat": "text chat",

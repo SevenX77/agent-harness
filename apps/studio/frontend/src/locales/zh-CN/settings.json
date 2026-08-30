@@ -298,12 +298,12 @@
         "openai": "OpenAI 兼容",
         "unknown": "未知"
       },
-      "protocolShort": {
-        "anthropic": "Anth",
-        "gemini": "Gemini",
-        "openai": "OpenAI",
-        "ark": "Ark",
-        "unknown": "Endpoint"
+      "protocolFamily": {
+        "anthropic": "Anthropic 兼容",
+        "gemini": "Gemini 兼容",
+        "openai": "OpenAI 兼容",
+        "ark": "Ark 兼容",
+        "unknown": "未知协议"
       },
       "capability": {
         "textChat": "文本对话",

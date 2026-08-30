@@ -661,8 +661,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   // N3 #12: subscribe to realtime-lint status changes (published by useDebouncedLint as
   // the `lintStatusEvent` window event). A matching skillId bumps lintTick so the
-  // CenterActionBar's stage (deriveBuildStage) re-reads readLintStatus and lights Predict
-  // the moment lint passes — without the user clicking Compile first.
+  // CenterActionBar's stage (deriveBuildStage) re-reads readLintStatus and keeps the
+  // compile-tier stage current (checking/failed/idle). Since R3-5 (2026-08-29) a lint
+  // pass never lights Predict by itself — only an explicit manual Compile success does.
   useEffect(() => {
     if (typeof window === "undefined" || !currentSkillId) return undefined
     const handler = (event: Event) => {
@@ -2527,21 +2528,26 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     // the stage. readLintStatus reads sessionStorage (not React state), so this read is
     // the dependency that re-runs the derivation when lint status changes.
     void lintTick
-    // J-04.C: within the compile tier, manual Compile and lint are two routes
-    // to the SAME verdict (compile-lint interface contract: both hit the one
-    // engine compile_skill exit). "最新一轮结算胜出" (J-03.B's rule for the
-    // diagnostics projection) applies here too, reusing the exact same "who
-    // settled last" signal (`contextDiagnosticsSource`) instead of a second,
-    // competing freshness mechanism. A stale manual compileStage must not
-    // permanently mask a fresher lint pass, and vice versa.
+    // J-04.C freshness half (survives R3-5): within the compile tier, manual
+    // Compile and lint are two routes to the SAME verdict (compile-lint
+    // interface contract: both hit the one engine compile_skill exit).
+    // "最新一轮结算胜出" (J-03.B's rule for the diagnostics projection)
+    // applies here too, reusing the exact same "who settled last" signal
+    // (`contextDiagnosticsSource`) instead of a second, competing freshness
+    // mechanism: a fresher lint round invalidates a stale manual verdict in
+    // both directions (a stale failure stops showing red, a stale pass stops
+    // holding Predict open).
     const source = contextDiagnosticsSource[id] ?? "lint"
     if (source === "compile" && compileStage) return compileStage
     const lint = readLintStatus(id)
     if (lint === "checking") return "compiling"
     if (lint === "failed") return "compile-fail"
-    // 03_compile.md:18 (A2) + :34 ("实时 lint 通过自动驱动 compile-pass"): a
-    // passing lint alone unlocks Predict, no manual Compile click required.
-    if (lint === "passed") return "compile-pass"
+    // R3-5 (批示轮三 2026-08-29, reversing J-04.C's auto-drive half): a passing
+    // realtime lint is diagnostics-only — it settles to idle and never to
+    // compile-pass. Predict unlocks ONLY via an explicit manual Compile
+    // success (03_compile.md:34, 2026-08-29 revision: 「实时 lint 通过自动驱动
+    // compile-pass」撤销,理由=「还是让用户按一下,更加踏实」).
+    if (lint === "passed") return "idle"
     // No lint has resolved for this skill yet -- fall back to whatever
     // (stale-but-still-in-tier) manual compile stage is on record, else idle.
     return compileStage ?? "idle"

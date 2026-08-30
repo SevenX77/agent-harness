@@ -2026,18 +2026,17 @@ describe('Workspace WS-1 local writer contracts', () => {
     }
   })
 
-  // J-04.C: 03_compile.md:18 (A2, "lint 状态 → build stage ... passed→通过")
-  // + :34 ("实时 lint 通过自动驱动 compile-pass") say a passing realtime lint
-  // alone -- no manual Compile click required -- drives compile-pass and
-  // unlocks Predict. The prior "idle" mapping here (#219, c1c1b208) never
-  // implemented that decision; this test used to enshrine the bug as
-  // intended behaviour.
-  it('a passing realtime lint alone drives compile-pass and unlocks Predict', () => {
+  // R3-5 (批示轮三 2026-08-29) REVERSES J-04.C's auto-drive half: the user ruled
+  // "实时lint通过自动compile pass这条去掉吧……还是让用户按一下,更加踏实" —
+  // realtime lint is diagnostics-only, and compile-pass (the Predict unlock)
+  // comes ONLY from an explicit manual Compile success (03_compile.md:34,
+  // 2026-08-29 revision).
+  it('a passing realtime lint alone keeps the gate idle — only manual Compile unlocks Predict', () => {
     mocks.lintStatus = 'passed'
 
     renderWorkspace()
 
-    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+    expect(mocks.centerActionBarProps?.stage).toBe('idle')
   })
 
   it('keeps the build stage idle while no lint has passed', () => {
@@ -2048,11 +2047,13 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(mocks.centerActionBarProps?.stage).toBe('idle')
   })
 
-  // J-04.C: "最新一轮结算胜出" (J-03.B's diagnostics rule) applies to the build
-  // stage too -- a manual Compile failure must not permanently mask a FRESHER
-  // lint pass. Reuses `contextDiagnosticsSource` (the same "who settled last"
-  // signal J-03.B introduced) rather than a second, competing mechanism.
-  it('unlocks Predict once a fresher lint pass settles after a stale manual Compile failure', async () => {
+  // J-04.C's freshness half SURVIVES the R3-5 reversal: "最新一轮结算胜出"
+  // (J-03.B's diagnostics rule) still applies to the build stage -- a stale
+  // manual Compile failure must not keep the button red after a FRESHER lint
+  // pass cleared the diagnostics. What changed (R3-5): the fresher pass now
+  // settles to `idle` (diagnostics clean, Predict still locked until the user
+  // clicks Compile again), never to compile-pass.
+  it('a fresher lint pass clears a stale manual Compile failure back to idle without unlocking Predict', async () => {
     vi.useFakeTimers()
     mocks.compileSkill.mockResolvedValueOnce({
       code: 'compile_failed',
@@ -2105,7 +2106,7 @@ describe('Workspace WS-1 local writer contracts', () => {
         await Promise.resolve()
       })
 
-      expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+      expect(mocks.centerActionBarProps?.stage).toBe('idle')
     } finally {
       act(() => {
         root.unmount()
@@ -2119,8 +2120,10 @@ describe('Workspace WS-1 local writer contracts', () => {
   // (per the tests above and the "Workspace adopts the run..." suite) this
   // must never reach into a stage the gate machine has already advanced past
   // (predicting/predict-pass/running/paused) -- this test only exercises the
-  // still-in-compile-tier case.
-  it('re-locks Predict when a fresh lint pass fails after an earlier pass had unlocked it', async () => {
+  // still-in-compile-tier case. R3-5 reshaped the premise: the unlock now
+  // comes from a manual Compile success (lint passes alone no longer unlock),
+  // and a FRESHER failing lint must still take it back.
+  it('re-locks Predict when a fresh lint failure lands after a manual Compile success', async () => {
     mocks.lintStatus = 'passed'
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -2131,6 +2134,11 @@ describe('Workspace WS-1 local writer contracts', () => {
           createElement(Workspace, { skillId: 'writer-smoke', onSelectSkill: vi.fn(), onCloseSkill: vi.fn() }),
         )
         await Promise.resolve()
+      })
+      expect(mocks.centerActionBarProps?.stage).toBe('idle')
+
+      await act(async () => {
+        await mocks.centerActionBarProps?.onCompile?.()
       })
       expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
 
@@ -3186,14 +3194,15 @@ describe('Workspace adopts the run the server says is under way (integration)', 
 
   // J-04.C: an abandoned run adopts no live run stage (compileStages stays
   // unset for this skill), so the bar falls through to whatever lint already
-  // settled -- this suite's beforeEach seeds `lintStatus = 'passed'`, so the
-  // correct resting stage is compile-pass, not idle (idle was only ever the
-  // "passed lint maps to idle" bug, not this test's own subject).
+  // settled -- this suite's beforeEach seeds `lintStatus = 'passed'`, which
+  // under R3-5 (lint is diagnostics-only, Predict unlocks only via manual
+  // Compile) rests at idle. The subject here is only that the abandoned run
+  // claims no stage of its own.
   it('falls through to the settled lint stage when every run of this skill has ended', () => {
     mocks.runHistoryList = [serverRun('abandoned')]
 
     mountFresh()
 
-    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+    expect(mocks.centerActionBarProps?.stage).toBe('idle')
   })
 })

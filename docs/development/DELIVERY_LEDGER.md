@@ -918,24 +918,31 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       随 R3-1 交付后重拍。
       | # | 事项(来源) | 决定与落点 | 验收判据 | 状态 |
       |---|---|---|---|---|
-      | R3-1 | CLI 区独立成设置页(批示①,命名授权 operator) | 定名 en「CLI Tools」/ zh「CLI 工具」;`CliSection` 从 Copilot 页搬成第六页签(`SettingsPageContent.tsx` nav+panel);设计源 `00_settings.md` 补第六条(沿 J-01.D 的 Media Generation 先例) | 真机:新页签在、内容齐(依赖/登录/Session defaults)、Copilot 页无 CLI 区;报告第 78 步图重拍为展开态 | ⏳ 待修 |
-      | R3-2 | registry 三副本同屏分叉(批示②前半 = J-01.K) | registry 快照收敛为共享响应式 store(J-01.H 的 `useSyncExternalStore` 模式),写响应快照广播全部消费者 | 按 J-01.K 行验收:probe 后 API-Key/Roles/Copilot 同帧收敛;回归测试钉住 | ⏳ 待修 |
-      | R3-3 | 模型标签后的「Previously Connected」可见文字撤掉(批示②后半) | 蓝态语义由颜色承载,可见文字不再常驻;语义保留在 aria-label 与 hover tooltip(兼顾 J-01.F 的非视觉通道) | 真机:Available Models 侧栏/角色卡的模型条目蓝态无常驻文字;aria/tooltip 仍可读出状态 | ⏳ 待修 |
-      | R3-4 | 社区目录同步即时化(批示③ = J-01.I) | 探测成功建 route 的同一写事务里合并已同步的社区 evidence(`community_catalog_runtime` merge 挂进 endpoint-test/manual-probe 写路径) | 按 J-01.I 行验收:fresh 配 key+Test 后**不重启**即见社区蓝 | ⏳ 待修 |
-      | R3-5 | 撤销「实时 lint 通过自动驱动 compile-pass」(批示④,推翻 2026-07-01 决策与 #1040 实现) | Predict 只由**显式 Compile 成功**解锁;实时 lint 只做诊断投影;源真相变更使旧 compile 结果失效回 idle(待编译),既不保持 stale fail 也不自动 pass;`03_compile.md` 决策行改写 + 修订记录 | 真机:lint 清零后 Predict 仍锁;点 Compile 绿后解锁;改盘后门禁回 idle | ⏳ 待修 |
-      | R3-6 | 报告第 45 步终态图更正(批示⑤) | 换用 #1050 后的真机图(fix-05a),图注写明三轮图是历史中间态;52ddeb64 复发布 | 页面第 45 步图与现行为一致 | ⏳ 待修 |
-      | R3-7 | 自动整理带 fit + 菜单有 Fit(批示⑥) | 代码已具备(见上核清②);真机复验两点并截图,不符再修 | 真机:菜单含 Fit view;Auto-arrange 后取景变化 | ⏳ 待修 |
-      | R3-8 | 撤画布加 step(批示⑦,推翻 F5「画布内联编辑」决策) | 删画布内联步骤**编辑**(Add step/增删改排);内联子节点保留**只读呈现**(F5 自证:运行期 debug bar 对话续跑作用于这些子节点,呈现不能删);步骤编辑归编辑器;`phase-editing/mvp1-alignment.md` F5 改写 + 修订记录 + 重钉哈希 | 真机:agent 节点无 Add step/编辑交互;SKILL.md 里的 steps 仍只读可见;编辑器改步骤照常生效 | ⏳ 待修 |
-      | R3-9 | 同意「开启共享」零反馈(J-01.J) | 选择后出确认 toast(开启/暂不两路) | 按 J-01.J 行验收 | ⏳ 待修 |
-      | R3-10 | 协议名顶替 provider 身份(J-01.L) | endpoint chip/toast 首名 = provider 身份,协议家族后置标注(「api.deepseek.com · OpenAI-compatible」式) | 按 J-01.L 行验收:DeepSeek/Ark 卡不再首名「OpenAI」 | ⏳ 待修 |
-      | R3-11 | golden 回填提示文案病 + Confirm 无产物无反馈(J-X.6) | 先复查写路径定根因,再修文案(区分 predict/run)与 Confirm 反馈/产物 | 按 J-X.6 行验收 | ⏳ 待修 |
-      | R3-12 | 状态纯色相编码的可访问性(J-01.F,与 R3-3 同口径收窄) | 可见通道保持颜色简洁(用户批示②),第二通道 = aria + hover tooltip 全覆盖;不再加常驻文字/图标 | 全部状态 chip 有 aria 与 tooltip 语义;J-01.F 按此口径销案 | ⏳ 待修 |
-      | R3-13 | CLI 启动 socket 警告(J-X.8) | 评估 cross-session messaging 对 Studio 场景是否需要;不需要则修 WSL socket 目录或抑制警告 | 按 J-X.8 行验收 | ⏳ 待修 |
-      | R3-14 | skill-spec 分叉副本收敛(J-X.4) | `docs/engine/skill-spec/` 为权威保留,`docs/engine/mvp0/skill-spec/` 删除、引用改指;`docs.backup-2026-05-20/` 处理同行判据 | 按 J-X.4 行验收 | ⏳ 待修 |
-      | R3-15 | 开抽屉点左 rail 图标抽屉被关(批示轮二观察) | rail 是侧栏的开关,按「不挡侧栏」精神并入豁免:点 rail 抽屉留驻 | 真机:开抽屉点 rail 图标,抽屉不关、面板正常切换 | ⏳ 待修 |
-      | R3-16 | 报告追加批示轮三章 + 重拍受影响截图 | 全部修完后真机逐项复验,新章续第 80 步起;52ddeb64 复发布 | 每项修复一步一图 | ⏳ 待修 |
+      | R3-1 | CLI 区独立成设置页(批示①,命名授权 operator) | 定名 en「CLI Tools」/ zh「CLI 工具」;`CliSection` 从 Copilot 页搬成第六页签(`SettingsPageContent.tsx` nav+panel);设计源 `00_settings.md` 补第六条(沿 J-01.D 的 Media Generation 先例) | 真机:新页签在、内容齐(依赖/登录/Session defaults)、Copilot 页无 CLI 区;报告第 78 步图重拍为展开态 | ✅ 已修(#1059;真机 2026-08-29:六页签在、CLI Tools 页内容齐、Copilot 页无 CLI 区;第 78 步图已重拍;报告第 80 步) |
+      | R3-2 | registry 三副本同屏分叉(批示②前半 = J-01.K) | registry 快照收敛为共享响应式 store(J-01.H 的 `useSyncExternalStore` 模式),写响应快照广播全部消费者 | 按 J-01.K 行验收:probe 后 API-Key/Roles/Copilot 同帧收敛;回归测试钉住 | ✅ 已修(#1063;真机:probe 后 Roles/Copilot 同帧收敛、零 reload;报告第 81 步) |
+      | R3-3 | 模型标签后的「Previously Connected」可见文字撤掉(批示②后半) | 蓝态语义由颜色承载,可见文字不再常驻;语义保留在 aria-label 与 hover tooltip(兼顾 J-01.F 的非视觉通道) | 真机:Available Models 侧栏/角色卡的模型条目蓝态无常驻文字;aria/tooltip 仍可读出状态 | ✅ 已修(#1062;真机:蓝态无常驻文字,aria 与 tooltip 均可读出语义;报告第 82 步) |
+      | R3-4 | 社区目录同步即时化(批示③ = J-01.I) | 探测成功建 route 的同一写事务里合并已同步的社区 evidence(`community_catalog_runtime` merge 挂进 endpoint-test/manual-probe 写路径) | 按 J-01.I 行验收:fresh 配 key+Test 后**不重启**即见社区蓝 | ✅ 已修(#1064;真机 fresh STUDIO_CONFIG_DIR:key+Test 后免重启即见社区蓝,deepseek-v4-pro 本轮未探测、蓝态只能来自社区合并;报告第 83 步) |
+      | R3-5 | 撤销「实时 lint 通过自动驱动 compile-pass」(批示④,推翻 2026-07-01 决策与 #1040 实现) | Predict 只由**显式 Compile 成功**解锁;实时 lint 只做诊断投影;源真相变更使旧 compile 结果失效回 idle(待编译),既不保持 stale fail 也不自动 pass;`03_compile.md` 决策行改写 + 修订记录 | 真机:lint 清零后 Predict 仍锁;点 Compile 绿后解锁;改盘后门禁回 idle | ✅ 已修(#1060;真机三段:lint 清零 Predict 仍锁 / Compile 绿解锁 / 改盘回待编译;报告第 84 步) |
+      | R3-6 | 报告第 45 步终态图更正(批示⑤) | 换用 #1050 后的真机图(fix-05a),图注写明三轮图是历史中间态;52ddeb64 复发布 | 页面第 45 步图与现行为一致 | ✅ 已修(52ddeb64 已复发布:第 45 步换 #1050 后真机图,图注注明三轮图为历史中间态;报告第 85 步) |
+      | R3-7 | 自动整理带 fit + 菜单有 Fit(批示⑥) | 代码已具备(见上核清②);真机复验两点并截图,不符再修 | 真机:菜单含 Fit view;Auto-arrange 后取景变化 | ✅ 复验即销(代码即 #1051;真机:菜单含 Fit view,Auto-arrange 重排并取景回正;报告第 86 步) |
+      | R3-8 | 撤画布加 step(批示⑦,推翻 F5「画布内联编辑」决策) | 删画布内联步骤**编辑**(Add step/增删改排);内联子节点保留**只读呈现**(F5 自证:运行期 debug bar 对话续跑作用于这些子节点,呈现不能删);步骤编辑归编辑器;`phase-editing/mvp1-alignment.md` F5 改写 + 修订记录 + 重钉哈希 | 真机:agent 节点无 Add step/编辑交互;SKILL.md 里的 steps 仍只读可见;编辑器改步骤照常生效 | ✅ 已修(#1061;真机:内联步骤只读、无 Add step,编辑器改步照常生效;报告第 87 步) |
+      | R3-9 | 同意「开启共享」零反馈(J-01.J) | 选择后出确认 toast(开启/暂不两路) | 按 J-01.J 行验收 | ✅ 已修(#1058;真机 fresh 首启:开启共享 → toast「Community sharing is on」,磁盘 community_sharing_choice=shared;报告第 88 步) |
+      | R3-10 | 协议名顶替 provider 身份(J-01.L) | endpoint chip/toast 首名 = provider 身份,协议家族后置标注(「api.deepseek.com · OpenAI-compatible」式) | 按 J-01.L 行验收:DeepSeek/Ark 卡不再首名「OpenAI」 | ✅ 已修(#1065;真机:「api.deepseek · OpenAI-compatible」式首名;报告第 89 步) |
+      | R3-11 | golden 回填提示文案病 + Confirm 无产物无反馈(J-X.6) | 先复查写路径定根因,再修文案(区分 predict/run)与 Confirm 反馈/产物 | 按 J-X.6 行验收 | ✅ 已修(#1066;真机三段:predict 结束无条 / run 结束条出新文案 / Confirm 有反馈且磁盘 golden 的 source_run_id 对上;报告第 90 步。点验中冒出新观察另案 J-X.9:失败 run 也弹条并可种出空 golden) |
+      | R3-12 | 状态纯色相编码的可访问性(J-01.F,与 R3-3 同口径收窄) | 可见通道保持颜色简洁(用户批示②),第二通道 = aria + hover tooltip 全覆盖;不再加常驻文字/图标 | 全部状态 chip 有 aria 与 tooltip 语义;J-01.F 按此口径销案 | ✅ 已销(口径=#1062:可见层保持颜色简洁,第二通道 aria+tooltip 全覆盖,93 个状态 chip aria 审计全过;报告第 91 步;J-01.F 行同步销案) |
+      | R3-13 | CLI 启动 socket 警告(J-X.8) | 评估 cross-session messaging 对 Studio 场景是否需要;不需要则修 WSL socket 目录或抑制警告 | 按 J-X.8 行验收 | ✅ 已修(环境修复:本机 WSL 根目录权限被改坏成 drwxrwxrwx ahe2e,修回 root:root 0755 后 CLI 启动零警告;评估结论 Studio 场景不需要 cross-session messaging,警告因根因消除而非抑制;报告第 92 步) |
+      | R3-14 | skill-spec 分叉副本收敛(J-X.4) | `docs/engine/skill-spec/` 为权威保留,`docs/engine/mvp0/skill-spec/` 删除、引用改指;`docs.backup-2026-05-20/` 处理同行判据 | 按 J-X.4 行验收 | ✅ 已修(#1067;两棵树整删、哈希锁改钉活文档、余下引用全为带日期历史记录,另立引用真实性门禁与 24 篇 backlog 棘轮;报告第 93 步) |
+      | R3-15 | 开抽屉点左 rail 图标抽屉被关(批示轮二观察) | rail 是侧栏的开关,按「不挡侧栏」精神并入豁免:点 rail 抽屉留驻 | 真机:开抽屉点 rail 图标,抽屉不关、面板正常切换 | ✅ 已修(#1068;真机:开抽屉点 rail 抽屉留驻、面板正常切换;报告第 94 步) |
+      | R3-16 | 报告追加批示轮三章 + 重拍受影响截图 | 全部修完后真机逐项复验,新章续第 80 步起;52ddeb64 复发布 | 每项修复一步一图 | ✅ 已交付(52ddeb64 复发布:新章第 80–95 步一项一步一图,第 45/78 步图同轮更正) |
       J-X.5(代码有、文档无的功能)维持既定「按模块随点验补」节奏,不入本轮;
       J-04.C 的 PROBLEM 行已补 2026-08-29 反转裁决注记(见该行)。
+      **批示轮三收口(2026-08-29)**:R3-1..R3-16 全部销账——11 个修复 PR
+      (#1058–#1068)合并,五处权威设计文档修订与实现同 PR 落地并重钉哈希
+      (00_settings 第六页签、03_compile 门禁决策行、phase-editing F5、
+      copilot-assist F7、compile-lint F2);真机点验:主配置环境 11 项 +
+      全新 STUDIO_CONFIG_DIR 环境 2 项(R3-4/R3-9)+ 仓库层核验 1 项(R3-14),
+      证据全部落报告第 80–95 步(52ddeb64)。点验中新立 J-X.9(失败 run 也弹
+      golden 回填条并可种出空 golden),与 J-X.2、J-X.5 一同为在册遗留。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)

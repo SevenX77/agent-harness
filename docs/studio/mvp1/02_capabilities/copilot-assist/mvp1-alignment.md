@@ -261,8 +261,9 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **决策+动机**：所有权不变量——数据流归各自能力，copilot 只作 chat 载体+渲染，只链接不重述。分析 bar = F3 主动诊断的具体落点 + **细化 [[golden-eval]] g-e 批量入口**(sonner→弹窗)。
 - **原话**：「每次跑完predict或者run, copilot输入框上方弹出一个小bar: 是否自动分析, 给用户确认. 没有写golden的节点自动写golden」/「这个bar是弹窗, 你确定了之后他就会消失, 我只是让你看下布局样式」
 - **修订(2026-08-29,批示轮三 J-X.6)**：分析 bar 只在 **run** 结束后弹出;predict 结束**不弹**。原文「predict/run 跑完」与体系内更早、专门针对 golden 来源的守卫矛盾:后端 `PREDICT_TRACE_CANNOT_BE_GOLDEN`(`apps/studio/backend/app/services/diagnostic_export.py`,P-T9 裁决 2026-05-07,早于本条 2026-06-05 的正文)与 [[04_run-and-verify]] E8「golden 作者定/手填,非从 predict trace 捕获」都规定 predict 的输出(占位数据,不是真产出)不得写进 golden——predict 后弹「确认→写 golden」等于邀请用户做一个后端注定 409 的动作。按「专门针对该对象且带理由的条目优先」判读,run-only 为准;上一行原话按语境剥离原则留底不改。
+- **修订(2026-08-30,J-X.9 用户裁决「失败 run 不弹条」)**：在 run-only 之上再收窄——分析 bar 只在 run 的**判定为 success** 时弹出;crashed / cancelled / abandoned / paused 一律不弹。理由:bar 的承诺是「从这次 run 的输出回填缺失 golden」,前提是 run 产出了完整输出;批示轮三点验实测 crashed run(无可用 route)照弹 bar,Confirm 从中种出**空 golden**(空对象)——「结束」与「成功」在这道门上必须分家。实现落点:`goldenSeedableRunId` 的入参由「是否结束」改为 run 判定(`RunVerdict`),仅 `success` 放行(`apps/studio/frontend/src/utils/run-status-projection.ts`)。
 - **status**：judge 现不可达(view='eval' 无人传)= target；分析 bar = target。
-- **测试点**：run 完弹窗(predict 完不弹)；确认→无 golden 节点写 golden；确认后消失；judge/打磨/commit-msg 跑在对话里、数据流落各自能力。
+- **测试点**：run **成功**完弹窗(predict 完不弹;run crashed/cancelled/abandoned 不弹)；确认→无 golden 节点写 golden；确认后消失；judge/打磨/commit-msg 跑在对话里、数据流落各自能力。
 - **归属**：copilot-assist 拥有分析弹窗 UI；数据流 [[golden-eval]]/[[publish]]。**回写** g-e + workflow [[04_run-and-verify]]。
 
 ### F8 生命周期（出现 / Home 卸载 / 下钻无缝）

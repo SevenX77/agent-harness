@@ -500,13 +500,22 @@ export function runningPhaseOf(
  * (`nextAdoptedLiveRun` takes any running row, predicts included), so the bar's
  * derivation must filter it here. An absent kind means "run": the field only
  * exists on rows written after Timeline F1 introduced it.
+ *
+ * And only a SUCCESSFUL run (J-X.9, 用户裁决 2026-08-30「失败 run 不弹条」):
+ * the offer's own sentence — "fill the missing goldens from this run's
+ * output" — presumes the run produced its complete output. A crashed run has
+ * none (seeding from one manufactured an empty {} golden); cancelled and
+ * abandoned runs stopped mid-way for the same reason. So the gate takes the
+ * run's verdict — the one already-derived answer to "how does this run
+ * stand" — rather than re-asking whether it merely stopped.
  */
 export function goldenSeedableRunId(args: {
   runId: string | null
   runKind: "run" | "predict" | undefined
-  ended: boolean
+  verdict: RunVerdict
 }): string | null {
-  if (!args.runId || !args.ended) return null
+  if (!args.runId) return null
   if (args.runKind === "predict") return null
+  if (args.verdict !== "success") return null
   return args.runId
 }

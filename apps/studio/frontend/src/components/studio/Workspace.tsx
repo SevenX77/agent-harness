@@ -52,7 +52,7 @@ import {
   type SkillGateEvent,
 } from "./gate-state"
 import { deriveEdgeStatuses, inputBoundaryStatus, outputBoundaryStatus } from "@/utils/edge-status-projection"
-import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, endsTheRun, goldenSeedableRunId, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
+import { deriveNodeActivity, deriveNodeErrorMessages, deriveNodeRuntimes, deriveNodeStatuses, goldenSeedableRunId, runVerdict, runningPhaseOf, type RunVerdict } from "@/utils/run-status-projection"
 import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, lintErrorToCompileError, lintErrorsByNode, selectActiveNodeErrors } from "./node-compile-errors"
@@ -776,12 +776,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const runStream = useRunStream(skillId, runId)
   const isViewingHistory = viewedTrace?.source === "history"
-  // F7: a finished run (run_ended in the stream) drives the copilot analysis
-  // bar. A run that merely STOPPED has not finished — offering to analyse it
-  // would be offering to analyse work that has not happened yet. Whether the
-  // finished thing is a RUN at all is decided further down (goldenSeedableRunId),
-  // where the run list that knows its kind is in scope.
-  const liveRunEnded = runStream.events.some(endsTheRun)
   // The run the BACKEND has finished finalizing, which is a strictly later thing
   // than the engine's `run_ended`. Between the two the backend still auto-commits
   // the skill, writes the run metadata and writes `report.md`; a reader that
@@ -876,7 +870,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const liveRunKind =
     (liveRunRecord?.runId === runId ? liveRunRecord.metadata.kind : undefined) ??
     skillRuns?.find((item) => item.run_id === runId)?.kind
-  const completedRunId = goldenSeedableRunId({ runId, runKind: liveRunKind, ended: liveRunEnded })
+  // F7: only a SUCCESSFUL run drives the copilot analysis bar (J-X.9, 用户裁决
+  // 2026-08-30「失败 run 不弹条」). A run that merely stopped has not finished,
+  // and a run that finished by crashing has no output to seed goldens from —
+  // so the bar's input is the run's VERDICT, derived by the same canonical
+  // `runVerdict` the rest of Studio quotes (stream, sealed record, and the
+  // finalize gate, each scoped to THIS run id).
+  const liveRunVerdict = runVerdict(
+    runStream.events,
+    liveRunRecord?.runId === runId ? liveRunRecord.metadata : null,
+    runId,
+    finalizedRun?.runId === runId ? finalizedRun.verdict : null,
+  )
+  const completedRunId = goldenSeedableRunId({ runId, runKind: liveRunKind, verdict: liveRunVerdict })
 
   useEffect(() => {
     const feedbackKey = nextLocalHistoryRefreshKey({

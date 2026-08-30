@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 import { apiClientConfigChangedEvent, authenticatedApiReady } from "@/api/client"
 import { useAppSettings } from "@/hooks/useAppSettings"
@@ -7,7 +7,7 @@ import { shouldApplyExternalRolesRefresh, useDebouncedRolesSave } from "@/hooks/
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import i18n from "@/i18n"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRegistry, getRoles, isRedactedEndpointSecret, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RegistryResponse, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, deleteRoute, forceTestEndpoint, getCredentials, getEndpointSecret, getModelGroups, getProviderModels, getRegistry, getRegistrySnapshot, getRoles, isRedactedEndpointSecret, modelGroupsFromRegistry, subscribeRegistrySnapshot, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RegistryResponse, type RolesData } from "../../../api/llm"
 import { clearActiveProbeEndpoints, updateActiveProbeEndpoint } from "../api-keys/active-probe-store"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
@@ -88,22 +88,24 @@ export async function refreshLoadedLlmRolesProjection({
   loadModelGroups = getModelGroups,
   loadRoles = getRoles,
   rolesLoaded,
-  setModelGroups,
   setRolesData,
   setRolesError,
 }: {
   loadModelGroups?: () => Promise<ModelGroup[]>
   loadRoles?: () => Promise<RolesData>
   rolesLoaded: boolean
-  setModelGroups: (next: ModelGroup[]) => void
   setRolesData: (next: RolesData) => void
   setRolesError: (next: string | null) => void
 }) {
   if (!rolesLoaded) return
   try {
-    const [nextRoles, nextModelGroups] = await Promise.all([loadRoles(), loadModelGroups()])
+    // loadModelGroups is still awaited even though the model-groups projection
+    // now reaches consumers through the shared registry snapshot store
+    // (J-01.K): its read re-materializes the snapshot when the cache was
+    // invalidated (e.g. after a community-catalog sync), which is what commits
+    // the fresh model groups into the store.
+    const [nextRoles] = await Promise.all([loadRoles(), loadModelGroups()])
     setRolesData(nextRoles)
-    setModelGroups(nextModelGroups)
     setRolesError(null)
   } catch {
     setRolesError("Roles unavailable")
@@ -499,7 +501,17 @@ export function useSettingsPageController(): SettingsPageController {
   // falls back to "everything under the provider is spinning".
   const [providerTestingEndpointIds, setProviderTestingEndpointIds] = useState<Record<string, string | null>>({})
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
-  const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
+  // J-01.K (批示轮三 R3-2): model groups are a projection of the ONE shared
+  // registry snapshot store in api/llm — every write response that commits a
+  // canonical snapshot (probe, endpoint test, model test, save) re-renders
+  // every consumer (Roles sidebar, Copilot tab) in the same frame. A useState
+  // copy here is exactly the replica that went stale in the fresh-machine
+  // journey (API-Key chip green while the sidebar stayed blue).
+  const registrySnapshot = useSyncExternalStore(subscribeRegistrySnapshot, getRegistrySnapshot)
+  const modelGroups = useMemo(
+    () => (registrySnapshot ? modelGroupsFromRegistry(registrySnapshot) : emptyModelGroups),
+    [registrySnapshot],
+  )
   const [rolesError, setRolesError] = useState<string | null>(null)
 
   // Keep a ref of the most recent draft list so the debounced save can read it
@@ -575,7 +587,6 @@ export function useSettingsPageController(): SettingsPageController {
       pendingRoleProjectionRefreshRef.current = false
       void refreshLoadedLlmRolesProjection({
         rolesLoaded: Boolean(rolesDataRef.current),
-        setModelGroups,
         setRolesData: applyRolesDataFromBackend,
         setRolesError,
       })
@@ -590,7 +601,6 @@ export function useSettingsPageController(): SettingsPageController {
     onRecoverableError: () => {
       void refreshLoadedLlmRolesProjection({
         rolesLoaded: Boolean(rolesDataRef.current),
-        setModelGroups,
         setRolesData: applyRolesDataFromBackend,
         setRolesError,
       })
@@ -683,9 +693,8 @@ export function useSettingsPageController(): SettingsPageController {
       return
     }
     Promise.all([getRoles({ force: true }), getModelGroups({ force: true })])
-      .then(([next, nextModelGroups]) => {
+      .then(([next]) => {
         applyRolesDataFromBackend(next)
-        setModelGroups(nextModelGroups)
       })
       .catch((error) => {
         console.warn("phase=settings-event-refresh action=roles-refetch-failed error=%o", error)
@@ -802,10 +811,9 @@ export function useSettingsPageController(): SettingsPageController {
       rolesDirtyRef.current = false
     }
     Promise.all([getRoles(), getModelGroups()])
-      .then(([next, nextModelGroups]) => {
+      .then(([next]) => {
         if (cancelled) return
         applyRolesDataFromBackend(next)
-        setModelGroups(nextModelGroups)
       })
       .catch(() => {
         if (!cancelled) setRolesError("Roles unavailable")
@@ -821,7 +829,6 @@ export function useSettingsPageController(): SettingsPageController {
     if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
     void refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
-      setModelGroups,
       setRolesData: applyRolesDataFromBackend,
       setRolesError,
     })
@@ -1237,7 +1244,6 @@ export function useSettingsPageController(): SettingsPageController {
   const refreshRolesProjection = useCallback(async () => {
     await refreshLoadedLlmRolesProjection({
       rolesLoaded: Boolean(rolesDataRef.current),
-      setModelGroups,
       setRolesData: applyRolesDataFromBackend,
       setRolesError,
     })

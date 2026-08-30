@@ -233,20 +233,23 @@ describe('refreshLoadedLlmRolesProjection', () => {
       },
     ]
     const setRolesData = vi.fn()
-    const setModelGroups = vi.fn()
     const setRolesError = vi.fn()
+    // J-01.K: model groups reach consumers through the shared registry
+    // snapshot store, so the helper no longer takes a setter — but it must
+    // still READ model groups, because that read re-materializes the shared
+    // snapshot when the cache was invalidated.
+    const loadModelGroups = vi.fn().mockResolvedValue(nextModelGroups)
 
     await refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
       loadRoles: vi.fn().mockResolvedValue(nextRoles),
-      loadModelGroups: vi.fn().mockResolvedValue(nextModelGroups),
+      loadModelGroups,
       setRolesData,
-      setModelGroups,
       setRolesError,
     })
 
     expect(setRolesData).toHaveBeenCalledWith(nextRoles)
-    expect(setModelGroups).toHaveBeenCalledWith(nextModelGroups)
+    expect(loadModelGroups).toHaveBeenCalled()
     expect(setRolesError).toHaveBeenCalledWith(null)
   })
 
@@ -259,7 +262,6 @@ describe('refreshLoadedLlmRolesProjection', () => {
       loadRoles,
       loadModelGroups,
       setRolesData: vi.fn(),
-      setModelGroups: vi.fn(),
       setRolesError: vi.fn(),
     })
 

@@ -667,12 +667,43 @@ const fixedRoleStatusCache: Partial<Record<string, FixedRoleStatus>> = {}
 const fixedRoleStatusRequests: Partial<Record<string, Promise<FixedRoleStatus>>> = {}
 const testResultCacheByEndpoint: Record<string, ProviderTestResult[]> = {}
 
+// J-01.K (批示轮三 R3-2): the registry snapshot is a shared external store, not
+// a passive cache. Every consumer (API-Key page, Roles "Available Models"
+// sidebar, Copilot tab) projects the SAME snapshot via
+// useSyncExternalStore(subscribeRegistrySnapshot, getRegistrySnapshot), so a
+// probe/test write response — which carries the canonical registry snapshot,
+// model_groups included — converges all surfaces in the same frame with no
+// refetch. Shape borrowed from React's official external-store primitive as
+// already instantiated twice in this repo (the J-01.H useAppSettings store and
+// active-probe-store). Rejected alternative: a backend registry_changed domain
+// event for self-writes — the write response already IS the canonical snapshot
+// (AGENTS.md SSOT trigger #1); an event round-trip would add latency plus a
+// redundant GET, and the file watcher's echo suppression of self-writes is
+// correct by design.
+const registrySnapshotListeners = new Set<() => void>()
+
+function commitRegistrySnapshot(next: RegistryResponse | null): void {
+  cachedRegistry = next
+  for (const listener of registrySnapshotListeners) listener()
+}
+
+export function subscribeRegistrySnapshot(listener: () => void): () => void {
+  registrySnapshotListeners.add(listener)
+  return () => {
+    registrySnapshotListeners.delete(listener)
+  }
+}
+
+export function getRegistrySnapshot(): RegistryResponse | null {
+  return cachedRegistry
+}
+
 export function isRedactedEndpointSecret(value: string | null | undefined): boolean {
   return value === REDACTED_ENDPOINT_SECRET
 }
 
 export function resetLlmApiCachesForTests(): void {
-  cachedRegistry = null
+  commitRegistrySnapshot(null)
   registryRequest = null
   cachedRolesData = null
   rolesRequest = null
@@ -1276,7 +1307,7 @@ function hydrateRegistryWithKnownSecrets<T extends CredentialRegistryResponse>(r
 function cacheRegistry(registry: CredentialRegistryResponse): RegistryResponse {
   const hydrated = hydrateRegistryWithKnownSecrets(registry)
   cachedRolesData = null
-  cachedRegistry = {
+  const next = {
     ...(cachedRegistry ?? {
       model_profiles: {},
       model_groups: [],
@@ -1287,7 +1318,8 @@ function cacheRegistry(registry: CredentialRegistryResponse): RegistryResponse {
     }),
     ...hydrated,
   } as RegistryResponse
-  return cachedRegistry
+  commitRegistrySnapshot(next)
+  return next
 }
 
 function cacheRolesProjection(snapshot: RolesProjectionResponse): RolesData {
@@ -1556,7 +1588,7 @@ export async function getRegistry(options: RegistryReadOptions = {}): Promise<Re
  */
 export async function syncVerifiedCommunityCatalog(): Promise<VerifiedCatalogSyncResponse> {
   const response = await api.post<VerifiedCatalogSyncResponse>('/llm/catalog/sync-verified')
-  cachedRegistry = null
+  commitRegistrySnapshot(null)
   registryRequest = null
   cachedRolesData = null
   rolesRequest = null
@@ -1611,10 +1643,10 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
     provider_endpoints: Object.fromEntries(entries),
   }
   if (cachedRegistry) {
-    cachedRegistry = {
+    commitRegistrySnapshot({
       ...cachedRegistry,
       provider_endpoints: hydrated.provider_endpoints,
-    }
+    })
   }
   return hydrated
 }
@@ -1659,13 +1691,13 @@ export async function testEndpoint(endpointId: string): Promise<ProviderEndpoint
   }
   rememberEndpointSecret(endpointId, response.data.api_key)
   if (cachedRegistry) {
-    cachedRegistry = {
+    commitRegistrySnapshot({
       ...cachedRegistry,
       provider_endpoints: {
         ...cachedRegistry.provider_endpoints,
         [endpointId]: response.data,
       },
-    }
+    })
   }
   return response.data
 }
@@ -1970,7 +2002,7 @@ export async function testProviderModels(
   if (!isEndpointModelTestResponse(response.data)) {
     throw new Error('Endpoint model test response omitted registry results.')
   }
-  cachedRegistry = response.data.registry
+  commitRegistrySnapshot(response.data.registry)
   const endpointRoutes = routesForEndpoint(response.data.registry, request.provider_id)
   return {
     results: response.data.results,

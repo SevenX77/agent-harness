@@ -219,6 +219,32 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("canonical")
   })
 
+  // R3-3 (批示轮三 2026-08-29): 「模型标签后面没必要写"previously connected"
+  // 蓝色框已经表示同样意思了」 — the blue (probe-verified) frame carries the
+  // meaning; the words stay in the tooltip/aria only.
+  it("omits Previously Connected text from historical_ready provider tags (blue frame + tooltip carry it)", () => {
+    const html = renderToStaticMarkup(
+      <AvailableModelsSidebar
+        modelGroups={[{
+          ...modelGroups[0],
+          provider_models: [{
+            ...modelGroups[0].provider_models[0],
+            provider_label: "Zhipu",
+            ui_state: "historical_ready",
+          }],
+        }]}
+      />,
+    )
+    const providerTag = html.match(/<span[^>]*data-available-model-provider-label="true"[\s\S]*?<\/span><\/span>/)?.[0] ?? ""
+
+    expect(providerTag).toContain("Zhipu")
+    expect(providerTag).toContain('data-provider-state="historical_ready"')
+    // Blue frame, no visible words…
+    expect(providerTag).not.toContain(">Previously Connected<")
+    // …while the accessible name/tooltip still says it.
+    expect(providerTag).toContain("Previously Connected")
+  })
+
   it("omits Ready text from ready provider tags", () => {
     const html = renderToStaticMarkup(
       <AvailableModelsSidebar

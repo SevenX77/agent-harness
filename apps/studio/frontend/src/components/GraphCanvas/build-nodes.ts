@@ -202,16 +202,14 @@ function toolsForPhase(
   return phase.mode === 'llm' ? phase.agent_tools : []
 }
 
-// N2 atom #15 (l3-step-edit): the canvas-owned inputs that mount the inline L3
-// step editor onto AGENT nodes. Grouped into one object so buildNodes' positional
-// signature (already at its limit) does not grow further. All optional so existing
-// callers / the drilled-child path render unchanged when steps editing is not wired.
+// The canvas-owned inputs that mount the inline L3 step projection onto AGENT
+// nodes (read-only since R3-8 — editing happens in the editor). Grouped into one
+// object so buildNodes' positional signature (already at its limit) does not
+// grow further. All optional so existing callers / the drilled-child path
+// render unchanged when the projection is not wired.
 export interface AgentStepsInputs {
   expandedSteps?: Set<string>
   onToggleSteps?: (nodeId: string) => void
-  // Persist an edited agent body. The canvas binds the file path + the
-  // optimistic-lock hash (of the pre-edit body) and this forwards the result.
-  onStepsSave?: (nodeId: string, filePath: string, currentBody: string, nextBody: string) => void
   // N5 atom #3 (dirty-downstream-graying): the `affected_downstream` node ids the
   // resume-validity endpoint returned for the node being resumed from. Each node
   // in this set is grayed (its node-level Resume can't continue); unrelated
@@ -276,11 +274,11 @@ export function buildNodes(
     const subgraphPath = normalizeSubgraphPath(topology?.path)
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
-    // N2 atom #15: AGENT nodes (SKILL.md) get the inline L3 step editor wired off
-    // the real on-disk body. Non-agent (logic/subgraph) nodes leave it undefined.
+    // AGENT nodes (SKILL.md) get the inline L3 step projection wired off the
+    // real on-disk body. Non-agent (logic/subgraph) nodes leave it undefined.
     const isAgentNode = phaseKindFile({ mode, subgraphPath }) === 'SKILL.md'
     const agentBody = isAgentNode ? detail?.files?.[filePath] : undefined
-    const { onToggleSteps, onStepsSave } = agentSteps
+    const { onToggleSteps } = agentSteps
     return {
       id: phase.name,
       type: 'skill',
@@ -321,9 +319,6 @@ export function buildNodes(
         isStepsExpanded: isAgentNode ? (agentSteps.expandedSteps?.has(phase.name) ?? false) : false,
         onToggleSteps: isAgentNode && onToggleSteps
           ? () => onToggleSteps(phase.name)
-          : undefined,
-        onStepsSave: isAgentNode && onStepsSave && agentBody !== undefined
-          ? (nextBody: string) => onStepsSave(phase.name, filePath, agentBody, nextBody)
           : undefined,
       },
     }
@@ -383,11 +378,11 @@ export function buildNodesFromTopology(
     const mode = phaseKindFromTopologyMode(topology?.mode)
     const subgraphPath = normalizeSubgraphPath(topology?.path)
     const filePath = `phases/${phaseName}/${phaseKindFile({ mode, subgraphPath })}`
-    // n2-canvas #14: the topology-only (drill loading / fallback) view has no file
-    // body, so the AGENT step-editor open/close toggle is wired but the body-bound
-    // save (onStepsSave / agentBody) is not — that is supplied by the Option-A
-    // loaded path (buildNodes with the child's full SkillDetail). The toggle is
-    // withheld entirely on the read-only/compact projection (agentSteps left {}).
+    // n2-canvas #14: the topology-only (drill loading / fallback) view has no
+    // file body (`agentBody`), so the AGENT step-projection toggle is wired but
+    // stays hidden until the Option-A loaded path (buildNodes with the child's
+    // full SkillDetail) supplies the body. The toggle is withheld entirely on
+    // the read-only/compact projection (agentSteps left {}).
     const isAgentNode = phaseKindFile({ mode, subgraphPath }) === 'SKILL.md'
     const { onToggleSteps } = agentSteps
     return {

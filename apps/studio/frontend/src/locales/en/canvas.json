@@ -74,7 +74,7 @@
     "errorSummary": "Node error summary",
     "resumeUnavailable": "Resume unavailable: upstream changed",
     "collapseSteps": "Collapse steps",
-    "editSteps": "Edit steps",
+    "viewSteps": "View steps",
     "hideSteps": "Hide steps",
     "collapseSubgraph": "Collapse subgraph",
     "expandSubgraph": "Expand subgraph",

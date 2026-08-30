@@ -49,43 +49,47 @@ function renderNode(data: SkillGraphNodeData): string {
   return renderToStaticMarkup(<SkillNode {...props} />)
 }
 
-describe("SkillNode inline L3 step editor (N2 atom #15, l3-step-edit)", () => {
-  it("shows an Edit steps toggle for an agent node with body + save wired", () => {
+// R3-8 (批示轮三 2026-08-29): canvas step EDITING is withdrawn (「应该让用户
+// 在编辑器改」); the inline rows stay as a read-only projection because the
+// runtime debug bar's 对话续跑 targets them (phase-editing F5, 2026-08-29 rev).
+describe("SkillNode inline L3 step projection", () => {
+  it("shows a View steps toggle for an agent node with a body + toggle wired", () => {
     const html = renderNode(
-      baseData({ agentBody: AGENT_BODY, onToggleSteps: () => undefined, onStepsSave: () => undefined }),
+      baseData({ agentBody: AGENT_BODY, onToggleSteps: () => undefined }),
     )
-    expect(html).toContain('aria-label="Edit steps"')
-    expect(html).toContain("Edit steps")
-    // Collapsed: the editor (and its step rows) is not rendered yet.
+    expect(html).toContain('aria-label="View steps"')
+    expect(html).toContain("View steps")
+    // Collapsed: the projection (and its step rows) is not rendered yet.
     expect(html).not.toContain("Steps</span>")
   })
 
-  it("renders the inline step rows when expanded", () => {
+  it("renders the read-only step rows when expanded — no mutation controls", () => {
     const html = renderNode(
       baseData({
         agentBody: AGENT_BODY,
         isStepsExpanded: true,
         onToggleSteps: () => undefined,
-        onStepsSave: () => undefined,
       }),
     )
     expect(html).toContain('aria-label="Collapse steps"')
     expect(html).toContain("Hide steps")
-    // The AgentStepsInline editor mounted with the real body's step parsed in.
+    // The AgentStepsInline projection mounted with the real body's step parsed in.
     expect(html).toContain("S1")
     expect(html).toContain("Read the brief.")
-    expect(html).toContain("Add step")
+    expect(html).not.toContain("Add step")
+    expect(html).not.toContain("<input")
+    expect(html).not.toContain("<textarea")
   })
 
-  it("does not offer step editing for a logic node (no body / callbacks wired)", () => {
+  it("does not offer the steps toggle for a logic node (no body / toggle wired)", () => {
     const html = renderNode(baseData({ mode: "logic" }))
-    expect(html).not.toContain('aria-label="Edit steps"')
-    expect(html).not.toContain("Edit steps")
+    expect(html).not.toContain('aria-label="View steps"')
+    expect(html).not.toContain("View steps")
   })
 
-  it("does not offer step editing for an agent node whose callbacks are not wired", () => {
+  it("does not offer the steps toggle for an agent node whose toggle is not wired", () => {
     const html = renderNode(baseData({ agentBody: AGENT_BODY }))
-    expect(html).not.toContain('aria-label="Edit steps"')
+    expect(html).not.toContain('aria-label="View steps"')
   })
 
   it("renders a dedicated bridge source handle only when the subgraph is expanded", () => {

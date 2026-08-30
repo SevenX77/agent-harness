@@ -762,7 +762,12 @@ function providerStateLabel(state: ProviderUiState): string {
 }
 
 function providerVisibleStateLabel(state: ProviderUiState): string | null {
-  return state === "ready" ? null : providerStateLabel(state)
+  // ready: the green frame alone says it. historical_ready (R3-3, 批示轮三
+  // 2026-08-29): the blue frame alone says it — 「模型标签后面没必要写
+  // "previously connected"蓝色框已经表示同样意思了」; the words remain in the
+  // chip's tooltip/aria (providerChipTooltip / providerStateAriaLabel).
+  if (state === "ready" || state === "historical_ready") return null
+  return providerStateLabel(state)
 }
 
 function providerStateAriaLabel(provider: AvailableModelProvider): string {

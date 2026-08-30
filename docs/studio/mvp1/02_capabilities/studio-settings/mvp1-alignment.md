@@ -93,7 +93,8 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 - Region link: `settings`; platform link: `gateway`.
 
 ## 4. 设计决策基础（PM 原话）
-- 六态最终标签(中/英,= i18n P1 首批词条):`ready`=就绪/Ready · `historical_ready`=曾连通/Previously connected · `untested`=未测试/Untested · `failed`=失败(带原因)/Failed · `cooling_down`=冷却中/Cooling down · `off`=已关闭/Off。`historical_ready` **直接显示**(非仅 tooltip)。
+- 六态最终标签(中/英,= i18n P1 首批词条):`ready`=就绪/Ready · `historical_ready`=曾连通/Previously connected · `untested`=未测试/Untested · `failed`=失败(带原因)/Failed · `cooling_down`=冷却中/Cooling down · `off`=已关闭/Off。
+  **修订记录(2026-08-29,用户批示)**:本行原句尾为「`historical_ready` **直接显示**(非仅 tooltip)」,被用户批示推翻:「模型标签后面没必要写"previously connected"蓝色框已经表示同样意思了」。现行口径:**模型/provider 标签(chip)上 `historical_ready` 与 `ready` 一样只以边框颜色表意**(蓝框=曾连通,绿框=就绪),文字标签留在 tooltip 与 aria-label(可访问性口径同 J-01.F 结案方式);**独立状态徽章**(ProviderStateBadge 这类以状态为主体的字段,非模型标签后缀)不在本修订范围,仍显示六态文字。
 - Copilot SDK 测试 = **短 smoke,走真实路径**(建会话 + 发一条 + 收到流式即过),不做完整 session 创建探测。
 
 ## 5. 决策 + 动机

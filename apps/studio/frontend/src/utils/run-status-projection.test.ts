@@ -434,21 +434,35 @@ describe("goldenSeedableRunId", () => {
   // adoption, and its trace is refused promotion by the backend
   // (PREDICT_TRACE_CANNOT_BE_GOLDEN) — offering it is a dead-end Confirm that
   // calls a stub rehearsal "Run finished".
-  it("offers a real run once it has ended", () => {
-    expect(goldenSeedableRunId({ runId: "run-1", runKind: "run", ended: true })).toBe("run-1")
+  //
+  // J-X.9 (用户裁决 2026-08-30「失败 run 不弹条」): finishing is not enough
+  // either — the offer reads "fill the missing goldens from this run's output",
+  // and only a SUCCESSFUL run has the complete output that sentence promises.
+  // A crashed run seeded an empty {} golden; cancelled/abandoned runs stopped
+  // mid-way for the same reason. The gate therefore asks HOW the run stands
+  // (RunVerdict), not merely whether it stopped.
+  it("offers a real run once its verdict is success", () => {
+    expect(goldenSeedableRunId({ runId: "run-1", runKind: "run", verdict: "success" })).toBe("run-1")
   })
 
-  it("never offers a predict, ended or not", () => {
-    expect(goldenSeedableRunId({ runId: "pred-1", runKind: "predict", ended: true })).toBeNull()
-    expect(goldenSeedableRunId({ runId: "pred-1", runKind: "predict", ended: false })).toBeNull()
+  it("never offers a predict, whatever its verdict", () => {
+    expect(goldenSeedableRunId({ runId: "pred-1", runKind: "predict", verdict: "success" })).toBeNull()
+    expect(goldenSeedableRunId({ runId: "pred-1", runKind: "predict", verdict: "running" })).toBeNull()
   })
 
   it("treats an absent kind as a run (pre-kind rows mean run)", () => {
-    expect(goldenSeedableRunId({ runId: "run-2", runKind: undefined, ended: true })).toBe("run-2")
+    expect(goldenSeedableRunId({ runId: "run-2", runKind: undefined, verdict: "success" })).toBe("run-2")
+  })
+
+  it("offers nothing for a run that ended any way but success", () => {
+    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", verdict: "failed" })).toBeNull()
+    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", verdict: "cancelled" })).toBeNull()
+    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", verdict: "abandoned" })).toBeNull()
+    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", verdict: "paused" })).toBeNull()
   })
 
   it("offers nothing while the run is still going or absent", () => {
-    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", ended: false })).toBeNull()
-    expect(goldenSeedableRunId({ runId: null, runKind: "run", ended: true })).toBeNull()
+    expect(goldenSeedableRunId({ runId: "run-3", runKind: "run", verdict: "running" })).toBeNull()
+    expect(goldenSeedableRunId({ runId: null, runKind: "run", verdict: "success" })).toBeNull()
   })
 })

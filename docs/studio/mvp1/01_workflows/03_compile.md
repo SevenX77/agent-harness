@@ -9,13 +9,13 @@ role: workflow-record
 > **走查完整记录**(全部 atom actions + 决策 + 原话 + 测试关键点)。
 
 ## 旅程位
-搭好图 → 实时 lint / 手动 Compile 校验 → **compile-pass(绿灯)才解锁 Predict**。检查内容(结构/字段/拓扑/IO 数据流/mention)由引擎 FROZEN spec 定,studio 只触发 + 呈现。
+搭好图 → 实时 lint(只做诊断投影)/ 手动 Compile 校验 → **手动 Compile 成功(compile-pass 绿灯)才解锁 Predict**(修订 2026-08-29,见「决策」)。检查内容(结构/字段/拓扑/IO 数据流/mention)由引擎 FROZEN spec 定,studio 只触发 + 呈现。
 
 ## Atom actions
 | # | 动作 | 区域 | status |
 |---|---|---|---|
 | A1 | 编辑时实时 lint(防抖 800ms → POST /lint → 引擎编译查错) | editor/后台 | live |
-| A2 | lint 状态 → build stage(checking→编译中 / failed→失败 / passed→通过) | 动作条 | live |
+| A2 | lint 状态 → build stage(checking→编译中 / failed→失败 / passed→**待编译 idle,不解锁**;修订 2026-08-29) | 动作条 | live |
 | A3 | 错误上下文标①:canvas 节点警告/错误小标志 + tooltip | canvas | target-design |
 | A4 | 错误上下文标②:properties/io 特定属性旁 tooltip | properties/io | target-design |
 | A5 | 错误上下文标③:编辑器 IDE 式行内标记 | editor | target-design |
@@ -31,7 +31,8 @@ role: workflow-record
 ## 决策
 - 错误呈现 = **3 处上下文标(canvas 节点 / 属性旁 / 编辑器行)+ 点 Compile 弹 drawer(可复制、不盖侧栏)**;删旧底部浮层卡片。
 - 实时 lint **只标红(上下文),不弹全局面板/toast**(避免编辑中途不完整一直全局报错);详细汇总只在 Compile drawer 看。
-- Compile 按钮保留(点 = 看详细错误 drawer);实时 lint 通过自动驱动 compile-pass。
+- Compile 按钮保留(点 = 看详细错误 drawer);**Predict 只由显式 Compile 成功解锁**。
+  **修订记录(2026-08-29,用户批示反转)**:本行原文为「实时 lint 通过自动驱动 compile-pass」(2026-07-01 定,#1040 落地),被用户批示推翻:「实时lint通过自动compile pass这条去掉吧,lint和compile一样嘛?就算一样,还是让用户按一下,更加踏实,交互体验更好」。现行语义:实时 lint 只做诊断投影(checking→编译中、failed→失败红,passed→待编译 idle);「最新一轮结算胜出」的新鲜度规则(J-03.B/J-04.C)保留——更新的 lint 轮在两个方向上作废过期的手动 Compile 判定(stale 失败不再标红、stale 成功不再保持 Predict 解锁),源真相变更后重新点 Compile 才再解锁。
 - compile 检查内容 + F-v3 错误码沿用引擎 FROZEN spec,不自创。
 - **lint 触发语义 = skill 源真相变更**,不是"编辑器文本变更":编辑器打字(防抖 800ms)和画布拓扑改动(写盘 GRAPH.md 成功后)都必须触发 relint;画布改动只清旧投影、不重查 = 缺陷(2026-07-01 PM 定)。
 - **实时 lint 返回该次编译聚合出的全部错误**:引擎按 compile-rules「同阶段尽量聚合」收集,studio 展开完整 issues 列表投影,不得只取首错(2026-07-01 PM 定,废除"实时 lint = 单错误消费者"假设)。

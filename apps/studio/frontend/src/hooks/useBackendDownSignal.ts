@@ -164,6 +164,10 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
   // RuntimeGate's own timer cleanup has already run by then, so the restart it
   // would schedule is a timer nobody is left to cancel.
   const mountedRef = useRef(true)
+  // Which signal the CURRENT probe round is answering — updated when a signal
+  // coalesces in, so the log line names the reason we are still probing rather
+  // than whichever signal happened to open the round.
+  const latestSignalRef = useRef("")
 
   const confirmOutageThenFire = useCallback(async (signal: string): Promise<void> => {
     if (firedRef.current) return
@@ -178,9 +182,11 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
       // shape as the repo's settings-autosave rule: an in-flight request does
       // not discard the newer demand, it supersedes into a pending one.
       signalArrivedDuringProbeRef.current = true
+      latestSignalRef.current = signal
       return
     }
     probeInFlightRef.current = true
+    latestSignalRef.current = signal
     const episode = episodeRef.current
     try {
       // Re-probe as long as another signal came in while the last one was in
@@ -198,7 +204,7 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
           return
         }
         console.warn(
-          `[studio] ${signal} looked like a dead backend, but /health still answers — not reporting it down`,
+          `[studio] ${latestSignalRef.current} looked like a dead backend, but /health still answers — not reporting it down`,
         )
       } while (signalArrivedDuringProbeRef.current)
     } finally {
@@ -206,12 +212,17 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
     }
   }, [])
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Set on the way IN as well as cleared on the way out. `main.tsx` wraps the
+    // app in `<StrictMode>`, which deliberately runs mount → cleanup → mount
+    // again on the SAME instance (so the same refs). Only clearing it would
+    // latch this instance to "unmounted" for the rest of its life in dev, and
+    // silently disable down-detection entirely.
+    mountedRef.current = true
+    return () => {
       mountedRef.current = false
-    },
-    [],
-  )
+    }
+  }, [])
 
   useEffect(() => {
     const wasArmed = previousArmedRef.current

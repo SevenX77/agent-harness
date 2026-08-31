@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement, useState } from "react"
+import { act, createElement, StrictMode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { configureApiBaseURL, configureApiToken, BACKEND_UNAVAILABLE_HTTP_EVENT } from "../api/client"
@@ -133,6 +133,27 @@ function unmount(): void {
     root.unmount()
   })
   container.remove()
+}
+
+/**
+ * Mounts inside `<StrictMode>`, exactly as `main.tsx` does. StrictMode runs
+ * mount → cleanup → mount again on the SAME instance, so any effect that only
+ * CLEARS a ref on cleanup leaves it cleared for that instance's whole life.
+ */
+function mountUnderStrictMode(onDown: () => void): void {
+  container = document.createElement("div")
+  document.body.appendChild(container)
+  root = createRoot(container)
+
+  function Host(): null {
+    useStudioEventStream(PERMANENT_SUBSCRIBER_CALLBACKS)
+    useBackendDownSignal(true, onDown)
+    return null
+  }
+
+  act(() => {
+    root.render(createElement(StrictMode, null, createElement(Host)))
+  })
 }
 
 beforeEach(() => {
@@ -449,6 +470,22 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     await settleHealthProbe()
 
     expect(onDown).not.toHaveBeenCalled()
+  })
+
+  it("still detects an outage under StrictMode's mount/cleanup/mount cycle", async () => {
+    // `main.tsx` renders the app inside <StrictMode>. If the unmount guard were
+    // only cleared on cleanup and never re-set on mount, StrictMode's
+    // double-invoke would latch this instance to "unmounted" and silently
+    // disable down-detection for the entire dev session.
+    const onDown = vi.fn()
+    mountUnderStrictMode(onDown)
+
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+    await settleHealthProbe()
+
+    expect(onDown).toHaveBeenCalledTimes(1)
   })
 
   it("does not fire when the hook unmounts while the /health probe is still in flight", async () => {

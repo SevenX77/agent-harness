@@ -947,6 +947,7 @@ UI-UX 认知合规 / 模块代码健康度),并要求「任务记入 ledger,完�
       (`goldenSeedableRunId` 改收 RunVerdict、仅 success 放行,F7 补 success-only 修订并重钉哈希),
       真机复验两例通过(crashed 零弹条 / success 弹条如常,报告第 96 步)。复验中新立 J-X.10
       (引擎默认角色 `graph_agent` 不在角色种子表,向导新建 skill 默认直跑必崩),待裁决。
+      **二次追销(2026-08-30)**:J-X.10 经用户亲裁「默认角色应该是空,必须要设置,不设置compile报错」,#1072 落地:引擎删兜底角色、新增编译期 FATAL `[F-v3-agent-llm-role-missing]`(registry 89 码)、子图透传 allowed_roles、写入门禁改纯结构 lint 以保「骨架无角色+编译报错即引导」首态可创建;真机复验一负一正(向导骨架报错 / 补 fast 后绿,报告第 97 步)。在册遗留仅剩 J-X.2、J-X.5。
 - [ ] 模块五 · 试飞 predict(04 §B)
 - [ ] 模块六 · 真跑 run(04 §C)
 - [ ] 模块七 · 去黑盒 trace(04 §D)

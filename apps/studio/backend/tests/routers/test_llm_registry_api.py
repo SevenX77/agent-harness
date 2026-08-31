@@ -2753,12 +2753,19 @@ def test_forced_reprobe_revives_a_protocol_unsupported_cell(
     monkeypatch,
 ) -> None:
     # Design §1.2 matrix revision point 4 + point 6 (revised 2026-08-31): because
-    # the verdict destroys nothing, `force=true` is a COMPLETE recovery path — it
-    # bypasses the 30-day half-life gate, and a successful re-probe clears
-    # `last_error_code` and returns the cell to `verified` with its routes and role
-    # bindings never having moved. This is what makes a misjudged probe a
-    # recoverable mistake rather than a permanent one: nothing in the recovery
-    # asks the user to re-author anything by hand.
+    # the verdict destroys nothing, `force=true` is a complete recovery path in the
+    # STATE sense — it bypasses the 30-day half-life gate, and a re-probe that
+    # comes back ok clears `last_error_code` and returns the cell to `verified`
+    # with its routes and role bindings never having moved. That is what makes a
+    # misjudged probe a recoverable mistake rather than a permanent one: nothing in
+    # the recovery asks the user to re-author anything by hand.
+    #
+    # It does NOT claim the misjudgment itself is gone. The official-OpenAI trigger
+    # (the model-list probe appends `/v1` while the generation probe and the
+    # runtime factory do not) lives in the probe/judge chain and has its own task;
+    # until that lands, a re-probe re-earns the same verdict. This test therefore
+    # fakes the probe outcome: what is under test is the state transition, not the
+    # URL assembly.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(

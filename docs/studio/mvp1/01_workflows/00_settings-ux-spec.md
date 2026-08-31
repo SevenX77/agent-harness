@@ -114,9 +114,19 @@ role: workflow-record
           （`EXECUTABLE_ROUTE_STATUSES`），且**看不到** `last_error_code` —— 该字段是 Studio 专属
           展示字段，被 `_gateway_endpoint` 剥掉。要加这道门，就要改 gateway endpoint 契约携带什么，
           那是一次有自己 owner 的设计决策，不是本次修复的副作用。在它落地之前，一条指向死格子的
-          旧 role 绑定会在真实调用上失败并沿 fallback 链继续 —— 这与**任何其它** `failed` endpoint
-          今天的代价完全一样（它们同样不拦执行）。这个代价有界；而在一次误判上删掉用户的 role 绑定
-          没有界。
+          旧 role 绑定的代价 = 运行时一次失败的 provider 调用，**具体形态随判定来源不同**：404 在
+          gateway 的 `FALLBACK_STATUS_CODES` 里，会沿 fallback 链继续；405 既不在 fallback 集也不在
+          retryable 集，会让那一次请求 fail-fast。这与**任何其它** `failed` endpoint 今天的暴露面
+          完全一样（它们同样不拦执行），且是**用户看得见、能动手**的单次失败。而在一次误判上删掉
+          用户的 role 绑定，既不可见也没有界。
+        - **本次修订不触碰误判本身**：把官方 OpenAI 默认配置一次 Test 就打成 `protocol_unsupported`
+          的根因，是**模型列表探测会补 `/v1`、而生成探测与真实运行走的
+          `canonicalize_base_url(openai_compatible)` 不补**（`registry/base_url.py` 对
+          openai_compatible 原样返回），于是默认 `https://api.openai.com` 被打成
+          `/chat/completions` 而非 `/v1/chat/completions`。那属于判定链的修复，有自己的工单。
+          因此这里说的"`force=true` 是完整恢复路径"只指**状态语义**：一旦复测返回 ok，格子与
+          route、role 绑定就地回到可用，不需要用户手工重建任何东西；它**不**意味着官方 OpenAI
+          那个误判已经消失——在根因修好之前，复测会重新赚回同一个判定。
      7. **日志完整性**：每个格子测自己 → `probe_attempts` 天然覆盖全部尝试（旧轮换里中间候选的失败探测不落日志、协议翻转无因无果，随轮换机一并消灭）；runtime activity 时间戳统一 **UTC**（与 credentials 对齐）。
      8. **catalog 只当线索，不当真相**（后续 PR）：探测观察（**含失败**）双向进 Probe Knowledge Catalog（对齐 §1.4 #2.4"失败也是历史"）；catalog 与本地观察冲突（别人通了我这标 unsupported）只**提前本地复测**，永远不直接改本地状态 —— 别人的 key 套餐/区域/网络与我不同，"他通我不通"是常态。
      9. **unsupported 格子必须"指路"到同域名的活协议**（UX，PM 2026-07-02）：格子被判 `protocol_unsupported` 不是死胡同 —— 提供商返回的信号本身就在指路（`anthropic.qnaigc.com` 对 `/v1/chat/completions` 明确回 "Use /v1/messages instead"，实证 2026-07-02：换到 `/v1/messages` 用 `x-api-key` 或 `Bearer` 均 HTTP 200，但**回来的是 Anthropic 信封**`type:message`/`content[]`、**无 `choices`** → OpenAI 客户端解析不了，所以"换后缀能连"= 走回了 Anthropic 协议，不是 OpenAI 协议复活）。tooltip 要把这条指路讲给用户：**"此域名不支持 {当前协议} 协议 —— 请改用同域名下的 {已验证的兄弟协议} 路由"**（同域名 = 同 hostname；兄弟协议 = 同 hostname 下 status=verified 的其它格子协议，可多个）。实证：`anthropic.qnaigc.com × OpenAI` 灰格子指向同域名 `× Anthropic` 绿格子；`api.qnaigc.com × Gemini` 灰格子指向同域名 `× OpenAI / × Anthropic` 两个绿格子；同域名无任何活协议时只说"此域名不支持 {当前协议} 协议"。目的：让用户一眼看懂"能力没丢、在隔壁格子"，而不是把灰色误读成"这把 key / 这个域名废了"（对齐 §4.2 灰 = 非用户可修的架构事实，红才 = 用户要动手）。

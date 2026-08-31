@@ -1103,11 +1103,17 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
     # admits routes on their own status alone (`EXECUTABLE_ROUTE_STATUSES`) and
     # cannot even see `last_error_code`, which `_gateway_endpoint` strips. Adding
     # it means changing what the gateway endpoint contract carries, which is a
-    # design decision with its own owner, not a side effect of this fix. Until
-    # then a stale role binding onto a dead cell fails its provider call and falls
-    # through the chain — the same cost every other `failed` endpoint already has,
-    # since none of them gates execution either. That cost is bounded; deleting a
-    # user's role bindings on a misjudged probe was not.
+    # design decision with its own owner, not a side effect of this fix.
+    #
+    # So until that gate exists, a stale role binding onto a dead cell costs a
+    # failed provider call at run time, and how it fails depends on which flavor
+    # of the verdict the cell earned: a 404 is in the gateway's
+    # `FALLBACK_STATUS_CODES` and falls through to the next route, while a 405 is
+    # in neither the fallback nor the retryable set and fail-fasts that one
+    # request. That is the same exposure every other `failed` endpoint already
+    # carries, since none of them gates execution either, and it is a visible
+    # per-request failure the user can act on. Deleting a user's role bindings on
+    # a misjudged probe was neither visible nor bounded.
     endpoint_update.update(
         {
             "status": status,

@@ -59,6 +59,7 @@ io:
   outputs:
     type: object
     properties: {{}}
+llm_role: analyst
 phases:
 {phase_yaml}
 ---

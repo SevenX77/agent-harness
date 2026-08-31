@@ -233,6 +233,7 @@ features:
   - '[F-v3-agent-example-invalid]'
   - '[F-v3-agent-goal-missing]'
   - '[F-v3-agent-io-schema-invalid]'
+  - '[F-v3-agent-llm-role-missing]'
   - '[F-v3-agent-llm-role-unknown]'
   - '[F-v3-agent-max-iterations-invalid]'
   - '[F-v3-agent-output-schema-invalid]'

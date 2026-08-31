@@ -293,3 +293,25 @@ def register_skill_index_entry(skill_id: str, skill_dir: Path) -> None:
     raw = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {}
     raw[skill_id] = {"absolute_path": str(skill_dir), "l2_remote_url": ""}
     index_path.write_text(json.dumps(raw), encoding="utf-8")
+
+
+def seed_llm_roles(*role_names: str) -> Path:
+    """Write the isolated env's llm_roles.yaml naming these roles.
+
+    J-X.10 (用户裁决 2026-08-31): an agent phase must resolve a registered role
+    or compile fails, so a test that lints/compiles under role governance must
+    register the role its fixture declares — the way a real fresh install has
+    its seeded roles table. Call after ``studio_roots`` so ``roles_path()``
+    already points inside the test's own config dir.
+    """
+    from app.models.llm_config import RoleEntry, RolesData
+    from app.services.llm_paths import roles_path
+    from app.services.llm_roles import save_roles_file
+
+    path = roles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_roles_file(
+        path,
+        RolesData(schema_version=3, roles={name: RoleEntry() for name in role_names}),
+    )
+    return path

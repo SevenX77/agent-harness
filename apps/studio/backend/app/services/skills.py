@@ -192,7 +192,10 @@ def write_skill_files_atomic(skill_dir: Path, files: dict[str, str]) -> None:
         for rel_path, target in targets.items():
             write_text_atomically(target, files[rel_path])
             published.append(target)
-        lint = lint_skill_path(skill_dir, include_studio_preflight=False)
+        # Structure-only gate: role governance is a diagnostics-surface concern
+        # (see lint_skill_path docstring / J-X.10) — gating writes on it would
+        # make the role-unset scaffold uncreatable.
+        lint = lint_skill_path(skill_dir, include_studio_preflight=False, include_role_governance=False)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
     except Exception:
@@ -361,15 +364,30 @@ def lint_skill_on_disk(skill_id: str, workspace_root: str | None = None) -> Lint
     return lint_skill(skill_id)
 
 
-def lint_skill_path(skill_path: Path, *, include_studio_preflight: bool = True) -> LintResult:
-    """Compile a V2.1 skill root into Studio lint diagnostics."""
+def lint_skill_path(
+    skill_path: Path,
+    *,
+    include_studio_preflight: bool = True,
+    include_role_governance: bool = True,
+) -> LintResult:
+    """Compile a V2.1 skill root into Studio lint diagnostics.
+
+    ``include_role_governance=False`` lints structure only (``allowed_roles``
+    stays None, so the engine skips the role checks). The write seams use it:
+    whether a role resolves depends on llm_roles.yaml — host config OUTSIDE the
+    tree that can change without any file write — so a write gate cannot keep
+    the tree role-consistent, it can only refuse legitimate states. J-X.10
+    (用户裁决 2026-08-31) makes one such state first-class: a fresh skill is
+    created with NO role and the compile diagnostic [F-v3-agent-llm-role-missing]
+    IS the guidance to set one. Diagnostics surfaces keep full governance.
+    """
     runtime_config = refresh_runtime_config(skill_path)
     try:
         compiled = compile_skill(
             skill_path,
             skill_resolver=build_studio_skill_resolver(),
             runtime_input_fields=runtime_input_fields_for_engine(runtime_config),
-            allowed_roles=_configured_role_names(),
+            allowed_roles=_configured_role_names() if include_role_governance else None,
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         # compile-lint F6: lint projects the engine's FULL aggregated defect set
@@ -1336,7 +1354,9 @@ async def fork_skill(
             str(target_path),
             _rewrite_forked_skill_content(content, old_id=skill_id, new_id=new_skill_id),
         )
-        lint = lint_skill_path(target_dir, include_studio_preflight=False)
+        # Same structure-only gate as write_skill_files_atomic: a fork must not
+        # fail because the source's role vanished from llm_roles.yaml since.
+        lint = lint_skill_path(target_dir, include_studio_preflight=False, include_role_governance=False)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
         summary = await _summary_for_skill_dir_async(user_id, target_dir, storage, metadata)

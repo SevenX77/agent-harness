@@ -146,11 +146,13 @@ def test_effective_role_switch_on_graph_wins() -> None:
     assert effective_llm_role(ast, "fast") == "fast"
 
 
-def test_effective_role_switch_on_without_graph_default_falls_back() -> None:
+def test_effective_role_switch_on_without_graph_default_resolves_none() -> None:
+    # 2026-08-31 用户裁决:引擎没有兜底角色——switch on 且整图默认未设置时
+    # 解析结果是"没有角色",由 loader 的 [F-v3-agent-llm-role-missing] 拦下。
     ast = AgentNodeAST(
         mode="agent", role="r", goal="g", llm_role="analyst", use_graph_llm_role=True, io=_MINIMAL_IO
     )
-    assert effective_llm_role(ast, None) == "graph_agent"
+    assert effective_llm_role(ast, None) is None
 
 
 def test_effective_role_switch_off_node_wins() -> None:
@@ -163,9 +165,10 @@ def test_effective_role_switch_off_without_node_inherits_graph() -> None:
     assert effective_llm_role(ast, "fast") == "fast"
 
 
-def test_effective_role_both_unset_uses_conventional_default() -> None:
+def test_effective_role_both_unset_resolves_none() -> None:
+    # 2026-08-31 用户裁决:两层都没设置就是没有角色,编译期报错,不发明默认值。
     ast = AgentNodeAST(mode="agent", role="r", goal="g", io=_MINIMAL_IO)
-    assert effective_llm_role(ast, None) == "graph_agent"
+    assert effective_llm_role(ast, None) is None
 
 
 # --- the resolver receives the effective role, not the raw node value ---

@@ -169,10 +169,25 @@ def test_materialize_unknown_node_raises(tmp_path: Path) -> None:
         materialize_single_node_skill(skill, "nope", tmp_path / "variant")
 
 
-def test_node_effective_role_falls_back_to_graph_agent(tmp_path: Path) -> None:
+def test_node_effective_role_agent_without_role_is_refused(tmp_path: Path) -> None:
+    # J-X.10 (用户裁决 2026-08-31): no invented fallback. An AGENT node that
+    # resolves no role is refused with the fix spelled out, instead of quietly
+    # binding the deleted conventional name.
+    skill = tmp_path / "skill"
+    _write(skill / "GRAPH.md", _AGENT_ONLY_GRAPH)
+    _write(
+        skill / "phases" / "write" / "SKILL.md",
+        _CHILD_AGENT.replace("llm_role: analyst\n", ""),
+    )
+    with pytest.raises(ValueError, match="resolves no LLM role"):
+        node_effective_role(skill, "write")
+
+
+def test_node_effective_role_logic_node_without_graph_default_is_none(tmp_path: Path) -> None:
+    # A LOGIC node consumes no role itself; with no graph default there is
+    # nothing to bind — None, not an invented name and not an error.
     skill = _two_phase_skill(tmp_path / "skill")
-    # logic node, no graph llm_role -> conventional fallback
-    assert node_effective_role(skill, "score") == "graph_agent"
+    assert node_effective_role(skill, "score") is None
 
 
 # ---------------------------------------------------------------------------
@@ -258,8 +273,8 @@ def _subgraph_skill(root: Path) -> Path:
     """A root graph whose only node is a SUBGRAPH; the inner phase wants `analyst`.
 
     This is the shape the lab skill has: nothing at root level declares a role,
-    so the node's effective role is the conventional `graph_agent`, while the
-    role the run actually asks for lives one level down.
+    so the SUBGRAPH node resolves no role of its own (J-X.10: no conventional
+    fallback), while the role the run actually asks for lives one level down.
     """
     _write(root / "GRAPH.md", _SUBGRAPH_HOST_GRAPH)
     _write(root / "phases" / "delegate" / "SUBGRAPH.md", _SUBGRAPH_MARKER)
@@ -389,10 +404,12 @@ def test_build_candidate_roles_materializes_an_executable_chain(
 
     _settings_with_both_routes(tmp_path, monkeypatch)
 
-    skill = _two_phase_skill(tmp_path / "skill")
-    roles = build_candidate_roles(skill, "score", _candidate())
+    skill = tmp_path / "skill"
+    _write(skill / "GRAPH.md", _AGENT_ONLY_GRAPH)
+    _write(skill / "phases" / "write" / "SKILL.md", _CHILD_AGENT)
+    roles = build_candidate_roles(skill, "write", _candidate())
 
-    entry = roles.roles["graph_agent"]
+    entry = roles.roles["analyst"]
     assert [route.route_id for route in entry.fallback_chain] == [_CANDIDATE_ROUTE]
 
 
@@ -401,10 +418,11 @@ def test_build_candidate_roles_swaps_the_model_for_every_role_in_the_truth(
 ) -> None:
     """Every role the run can ask for must land on the candidate model.
 
-    A SUBGRAPH node's effective role is the conventional ``graph_agent``, but the
-    phases INSIDE the subgraph declare their own roles. Binding only the node's
-    effective role leaves those undefined in the candidate roles file, and the
-    side-run dies at ``analyst`` with ``resource.no_available_route``.
+    A SUBGRAPH node resolves no role of its own (J-X.10: no conventional
+    fallback), but the phases INSIDE the subgraph declare their own roles.
+    Binding only the node's effective role leaves those undefined in the
+    candidate roles file, and the side-run dies at ``analyst`` with
+    ``resource.no_available_route``.
     """
     from app.services.model_compare import build_candidate_roles
 
@@ -421,10 +439,8 @@ def test_build_candidate_roles_swaps_the_model_for_every_role_in_the_truth(
     assert [route.route_id for route in roles.roles["analyst"].fallback_chain] == [
         _CANDIDATE_ROUTE
     ]
-    # The conventional fallback and the node's effective role stay bound too.
-    assert [route.route_id for route in roles.roles["graph_agent"].fallback_chain] == [
-        _CANDIDATE_ROUTE
-    ]
+    # The role-less SUBGRAPH node itself adds no entry (J-X.10: nothing to bind).
+    assert "graph_agent" not in roles.roles
 
 
 _AGENT_ONLY_GRAPH = """---
@@ -470,7 +486,6 @@ def test_build_candidate_roles_still_binds_an_agent_nodes_own_role(
     assert [route.route_id for route in roles.roles["reviewer"].fallback_chain] == [
         _CANDIDATE_ROUTE
     ]
-    assert "graph_agent" in roles.roles
     assert "analyst" in roles.roles
 
 

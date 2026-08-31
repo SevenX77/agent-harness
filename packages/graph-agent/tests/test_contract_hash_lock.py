@@ -17,7 +17,12 @@ EXPECTED_CONTRACT_HASHES = {
     # docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md, declared FROZEN by
     # its own README. The mvp0 fork drifted ~898 lines precisely because
     # only the dead copy was pinned while the live one had no enforcement.
-    "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "4967006e0d5d95a8328ee60b8da3107a64aae18bdbbfc2d10d0e6c65e269bf41",
+    # Re-pinned 2026-08-31 (J-X.10, user ruling "默认角色应该是空,必须要设置,
+    # 不设置 compile 报错"): the effective-role chain lost its invented
+    # graph_agent fallback — unset stays unset, and a governed compile
+    # rejects it as [F-v3-agent-llm-role-missing]. Same PR as the engine
+    # change (design and implementation land together).
+    "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "a1834a937f5be9653f0535c6f20829a4e26fb2827a7a9c9b6d3e5064ba5ad6cb",
     # Re-pinned 2026-08-15 (PR E, legacy execution family removal): the
     # CallbackEvent union dropped the ten zero-emitter event classes
     # (ValidationPass/ValidationFail/Retry/RetryExhausted/ModelResolved/

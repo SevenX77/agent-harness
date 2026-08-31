@@ -59,11 +59,13 @@ def _graph_md(
     body: str,
     name: str = "diag-v2",
     io_block: str = _EMPTY_IO,
+    graph_llm_role: str | None = None,
 ) -> None:
     roster = "\n".join(f"  - {phase}" for phase in phases)
+    role_line = f"llm_role: {graph_llm_role}\n" if graph_llm_role is not None else ""
     _write(
         root / "GRAPH.md",
-        f'---\nschema_version: "v0.3.0"\nname: {name}\n{io_block}\nphases:\n{roster}\n---\n{body}\n',
+        f'---\nschema_version: "v0.3.0"\nname: {name}\n{role_line}{io_block}\nphases:\n{roster}\n---\n{body}\n',
     )
 
 
@@ -92,6 +94,7 @@ def _solo_agent_skill(
     phase: str = "main",
     graph_io: str = _EMPTY_IO,
     graph_name: str = "diag-v2",
+    graph_llm_role: str | None = None,
     **agent_kwargs: object,
 ) -> None:
     _graph_md(
@@ -100,6 +103,7 @@ def _solo_agent_skill(
         body=f'<phase depends_on="input" output>{phase}</phase>',
         name=graph_name,
         io_block=graph_io,
+        graph_llm_role=graph_llm_role,
     )
     _write(root / "phases" / phase / "SKILL.md", _agent_md(**agent_kwargs))  # type: ignore[arg-type]
 
@@ -445,6 +449,87 @@ def test_llm_role_empty_set_treats_all_roles_unknown(
     assert "[F-v3-agent-llm-role-unknown]" in _codes(excinfo.value), _codes(excinfo.value)
 
 
+def test_llm_role_missing_is_compile_fatal_when_roles_injected(
+    tmp_path: Path, mock_skill_resolver: SkillResolverProtocol
+) -> None:
+    # J-X.10 (用户裁决 2026-08-31): the engine invents no fallback role. An
+    # agent phase whose chain (node llm_role -> graph default) resolves to
+    # NOTHING is a compile-time FATAL once the host injected role governance.
+    # Before this rule the engine silently substituted the conventional name
+    # "graph_agent" — which exists in no host seed table, so every
+    # wizard-scaffolded skill compiled green and then died at runtime with
+    # resource.no_available_route.
+    _solo_agent_skill(tmp_path, llm_role=None)
+
+    with pytest.raises(SkillLoadError) as excinfo:
+        _compile_with_allowed_roles(tmp_path, mock_skill_resolver, {"a", "b"})
+    assert "[F-v3-agent-llm-role-missing]" in _codes(excinfo.value), _codes(excinfo.value)
+
+
+def test_llm_role_missing_satisfied_by_graph_default(
+    tmp_path: Path, mock_skill_resolver: SkillResolverProtocol
+) -> None:
+    # The graph-level default IS an explicit setting: a role-less node under a
+    # graph that names one compiles clean.
+    _solo_agent_skill(tmp_path, llm_role=None, graph_llm_role="a")
+
+    compiled = _compile_with_allowed_roles(tmp_path, mock_skill_resolver, {"a"})
+    assert compiled is not None
+
+
+def test_use_graph_llm_role_with_no_graph_default_is_missing(
+    tmp_path: Path, mock_skill_resolver: SkillResolverProtocol
+) -> None:
+    # The sharp edge of the switch semantics: use_graph_llm_role=true makes the
+    # graph default win WITHOUT erasing the node's own value — so with no graph
+    # default the phase resolves nothing even though its frontmatter names a
+    # valid role. That is "unset", not "fall back to the node value".
+    _solo_agent_skill(tmp_path, llm_role="a", extra_fm="use_graph_llm_role: true")
+
+    with pytest.raises(SkillLoadError) as excinfo:
+        _compile_with_allowed_roles(tmp_path, mock_skill_resolver, {"a"})
+    assert "[F-v3-agent-llm-role-missing]" in _codes(excinfo.value), _codes(excinfo.value)
+
+
+def test_llm_role_missing_check_skipped_when_roles_not_injected(
+    tmp_path: Path, mock_skill_resolver: SkillResolverProtocol
+) -> None:
+    # allowed_roles=None = the host declared no role registry (bare SDK
+    # compile): role resolution is that host's business, same boundary as the
+    # unknown-role checks above.
+    _solo_agent_skill(tmp_path, llm_role=None)
+
+    compiled = _compile_with_allowed_roles(tmp_path, mock_skill_resolver, None)
+    assert compiled is not None
+
+
+def test_subgraph_child_missing_llm_role_surfaces_in_parent(
+    tmp_path: Path, mock_skill_resolver: SkillResolverProtocol
+) -> None:
+    # Two rules pinned at once: (1) allowed_roles threads into the child
+    # compile a subgraph node triggers — before this it silently did not, so
+    # role rules went blind one subgraph deep; (2) the PARENT's graph default
+    # does NOT reach inside the child — each graph declares its own
+    # (J-X.10's second limb, the shape the fixture actually died on).
+    _graph_md(
+        tmp_path,
+        phases=["outer"],
+        body='<phase depends_on="input" output>outer</phase>',
+        graph_llm_role="a",
+    )
+    _write(tmp_path / "phases" / "outer" / "SUBGRAPH.md", f"---\npath: subskills/child\n{_EMPTY_IO}\n---\n")
+    _write(
+        tmp_path / "subskills" / "child" / "GRAPH.md",
+        f'---\nschema_version: "v0.3.0"\nname: child\n{_EMPTY_IO}\nphases:\n  - inner\n---\n'
+        '<phase depends_on="input" output>inner</phase>\n',
+    )
+    _write(tmp_path / "subskills" / "child" / "phases" / "inner" / "SKILL.md", _agent_md(llm_role=None))
+
+    with pytest.raises(SkillLoadError) as excinfo:
+        _compile_with_allowed_roles(tmp_path, mock_skill_resolver, {"a"})
+    assert "[F-v3-agent-llm-role-missing]" in _codes(excinfo.value), _codes(excinfo.value)
+
+
 def test_allowed_roles_param_is_pure_set_no_gateway_import() -> None:
     # RED on the signature (param not added yet) + LOCK on NFR1: the engine
     # package must never import gateway/studio.
@@ -658,14 +743,15 @@ def test_reference_has_no_path_missing_code_example_does() -> None:
     assert "[F-v3-resource-example-path-missing]" in ERROR_REGISTRY
 
 
-def test_error_registry_len_locked_88() -> None:
+def test_error_registry_len_locked_89() -> None:
     # LOCK: 88 codes after the 2026-08-19 adjudication
     # (.kiro/specs/decision-2026-08-19-an-error-code-either-fires-or-leaves.md)
-    # removed the eleven emitterless codes from the previous 99-code freeze.
-    # The registry↔catalog bijection still must not move.
-    assert len(ERROR_REGISTRY) == 88
+    # removed the eleven emitterless codes from the previous 99-code freeze,
+    # +1 on 2026-08-31 ([F-v3-agent-llm-role-missing], 用户裁决:默认角色为空,
+    # 未设置即编译报错). The registry↔catalog bijection still must not move.
+    assert len(ERROR_REGISTRY) == 89
     catalog = export_error_catalog()
-    assert len(catalog["items"]) == 88
+    assert len(catalog["items"]) == 89
     assert all(item["remediation"] for item in catalog["items"])
 
 
@@ -724,6 +810,7 @@ _REGISTRY_STAGE_SNAPSHOT: dict[str, tuple[str, tuple[str, ...]]] = {
     '[F-v3-golden-stale-fields]': ('FATAL', ('eval 期',)),
     '[F-v3-agent-schema-unknown-field]': ('FATAL', ('编译期',)),
     '[F-v3-agent-llm-role-unknown]': ('FATAL', ('编译期',)),
+    '[F-v3-agent-llm-role-missing]': ('FATAL', ('编译期',)),
     '[F-v3-agent-io-schema-invalid]': ('FATAL', ('编译期',)),
     '[F-v3-agent-output-schema-invalid]': ('FATAL', ('运行期',)),
     '[F-v3-agent-output-schema-missing]': ('FATAL', ('运行期',)),

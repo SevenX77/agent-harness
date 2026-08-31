@@ -18,12 +18,20 @@ from typing import TYPE_CHECKING
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import register_skill_index_entry
+from tests.conftest import register_skill_index_entry, seed_llm_roles
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 AGENT_SKILL = "agent-golden-skill"
+
+
+@pytest.fixture(autouse=True)
+def _registered_fast_role(studio_roots: tuple[Path, Path]) -> None:
+    # The fixture graph declares `llm_role: fast`; register it so role
+    # governance (J-X.10) judges the golden gate, not a missing role.
+    del studio_roots
+    seed_llm_roles("fast")
 
 
 def _write_agent_skill(skills_dir: Path, *, required_outputs: str) -> None:
@@ -40,6 +48,7 @@ def _write_agent_skill(skills_dir: Path, *, required_outputs: str) -> None:
 schema_version: "v0.3.0"
 name: agent-golden-skill
 description: Agent node with output schema
+llm_role: fast
 io:
   inputs:
     type: object

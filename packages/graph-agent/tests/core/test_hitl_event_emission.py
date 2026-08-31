@@ -83,6 +83,7 @@ io:
     properties:
       answer:
         type: string
+llm_role: analyst
 phases:
   - main
 ---

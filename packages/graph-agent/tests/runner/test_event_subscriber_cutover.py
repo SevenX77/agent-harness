@@ -116,6 +116,7 @@ io:
     properties:
       answer:
         type: string
+llm_role: analyst
 phases:
   - prepare
   - delegate
@@ -215,6 +216,7 @@ io:
     properties:
       child_answer:
         type: string
+llm_role: analyst
 phases:
   - inspect
 ---

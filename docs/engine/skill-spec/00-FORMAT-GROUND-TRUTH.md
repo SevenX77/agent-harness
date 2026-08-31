@@ -17,7 +17,8 @@ supersedes:
 - Declared Agent tools must resolve during compile, except for framework-provided tools and generated subagent/critic tools.
 - Declared `references[].path` and `examples[].path` are compile-time source resources: paths must be portable POSIX-style relative paths using only `A-Z a-z 0-9 . _ - /`, must not escape the skill root, and must point to readable files. Runtime reader fallback is only for reader processing failures after the source path has passed compile.
 - `llm_role` reachability is host/gateway truth. Pure source compile accepts the string shape; Studio strict compile/run preflight may inject a role resolver and fail early when the configured role is unavailable.
-- Agent phase 生效角色判定链（engine `manifest.effective_llm_role`）：`use_graph_llm_role: true` → 图默认 `llm_role` → 兜底；`false`（默认）→ 节点 `llm_role` → 图默认 `llm_role` → 兜底。兜底 = 约定角色名 `graph_agent`（去 host 的角色注册表按此名解析）。
+- Agent phase 生效角色判定链（engine `manifest.effective_llm_role`）：`use_graph_llm_role: true` → 图默认 `llm_role`；`false`（默认）→ 节点 `llm_role` → 图默认 `llm_role`。**判定链没有兜底**：两级都空 = 该 phase 未设置角色。
+- **角色必须显式设置（修订 2026-08-31，用户裁决「默认角色应该是空，必须要设置，不设置 compile 报错」）**：宿主注入角色治理（`compile_skill(allowed_roles=…)`，Studio 的全部编译路径都注入）时，Agent phase 解析不出角色是编译期 FATAL `[F-v3-agent-llm-role-missing]`；未注入角色治理的裸 SDK 编译不判此项，但装配执行仍拒绝无角色的 Agent phase。子图是独立的 graph：父图的图默认 `llm_role` **不**进入子图，子图在自己的 GRAPH.md 或 phase 里声明。历史注记：旧设计的兜底 = 约定角色名 `graph_agent`，该名不在任何宿主的角色种子表里，导致向导新建的 skill 编译全绿、运行必崩（`resource.no_available_route`）——J-X.10 实证后删除。
 
 ## 2026-07-05 Runtime Config Addendum
 

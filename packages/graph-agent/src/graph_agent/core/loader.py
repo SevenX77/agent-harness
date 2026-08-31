@@ -31,6 +31,7 @@ from graph_agent.core.manifest import (
     LogicNodeAST,
     PhaseIOSchema,
     SubgraphNodeAST,
+    effective_llm_role,
 )
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
 from graph_agent.core.parser import (
@@ -311,6 +312,29 @@ class SkillLoader:
                                 ]
                             )
                         )
+                    # J-X.10 (用户裁决 2026-08-31): no role resolves at all ->
+                    # compile FATAL. The engine invents no fallback name, and a
+                    # phase nobody gave a role to must fail HERE, not at
+                    # runtime inside the host's route lookup. Same governance
+                    # boundary as the unknown-role check above: allowed_roles
+                    # injected = the host owns a role registry.
+                    if effective_llm_role(doc.ast, manifest.llm_role) is None:
+                        batch_errors.append(
+                            _diags_error(
+                                [
+                                    _Diag(
+                                        doc.path,
+                                        _frontmatter_key_line(doc.path, "llm_role"),
+                                        "[F-v3-agent-llm-role-missing]",
+                                        f"Agent phase {doc.phase_name!r} resolves no LLM role: set "
+                                        "`llm_role` in this phase's frontmatter or a graph default "
+                                        "`llm_role` in GRAPH.md (a subgraph declares its own default; "
+                                        "the parent graph's does not reach inside it)",
+                                        field_path="llm_role",
+                                    )
+                                ]
+                            )
+                        )
 
                 # R3.2 check validator.py statically
                 if isinstance(doc.ast, LogicNodeAST) and doc.ast.validator:
@@ -403,6 +427,7 @@ class SkillLoader:
             _compilation_cache=_compilation_cache,
             diags=post_diags,
             poisoned_phases=poisoned_phases,
+            allowed_roles=allowed_roles,
         )
         _validate_iterate_compile_contracts(phase_docs, post_diags)
         _validate_static_dataflow(
@@ -1008,8 +1033,15 @@ def _validate_subgraph_io_contracts(
     _compilation_cache: dict[str, CompiledSkill],
     diags: list[_Diag],
     poisoned_phases: set[str],
+    allowed_roles: set[str] | None,
 ) -> None:
-    """Compile each subgraph's child so a parent compile validates its children."""
+    """Compile each subgraph's child so a parent compile validates its children.
+
+    ``allowed_roles`` rides along: a child is a full graph of its own, so the
+    host's role governance applies inside it exactly as at the root — before
+    this threading, the role rules went blind one subgraph deep, and a child
+    whose phases resolved no role compiled green under a governed parent.
+    """
     for doc in phase_docs:
         if not isinstance(doc.ast, SubgraphNodeAST):
             continue
@@ -1023,6 +1055,7 @@ def _validate_subgraph_io_contracts(
                 skill_resolver=resolver,
                 _loading_stack=_loading_stack,
                 _compilation_cache=_compilation_cache,
+                allowed_roles=allowed_roles,
             )
         except SkillLoadError as exc:
             for issue in _issues_of(exc):

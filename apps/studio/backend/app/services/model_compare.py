@@ -115,16 +115,29 @@ def materialize_single_node_skill(skill_dir: Path, node_id: str, dest: Path) -> 
     return dest
 
 
-def node_effective_role(skill_dir: Path, node_id: str) -> str:
-    """The role name ``node_id`` resolves to (PR1 layering), for roles binding."""
+def node_effective_role(skill_dir: Path, node_id: str) -> str | None:
+    """The role name ``node_id`` resolves to (PR1 layering), for roles binding.
+
+    None only for a LOGIC/SUBGRAPH node under a graph with no default role:
+    such a node consumes no role itself (agent phases inside its subtree each
+    declare their own). An AGENT node that resolves no role is refused —
+    J-X.10 (用户裁决 2026-08-31): no invented fallback; the side-run would
+    resolve models by a name nobody set, and the main compile path already
+    rejects the skill as [F-v3-agent-llm-role-missing].
+    """
     compiled = compile_skill(skill_dir, cache=False)
     doc = next((n for n in compiled.nodes if n.phase_name == node_id), None)
     if doc is None:
         raise ValueError(f"node {node_id!r} not found in skill {skill_dir}")
     if isinstance(doc.ast, AgentNodeAST):
-        return effective_llm_role(doc.ast, compiled.manifest.llm_role)
-    # logic/subgraph nodes have no llm_role; fall back to the conventional role.
-    return compiled.manifest.llm_role or "graph_agent"
+        role = effective_llm_role(doc.ast, compiled.manifest.llm_role)
+        if role is None:
+            raise ValueError(
+                f"node {node_id!r} resolves no LLM role: set `llm_role` in the phase "
+                "frontmatter or a graph default `llm_role` in GRAPH.md"
+            )
+        return role
+    return compiled.manifest.llm_role
 
 
 def build_candidate_roles(
@@ -203,9 +216,9 @@ def build_candidate_roles(
     active = load_roles_file(active_path) if active_path.exists() else RolesData()
 
     roles = {name: _with_candidate_model(role) for name, role in active.roles.items()}
-    for name in (node_effective_role(skill_dir, node_id), "graph_agent"):
-        if name not in roles:
-            roles[name] = _with_candidate_model(RoleEntry())
+    effective_role = node_effective_role(skill_dir, node_id)
+    if effective_role is not None and effective_role not in roles:
+        roles[effective_role] = _with_candidate_model(RoleEntry())
     # Bundles and profiles are unreachable once every role's bundle reference is
     # cleared; carrying them would leave the original models named in the file.
     return active.model_copy(update={"roles": roles, "model_bundles": {}, "model_profiles": {}})

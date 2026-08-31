@@ -74,7 +74,7 @@ io:
       answer:
         type: string
 max_iterations: {max_iterations}
-llm_role: graph_agent
+llm_role: analyst
 tools:
   - lookup
 references:
@@ -133,7 +133,7 @@ io:
     type: object
     properties: {}
 max_iterations: 1
-llm_role: graph_agent
+llm_role: analyst
 ---
 <role>
 Child expert.
@@ -179,7 +179,7 @@ io:
     type: object
     properties: {{}}
 max_iterations: 3
-llm_role: graph_agent
+llm_role: analyst
 subagents:
   - name: child_expert
     target_skill: {target_skill}
@@ -404,7 +404,7 @@ class _MemoryMockStrategy(BaseMockStrategy):
 
 def _resolved_role() -> ResolvedRole:
     route = ResolvedRoute(
-        role_name="graph_agent",
+        role_name="analyst",
         route_id="mock-endpoint:mock-route",
         endpoint_id="mock-endpoint",
         protocol="openai_compatible",
@@ -415,7 +415,7 @@ def _resolved_role() -> ResolvedRole:
         canonical_id="mock-model",
     )
     return ResolvedRole(
-        role_name="graph_agent",
+        role_name="analyst",
         system_prompt_prefix="",
         runtime_policy=RuntimePolicy(),
         routes=[route],
@@ -508,7 +508,7 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
     assert captured["agent_invoke_kwargs"]["durability"] == "sync"
 
     (resolved,) = resolver.calls
-    assert resolved["llm_role"] == "graph_agent"
+    assert resolved["llm_role"] == "analyst"
     assert resolved["phase_name"] == "main"
     assert resolved["predict_context"] is predict_context
     # Not the engine's callback tuple: the gateway builds its own events and
@@ -695,7 +695,7 @@ def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
 ) -> None:
     _agent_skill(tmp_path, max_iterations=1)
     predict_model = PredictGatewayChatModel(
-        "graph_agent",
+        "analyst",
         _resolved_role(),
         mock_strategy=_MemoryMockStrategy({"answer": "mocked"}),
         phase_name="main",

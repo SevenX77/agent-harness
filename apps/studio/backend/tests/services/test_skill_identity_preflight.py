@@ -33,13 +33,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from app.core import config
 from app.services.skills import lint_skill_path
+
+from tests.conftest import seed_llm_roles
+
+
+@pytest.fixture(autouse=True)
+def _registered_fast_role(studio_roots: tuple[Path, Path]) -> None:
+    # The fixture graphs declare `llm_role: fast`; register it so role
+    # governance (J-X.10) judges the identity concern, not a missing role.
+    del studio_roots
+    seed_llm_roles("fast")
 
 _GRAPH_MD = """---
 schema_version: "v0.3.0"
 name: {name}
 description: "identity fixture"
+llm_role: fast
 io:
   inputs:
     type: object

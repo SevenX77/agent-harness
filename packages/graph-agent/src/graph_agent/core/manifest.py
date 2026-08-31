@@ -342,22 +342,25 @@ class AgentNodeAST(_BaseNodeAST):
         return self
 
 
-# Conventional fallback role looked up in the host's role registry when
-# neither the node nor the graph names one (skill-spec 00-FORMAT-GROUND-TRUTH).
-DEFAULT_LLM_ROLE = "graph_agent"
-
-
-def effective_llm_role(phase_ast: AgentNodeAST, graph_llm_role: str | None) -> str:
-    """Resolve the role an agent phase actually runs as.
+def effective_llm_role(phase_ast: AgentNodeAST, graph_llm_role: str | None) -> str | None:
+    """Resolve the role an agent phase actually runs as, or None when unset.
 
     ``use_graph_llm_role`` on -> the graph-level default wins (the node's own
     ``llm_role`` stays in the file but is inactive). Off -> the node's own
-    value wins, inheriting the graph default when the node has none. When
-    neither names a role, fall back to ``DEFAULT_LLM_ROLE``.
+    value wins, inheriting the graph default when the node has none.
+
+    The engine invents NO fallback role (user ruling 2026-08-31: the default
+    is empty and a role must be set explicitly). The old conventional name
+    "graph_agent" existed in no host's seeded role table, so skills that
+    relied on it compiled green and died at runtime with
+    resource.no_available_route. An unresolved chain now stays None: hosts
+    that inject role governance reject it at compile time
+    ([F-v3-agent-llm-role-missing]), and the role-resolving model seam
+    refuses to look up a role nobody named.
     """
     if phase_ast.use_graph_llm_role:
-        return graph_llm_role or DEFAULT_LLM_ROLE
-    return phase_ast.llm_role or graph_llm_role or DEFAULT_LLM_ROLE
+        return graph_llm_role
+    return phase_ast.llm_role or graph_llm_role
 
 
 PhaseAST = Annotated[

@@ -224,6 +224,34 @@ def test_create_skill_without_files_uses_valid_default_scaffold(
     assert (skill_dir / ".git").is_dir()
 
 
+def test_create_skill_scaffold_has_no_role_and_lint_reports_it(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    # J-X.10 (用户裁决 2026-08-31): the scaffold pre-fills NO llm_role — the
+    # compile diagnostic IS the guidance. Two halves pinned together: the
+    # role-less scaffold must be creatable (the write seam lints structure
+    # only), and the diagnostics surface must report the missing role.
+    from app.services.skills import lint_skill_path
+
+    skill_dir = tmp_path / "external" / "roleless-skill"
+    skill_dir.parent.mkdir()
+
+    response = client.post(
+        "/api/skills",
+        json={"skill_id": "roleless-skill", "directory_path": str(skill_dir)},
+    )
+
+    assert response.status_code == 201, response.json()
+    assert "llm_role" not in (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+
+    lint = lint_skill_path(skill_dir)
+    assert lint.status == "failed"
+    assert any(error.error_code == "F-v3-agent-llm-role-missing" for error in lint.errors), [
+        (error.error_code, error.message) for error in lint.errors
+    ]
+
+
 def test_create_skill_without_directory_uses_settings_default_folder(
     client: TestClient,
     tmp_path: Path,

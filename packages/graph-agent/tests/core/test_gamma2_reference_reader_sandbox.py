@@ -64,6 +64,7 @@ io:
         type: string
   outputs:
     {output_yaml}
+llm_role: analyst
 phases:
 {phase_yaml}
 ---

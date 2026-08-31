@@ -56,6 +56,7 @@ io:
     properties:
       answer:
         type: string
+llm_role: analyst
 phases:
   - main
 ---
@@ -126,6 +127,7 @@ io:
         type: string
       saw_parent_secret:
         type: boolean
+llm_role: analyst
 phases:
   - sub
 ---
@@ -170,6 +172,7 @@ io:
         type: string
       saw_parent_secret:
         type: boolean
+llm_role: analyst
 phases:
   - inspect
 ---

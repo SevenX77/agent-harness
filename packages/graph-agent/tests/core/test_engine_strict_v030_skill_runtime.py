@@ -37,6 +37,7 @@ io:
     properties:
       answer:
         type: string
+llm_role: analyst
 phases:
   - main
 ---
@@ -107,6 +108,7 @@ io:
         type: string
   outputs:
     {output_schema}
+llm_role: analyst
 phases:
   - score
 ---
@@ -330,6 +332,7 @@ io:
                   type: string
                 text:
                   type: string
+llm_role: analyst
 phases:
   - setup
   - segment

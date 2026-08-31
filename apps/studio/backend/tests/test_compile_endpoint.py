@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import copy_skill, register_skill_index_entry
+from tests.conftest import copy_skill, register_skill_index_entry, seed_llm_roles
 
 
 def test_compile_success_returns_manifest_summary(
@@ -117,6 +117,7 @@ def test_compile_declared_unsupplied_inputs_return_engine_dataflow_errors(
     studio_roots: tuple[Path, Path],
 ) -> None:
     skills_dir, _workspaces_dir = studio_roots
+    seed_llm_roles("fast")
     skill_dir = skills_dir / "missing-inputs"
     (skill_dir / "phases" / "review").mkdir(parents=True)
     register_skill_index_entry("missing-inputs", skill_dir)
@@ -124,6 +125,7 @@ def test_compile_declared_unsupplied_inputs_return_engine_dataflow_errors(
         """---
 schema_version: "v0.3.0"
 name: missing-inputs
+llm_role: fast
 io:
   inputs:
     type: object

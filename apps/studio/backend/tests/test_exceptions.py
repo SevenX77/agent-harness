@@ -26,6 +26,7 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "RUN_REQUIRES_PREDICT": 409,
         "RUN_NOT_RUNNING": 409,
         "RUN_NOT_CONCLUDED": 409,
+        "INTERNAL_ERROR": 500,
     }
 
     assert set(STANDARD_ERROR_MAP) == set(expected)

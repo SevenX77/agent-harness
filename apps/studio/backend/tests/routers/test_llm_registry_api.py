@@ -2963,20 +2963,25 @@ def test_a_failed_role_cascade_leaves_the_credentials_file_untouched(
 
     monkeypatch.setattr(llm_router, "save_roles_file", refuse_to_write_roles)
 
-    with pytest.raises(RuntimeError, match="roles file unwritable"):
-        client.put(
-            "/api/llm/registry/endpoints",
-            json={
-                "provider_endpoints": {
-                    "legacy-hand-written": {
-                        "endpoint_id": "legacy-hand-written",
-                        "display_name": "Legacy",
-                        "protocol": "openai_compatible",
-                        "base_url": "https://api.legacy.example/v1",
-                    }
+    # The roles write failing is now answered, not leaked: an exception no handler
+    # claims is converted to the standard 500 envelope by
+    # `UnhandledExceptionEnvelopeMiddleware`. What this test is about is unchanged
+    # and asserted below — the credentials file must be exactly as it was.
+    response = client.put(
+        "/api/llm/registry/endpoints",
+        json={
+            "provider_endpoints": {
+                "legacy-hand-written": {
+                    "endpoint_id": "legacy-hand-written",
+                    "display_name": "Legacy",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://api.legacy.example/v1",
                 }
-            },
-        )
+            }
+        },
+    )
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "INTERNAL_ERROR"
 
     credentials = load_credentials()
     assert list(credentials.provider_endpoints) == ["legacy-hand-written"]

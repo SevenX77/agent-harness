@@ -60,6 +60,13 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "TEST_INPUT_VALIDATION_FAILED": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
     "SUBGRAPH_PATH_INVALID": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
     "SUBGRAPH_PATH_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
+    # The answer when NO other code applies: an exception no handler claimed.
+    # `not_retryable` rather than the `idempotent` the other 500s carry — those
+    # two name a specific, side-effect-free spawn failure that is safe to repeat,
+    # whereas an unclaimed exception is a defect at an unknown point in an
+    # unknown endpoint. We cannot promise the request had no partial effect, and
+    # repeating it re-runs the same defect, so the honest label is "do not retry".
+    "INTERNAL_ERROR": ErrorDefinition(http_status=500, retry_strategy="not_retryable"),
 }
 
 

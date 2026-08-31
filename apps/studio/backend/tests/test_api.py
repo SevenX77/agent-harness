@@ -5,7 +5,7 @@ import queue
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from app.core import config
@@ -14,6 +14,7 @@ from app.services.event_bus import event_bus
 from app.services.predict_gate import record_predict_pass
 from app.services.run_manager import run_manager
 from app.services.skills import resolve_skill_dir
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
     FinishTaskVerdictEvent,
@@ -1344,6 +1345,74 @@ def test_value_error_handler_returns_studio_error_response(client: TestClient) -
         "details": None,
         "retry_strategy": "not_retryable",
     }
+
+
+_UNHANDLED_ERROR_PATH = "/api/_test/unhandled-error"
+
+
+def _mount_unhandled_error_route(client: TestClient) -> None:
+    """Give the app under test one route that raises an unclaimed exception.
+
+    Mounted on the fixture's own app instance rather than shipped in
+    `app/routers/debug.py`: nothing in the product needs an endpoint whose
+    purpose is to crash the server, and the behaviour under test is a property
+    of `create_app()`'s middleware ORDER, which a route added here exercises
+    exactly as well. Registering routes after startup is fine — the router is
+    the innermost app and resolves its `routes` list per request.
+
+    It must raise something no handler claims. `/api/_debug/value-error` cannot
+    stand in: `ValueError` has a registered handler, and a claimed exception
+    never reaches the middleware at all.
+    """
+    studio_app = cast(FastAPI, client.app)
+
+    @studio_app.get(_UNHANDLED_ERROR_PATH, include_in_schema=False)
+    async def _raise_unhandled() -> None:
+        raise RuntimeError("Studio test unhandled RuntimeError")
+
+
+def test_unhandled_exception_returns_studio_error_envelope(client: TestClient) -> None:
+    # Before the envelope middleware existed, an exception no handler claimed fell
+    # through to Starlette's ServerErrorMiddleware, which answers text/plain
+    # "Internal Server Error" — a body the frontend's error projection cannot read
+    # at all. Everything the UI knows about a failure comes from shape A.
+    _mount_unhandled_error_route(client)
+
+    response = client.get(_UNHANDLED_ERROR_PATH)
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body == {
+        "error_code": "INTERNAL_ERROR",
+        "http_status": 500,
+        "message": "Internal server error",
+        "details": None,
+        "retry_strategy": "not_retryable",
+    }
+    # The exception's own text stays in the server log; leaking it to the UI would
+    # put stack/internal detail on screen.
+    assert "RuntimeError" not in response.text
+    assert "Studio debug" not in response.text
+
+
+def test_unhandled_exception_response_carries_cors_headers(client: TestClient) -> None:
+    # THE reason this middleware sits inside CORSMiddleware. Under Tauri the API
+    # base URL is always absolute (`http://127.0.0.1:{port}/api`) while the webview
+    # origin is `tauri://localhost` / `http://tauri.localhost` — every call is
+    # cross-origin. A 500 without `Access-Control-Allow-Origin` is DISCARDED by the
+    # browser before axios sees it, so the frontend reads ERR_NETWORK, concludes the
+    # sidecar is dead, and RuntimeGate restarts a perfectly healthy process
+    # (rotating its token + port and losing in-flight work). Starlette's own
+    # last-resort handler cannot carry these headers: it wraps every user
+    # middleware, CORSMiddleware included.
+    _mount_unhandled_error_route(client)
+
+    for origin in ("http://localhost:5173", "tauri://localhost", "http://tauri.localhost"):
+        response = client.get(_UNHANDLED_ERROR_PATH, headers={"Origin": origin})
+
+        assert response.status_code == 500
+        assert response.headers["access-control-allow-origin"] == origin
+        assert response.json()["error_code"] == "INTERNAL_ERROR"
 
 
 def test_cors_allows_vite_and_backup_dev_origins(client: TestClient) -> None:

@@ -796,7 +796,7 @@ def _is_safe_phase_id(value: str) -> bool:
 def _graph_phase_ids(skill_dir: Path) -> list[str]:
     graph_path = skill_dir / "GRAPH.md"
     try:
-        text = graph_path.read_text(encoding="utf-8")
+        text = read_authored_text(graph_path)
     except OSError:
         return []
     frontmatter = _frontmatter_block(text)

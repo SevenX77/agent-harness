@@ -51,6 +51,7 @@ from app.core.adapters.engine import (
 )
 from app.core.adapters.run_layout import predicts_root, runs_root
 from app.core.adapters.transport_factory import build_engine_adapter
+from app.core.authored_text import read_authored_text
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
@@ -1133,7 +1134,7 @@ async def update_skill_file(
     validate_skill_file_path(rel_path)
     skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage, metadata)
     target = skill_dir.joinpath(*PurePosixPath(rel_path).parts)
-    current = target.read_text(encoding="utf-8") if target.exists() else ""
+    current = read_authored_text(target) if target.exists() else ""
     current_hash = _graph_content_hash(current)
     if expected_hash is not None and current_hash != expected_hash:
         raise CanvasConflictError(
@@ -1918,7 +1919,7 @@ def _read_skill_files(skill_dir: Path) -> dict[str, str]:
             files[rel_path] = "(binary or too large)"
             continue
         try:
-            files[rel_path] = path.read_text(encoding="utf-8")
+            files[rel_path] = read_authored_text(path)
         except UnicodeDecodeError:
             continue
     return files
@@ -1928,7 +1929,7 @@ def _read_current_graph_markdown(skill_dir: Path) -> str:
     graph_path = skill_dir / "GRAPH.md"
     if not graph_path.exists():
         return ""
-    return graph_path.read_text(encoding="utf-8")
+    return read_authored_text(graph_path)
 
 
 def _allowed_child_graph_roots(parent_skill_dir: Path) -> list[Path]:

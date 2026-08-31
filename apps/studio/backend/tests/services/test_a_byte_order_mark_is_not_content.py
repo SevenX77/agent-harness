@@ -25,7 +25,13 @@ from pathlib import Path
 import pytest
 from app.core.authored_text import read_authored_text
 from app.services.golden_diff import workspace_text_hash
-from app.services.runtime_config import _input_fields_from_markdown, read_runtime_config
+from app.services.runtime_config import (
+    _graph_phase_ids,
+    _input_fields_from_markdown,
+    ensure_import_layout,
+    read_runtime_config,
+)
+from app.services.skills import _graph_content_hash, _read_current_graph_markdown
 
 BOM = b"\xef\xbb\xbf"
 
@@ -39,6 +45,17 @@ io:
 ---
 
 body
+"""
+
+GRAPH_MARKDOWN = """---
+schema_version: "v0.3.0"
+name: signed-skill
+description: a skill an outside editor saved
+phases:
+  - setup
+  - review
+---
+<phase depends_on="input" output>setup</phase>
 """
 
 
@@ -68,6 +85,60 @@ def test_a_signed_phase_still_declares_its_inputs(tmp_path: Path) -> None:
     path = _signed(tmp_path / "LOGIC.md", PHASE_MARKDOWN)
 
     assert _input_fields_from_markdown(path) == {"topic", "depth"}
+
+
+def test_a_signed_graph_still_declares_its_phases(tmp_path: Path) -> None:
+    """K7's own shape, and the half of it that was still unfixed.
+
+    ``_input_fields_from_markdown`` above went through the shared exit; the graph
+    reader twelve lines away kept plain ``utf-8``, so a signed ``GRAPH.md``
+    answered "zero phases" — the exact symptom the ledger recorded — and did so
+    SILENTLY: ``_frontmatter_block`` tests ``startswith("---")``, and a leading
+    ``\\ufeff`` makes that false, which is indistinguishable from a file that
+    genuinely has no frontmatter.
+    """
+    skill_dir = tmp_path / "signed-skill"
+    _signed(skill_dir / "GRAPH.md", GRAPH_MARKDOWN)
+
+    assert _graph_phase_ids(skill_dir) == ["setup", "review"]
+
+
+def test_a_signed_graph_still_gets_its_per_phase_import_directories(tmp_path: Path) -> None:
+    """What the silence actually costs the user, asserted at the public surface.
+
+    ``ensure_import_layout`` derives the per-phase import directories from the
+    graph's phase list. Reading zero phases is not an error there — it is a valid
+    instruction to create nothing and prune whatever exists, so a signed file
+    leaves the user with no per-phase import slots and no diagnostic naming why.
+    """
+    skill_dir = tmp_path / "signed-skill"
+    _signed(skill_dir / "GRAPH.md", GRAPH_MARKDOWN)
+
+    assert ensure_import_layout(skill_dir) == ["review", "setup"]
+
+
+def test_a_signed_graph_hashes_for_the_canvas_lock_like_the_writer_reads_it(tmp_path: Path) -> None:
+    """The optimistic-lock case this module's docstring calls the sharpest of the lot.
+
+    ``_read_current_graph_markdown`` feeds ``_graph_content_hash``, and that hash
+    is compared against the one the frontend holds — which came from the Rust
+    native-fs layer, the sole writer, which DOES drop the mark
+    (``native_fs.rs``: ``if text.starts_with('\\u{feff}') { text.drain(..) }``).
+    Keeping it on this side makes the two sides hash the same bytes differently,
+    so every canvas save of a signed ``GRAPH.md`` reports a conflict that did not
+    happen — and a conflict the user cannot clear, because nothing is actually
+    out of date.
+    """
+    signed_dir = tmp_path / "signed"
+    plain_dir = tmp_path / "plain"
+    _signed(signed_dir / "GRAPH.md", GRAPH_MARKDOWN)
+    plain = plain_dir / "GRAPH.md"
+    plain.parent.mkdir(parents=True)
+    plain.write_text(GRAPH_MARKDOWN, encoding="utf-8")
+
+    assert _graph_content_hash(_read_current_graph_markdown(signed_dir)) == _graph_content_hash(
+        _read_current_graph_markdown(plain_dir)
+    )
 
 
 def test_a_signed_runtime_config_reads_the_same_as_an_unsigned_one(tmp_path: Path) -> None:

@@ -1,6 +1,13 @@
-import { useEffect, useRef } from "react"
-import { BACKEND_UNAVAILABLE_HTTP_EVENT } from "@/api/client"
+import { useCallback, useEffect, useRef } from "react"
+import { BACKEND_UNAVAILABLE_HTTP_EVENT, getApiBaseURL } from "@/api/client"
 import { useStudioEventStream } from "./useStudioEventStream"
+
+// Long enough for a busy-but-alive sidecar to answer a trivial handler, short
+// enough that confirming an outage does not visibly delay the banner. The Rust
+// supervisor allows 30s for the same endpoint, but that budget covers a COLD
+// START (interpreter boot + imports); here the process has been serving for a
+// while, so a reply that takes seconds is itself evidence of trouble.
+const HEALTH_RECHECK_TIMEOUT_MS = 2000
 
 // This hook only needs to know THAT something changed, never what — it never
 // reads registry/roles truth, so a no-op pair satisfies useStudioEventStream's
@@ -8,6 +15,58 @@ import { useStudioEventStream } from "./useStudioEventStream"
 const NOOP_EVENT_CALLBACKS = {
   onRegistryChanged: (): void => {},
   onRolesChanged: (): void => {},
+}
+
+/**
+ * `/health` is the sidecar's own liveness endpoint — unauthenticated
+ * (`app/main.py`'s auth middleware whitelists it) and the SAME evidence the
+ * Rust supervisor decides on (`apps/studio/tauri/src/sidecar.rs::wait_for_health`
+ * polls `http://127.0.0.1:{port}/health`). Until this recheck existed, no
+ * frontend code called it even once.
+ *
+ * It is reached by dropping the base URL's trailing `/api`, because `/health` is
+ * the only registered route: `/api/health` also appears in the auth whitelist
+ * but no router serves it, so it 404s.
+ */
+function healthProbeUrl(): string {
+  const base = getApiBaseURL().replace(/\/+$/, "")
+  return `${base.replace(/\/api$/, "")}/health`
+}
+
+/**
+ * Ask the sidecar directly whether it is alive.
+ *
+ * Uses `fetch`, deliberately NOT the shared axios instance: that client's
+ * response interceptor dispatches `BACKEND_UNAVAILABLE_HTTP_EVENT` on a failed
+ * call, so probing through it would have every failed probe re-enter this hook
+ * as a fresh down-signal — a self-feeding loop.
+ *
+ * "Healthy" means the sidecar answered ITS health endpoint, not merely that
+ * something returned 200. In the worktree preview the API base URL is the
+ * relative `/api`, so the probe URL becomes `/health` — which the Vite dev
+ * server answers from its SPA fallback with 200 index.html. Checking the body
+ * is what keeps that from reading as a healthy sidecar and permanently
+ * suppressing detection there.
+ */
+async function sidecarAnswersHealthProbe(): Promise<boolean> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HEALTH_RECHECK_TIMEOUT_MS)
+  try {
+    const response = await fetch(healthProbeUrl(), {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    })
+    if (!response.ok) return false
+    const body = (await response.json()) as { status?: unknown } | null
+    return body?.status === "ok"
+  } catch {
+    // Network error, abort on timeout, or a body that is not the health JSON —
+    // every one of them means we did NOT get the sidecar's own confirmation.
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 /**
@@ -51,6 +110,26 @@ const NOOP_EVENT_CALLBACKS = {
  * be mistaken for a fresh failure, however long the reconnect actually takes.
  * A connection that genuinely goes down again afterward still produces a real
  * transition and still fires — detection is never permanently blinded.
+ *
+ * confirm-before-you-kill — BOTH signals above are weak evidence, and neither
+ * is allowed to fire `onDown` on its own any more. `/health` is asked first,
+ * and only its refusal to answer confirms the outage.
+ *
+ * The weakness is structural, not incidental. `BACKEND_UNAVAILABLE_HTTP_EVENT`
+ * says "this call got no HTTP RESPONSE", which is NOT the same fact as "the
+ * process is gone": a 500 the browser discards for lacking
+ * `Access-Control-Allow-Origin` reaches axios as ERR_NETWORK and looks, from
+ * inside the interceptor, exactly like a dead port. `connectionLost` is weaker
+ * still — a reconnect heuristic that also trips on a rotated auth token. Acting
+ * on either alone had RuntimeGate auto-restarting sidecars that were serving
+ * fine, and an unnecessary restart is expensive: it rotates the token and port
+ * and drops every in-flight run.
+ *
+ * The recheck costs one request, on a path that only runs when something
+ * already looks wrong, and it is the same question the Rust supervisor asks.
+ * A veto does NOT spend the episode: `firedRef` is set when we actually FIRE,
+ * never merely because we asked, so one early false alarm cannot blind
+ * detection for the rest of the episode.
  */
 export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
   const { connectionLost } = useStudioEventStream(NOOP_EVENT_CALLBACKS)
@@ -59,6 +138,34 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
   const firedRef = useRef(false)
   const previousArmedRef = useRef(armed)
   const previousConnectionLostRef = useRef(connectionLost)
+  const armedRef = useRef(armed)
+  armedRef.current = armed
+  // Identifies the down episode a probe was started for, so a verdict that
+  // lands after RuntimeGate disarmed (or after a whole new episode opened)
+  // cannot be applied to the wrong one.
+  const episodeRef = useRef(0)
+  const probeInFlightRef = useRef(false)
+
+  const confirmOutageThenFire = useCallback(async (signal: string): Promise<void> => {
+    if (firedRef.current || probeInFlightRef.current) return
+    probeInFlightRef.current = true
+    const episode = episodeRef.current
+    try {
+      const alive = await sidecarAnswersHealthProbe()
+      if (episode !== episodeRef.current || !armedRef.current) return
+      if (alive) {
+        console.warn(
+          `[studio] ${signal} looked like a dead backend, but /health still answers — not reporting it down`,
+        )
+        return
+      }
+      if (firedRef.current) return
+      firedRef.current = true
+      onDownRef.current()
+    } finally {
+      probeInFlightRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     const wasArmed = previousArmedRef.current
@@ -72,6 +179,7 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
       // known as of arming," so it can never itself count as the new edge
       // that opens this episode.
       firedRef.current = false
+      episodeRef.current += 1
       previousConnectionLostRef.current = connectionLost
       return
     }
@@ -80,18 +188,15 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
     previousConnectionLostRef.current = connectionLost
 
     if (!armed || !connectionLost || wasLost || firedRef.current) return
-    firedRef.current = true
-    onDownRef.current()
-  }, [armed, connectionLost])
+    void confirmOutageThenFire("WebSocket connectionLost")
+  }, [armed, connectionLost, confirmOutageThenFire])
 
   useEffect(() => {
     if (!armed) return undefined
     function handleHttpFailure(): void {
-      if (firedRef.current) return
-      firedRef.current = true
-      onDownRef.current()
+      void confirmOutageThenFire("An HTTP call got no response")
     }
     window.addEventListener(BACKEND_UNAVAILABLE_HTTP_EVENT, handleHttpFailure)
     return () => window.removeEventListener(BACKEND_UNAVAILABLE_HTTP_EVENT, handleHttpFailure)
-  }, [armed])
+  }, [armed, confirmOutageThenFire])
 }

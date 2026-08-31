@@ -197,6 +197,17 @@ beforeEach(() => {
   vi.useFakeTimers()
   FakeWebSocket.instances = []
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
+  // These tests drive the REAL `useBackendDownSignal`, which now confirms a weak
+  // signal against `/health` before reporting the backend down. Left unstubbed,
+  // `fetch` would attempt a genuine connection to 127.0.0.1:8787 and the outcome
+  // of this gate would depend on whether a sidecar happens to be running on the
+  // machine — passing on a clean box, silently VETOING every down-signal below
+  // for a developer who has the app open. Stubbed to "unreachable", which is
+  // what these tests mean by a dead sidecar.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+  )
   configureApiBaseURL('http://127.0.0.1:8787/api')
   configureApiToken('token')
   runtimeMocks.initializeRuntimeConfig.mockReset().mockResolvedValue(READY_CONFIG)
@@ -208,6 +219,7 @@ beforeEach(() => {
 afterEach(() => {
   unmount()
   vi.useRealTimers()
+  vi.unstubAllGlobals()
   ;(globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = originalWebSocket
   configureApiToken(null)
 })

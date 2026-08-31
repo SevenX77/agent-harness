@@ -2,12 +2,22 @@ import { useCallback, useEffect, useRef } from "react"
 import { BACKEND_UNAVAILABLE_HTTP_EVENT, getApiBaseURL } from "@/api/client"
 import { useStudioEventStream } from "./useStudioEventStream"
 
-// Long enough for a busy-but-alive sidecar to answer a trivial handler, short
-// enough that confirming an outage does not visibly delay the banner. The Rust
-// supervisor allows 30s for the same endpoint, but that budget covers a COLD
-// START (interpreter boot + imports); here the process has been serving for a
-// while, so a reply that takes seconds is itself evidence of trouble.
-const HEALTH_RECHECK_TIMEOUT_MS = 2000
+// This number is close to free, which is why it is generous. A sidecar that is
+// actually GONE does not consume it: connecting to a closed port on loopback
+// fails immediately with ECONNREFUSED, so the dead case — the common one — is
+// answered in milliseconds either way. The timeout governs only the other
+// shape: the port is open but no reply comes, which is what a sidecar whose
+// event loop is momentarily blocked looks like. Studio has such paths (`async`
+// routes that run a synchronous compile, e.g. `routers/lint.py::lint_skill`),
+// and they have no sub-second response bound. Timing out on one of those and
+// concluding "dead" would restart a sidecar in the middle of real work — the
+// exact failure this recheck exists to prevent. So waiting longer costs almost
+// nothing and buys real protection.
+//
+// It is not unbounded, because the wait does delay a genuine outage banner. The
+// Rust supervisor's 30s budget for the same endpoint is not the comparison: that
+// one covers a COLD START (interpreter boot + imports), not a live process.
+const HEALTH_RECHECK_TIMEOUT_MS = 5000
 
 // This hook only needs to know THAT something changed, never what — it never
 // reads registry/roles truth, so a no-op pair satisfies useStudioEventStream's
@@ -26,7 +36,9 @@ const NOOP_EVENT_CALLBACKS = {
  *
  * It is reached by dropping the base URL's trailing `/api`, because `/health` is
  * the only registered route: `/api/health` also appears in the auth whitelist
- * but no router serves it, so it 404s.
+ * but no router serves it, so it 404s. The Vite dev proxy forwards `/health`
+ * alongside `/api` and `/ws` so the worktree preview reaches the real sidecar
+ * too, instead of Vite's own SPA fallback.
  */
 function healthProbeUrl(): string {
   const base = getApiBaseURL().replace(/\/+$/, "")
@@ -41,12 +53,14 @@ function healthProbeUrl(): string {
  * call, so probing through it would have every failed probe re-enter this hook
  * as a fresh down-signal — a self-feeding loop.
  *
- * "Healthy" means the sidecar answered ITS health endpoint, not merely that
- * something returned 200. In the worktree preview the API base URL is the
- * relative `/api`, so the probe URL becomes `/health` — which the Vite dev
- * server answers from its SPA fallback with 200 index.html. Checking the body
- * is what keeps that from reading as a healthy sidecar and permanently
- * suppressing detection there.
+ * "Healthy" means something answered with the health endpoint's own body, not
+ * merely that something returned 200. The body check is what stops an unrelated
+ * 200 — a dev server's SPA fallback serving index.html for an unproxied
+ * `/health`, say — from reading as a live sidecar and suppressing detection
+ * forever. It is a check on the SHAPE of the reply, not proof of identity:
+ * `/health` is unauthenticated and carries no instance id, so another local
+ * process holding the port and answering the same JSON would pass. That is the
+ * same evidence, and the same limit, as the Rust supervisor's own probe.
  */
 async function sidecarAnswersHealthProbe(): Promise<boolean> {
   const controller = new AbortController()
@@ -145,27 +159,59 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
   // cannot be applied to the wrong one.
   const episodeRef = useRef(0)
   const probeInFlightRef = useRef(false)
+  const signalArrivedDuringProbeRef = useRef(false)
+  // Cleared on unmount. A probe that lands afterwards must not call `onDown`:
+  // RuntimeGate's own timer cleanup has already run by then, so the restart it
+  // would schedule is a timer nobody is left to cancel.
+  const mountedRef = useRef(true)
 
   const confirmOutageThenFire = useCallback(async (signal: string): Promise<void> => {
-    if (firedRef.current || probeInFlightRef.current) return
+    if (firedRef.current) return
+    if (probeInFlightRef.current) {
+      // COALESCE, never drop. The probe already running may come back healthy
+      // while THIS signal is the real outage — and the WS signal cannot be
+      // re-offered: `connectionLost` is edge-triggered off a false→true
+      // transition whose baseline has already advanced, and a level that stays
+      // true produces no second edge. Dropping the signal here would therefore
+      // blind detection for the rest of the episode, which is exactly the
+      // failure this hook's edge-trigger design was written to avoid. Same
+      // shape as the repo's settings-autosave rule: an in-flight request does
+      // not discard the newer demand, it supersedes into a pending one.
+      signalArrivedDuringProbeRef.current = true
+      return
+    }
     probeInFlightRef.current = true
     const episode = episodeRef.current
     try {
-      const alive = await sidecarAnswersHealthProbe()
-      if (episode !== episodeRef.current || !armedRef.current) return
-      if (alive) {
+      // Re-probe as long as another signal came in while the last one was in
+      // flight. This cannot spin: each pass performs a real request (or waits
+      // out its timeout), and it exits as soon as one completes with nothing
+      // new behind it.
+      do {
+        signalArrivedDuringProbeRef.current = false
+        const alive = await sidecarAnswersHealthProbe()
+        if (!mountedRef.current || episode !== episodeRef.current || !armedRef.current) return
+        if (!alive) {
+          if (firedRef.current) return
+          firedRef.current = true
+          onDownRef.current()
+          return
+        }
         console.warn(
           `[studio] ${signal} looked like a dead backend, but /health still answers — not reporting it down`,
         )
-        return
-      }
-      if (firedRef.current) return
-      firedRef.current = true
-      onDownRef.current()
+      } while (signalArrivedDuringProbeRef.current)
     } finally {
       probeInFlightRef.current = false
     }
   }, [])
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false
+    },
+    [],
+  )
 
   useEffect(() => {
     const wasArmed = previousArmedRef.current

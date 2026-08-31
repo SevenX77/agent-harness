@@ -379,6 +379,55 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     expect(onDown).toHaveBeenCalledTimes(1)
   })
 
+  it("a signal that arrives DURING a probe is re-checked, not dropped", async () => {
+    // The overlap case. Probe A is a false alarm and will answer "healthy". The
+    // real outage happens while it is still in flight, and its signal must not
+    // be consumed by A's verdict: the WS edge that carried it is gone (the
+    // baseline already advanced, and a level that stays true yields no second
+    // edge), so a dropped signal here would blind detection for the rest of the
+    // episode — a dead backend that never gets restarted.
+    let resolveFirstProbe: ((value: unknown) => void) | undefined
+    healthFetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstProbe = resolve
+        }),
+    )
+    const onDown = vi.fn()
+    mount(onDown)
+
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+    // The real outage, while probe A is still pending.
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+
+    // Probe A says healthy — and the second probe (the default: unreachable)
+    // must then run because a signal arrived while A was in flight.
+    healthUnreachable()
+    resolveFirstProbe?.({ ok: true, status: 200, json: async () => ({ status: "ok" }) })
+    await settleHealthProbe()
+
+    expect(healthFetch).toHaveBeenCalledTimes(2)
+    expect(onDown).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops re-probing once a probe completes with no signal behind it", async () => {
+    healthAnswersOk()
+    const onDown = vi.fn()
+    mount(onDown)
+
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+    await settleHealthProbe()
+
+    expect(healthFetch).toHaveBeenCalledTimes(1)
+    expect(onDown).not.toHaveBeenCalled()
+  })
+
   it("does not fire when the episode ends while the /health probe is still in flight", async () => {
     // RuntimeGate disarms the instant it reacts. A verdict that arrives after
     // that belongs to an episode that is already over.
@@ -400,6 +449,35 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     await settleHealthProbe()
 
     expect(onDown).not.toHaveBeenCalled()
+  })
+
+  it("does not fire when the hook unmounts while the /health probe is still in flight", async () => {
+    // RuntimeGate's own timer cleanup runs on unmount. A verdict landing after
+    // that would schedule an auto-restart with nothing left to cancel it.
+    let resolveProbe: ((value: unknown) => void) | undefined
+    healthFetch.mockReturnValue(
+      new Promise((resolve) => {
+        resolveProbe = resolve
+      }),
+    )
+    const onDown = vi.fn()
+    mount(onDown)
+
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+    unmount()
+
+    resolveProbe?.({ ok: false, status: 503, json: async () => ({}) })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(onDown).not.toHaveBeenCalled()
+    // `mount` again so the shared afterEach's unconditional `unmount()` has a
+    // live root to tear down.
+    mount(vi.fn())
   })
 })
 

@@ -80,6 +80,15 @@ export default defineConfig(({ mode }) => {
         ws: true,
         changeOrigin: false,
       },
+      // The sidecar's liveness endpoint sits at the ROOT, not under `/api`
+      // (`app/routers/system.py`), so it needs its own proxy entry. Without one
+      // the SPA fallback answers `/health` with 200 index.html, and
+      // `useBackendDownSignal`'s pre-restart recheck would be asking Vite about
+      // Vite instead of asking the sidecar about the sidecar.
+      '/health': {
+        target: sidecarHttpTarget,
+        changeOrigin: false,
+      },
     },
     allowedHosts: ['.trycloudflare.com', 'localhost', '127.0.0.1', '144.202.108.83'],
   },

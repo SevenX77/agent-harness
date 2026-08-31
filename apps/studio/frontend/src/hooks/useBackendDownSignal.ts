@@ -2,21 +2,11 @@ import { useCallback, useEffect, useRef } from "react"
 import { BACKEND_UNAVAILABLE_HTTP_EVENT, getApiBaseURL } from "@/api/client"
 import { useStudioEventStream } from "./useStudioEventStream"
 
-// This number is close to free, which is why it is generous. A sidecar that is
-// actually GONE does not consume it: connecting to a closed port on loopback
-// fails immediately with ECONNREFUSED, so the dead case — the common one — is
-// answered in milliseconds either way. The timeout governs only the other
-// shape: the port is open but no reply comes, which is what a sidecar whose
-// event loop is momentarily blocked looks like. Studio has such paths (`async`
-// routes that run a synchronous compile, e.g. `routers/lint.py::lint_skill`),
-// and they have no sub-second response bound. Timing out on one of those and
-// concluding "dead" would restart a sidecar in the middle of real work — the
-// exact failure this recheck exists to prevent. So waiting longer costs almost
-// nothing and buys real protection.
-//
-// It is not unbounded, because the wait does delay a genuine outage banner. The
-// Rust supervisor's 30s budget for the same endpoint is not the comparison: that
-// one covers a COLD START (interpreter boot + imports), not a live process.
+// Bounds how long a down-signal waits for its answer, nothing more. It is not
+// a liveness threshold: reaching it is treated as "cannot tell", not "dead"
+// (see `anythingAnswersOnTheSidecarPort`), so the exact value only decides how
+// long the banner is delayed in the ambiguous case. The dead case never waits —
+// a closed port on loopback refuses immediately.
 const HEALTH_RECHECK_TIMEOUT_MS = 5000
 
 // This hook only needs to know THAT something changed, never what — it never
@@ -46,38 +36,54 @@ function healthProbeUrl(): string {
 }
 
 /**
- * Ask the sidecar directly whether it is alive.
+ * Ask whether anything is still serving on the sidecar's port.
  *
  * Uses `fetch`, deliberately NOT the shared axios instance: that client's
  * response interceptor dispatches `BACKEND_UNAVAILABLE_HTTP_EVENT` on a failed
  * call, so probing through it would have every failed probe re-enter this hook
  * as a fresh down-signal — a self-feeding loop.
  *
- * "Healthy" means something answered with the health endpoint's own body, not
- * merely that something returned 200. The body check is what stops an unrelated
- * 200 — a dev server's SPA fallback serving index.html for an unproxied
- * `/health`, say — from reading as a live sidecar and suppressing detection
- * forever. It is a check on the SHAPE of the reply, not proof of identity:
- * `/health` is unauthenticated and carries no instance id, so another local
- * process holding the port and answering the same JSON would pass. That is the
- * same evidence, and the same limit, as the Rust supervisor's own probe.
+ * The question is deliberately the narrowest one that settles the decision at
+ * hand, and it is NOT "is the backend well". It is "did we get an HTTP reply".
+ * The signal being double-checked means exactly "a call received no HTTP
+ * response at all", and the action being gated is "kill this process and start
+ * another". So:
+ *
+ * - ANY HTTP status — 200, 500, 503 — means a process accepted the connection
+ *   and answered. That refutes "the process is gone", which is the only claim
+ *   the restart rests on. Judging a 503 as dead would restart a sidecar that
+ *   just told us it is alive, and it would disagree with the Rust supervisor,
+ *   whose own probe (`sidecar.rs::wait_for_health`) accepts any 2xx and never
+ *   reads the body. Two components that disagree about liveness are worse than
+ *   either rule alone.
+ * - A TIMEOUT is ambiguous, not negative: the socket may well have been
+ *   accepted by a process whose event loop is briefly blocked (Studio has
+ *   `async` routes that run a synchronous compile, with no sub-second bound).
+ *   No timeout value can separate "blocked" from "gone", so the tie goes to
+ *   NOT restarting — the person still has Retry, which bypasses the automatic
+ *   budget, and a delayed banner is cheaper than killing live work.
+ * - Only a transport failure — connection refused, and on loopback that is
+ *   immediate and unambiguous — confirms nothing is there.
+ *
+ * What this does NOT establish is identity: `/health` is unauthenticated and
+ * carries no instance id, so another local process holding the port would pass.
+ * That limit is the supervisor's too, and it is the reason this is a veto on a
+ * destructive action rather than a health assertion.
  */
-async function sidecarAnswersHealthProbe(): Promise<boolean> {
+async function anythingAnswersOnTheSidecarPort(): Promise<boolean> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), HEALTH_RECHECK_TIMEOUT_MS)
   try {
-    const response = await fetch(healthProbeUrl(), {
+    await fetch(healthProbeUrl(), {
       method: "GET",
       cache: "no-store",
       signal: controller.signal,
     })
-    if (!response.ok) return false
-    const body = (await response.json()) as { status?: unknown } | null
-    return body?.status === "ok"
-  } catch {
-    // Network error, abort on timeout, or a body that is not the health JSON —
-    // every one of them means we did NOT get the sidecar's own confirmation.
-    return false
+    return true
+  } catch (error) {
+    // Our own abort fired: no reply inside the budget, but nothing said the
+    // port is closed either. Ambiguous — see above, the tie goes to alive.
+    return error instanceof Error && error.name === "AbortError"
   } finally {
     clearTimeout(timeout)
   }
@@ -187,26 +193,47 @@ export function useBackendDownSignal(armed: boolean, onDown: () => void): void {
     }
     probeInFlightRef.current = true
     latestSignalRef.current = signal
-    const episode = episodeRef.current
     try {
-      // Re-probe as long as another signal came in while the last one was in
-      // flight. This cannot spin: each pass performs a real request (or waits
-      // out its timeout), and it exits as soon as one completes with nothing
-      // new behind it.
-      do {
+      // Loop while signals keep arriving mid-probe. This cannot spin: every pass
+      // performs a real request (or waits out its budget), and it exits as soon
+      // as one finishes with nothing new behind it.
+      for (;;) {
         signalArrivedDuringProbeRef.current = false
-        const alive = await sidecarAnswersHealthProbe()
-        if (!mountedRef.current || episode !== episodeRef.current || !armedRef.current) return
-        if (!alive) {
-          if (firedRef.current) return
-          firedRef.current = true
-          onDownRef.current()
-          return
+        // Captured per PASS, not per call. A verdict may only be applied to the
+        // episode whose probe produced it — but a signal that arrived while that
+        // probe was running is evidence for whatever episode is current when it
+        // lands, so the two decisions have to be made separately.
+        const episode = episodeRef.current
+        const answered = await anythingAnswersOnTheSidecarPort()
+        if (!mountedRef.current) return
+
+        if (episode === episodeRef.current && armedRef.current) {
+          if (!answered) {
+            if (firedRef.current) return
+            firedRef.current = true
+            onDownRef.current()
+            return
+          }
+          // Vetoed. Note what this does NOT restore: the WS branch's consumed
+          // edge. Once `connectionLost` is true it stays true until a reconnect,
+          // and React only re-runs that effect when the value CHANGES — so
+          // rewinding the baseline here would be a line that reads like a fix
+          // and does nothing. Detection in the interim rides on the HTTP branch,
+          // which is level-driven and fires on every call that gets no response;
+          // the WS branch resumes as soon as the connection actually transitions
+          // (reconnect, then a real loss), which is covered by test. Closing the
+          // stuck-true window itself would take a re-check timer, and this hook
+          // deliberately has no timers.
+          console.warn(
+            `[studio] ${latestSignalRef.current} looked like a dead backend, but the sidecar port still answers — not reporting it down`,
+          )
         }
-        console.warn(
-          `[studio] ${latestSignalRef.current} looked like a dead backend, but /health still answers — not reporting it down`,
-        )
-      } while (signalArrivedDuringProbeRef.current)
+        // Reached either after applying a veto, or after DISCARDING a verdict
+        // that belonged to a finished episode. Both leave a pending signal
+        // unanswered, and dropping it here is the same blindness the coalesce
+        // exists to prevent — so keep going while one is outstanding.
+        if (!signalArrivedDuringProbeRef.current || !armedRef.current) return
+      }
     } finally {
       probeInFlightRef.current = false
     }

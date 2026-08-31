@@ -78,20 +78,21 @@ let container: HTMLDivElement
 let root: Root
 const originalWebSocket = globalThis.WebSocket
 
-// Every weak signal is now confirmed against the sidecar's own `/health` before
-// `onDown` fires, so each test must say what that probe answers. The default is
-// "unreachable" — the plain dead-sidecar case the older tests were written
-// against, which keeps their expectations meaningful.
+// Every weak signal is now confirmed against the sidecar's port before `onDown`
+// fires, so each test must say what that probe finds. The default is "connection
+// refused" — the plain dead-sidecar case the older tests were written against,
+// which keeps their expectations meaningful.
 let healthFetch: ReturnType<typeof vi.fn>
 
-function healthUnreachable(): void {
+/** Connection refused — on loopback, the unambiguous "nothing is there". */
+function portRefusesConnections(): void {
   healthFetch.mockRejectedValue(new TypeError("Failed to fetch"))
 }
 
-function healthAnswersOk(): void {
+function portAnswers(status = 200): void {
   healthFetch.mockResolvedValue({
-    ok: true,
-    status: 200,
+    ok: status >= 200 && status < 300,
+    status,
     json: async () => ({ status: "ok" }),
   })
 }
@@ -162,7 +163,7 @@ beforeEach(() => {
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
   healthFetch = vi.fn()
   vi.stubGlobal("fetch", healthFetch)
-  healthUnreachable()
+  portRefusesConnections()
   configureApiBaseURL("http://localhost:8787/api")
   configureApiToken("token")
 })
@@ -284,7 +285,7 @@ describe("useBackendDownSignal", () => {
  */
 describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", () => {
   it("does NOT fire onDown when /health still answers ok after an HTTP failure signal", async () => {
-    healthAnswersOk()
+    portAnswers()
     const onDown = vi.fn()
     mount(onDown)
 
@@ -298,7 +299,7 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
   })
 
   it("does NOT fire onDown when /health still answers ok after the WS connectionLost edge", async () => {
-    healthAnswersOk()
+    portAnswers()
     const onDown = vi.fn()
     mount(onDown)
 
@@ -321,7 +322,7 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
   })
 
   it("probes /health, not /api/health, and never through the axios client", async () => {
-    healthAnswersOk()
+    portAnswers()
     const onDown = vi.fn()
     mount(onDown)
 
@@ -335,19 +336,12 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     expect(healthFetch.mock.calls[0][0]).toBe("http://localhost:8787/health")
   })
 
-  it("a 200 that is not the sidecar's own health body does not count as healthy", async () => {
-    // The worktree preview serves the frontend from Vite with the API base URL
-    // set to the relative `/api`, so the probe URL becomes `/health` — a path
-    // Vite answers from its SPA fallback with 200 index.html. Trusting the
-    // status code alone would make the recheck permanently suppress detection
-    // there. The predicate is "the sidecar answered ITS health endpoint".
-    healthFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => {
-        throw new SyntaxError("Unexpected token '<'")
-      },
-    })
+  it("a 503 is a REPLY, so it vetoes the restart instead of confirming it", async () => {
+    // A process that answers 503 has just proved it is running, and "the process
+    // is gone" is the only claim an auto-restart rests on. Restarting here would
+    // kill a live sidecar that told us it was alive — and would disagree with the
+    // Rust supervisor, whose own probe never looks past the status line.
+    portAnswers(503)
     const onDown = vi.fn()
     mount(onDown)
 
@@ -356,15 +350,31 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     })
     await settleHealthProbe()
 
-    expect(onDown).toHaveBeenCalledTimes(1)
+    expect(onDown).not.toHaveBeenCalled()
   })
 
-  it("a non-200 from /health confirms the outage and fires onDown once", async () => {
-    healthFetch.mockResolvedValue({
-      ok: false,
-      status: 502,
-      json: async () => ({}),
+  it("a timeout is ambiguous, so it vetoes rather than confirming a dead process", async () => {
+    // Timing out does not mean the port is closed: it is also what a live
+    // sidecar looks like while its event loop runs a synchronous compile. No
+    // timeout value separates the two, so the tie goes to not restarting — the
+    // person still has Retry, and a delayed banner is cheaper than killing work
+    // in flight.
+    const abortError = new Error("The operation was aborted")
+    abortError.name = "AbortError"
+    healthFetch.mockRejectedValue(abortError)
+    const onDown = vi.fn()
+    mount(onDown)
+
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
     })
+    await settleHealthProbe()
+
+    expect(onDown).not.toHaveBeenCalled()
+  })
+
+  it("a refused connection is the one unambiguous answer, and fires onDown once", async () => {
+    portRefusesConnections()
     const onDown = vi.fn()
     mount(onDown)
 
@@ -381,7 +391,7 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     // The edge-trigger budget must be spent on FIRING, not on being asked. A
     // recheck that vetoes the signal leaves the episode open, otherwise one
     // early false alarm would blind detection for the rest of the episode.
-    healthAnswersOk()
+    portAnswers()
     const onDown = vi.fn()
     mount(onDown)
 
@@ -391,7 +401,7 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     await settleHealthProbe()
     expect(onDown).not.toHaveBeenCalled()
 
-    healthUnreachable()
+    portRefusesConnections()
     act(() => {
       window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
     })
@@ -427,7 +437,7 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
 
     // Probe A says healthy — and the second probe (the default: unreachable)
     // must then run because a signal arrived while A was in flight.
-    healthUnreachable()
+    portRefusesConnections()
     resolveFirstProbe?.({ ok: true, status: 200, json: async () => ({ status: "ok" }) })
     await settleHealthProbe()
 
@@ -436,7 +446,7 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
   })
 
   it("stops re-probing once a probe completes with no signal behind it", async () => {
-    healthAnswersOk()
+    portAnswers()
     const onDown = vi.fn()
     mount(onDown)
 
@@ -470,6 +480,84 @@ describe("useBackendDownSignal — confirm-before-you-kill (/health recheck)", (
     await settleHealthProbe()
 
     expect(onDown).not.toHaveBeenCalled()
+  })
+
+  it("a vetoed WS episode still fires after a real reconnect and a real second loss", async () => {
+    // What a veto must not do is disarm the branch permanently. It does spend
+    // the current edge — `connectionLost` stays true until a reconnect, and
+    // React re-runs that effect only when the value changes, so nothing can
+    // re-trigger on a level that never moves (the HTTP branch covers that
+    // window). What it must preserve is the NEXT genuine transition.
+    portAnswers()
+    const onDown = vi.fn()
+    mount(onDown)
+
+    act(() => {
+      FakeWebSocket.instances[0].acceptOpen()
+    })
+    for (let i = 0; i < 3; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current.dropWith(1006, "abnormal")
+      })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+    }
+    await settleHealthProbe()
+    expect(onDown).not.toHaveBeenCalled()
+
+    // A real reconnect drives connectionLost back to false...
+    act(() => {
+      FakeWebSocket.instances[FakeWebSocket.instances.length - 1].acceptOpen()
+    })
+    // ...and this time the process really is gone.
+    portRefusesConnections()
+    for (let i = 0; i < 3; i += 1) {
+      const current = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      act(() => {
+        current.dropWith(1006, "abnormal")
+      })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+    }
+    await settleHealthProbe()
+
+    expect(onDown).toHaveBeenCalledTimes(1)
+  })
+
+  it("a signal that arrives mid-probe is answered for the NEW episode after a re-arm", async () => {
+    // The verdict of a probe belongs to the episode that started it, but a
+    // signal that arrived while it ran is evidence for whatever episode is
+    // current when it lands. Conflating the two let the pending signal be
+    // discarded together with the stale verdict, blinding the new episode.
+    let resolveFirstProbe: ((value: unknown) => void) | undefined
+    healthFetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstProbe = resolve
+        }),
+    )
+    const onDown = vi.fn()
+    const { setEnabled } = mount(onDown)
+
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+    // RuntimeGate closes the episode and opens a new one while the probe runs.
+    setEnabled(false)
+    setEnabled(true)
+    // A fresh signal for the NEW episode, still while the old probe is pending.
+    act(() => {
+      window.dispatchEvent(new Event(BACKEND_UNAVAILABLE_HTTP_EVENT))
+    })
+
+    portRefusesConnections()
+    resolveFirstProbe?.({ ok: true, status: 200, json: async () => ({ status: "ok" }) })
+    await settleHealthProbe()
+
+    expect(onDown).toHaveBeenCalledTimes(1)
   })
 
   it("still detects an outage under StrictMode's mount/cleanup/mount cycle", async () => {

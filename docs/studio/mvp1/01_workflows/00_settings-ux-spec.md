@@ -50,7 +50,7 @@ role: workflow-record
    - **修订记录（PM 2026-07-02，协议探测矩阵）**：#C 的"排列组合各测一遍"落地形态定为**探测矩阵**，并纠正实现 drift（"轮换选出唯一协议并改写 endpoint.protocol"）。原则：**状态不能被设置，只能从观察算出来；观察会老化，但不会被覆盖**。
      1. **矩阵格子 = (canonical base_url, protocol)，身份不可变**。一张卡的每个 URL × 每个候选协议是一个独立格子（= endpoint 记录）；`protocol` 是身份的一部分，**创建后永不改写**。"检测协议"不再是给某个 endpoint 找协议，而是每个格子**用自己的协议**打推理端点、把结果记在**自己**身上。协议轮换机（在一个 endpoint 的 Test 里换协议试、试通改写 `protocol` 字段）**作废删除** —— 它制造过三重事故（实证 2026-07-02）：qiniu `-openai-` endpoint 被改写成 anthropic 与兄弟 endpoint 完全重复；瞬时失败让 google 的 404 赢下检测；同一 Test 连点两次持久真相不同（前端按 id-slug 回写 protocol 与后端检测打乒乓）。
      2. **`protocol_unsupported` 一等分类**（gateway 探测分类新增）：路径级 404/405（如 "not found or method not allowed"、"Use /v1/messages instead"，响应体**不含**模型语义错误）= **该 URL 不支持该协议**，与 `invalid_model`（协议通了、模型 id 不对）**必须区分**。旧实现把协议 404 归进 `invalid_model` 是三个假象的共同根因（"Untested"假状态、google 赢检测、6/6 失败仍 verified）。
-        - **补充信号（PM 2026-07-02，误路由与路由拒绝）**：判据不止 404/405。① **路由级拒绝**：`5xx` 明说该协议路径不存在（实证：`anthropic.qnaigc.com × google` 的 `GET /v1beta/models` → HTTP 500 `"Unsupported fixed route: /v1beta/models"`）也是 `protocol_unsupported`（标记扩到 `unsupported fixed route` / `unknown route` / `route not found`）。② **误路由到异协议**：某些网关对不支持的协议**不报错而是静默转发到自己的另一协议上游**，把那个上游的错误原样吐回 —— 探 `google` 却收到 `"OpenAI API error: 401 invalid api key"`（实证：`anthropic.qnaigc.com × gemini` 生成 500 包着七牛内部 OpenAI 上游的 401）。**探 X 协议却收到 Y 协议的 API 错误 = 该 URL 不说 X**，判 `protocol_unsupported`（此判据须早于 401 分支，否则异协议的 401 会被误当成"我这把 key 失效"）。真机验证 2026-07-02：修后该格子稳定判 `protocol_unsupported`、名下 6 条幽灵路由被清空（deepseek-v4-pro 的 qiniu 路由 4→3）。
+        - **补充信号（PM 2026-07-02，误路由与路由拒绝）**：判据不止 404/405。① **路由级拒绝**：`5xx` 明说该协议路径不存在（实证：`anthropic.qnaigc.com × google` 的 `GET /v1beta/models` → HTTP 500 `"Unsupported fixed route: /v1beta/models"`）也是 `protocol_unsupported`（标记扩到 `unsupported fixed route` / `unknown route` / `route not found`）。② **误路由到异协议**：某些网关对不支持的协议**不报错而是静默转发到自己的另一协议上游**，把那个上游的错误原样吐回 —— 探 `google` 却收到 `"OpenAI API error: 401 invalid api key"`（实证：`anthropic.qnaigc.com × gemini` 生成 500 包着七牛内部 OpenAI 上游的 401）。**探 X 协议却收到 Y 协议的 API 错误 = 该 URL 不说 X**，判 `protocol_unsupported`（此判据须早于 401 分支，否则异协议的 401 会被误当成"我这把 key 失效"）。真机验证 2026-07-02：修后该格子稳定判 `protocol_unsupported`（当时**连带**清空了名下 6 条路由，deepseek-v4-pro 的 qiniu 路由 4→3；这条连带清空已在第 6 点 2026-08-31 修订中作废，本条只对"判 `protocol_unsupported` 是对的"这一半负责）。
      3. **格子永不删除、永不手工 disable，状态 = 最近观察的投影**：`verified`（最近生成 ok）/ `untested`（无观察）/ `unsupported`（最近观察 = protocol_unsupported，展示观察时间 + 下次复查时间）/ 瞬时失败（网络/限流/超时 → 下次 Test 即重试）/ 结构失败（invalid_key / quota → 账号级，与格子生死无关）。
         - **"与格子生死无关"的落地含义（2026-08-19 补明）**：`invalid_key` 让格子记下一次
           `failed` 观察（§4.2 的红＝要你修），**不把 endpoint 置为 `disabled`**。停用只落在它
@@ -82,7 +82,51 @@ role: workflow-record
           那条被继承的判决在新地址上根本是假的）。
      4. **失败分类定半衰期**：`protocol_unsupported` 是提供商架构级事实 → 长半衰期（**30 天**内日常 Test 跳过该格子，到期自动补测；用户可对单格子强制 re-probe）；瞬时类不设门。"哪天 qiniu 支持 gemini 了"由半衰期复测或手动 re-probe 重新发现 —— 能力不会永久丢失，只有"多久发现"。
      5. **protocol 单写真相**：`protocol` 唯一权威 = 后端 credentials 存储的字段。前端**不得**从 endpoint id 的 slug 反推协议，upsert **不得**修改既有 endpoint 的 `protocol`（后端拒绝 422）；(canonical base_url, protocol) 唯一性是存储不变量（历史被改写产生的重复格子视为坏数据清除，数据可丢弃）。
-     6. **routes 只挂在活格子上**：格子被观察为 `protocol_unsupported` 时清除其名下 routes（协议都不通的格子上不存在"模型清单"）；瞬时失败不清。**格子身份搬家时同样清除**（第 3 点"改地址即作废旧观察"）：routes 就是"在那个地址问出来的模型清单"，地址换了它们描述的就是别处；清除后走与 endpoint 删除相同的级联，把 role 里指向这些 route 的引用一并摘掉，不留下解析不了的悬空引用。
+     6. **routes 只挂在活格子上**：**格子身份搬家时清除其名下 routes**（第 3 点"改地址即作废旧观察"）：routes 就是"在那个地址问出来的模型清单"，地址换了它们描述的就是别处；清除后走与 endpoint 删除相同的级联，把 role 里指向这些 route 的引用一并摘掉，不留下解析不了的悬空引用。瞬时失败不清。
+        - **修订（2026-08-31，`protocol_unsupported` 不再清 routes）**：本条原文还写着"格子被观察为
+          `protocol_unsupported` 时清除其名下 routes……清除后走与 endpoint 删除相同的级联，把 role
+          里指向这些 route 的引用一并摘掉"。**这一半作废**：观察只负责记录，不拥有销毁用户数据的权限。
+          三条依据，指向同一侧：
+          ① **实证（2026-08-31 真机）**：官方 OpenAI 卡在**默认配置**下点一次 Test 就命中
+          `protocol_unsupported`（探测 URL 少拼 `/v1` → 404 空包体 → 误判），一次删掉 124 条 route
+          连带 role 引用。一个误判能造成的最大损失，被这条规则从"一个灰格子"放大成"整份配置"。
+          ② **可恢复性不对称**：routes 是**探出来的**，一次成功复测就能重建；role 里的
+          `route_id` 绑定是**用户亲手拖出来的**，没有任何机制能重建。把两者绑在同一个 verdict 上清除，
+          等于用可再生数据的理由去删不可再生数据。
+          ③ **与第 3 点同源**：第 3 点 2026-08-19 那次补明已经为 `invalid_key` 走过同一条路——
+          "曾经把 endpoint 一起置 `disabled` 的实现，连带让这个格子**不可再测**"，破坏性动作把恢复
+          入口自己堵死了。同一条教训在这里的形态是：删掉 role 绑定之后，即使复测转绿，用户看到的
+          也是一份需要手工重建的角色配置。
+          **现行落地**：`protocol_unsupported` 只写 endpoint 级 `status` + `last_error_code`
+          （= 第 3 点"状态 = 最近观察的投影"），前端按第 9 点把该格子渲染成不可点的架构事实灰态；
+          名下 route 记录、route 自己的 `status`、以及 role 里的 `route_id` 绑定，**一个都不动**。
+          恢复路径 = 第 4 点的显式 Re-probe（`force=true` 绕过半衰期门）：复测成功即清空
+          `last_error_code`、格子回 `verified`，route 与 role 绑定自始至终没动过 —— 整条恢复路径
+          不需要用户手工重建任何东西。
+        - **为什么不顺手把名下 route 一起停掉（待办，非本次范围）**：论点是"死传输不该再收到 prompt"，
+          成立；但**两个 route 状态值都不能承载这个事实**。`disabled` 是**用户自己的开关**
+          （`RouteEditableUpdate` 的原话：*whether it is on*），而既有的 R-E2 复活扫描分不清
+          "系统自动熔断"与"用户主动关掉"，写进去就意味着下一次成功 Test 会**悄悄打开用户关掉的
+          route** —— 那正是本条修订要杜绝的那类破坏。`failed` 的语义是"这条 route 上一次观察失败"、
+          且按 §4.2 渲染成红＝"要你动手"，与第 9 点要求的灰＝架构事实**直接冲突**。
+          事实的主语是**格子**，所以它本来就不该被塞进 route 的状态位。诚实的做法是**endpoint 级
+          执行门**，而它目前**不存在**：gateway resolver 只按 route 自己的状态放行
+          （`EXECUTABLE_ROUTE_STATUSES`），且**看不到** `last_error_code` —— 该字段是 Studio 专属
+          展示字段，被 `_gateway_endpoint` 剥掉。要加这道门，就要改 gateway endpoint 契约携带什么，
+          那是一次有自己 owner 的设计决策，不是本次修复的副作用。在它落地之前，一条指向死格子的
+          旧 role 绑定的代价 = 运行时一次失败的 provider 调用，**具体形态随判定来源不同**：404 在
+          gateway 的 `FALLBACK_STATUS_CODES` 里，会沿 fallback 链继续；405 既不在 fallback 集也不在
+          retryable 集，会让那一次请求 fail-fast。这与**任何其它** `failed` endpoint 今天的暴露面
+          完全一样（它们同样不拦执行），且是**用户看得见、能动手**的单次失败。而在一次误判上删掉
+          用户的 role 绑定，既不可见也没有界。
+        - **本次修订不触碰误判本身**：把官方 OpenAI 默认配置一次 Test 就打成 `protocol_unsupported`
+          的根因，是**模型列表探测会补 `/v1`、而生成探测与真实运行走的
+          `canonicalize_base_url(openai_compatible)` 不补**（`registry/base_url.py` 对
+          openai_compatible 原样返回），于是默认 `https://api.openai.com` 被打成
+          `/chat/completions` 而非 `/v1/chat/completions`。那属于判定链的修复，有自己的工单。
+          因此这里说的"`force=true` 是完整恢复路径"只指**状态语义**：一旦复测返回 ok，格子与
+          route、role 绑定就地回到可用，不需要用户手工重建任何东西；它**不**意味着官方 OpenAI
+          那个误判已经消失——在根因修好之前，复测会重新赚回同一个判定。
      7. **日志完整性**：每个格子测自己 → `probe_attempts` 天然覆盖全部尝试（旧轮换里中间候选的失败探测不落日志、协议翻转无因无果，随轮换机一并消灭）；runtime activity 时间戳统一 **UTC**（与 credentials 对齐）。
      8. **catalog 只当线索，不当真相**（后续 PR）：探测观察（**含失败**）双向进 Probe Knowledge Catalog（对齐 §1.4 #2.4"失败也是历史"）；catalog 与本地观察冲突（别人通了我这标 unsupported）只**提前本地复测**，永远不直接改本地状态 —— 别人的 key 套餐/区域/网络与我不同，"他通我不通"是常态。
      9. **unsupported 格子必须"指路"到同域名的活协议**（UX，PM 2026-07-02）：格子被判 `protocol_unsupported` 不是死胡同 —— 提供商返回的信号本身就在指路（`anthropic.qnaigc.com` 对 `/v1/chat/completions` 明确回 "Use /v1/messages instead"，实证 2026-07-02：换到 `/v1/messages` 用 `x-api-key` 或 `Bearer` 均 HTTP 200，但**回来的是 Anthropic 信封**`type:message`/`content[]`、**无 `choices`** → OpenAI 客户端解析不了，所以"换后缀能连"= 走回了 Anthropic 协议，不是 OpenAI 协议复活）。tooltip 要把这条指路讲给用户：**"此域名不支持 {当前协议} 协议 —— 请改用同域名下的 {已验证的兄弟协议} 路由"**（同域名 = 同 hostname；兄弟协议 = 同 hostname 下 status=verified 的其它格子协议，可多个）。实证：`anthropic.qnaigc.com × OpenAI` 灰格子指向同域名 `× Anthropic` 绿格子；`api.qnaigc.com × Gemini` 灰格子指向同域名 `× OpenAI / × Anthropic` 两个绿格子；同域名无任何活协议时只说"此域名不支持 {当前协议} 协议"。目的：让用户一眼看懂"能力没丢、在隔壁格子"，而不是把灰色误读成"这把 key / 这个域名废了"（对齐 §4.2 灰 = 非用户可修的架构事实，红才 = 用户要动手）。

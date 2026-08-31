@@ -1084,34 +1084,36 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
                 latest_credentials.provider_routes[route_id] = route.model_copy(
                     update={"status": "disabled"}
                 )
-    if last_error_code == "protocol_unsupported":
-        # Design §1.2 matrix revision point 6: routes only live on cells that
-        # speak their protocol. Clear this cell's routes (phantom model lists on
-        # a dead transport are pure red noise) and strip role references to them.
-        unsupported_route_ids = {
-            route_id
-            for route_id, route in latest_credentials.provider_routes.items()
-            if route.endpoint_id == endpoint_id
-        }
-        if unsupported_route_ids:
-            roles = _load_roles_or_empty()
-            if roles_path().exists():
-                save_roles_file(
-                    roles_path(),
-                    _remove_route_references_from_roles(roles, unsupported_route_ids),
-                    known_route_ids=set(latest_credentials.provider_routes) - unsupported_route_ids,
-                )
-                record_runtime_activity(
-                    source_id="llm_roles",
-                    action="remove_endpoint_route_references",
-                    message="Removed role references to routes on a protocol-unsupported endpoint.",
-                    changes={
-                        "endpoint_id": endpoint_id,
-                        "route_ids": sorted(unsupported_route_ids),
-                    },
-                )
-            for route_id in unsupported_route_ids:
-                del latest_credentials.provider_routes[route_id]
+    # A `protocol_unsupported` verdict records an observation about this CELL and
+    # changes nothing else: the endpoint-level `status` + `last_error_code` written
+    # just below are the whole of it (design §1.2 matrix revision point 6, revised
+    # 2026-08-31). It deletes no route and rewrites no route status.
+    #
+    # Why it does not reach down to the routes, even though a dead transport
+    # arguably should not be executable: neither available route status can carry
+    # this fact without lying. `disabled` is the USER's own on/off switch (see
+    # `RouteEditableUpdate`: "whether it is on"), and the revive sweep above
+    # cannot tell an automatic circuit-break from a deliberate "off" — so writing
+    # it here would let the next successful Test silently re-enable a route the
+    # user turned off. `failed` means "the last observation on THIS route failed"
+    # and renders red = "user, fix something", while §1.2 point 9 requires this
+    # cell to read gray = an architectural fact the user cannot fix. The fact is
+    # about the cell, so a route status bit is the wrong place for it; the honest
+    # gate is endpoint-level, and it does not exist yet — the gateway resolver
+    # admits routes on their own status alone (`EXECUTABLE_ROUTE_STATUSES`) and
+    # cannot even see `last_error_code`, which `_gateway_endpoint` strips. Adding
+    # it means changing what the gateway endpoint contract carries, which is a
+    # design decision with its own owner, not a side effect of this fix.
+    #
+    # So until that gate exists, a stale role binding onto a dead cell costs a
+    # failed provider call at run time, and how it fails depends on which flavor
+    # of the verdict the cell earned: a 404 is in the gateway's
+    # `FALLBACK_STATUS_CODES` and falls through to the next route, while a 405 is
+    # in neither the fallback nor the retryable set and fail-fasts that one
+    # request. That is the same exposure every other `failed` endpoint already
+    # carries, since none of them gates execution either, and it is a visible
+    # per-request failure the user can act on. Deleting a user's role bindings on
+    # a misjudged probe was neither visible nor bounded.
     endpoint_update.update(
         {
             "status": status,

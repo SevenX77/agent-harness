@@ -2636,17 +2636,36 @@ def test_endpoint_test_probes_only_its_own_protocol_and_never_rewrites_it(
     # Only this cell's own transport was probed — exactly once (structural
     # short-circuit), never a rotated sibling protocol.
     assert probed_backends == ["openai"]
+    # get-models succeeded before the generation probe rejected the transport, so
+    # the listed model IS recorded as a route — the provider really did list it,
+    # and the verdict about the CELL's protocol deletes no route. This route's own
+    # `failed` status comes from its own probe (claude-x was actually asked to
+    # generate and was rejected), not from the cell-level verdict: the cell-level
+    # verdict rewrites no route status at all (see the `protocol_unsupported`
+    # comment in `app/routers/llm.py`).
+    assert [
+        (route_id, route.status)
+        for route_id, route in load_credentials().provider_routes.items()
+    ] == [("mystery:claude-x", "failed")]
 
 
-def test_endpoint_test_protocol_unsupported_removes_routes_and_role_refs(
+def test_endpoint_test_protocol_unsupported_keeps_routes_and_role_refs(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    # Design §1.2 matrix revision point 6: routes only live on cells that speak
-    # their protocol. A protocol_unsupported observation clears the cell's routes
-    # (phantom gemini routes on a dead google cell were pure red noise) and strips
-    # role references to them.
+    # Design §1.2 matrix revision point 6, revised 2026-08-31: a verdict records
+    # an observation, it does not own the power to destroy user data. The old
+    # implementation deleted every route on the cell and stripped the role
+    # references to them; a single misjudged probe therefore erased 124 routes and
+    # the role bindings pointing at them (live 2026-08-31, official OpenAI card at
+    # its default configuration). Routes are re-derivable by a re-probe; the
+    # role→route bindings the user authored by hand are not, so nothing about the
+    # cell's protocol may delete them. The dead cell is expressed by the
+    # endpoint-level `last_error_code` projection the frontend already renders;
+    # the routes' OWN statuses are not rewritten either, because `disabled` is the
+    # user's on/off switch and `failed` would render red — see the reasoning at the
+    # `protocol_unsupported` comment in `app/routers/llm.py`.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -2708,11 +2727,16 @@ def test_endpoint_test_protocol_unsupported_removes_routes_and_role_refs(
     assert response.status_code == 200
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["qiniu-google"]
+    # The observation is recorded on the endpoint — that projection is the whole
+    # of the state change.
     assert endpoint["status"] == "failed"
     assert endpoint["last_error_code"] == "protocol_unsupported"
-    # Phantom routes on the dead cell are gone.
-    assert "qiniu-google:gemini-2.5-pro" not in body["registry"]["provider_routes"]
-    # Role references to the removed routes are stripped.
+    # The cell's routes survive the verdict, on disk as well as in the response,
+    # with their own status untouched.
+    assert "qiniu-google:gemini-2.5-pro" in body["registry"]["provider_routes"]
+    persisted_route = load_credentials().provider_routes["qiniu-google:gemini-2.5-pro"]
+    assert persisted_route.status == "unverified_manual"
+    # So do the role references to them.
     roles = load_roles_file(active_roles_path())
     analyst_groups = roles.roles["analyst"].model_groups or []
     referenced = [
@@ -2720,7 +2744,113 @@ def test_endpoint_test_protocol_unsupported_removes_routes_and_role_refs(
         for group in analyst_groups
         for provider_model in group.provider_models
     ]
-    assert "qiniu-google:gemini-2.5-pro" not in referenced
+    assert referenced == ["qiniu-google:gemini-2.5-pro"]
+
+
+def test_forced_reprobe_revives_a_protocol_unsupported_cell(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # Design §1.2 matrix revision point 4 + point 6 (revised 2026-08-31): because
+    # the verdict destroys nothing, `force=true` is a complete recovery path in the
+    # STATE sense — it bypasses the 30-day half-life gate, and a re-probe that
+    # comes back ok clears `last_error_code` and returns the cell to `verified`
+    # with its routes and role bindings never having moved. That is what makes a
+    # misjudged probe a recoverable mistake rather than a permanent one: nothing in
+    # the recovery asks the user to re-author anything by hand.
+    #
+    # It does NOT claim the misjudgment itself is gone. The official-OpenAI trigger
+    # (the model-list probe appends `/v1` while the generation probe and the
+    # runtime factory do not) lives in the probe/judge chain and has its own task;
+    # until that lands, a re-probe re-earns the same verdict. This test therefore
+    # fakes the probe outcome: what is under test is the state transition, not the
+    # URL assembly.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "qiniu-google": ProviderEndpoint(
+                    endpoint_id="qiniu-google",
+                    display_name="Qiniu",
+                    protocol="google_genai",
+                    base_url="https://api.qiniu.example/v1",
+                    api_key="secret",
+                    status="failed",
+                    last_test_at=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                    last_test_message="Protocol not supported by this URL.",
+                    last_error_code="protocol_unsupported",
+                )
+            },
+            provider_routes={
+                # The state the verdict leaves behind: the route is simply still
+                # there, exactly as the previous observation left it.
+                "qiniu-google:gemini-2.5-pro": ProviderRoute(
+                    route_id="qiniu-google:gemini-2.5-pro",
+                    endpoint_id="qiniu-google",
+                    route_slug="gemini-2.5-pro",
+                    provider_model_id="gemini-2.5-pro",
+                    canonical_id="gemini-2.5-pro",
+                ),
+            },
+        ),
+        credentials_path(),
+    )
+    save_roles_file(
+        active_roles_path(),
+        RolesData(
+            schema_version=3,
+            roles={
+                "analyst": RoleEntry(
+                    model_groups=[
+                        RoleModelGroup(
+                            canonical_id="gemini-2.5-pro",
+                            display_name="Gemini 2.5 Pro",
+                            provider_models=[
+                                RoleProviderModel(route_id="qiniu-google:gemini-2.5-pro"),
+                            ],
+                        )
+                    ],
+                )
+            },
+        ),
+        known_route_ids={"qiniu-google:gemini-2.5-pro"},
+    )
+
+    async def fake_test_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        return _endpoint_probe_ok(endpoint, model_ids=("gemini-2.5-pro",))
+
+    async def fake_test_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        return _route_probe(endpoint, route, status="ok")
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_test_endpoint)
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_route", fake_test_route)
+
+    response = client.post("/api/llm/endpoints/qiniu-google/test?force=true")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["skipped"] is False
+    endpoint = body["registry"]["provider_endpoints"]["qiniu-google"]
+    assert endpoint["status"] == "verified"
+    assert endpoint["last_error_code"] is None
+    # The route is verified again — no manual re-authoring anywhere.
+    assert "qiniu-google:gemini-2.5-pro" in body["registry"]["provider_routes"]
+    revived_route = load_credentials().provider_routes["qiniu-google:gemini-2.5-pro"]
+    assert revived_route.status == "verified"
+    roles = load_roles_file(active_roles_path())
+    revived_groups = roles.roles["analyst"].model_groups or []
+    assert [
+        provider_model.route_id
+        for group in revived_groups
+        for provider_model in group.provider_models
+    ] == ["qiniu-google:gemini-2.5-pro"]
 
 
 def test_normalizing_an_endpoint_id_repins_every_role_reference(

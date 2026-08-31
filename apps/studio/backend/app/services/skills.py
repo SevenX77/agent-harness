@@ -2044,7 +2044,11 @@ async def serialize_skill_graph_markdown(
     started = time.perf_counter()
     skill_dir = await _resolve_canvas_serialize_dir(user_id, skill_id, request.workspace_root, storage, metadata)
     graph_path = skill_dir / "GRAPH.md"
-    original_md = await storage.read_text(str(graph_path))
+    # Not `storage.read_text`: that port decodes plain UTF-8, and this value is
+    # hashed against a hash the CALLER computed from text read by a reader that
+    # drops the signature. The lock only works if both sides decode the file the
+    # same way, so this read has to be the authored-text one.
+    original_md = read_authored_text(graph_path)
     current_hash = _graph_content_hash(original_md)
     try:
         if request.expected_hash is not None and request.expected_hash != current_hash:

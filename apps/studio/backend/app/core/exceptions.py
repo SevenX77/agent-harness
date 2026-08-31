@@ -69,6 +69,29 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "INTERNAL_ERROR": ErrorDefinition(http_status=500, retry_strategy="not_retryable"),
 }
 
+# The one code a CALLER may not select. `INTERNAL_ERROR` is the framework's
+# answer for an exception nobody claimed, and its message is a fixed placeholder
+# precisely so that internal detail reaches the log and not the UI. A
+# caller-chosen message would defeat that: both routes below let a caller name a
+# code AND supply the text, so `raise ValueError("INTERNAL_ERROR: <a path with a
+# secret in it>")` would be recognized by the prefix protocol and echoed
+# verbatim. It stays registered here because this map is the single registry of
+# Studio's error-code vocabulary — it is the caller-facing VIEW of the map that
+# must not contain it.
+_FRAMEWORK_RESERVED_ERROR_CODES = frozenset({"INTERNAL_ERROR"})
+
+
+def _caller_selectable(error_code: str) -> ErrorDefinition | None:
+    """Look the code up as callers see it: reserved codes are simply absent.
+
+    Returning "absent" rather than a distinct refusal keeps both call sites on
+    the behaviour they already have for a code that is not registered at all —
+    there is no second failure mode to reason about.
+    """
+    if error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
+        return None
+    return STANDARD_ERROR_MAP.get(error_code)
+
 
 class StudioHTTPException(HTTPException):
     """HTTPException carrying a Studio error code and retry strategy."""
@@ -80,7 +103,9 @@ class StudioHTTPException(HTTPException):
         message: str,
         details: dict[str, Any] | None = None,
     ) -> None:
-        definition = STANDARD_ERROR_MAP[error_code]
+        definition = _caller_selectable(error_code)
+        if definition is None:
+            raise KeyError(error_code)
         response = ErrorResponse(
             error_code=error_code,
             http_status=definition.http_status,
@@ -180,10 +205,10 @@ def _standard_error_from_value_error(exc: ValueError) -> ErrorResponse | None:
     text = str(exc)
     raw_code, separator, raw_message = text.partition(":")
     error_code = raw_code.strip()
-    if error_code not in STANDARD_ERROR_MAP:
+    definition = _caller_selectable(error_code)
+    if definition is None:
         return None
 
-    definition = STANDARD_ERROR_MAP[error_code]
     return error_response(
         error_code=error_code,
         http_status=definition.http_status,

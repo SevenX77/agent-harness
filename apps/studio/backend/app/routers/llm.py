@@ -1069,26 +1069,36 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
                 )
             status = _endpoint_status_from_model_probe_results(probe_results)
             message = _endpoint_message_from_model_probe_results(probe_results)
-    if auth_failed:
-        # R-E2 (revised 2026-08-19): an invalid API key makes every ROUTE on this
-        # endpoint unusable until the key is fixed, so they are disabled here and
-        # revived by the sweep above on the next successful test. The endpoint
-        # CELL itself keeps the ordinary `failed` verdict: design §1.2 matrix
-        # point 3 rules that a structural account-level failure (invalid_key /
-        # quota) is "与格子生死无关", and §4.2 defines red `failed` as exactly the
-        # state that asks the user to fix something. Marking the cell `disabled`
-        # instead used to make it un-testable — which turned "fix your key" into a
-        # dead end, since nothing in the UI could ever run the reviving test.
+    if auth_failed or last_error_code == "protocol_unsupported":
+        # One rule, two structural triggers: a failure that rejects EVERY model on
+        # this endpoint — a dead key (R-E2, revised 2026-08-19) or a transport the
+        # URL does not speak (design §1.2 matrix revision point 6, revised
+        # 2026-08-31) — makes every ROUTE on it unusable, so they are disabled
+        # here and revived by the sweep above on the next successful test.
+        # `disabled` is exactly the marking the gateway resolver's executable-status
+        # gate excludes, so a dead transport stops receiving prompts through a
+        # persisted fallback_chain / route_override while the route record and the
+        # role bindings that name it stay on disk untouched.
+        #
+        # Disabling, not deleting: the route rows are re-derivable by a re-probe,
+        # but the role→route bindings the user authored by hand are not, and
+        # deleting the routes cascaded into stripping those bindings. Live
+        # 2026-08-31: the official OpenAI card at its default configuration was
+        # misjudged `protocol_unsupported` by one Test and lost 124 routes plus
+        # their role bindings. A verdict records an observation; it does not own
+        # the power to destroy data no mechanism can rebuild.
+        #
+        # The endpoint CELL itself keeps the ordinary `failed` verdict: matrix
+        # point 3 rules that a structural failure is "与格子生死无关", and §4.2
+        # defines red `failed` as exactly the state that asks the user to fix
+        # something. Marking the cell `disabled` instead used to make it
+        # un-testable — which turned "fix your key" into a dead end, since nothing
+        # in the UI could ever run the reviving test.
         for route_id, route in list(latest_credentials.provider_routes.items()):
             if route.endpoint_id == endpoint_id and route.status != "disabled":
                 latest_credentials.provider_routes[route_id] = route.model_copy(
                     update={"status": "disabled"}
                 )
-    # A `protocol_unsupported` verdict records an observation about this cell and
-    # nothing else — it deletes no routes and touches no role bindings (design
-    # §1.2 matrix revision point 6, revised 2026-08-31). The endpoint-level
-    # `last_error_code` written just below is the entire state change; the
-    # frontend already projects it as the cell's own dormant state.
     endpoint_update.update(
         {
             "status": status,

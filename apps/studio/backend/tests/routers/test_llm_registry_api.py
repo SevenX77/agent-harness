@@ -2636,6 +2636,15 @@ def test_endpoint_test_probes_only_its_own_protocol_and_never_rewrites_it(
     # Only this cell's own transport was probed — exactly once (structural
     # short-circuit), never a rotated sibling protocol.
     assert probed_backends == ["openai"]
+    # get-models succeeded before the generation probe rejected the transport, so
+    # the listed model IS recorded as a route (the provider really did list it) —
+    # but every route on a cell that cannot speak its protocol is `disabled`, so
+    # nothing on it is executable. Recording the observation and offering the
+    # route to a role are separate things.
+    assert [
+        (route_id, route.status)
+        for route_id, route in load_credentials().provider_routes.items()
+    ] == [("mystery:claude-x", "disabled")]
 
 
 def test_endpoint_test_protocol_unsupported_keeps_routes_and_role_refs(
@@ -2650,8 +2659,11 @@ def test_endpoint_test_protocol_unsupported_keeps_routes_and_role_refs(
     # the role bindings pointing at them (live 2026-08-31, official OpenAI card at
     # its default configuration). Routes are re-derivable by a re-probe; the
     # role→route bindings the user authored by hand are not, so nothing about the
-    # cell's protocol may delete them. The dead cell is expressed by the
-    # endpoint-level `last_error_code` projection the frontend already renders.
+    # cell's protocol may delete them. The dead transport is expressed by
+    # `disabled` routes (the marking the gateway resolver's executable-status gate
+    # excludes — see the gateway's own
+    # test_resolver_rejects_missing_or_disabled_routes_without_dynamic_matching)
+    # plus the endpoint-level `last_error_code` the frontend already renders.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -2717,9 +2729,12 @@ def test_endpoint_test_protocol_unsupported_keeps_routes_and_role_refs(
     # of the state change.
     assert endpoint["status"] == "failed"
     assert endpoint["last_error_code"] == "protocol_unsupported"
-    # The cell's routes survive the verdict, on disk as well as in the response.
+    # The cell's routes survive the verdict, on disk as well as in the response —
+    # marked `disabled` (not executable, so the dead transport receives no
+    # prompts) rather than deleted.
     assert "qiniu-google:gemini-2.5-pro" in body["registry"]["provider_routes"]
-    assert "qiniu-google:gemini-2.5-pro" in load_credentials().provider_routes
+    persisted_route = load_credentials().provider_routes["qiniu-google:gemini-2.5-pro"]
+    assert persisted_route.status == "disabled"
     # So do the role references to them.
     roles = load_roles_file(active_roles_path())
     analyst_groups = roles.roles["analyst"].model_groups or []
@@ -2737,11 +2752,13 @@ def test_forced_reprobe_revives_a_protocol_unsupported_cell(
     monkeypatch,
 ) -> None:
     # Design §1.2 matrix revision point 4 + point 6 (revised 2026-08-31): because
-    # the verdict no longer destroys anything, `force=true` is a complete recovery
-    # path — it bypasses the 30-day half-life gate, and a successful re-probe
-    # clears `last_error_code` and returns the cell to `verified` with its routes
-    # and role bindings intact. This is what makes a misjudged probe a recoverable
-    # mistake rather than a permanent one.
+    # the verdict now only disables, `force=true` is a COMPLETE recovery path — it
+    # bypasses the 30-day half-life gate, and a successful re-probe clears
+    # `last_error_code`, returns the cell to `verified`, and lifts its routes back
+    # out of `disabled` into an executable status, with the role bindings never
+    # having moved. This is what makes a misjudged probe a recoverable mistake
+    # rather than a permanent one: nothing in the recovery asks the user to
+    # re-author anything by hand.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -2760,12 +2777,14 @@ def test_forced_reprobe_revives_a_protocol_unsupported_cell(
                 )
             },
             provider_routes={
+                # The state the verdict leaves behind: kept, but not executable.
                 "qiniu-google:gemini-2.5-pro": ProviderRoute(
                     route_id="qiniu-google:gemini-2.5-pro",
                     endpoint_id="qiniu-google",
                     route_slug="gemini-2.5-pro",
                     provider_model_id="gemini-2.5-pro",
                     canonical_id="gemini-2.5-pro",
+                    status="disabled",
                 ),
             },
         ),
@@ -2814,7 +2833,10 @@ def test_forced_reprobe_revives_a_protocol_unsupported_cell(
     endpoint = body["registry"]["provider_endpoints"]["qiniu-google"]
     assert endpoint["status"] == "verified"
     assert endpoint["last_error_code"] is None
+    # The route is executable again — no manual re-authoring anywhere.
     assert "qiniu-google:gemini-2.5-pro" in body["registry"]["provider_routes"]
+    revived_route = load_credentials().provider_routes["qiniu-google:gemini-2.5-pro"]
+    assert revived_route.status == "verified"
     roles = load_roles_file(active_roles_path())
     revived_groups = roles.roles["analyst"].model_groups or []
     assert [

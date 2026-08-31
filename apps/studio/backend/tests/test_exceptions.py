@@ -3,9 +3,12 @@ from __future__ import annotations
 import pytest
 from app.core.exceptions import (
     STANDARD_ERROR_MAP,
+    error_response,
+    http_exception_handler,
     standard_http_exception,
     value_error_handler,
 )
+from fastapi import HTTPException
 
 # Codes only the framework may answer with; a caller naming one is refused. Kept
 # as a literal here rather than imported so the test states the expectation
@@ -74,9 +77,17 @@ def test_a_caller_cannot_select_the_frameworks_internal_error_code() -> None:
 async def test_the_value_error_prefix_protocol_does_not_honour_internal_error() -> None:
     """The other caller route: `raise ValueError("CODE: text")`.
 
-    An unrecognized prefix degrades to MANIFEST_VALIDATION_FAILED, which is the
-    pre-existing behaviour for any code not in the caller-facing view — so the
-    text is still not presented AS an internal-error message with a 500.
+    The reserved code is not recognized as a code, so it degrades to the same
+    MANIFEST_VALIDATION_FAILED any unregistered prefix produces.
+
+    What that does NOT do — and this test says so out loud rather than leaving a
+    reader to assume otherwise — is scrub the ValueError's own text. The generic
+    fallback puts `str(exc)` in the message, as it does for EVERY ValueError, so
+    a caller who writes a secret into one still surfaces it in the 422. That is
+    unchanged, pre-existing behaviour of how validation failures are reported;
+    the guarantee being added here is narrower and exact: the reserved CODE
+    cannot be selected, so nothing can present caller text as a 500
+    INTERNAL_ERROR.
     """
     response = await value_error_handler(
         None,  # type: ignore[arg-type]
@@ -85,3 +96,32 @@ async def test_the_value_error_prefix_protocol_does_not_honour_internal_error() 
 
     assert response.status_code == 422
     assert b'"error_code":"MANIFEST_VALIDATION_FAILED"' in response.body
+    assert b"a database path with a secret in it" in response.body
+
+
+@pytest.mark.anyio
+async def test_a_hand_built_internal_error_envelope_cannot_carry_caller_text() -> None:
+    """The reserved-code rule is enforced at the way OUT, not only at the ways in.
+
+    Blocking the two code-selection routes leaves others open: a caller can
+    hand-build an envelope with `error_response(...)` and raise it, which arrives
+    as an `HTTPException` whose detail is already a complete envelope. Every one
+    of those still leaves through `_json_response`, so that is where the fixed
+    message is imposed.
+    """
+    smuggled = error_response(
+        error_code="INTERNAL_ERROR",
+        http_status=500,
+        message="a database path with a secret in it",
+        details=None,
+        retry_strategy="not_retryable",
+    )
+
+    response = await http_exception_handler(
+        None,  # type: ignore[arg-type]
+        HTTPException(status_code=500, detail=smuggled.model_dump()),
+    )
+
+    assert response.status_code == 500
+    assert b'"message":"Internal server error"' in response.body
+    assert b"a database path with a secret in it" not in response.body

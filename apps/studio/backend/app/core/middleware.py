@@ -10,14 +10,9 @@ from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import CORS_ORIGINS
-from app.core.exceptions import STANDARD_ERROR_MAP, error_response
+from app.core.exceptions import internal_error_response
 
 logger = logging.getLogger(__name__)
-
-# Fixed text, never the exception's own. What went wrong is a server-side fact
-# for the log; the UI is a remote surface that must not be handed stack or
-# internal-state detail.
-_INTERNAL_ERROR_MESSAGE = "Internal server error"
 
 
 def configure_cors(app: FastAPI) -> None:
@@ -93,14 +88,10 @@ class UnhandledExceptionEnvelopeMiddleware:
                 # any more. Propagate so the server tears the connection down
                 # instead of appending a second, contradictory body.
                 raise
-            definition = STANDARD_ERROR_MAP["INTERNAL_ERROR"]
-            envelope = error_response(
-                error_code="INTERNAL_ERROR",
-                http_status=definition.http_status,
-                message=_INTERNAL_ERROR_MESSAGE,
-                details=None,
-                retry_strategy=definition.retry_strategy,
-            )
+            # Fixed text, never the exception's own: what went wrong is a
+            # server-side fact for the log, and the UI is a remote surface that
+            # must not be handed stack or internal-state detail.
+            envelope = internal_error_response()
             response = JSONResponse(
                 status_code=envelope.http_status,
                 content=envelope.model_dump(),

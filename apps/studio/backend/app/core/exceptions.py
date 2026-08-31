@@ -80,6 +80,11 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
 # must not contain it.
 _FRAMEWORK_RESERVED_ERROR_CODES = frozenset({"INTERNAL_ERROR"})
 
+# The only message INTERNAL_ERROR is ever allowed to carry, defined once here
+# because two places need it: the middleware that produces it, and the
+# projection below that enforces it.
+INTERNAL_ERROR_MESSAGE = "Internal server error"
+
 
 def _caller_selectable(error_code: str) -> ErrorDefinition | None:
     """Look the code up as callers see it: reserved codes are simply absent.
@@ -160,7 +165,31 @@ def raise_not_implemented(feature: str) -> NoReturn:
     raise HTTPException(status_code=501, detail=response.model_dump())
 
 
+def internal_error_response() -> ErrorResponse:
+    """The framework's answer for an exception no handler claimed."""
+    definition = STANDARD_ERROR_MAP["INTERNAL_ERROR"]
+    return error_response(
+        error_code="INTERNAL_ERROR",
+        http_status=definition.http_status,
+        message=INTERNAL_ERROR_MESSAGE,
+        details=None,
+        retry_strategy=definition.retry_strategy,
+    )
+
+
 def _json_response(response: ErrorResponse) -> JSONResponse:
+    """Every handler-produced envelope leaves through here, so the reserved-code
+    rule is enforced here rather than at each way IN.
+
+    Blocking the two code-SELECTION routes is not enough on its own: a caller can
+    also hand-build an envelope with `error_response(...)` and raise it, or raise
+    an `HTTPException` whose detail is already a full envelope, and both arrive
+    at this function. Normalizing the message at the single exit is what makes
+    "INTERNAL_ERROR never carries caller text" true of every path instead of
+    true of the two that were checked.
+    """
+    if response.error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
+        response = response.model_copy(update={"message": INTERNAL_ERROR_MESSAGE})
     return JSONResponse(status_code=response.http_status, content=response.model_dump())
 
 

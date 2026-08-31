@@ -1069,36 +1069,45 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
                 )
             status = _endpoint_status_from_model_probe_results(probe_results)
             message = _endpoint_message_from_model_probe_results(probe_results)
-    if auth_failed or last_error_code == "protocol_unsupported":
-        # One rule, two structural triggers: a failure that rejects EVERY model on
-        # this endpoint — a dead key (R-E2, revised 2026-08-19) or a transport the
-        # URL does not speak (design §1.2 matrix revision point 6, revised
-        # 2026-08-31) — makes every ROUTE on it unusable, so they are disabled
-        # here and revived by the sweep above on the next successful test.
-        # `disabled` is exactly the marking the gateway resolver's executable-status
-        # gate excludes, so a dead transport stops receiving prompts through a
-        # persisted fallback_chain / route_override while the route record and the
-        # role bindings that name it stay on disk untouched.
-        #
-        # Disabling, not deleting: the route rows are re-derivable by a re-probe,
-        # but the role→route bindings the user authored by hand are not, and
-        # deleting the routes cascaded into stripping those bindings. Live
-        # 2026-08-31: the official OpenAI card at its default configuration was
-        # misjudged `protocol_unsupported` by one Test and lost 124 routes plus
-        # their role bindings. A verdict records an observation; it does not own
-        # the power to destroy data no mechanism can rebuild.
-        #
-        # The endpoint CELL itself keeps the ordinary `failed` verdict: matrix
-        # point 3 rules that a structural failure is "与格子生死无关", and §4.2
-        # defines red `failed` as exactly the state that asks the user to fix
-        # something. Marking the cell `disabled` instead used to make it
-        # un-testable — which turned "fix your key" into a dead end, since nothing
-        # in the UI could ever run the reviving test.
+    if auth_failed:
+        # R-E2 (revised 2026-08-19): an invalid API key makes every ROUTE on this
+        # endpoint unusable until the key is fixed, so they are disabled here and
+        # revived by the sweep above on the next successful test. The endpoint
+        # CELL itself keeps the ordinary `failed` verdict: design §1.2 matrix
+        # point 3 rules that a structural account-level failure (invalid_key /
+        # quota) is "与格子生死无关", and §4.2 defines red `failed` as exactly the
+        # state that asks the user to fix something. Marking the cell `disabled`
+        # instead used to make it un-testable — which turned "fix your key" into a
+        # dead end, since nothing in the UI could ever run the reviving test.
         for route_id, route in list(latest_credentials.provider_routes.items()):
             if route.endpoint_id == endpoint_id and route.status != "disabled":
                 latest_credentials.provider_routes[route_id] = route.model_copy(
                     update={"status": "disabled"}
                 )
+    # A `protocol_unsupported` verdict records an observation about this CELL and
+    # changes nothing else: the endpoint-level `status` + `last_error_code` written
+    # just below are the whole of it (design §1.2 matrix revision point 6, revised
+    # 2026-08-31). It deletes no route and rewrites no route status.
+    #
+    # Why it does not reach down to the routes, even though a dead transport
+    # arguably should not be executable: neither available route status can carry
+    # this fact without lying. `disabled` is the USER's own on/off switch (see
+    # `RouteEditableUpdate`: "whether it is on"), and the revive sweep above
+    # cannot tell an automatic circuit-break from a deliberate "off" — so writing
+    # it here would let the next successful Test silently re-enable a route the
+    # user turned off. `failed` means "the last observation on THIS route failed"
+    # and renders red = "user, fix something", while §1.2 point 9 requires this
+    # cell to read gray = an architectural fact the user cannot fix. The fact is
+    # about the cell, so a route status bit is the wrong place for it; the honest
+    # gate is endpoint-level, and it does not exist yet — the gateway resolver
+    # admits routes on their own status alone (`EXECUTABLE_ROUTE_STATUSES`) and
+    # cannot even see `last_error_code`, which `_gateway_endpoint` strips. Adding
+    # it means changing what the gateway endpoint contract carries, which is a
+    # design decision with its own owner, not a side effect of this fix. Until
+    # then a stale role binding onto a dead cell fails its provider call and falls
+    # through the chain — the same cost every other `failed` endpoint already has,
+    # since none of them gates execution either. That cost is bounded; deleting a
+    # user's role bindings on a misjudged probe was not.
     endpoint_update.update(
         {
             "status": status,

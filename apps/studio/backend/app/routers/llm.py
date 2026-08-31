@@ -1084,34 +1084,11 @@ async def test_endpoint(endpoint_id: str, force: bool = False) -> EndpointTestRe
                 latest_credentials.provider_routes[route_id] = route.model_copy(
                     update={"status": "disabled"}
                 )
-    if last_error_code == "protocol_unsupported":
-        # Design §1.2 matrix revision point 6: routes only live on cells that
-        # speak their protocol. Clear this cell's routes (phantom model lists on
-        # a dead transport are pure red noise) and strip role references to them.
-        unsupported_route_ids = {
-            route_id
-            for route_id, route in latest_credentials.provider_routes.items()
-            if route.endpoint_id == endpoint_id
-        }
-        if unsupported_route_ids:
-            roles = _load_roles_or_empty()
-            if roles_path().exists():
-                save_roles_file(
-                    roles_path(),
-                    _remove_route_references_from_roles(roles, unsupported_route_ids),
-                    known_route_ids=set(latest_credentials.provider_routes) - unsupported_route_ids,
-                )
-                record_runtime_activity(
-                    source_id="llm_roles",
-                    action="remove_endpoint_route_references",
-                    message="Removed role references to routes on a protocol-unsupported endpoint.",
-                    changes={
-                        "endpoint_id": endpoint_id,
-                        "route_ids": sorted(unsupported_route_ids),
-                    },
-                )
-            for route_id in unsupported_route_ids:
-                del latest_credentials.provider_routes[route_id]
+    # A `protocol_unsupported` verdict records an observation about this cell and
+    # nothing else — it deletes no routes and touches no role bindings (design
+    # §1.2 matrix revision point 6, revised 2026-08-31). The endpoint-level
+    # `last_error_code` written just below is the entire state change; the
+    # frontend already projects it as the cell's own dormant state.
     endpoint_update.update(
         {
             "status": status,

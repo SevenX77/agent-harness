@@ -708,3 +708,68 @@ def test_text_probe_unchanged_when_not_multimodal() -> None:
         )
     )
     assert captured["messages"][0]["content"] == "Reply with one short word."  # type: ignore[index]
+
+
+@pytest.mark.anyio
+async def test_official_method_probe_misrouted_to_foreign_protocol_is_protocol_unsupported() -> None:
+    """The official-method probe must apply the same foreign-protocol correction the
+    other two probe channels do.
+
+    Design §1.2 protocol matrix point 2 supplement (PM 2026-07-02): "探 X 协议却收到
+    Y 协议的 API 错误 = 该 URL 不说 X", and "此判据须早于 401 分支,否则异协议的 401
+    会被误当成'我这把 key 失效'". `probe_provider_endpoint` and `probe_provider_route`
+    both hand `probe_status` the wire they probed so it can make that call; the
+    official channel did not, which silently turned the correction OFF for every
+    official-method probe — a misroute there was reported as this key being invalid.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        # An anthropic_messages probe (backend `claude`) answered by an OpenAI
+        # upstream: the host does not speak Anthropic's wire.
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": 'OpenAI API error: 401 {"error":{"message":"invalid api key"}}',
+                    "type": "authentication_error",
+                }
+            },
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        "anthropic_messages",
+        "secret",
+        "https://anthropic.qnaigc.example",
+        "claude-x",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+async def test_official_method_probe_own_auth_error_stays_invalid_key() -> None:
+    """The correction must not swallow a real auth failure on the MATCHING protocol:
+    an anthropic_messages probe answered by Anthropic's own 401 is an invalid key,
+    not a protocol mismatch (the mirror of
+    test_gateway_openai_probe_own_auth_error_stays_invalid_key, for this channel)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={
+                "type": "error",
+                "error": {"type": "authentication_error", "message": "invalid x-api-key"},
+            },
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        "anthropic_messages",
+        "secret",
+        "https://api.anthropic.example",
+        "claude-x",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "invalid_key"

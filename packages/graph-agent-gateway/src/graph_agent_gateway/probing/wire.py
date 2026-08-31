@@ -230,7 +230,15 @@ async def probe_official_call_method(
         message = str(exc)
         latency_ms = probe_elapsed_ms(started)
     else:
-        status = probe_status(answer, model_not_found_status="invalid_model")
+        status = probe_status(
+            answer,
+            model_not_found_status="invalid_model",
+            # The wire this probe actually spoke, so `probe_status` can tell a
+            # misroute (an answer describing a DIFFERENT protocol's API) from a
+            # real failure on this one. Omitting it turns that correction off
+            # silently, and a misrouted 401 then reads as "your key is invalid".
+            probed_backend=_official_method_backend(method_id),
+        )
         message = None if status == "ok" else provider_response_message(answer)
         latency_ms = probe_elapsed_ms(started)
 

@@ -173,11 +173,10 @@ def test_a_probe_in_flight_does_not_clobber_a_write_that_lands_during_it(
         # writes through the service rather than the TestClient because a nested
         # client call cannot run on the event loop thread; what matters is only
         # that the file gains a change after the probe handler read it.
-        landed = media_generation.load_state()
-        landed.providers[media_generation.MEDIA_PROVIDER_ID].model_settings[
-            "rh-image-v2-t2i"
-        ] = MediaModelSettings(enabled=False)
-        media_generation.save_state(landed)
+        with media_generation.locked_state() as landed:
+            landed.providers[media_generation.MEDIA_PROVIDER_ID].model_settings[
+                "rh-image-v2-t2i"
+            ] = MediaModelSettings(enabled=False)
         return MediaProbeResult(
             status="ok",
             checked_at="2026-08-31T00:00:00+00:00",
@@ -220,6 +219,7 @@ def test_two_concurrent_writers_do_not_lose_each_other_s_change(
 
     first_inside = threading.Event()
     release_first = threading.Event()
+    second_started = threading.Event()
     second_finished = threading.Event()
 
     def write_first() -> None:
@@ -231,6 +231,7 @@ def test_two_concurrent_writers_do_not_lose_each_other_s_change(
             release_first.wait(timeout=5.0)
 
     def write_second() -> None:
+        second_started.set()
         with media_generation.locked_state() as state:
             state.providers[media_generation.MEDIA_PROVIDER_ID].model_settings[
                 "rh-video-x-i2v"
@@ -243,6 +244,10 @@ def test_two_concurrent_writers_do_not_lose_each_other_s_change(
 
     second = threading.Thread(target=write_second)
     second.start()
+    # The second thread announces itself BEFORE reaching for the section, so the
+    # window below starts only once it is provably running — otherwise a slow
+    # thread start would let an unlocked implementation pass by never having tried.
+    assert second_started.wait(timeout=5.0), "the second writer never started"
     # Expected to time out: while the first writer holds the section the second
     # must not have completed. Short so the test stays quick when the lock works.
     assert not second_finished.wait(timeout=0.5), (
@@ -292,3 +297,46 @@ def test_saving_works_while_a_reader_holds_the_file_open(
         if m["id"] == "rh-image-v2-t2i"
     )
     assert model["settings"]["enabled"] is False
+
+
+def test_a_probe_is_discarded_when_the_credential_changed_under_it(
+    client: TestClient, media_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe result describes the credential it was made with, and nothing else.
+
+    Merging only `last_probe` into a freshly read state fixes the stale-snapshot
+    overwrite, but on its own it would attribute the OLD key's verdict — success,
+    failure, remaining balance — to whatever key is configured by the time the
+    probe lands. Dropping the observation instead is the same rule the LLM
+    registry applies on key rotation: an observation whose subject no longer
+    exists is not evidence about its replacement.
+    """
+    client.put("/api/media/providers/runninghub/credential", json={"api_key": "k" * 32})
+
+    async def fake_probe(
+        credential: MediaProviderCredential, **_kwargs: object
+    ) -> MediaProbeResult:
+        assert credential.api_key.get_secret_value() == "k" * 32
+        with media_generation.locked_state() as rotated:
+            rotated.providers[media_generation.MEDIA_PROVIDER_ID].api_key = "j" * 32
+        return MediaProbeResult(
+            status="ok",
+            checked_at="2026-08-31T00:00:00+00:00",
+            latency_ms=7,
+        )
+
+    monkeypatch.setattr(
+        "app.services.media_generation.probe_runninghub_account", fake_probe
+    )
+
+    response = client.post("/api/media/providers/runninghub/probe")
+
+    assert response.status_code == 200
+    provider = client.get("/api/media/registry").json()["providers"][0]
+    # The rotation stands, and the old key's verdict is not shown as the new one's.
+    assert provider["api_key_set"] is True
+    assert provider["last_probe"] is None
+    assert (
+        client.get("/api/media/providers/runninghub/credential/secret").json()["api_key"]
+        == "j" * 32
+    )

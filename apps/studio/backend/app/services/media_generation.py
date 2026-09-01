@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.core import config
-from app.core.adapters.atomic_file import write_text_atomically
+from app.core.adapters.atomic_file import read_published_text, write_text_atomically
 from app.core.adapters.media_gateway import (
     MediaModelSettings,
     MediaProbeResult,
@@ -58,39 +58,49 @@ def load_state(path: Path | None = None) -> MediaFileState:
     state_path = path or media_generation_path()
     if not state_path.exists():
         return MediaFileState(providers={MEDIA_PROVIDER_ID: MediaProviderFileState()})
-    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    # Read through the same publishing contract the writer uses. On Windows a
+    # handle opened without FILE_SHARE_DELETE refuses the publisher's rename, so
+    # an ordinary `read_text` here would make a well-timed read fail an unrelated
+    # write — the reader must share delete for the pair to hold.
+    payload = json.loads(read_published_text(state_path))
     state = MediaFileState.model_validate(payload)
     state.providers.setdefault(MEDIA_PROVIDER_ID, MediaProviderFileState())
     return state
 
 
-# One writer at a time for this file, mirroring `llm_credentials._WRITE_LOCK`.
-# It guards the whole read-modify-write, because that is the unit that has to be
-# atomic: every write here rewrites the WHOLE document, so two writers that each
-# read before the other wrote will each save a document in which the other's
-# change never happened.
+# One writer at a time for this file WITHIN THIS PROCESS, mirroring
+# `llm_credentials._WRITE_LOCK`. It guards the whole read-modify-write, because
+# that is the unit that has to be atomic: every write here rewrites the WHOLE
+# document, so two writers that each read before the other wrote will each save a
+# document in which the other's change never happened.
+#
+# What it does NOT cover: two sidecar processes pointed at the same settings
+# directory. They would still interleave, and neither this store nor the
+# credentials store guards against that today — closing it needs a cross-process
+# lock or a compare-and-swap on file identity, which is a decision for both
+# stores at once rather than a thing to invent here for one of them.
 _WRITE_LOCK = threading.Lock()
 
 
 def _save_state_unlocked(state: MediaFileState, path: Path | None = None) -> None:
     """Write the state without taking the lock; the caller must hold it."""
     state_path = path or media_generation_path()
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    # The directory holds a provider API key, so it is owner-only — the same
-    # treatment `llm_credentials` gives the credentials directory. On Windows this
-    # is close to a no-op; it is still done unconditionally so the two stores do
-    # not drift into having different rules for the same kind of secret.
-    state_path.parent.chmod(0o700)
+    # Only a directory this call CREATES gets its mode set. The path is
+    # caller-supplied (argument or `STUDIO_MEDIA_GENERATION_PATH`), so it can name
+    # a directory that already exists and belongs to someone else — re-permissioning
+    # that would silently lock unrelated files away from unrelated processes. Same
+    # rule `ssh-keygen` follows: it creates `~/.ssh` as 0700 and leaves an existing
+    # one alone. The FILE's own confidentiality does not depend on this either way:
+    # `write_text_atomically` publishes through `mkstemp`, which creates
+    # owner-only, and the rename carries that mode over.
+    parent = state_path.parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+        parent.chmod(0o700)
     write_text_atomically(
         state_path,
         json.dumps(state.model_dump(mode="json"), ensure_ascii=False, indent=2),
     )
-
-
-def save_state(state: MediaFileState, path: Path | None = None) -> None:
-    """Publish a state the caller assembled without reading the current file."""
-    with _WRITE_LOCK:
-        _save_state_unlocked(state, path)
 
 
 @contextmanager
@@ -100,8 +110,9 @@ def locked_state(path: Path | None = None) -> Iterator[MediaFileState]:
     Every mutation of this file is a read-modify-write, and the three steps are
     only safe together: the document is rewritten whole, so a reader that loads
     before another writer's save will erase that save when it writes its own copy
-    back. Handing callers the state already inside the lock is what makes the
-    unsafe version unavailable rather than merely discouraged.
+    back. This is the ONLY way to write the file — there is deliberately no
+    "save this state I assembled earlier" entry point, because such a call is
+    exactly the stale-snapshot overwrite this exists to prevent.
 
     An exception from the body propagates and NOTHING is written, which is what a
     rejected edit needs (validation refuses the change after the state object has

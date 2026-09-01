@@ -78,7 +78,18 @@ async def probe_media_provider(provider_id: str) -> dict[str, Any]:
     # read before the await would revert whatever was committed during it.
     probe = await media_generation.run_account_probe(provider)
     with media_generation.locked_state() as state:
-        state.providers[media_generation.MEDIA_PROVIDER_ID].last_probe = probe
+        current = state.providers[media_generation.MEDIA_PROVIDER_ID]
+        # An observation belongs to the credential it was made with. If the key or
+        # the URL changed while the probe was on the wire, this result describes an
+        # account nobody is configured to use any more, and recording it would show
+        # the old credential's verdict — its success, its failure, its balance — as
+        # the new one's. The same rule the LLM registry follows when a key is
+        # rotated (design §1.2 matrix point 3: "换密钥即作废旧观察"): drop the
+        # stale observation rather than re-attribute it, and let the user re-probe.
+        if (current.api_key, current.base_url) == (provider.api_key, provider.base_url):
+            current.last_probe = probe
+        else:
+            current.last_probe = None
     return media_generation.registry_view(state)
 
 

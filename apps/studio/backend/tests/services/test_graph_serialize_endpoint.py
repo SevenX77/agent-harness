@@ -106,6 +106,44 @@ def test_serialize_bare_id_cannot_disambiguate_colliding_subgraph(
     assert response.json()["code"] == "snapshot_conflict"
 
 
+def test_serialize_does_not_report_a_conflict_for_a_signed_graph(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    """A UTF-8 byte-order mark must not make the canvas lock disagree with the writer.
+
+    This is the PUBLIC half of ledger K7's optimistic-lock symptom, and the entry
+    point the canvas actually calls before writing. The frontend's
+    ``expected_hash`` comes from text read by a reader that DROPS the mark (the
+    Rust native-fs layer is the sole writer of skill files, and
+    ``native_fs.rs`` strips a leading ``\\ufeff``). If this endpoint keeps the
+    mark, the two hash the same file differently and every topology save of a
+    signed ``GRAPH.md`` is refused with ``409 snapshot_conflict`` — a conflict
+    the user cannot clear, because nothing is out of date.
+
+    Asserted through the route rather than the private helper: the helper is not
+    the reader on this path, which is exactly how the ``storage.read_text`` call
+    inside ``serialize_skill_graph_markdown`` escaped the first sweep.
+    """
+    skills_dir, _ = studio_roots
+    subgraph_dir = skills_dir / "story-deconstruction" / "subgraph" / "text-segmentation"
+    subgraph_dir.mkdir(parents=True)
+    (subgraph_dir / "GRAPH.md").write_bytes(b"\xef\xbb\xbf" + _SUBGRAPH_GRAPH_MD.encode("utf-8"))
+    # The hash a BOM-stripping reader computes — i.e. what the frontend holds.
+    expected_hash = _graph_content_hash(_SUBGRAPH_GRAPH_MD)
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [{"id": "setup", "src": "phases/setup", "depends_on": []}],
+            "expected_hash": expected_hash,
+            "workspace_root": str(subgraph_dir),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["current_hash"] == expected_hash
+
+
 def test_serialize_adds_a_disconnected_phase_without_500(client: TestClient) -> None:
     # Mirrors "+ Add phase": the existing `setup` plus a freshly-added, not-yet-
     # connected `logic` phase (depends_on=[]). Must return 200 (not the old 500)

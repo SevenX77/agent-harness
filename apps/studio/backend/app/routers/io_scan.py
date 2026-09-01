@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.authored_text import read_authored_text
+from app.core.authored_text import open_authored_text, read_authored_text
 
 router = APIRouter(prefix="/api/io", tags=["io"])
 
@@ -120,7 +120,7 @@ def _scan_jsonl_file(path: Path) -> list[dict[str, Any]]:
 
 def _scan_tabular_file(path: Path, *, delimiter: str) -> list[dict[str, Any]]:
     try:
-        with path.open(encoding="utf-8-sig", newline="") as fh:  # see app.core.authored_text
+        with open_authored_text(path, newline="") as fh:
             reader = csv.reader(fh, delimiter=delimiter)
             header = next(reader, [])
     except (OSError, UnicodeDecodeError, csv.Error):

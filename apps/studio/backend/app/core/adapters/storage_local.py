@@ -8,6 +8,8 @@ from pathlib import Path
 
 import aiofiles  # type: ignore[import-untyped]
 
+from app.core.authored_text import read_authored_text
+
 
 class LocalFilesystemBackend:
     """Async wrapper around local filesystem operations."""
@@ -19,6 +21,23 @@ class LocalFilesystemBackend:
         """Read UTF-8 text from a local path."""
         async with aiofiles.open(self._resolve(path), encoding="utf-8") as file:
             return str(await file.read())
+
+    async def read_authored_text(self, path: str) -> str:
+        """Read text from a user's skill workspace, without its signature.
+
+        This CALLS `app.core.authored_text.read_authored_text` rather than
+        reopening the file with the same codec, which is the difference between
+        one decision and two implementations of it. Sharing only the codec name
+        would still leave two places to change if the rule ever grows a second
+        clause; sharing the function leaves one, and this method is then purely a
+        transport.
+
+        `to_thread` rather than aiofiles for that reason — reusing the sync exit
+        means running sync code, and the class already reaches for a thread
+        wherever the operation has no aiofiles form (`exists`, `list_dirs`,
+        `copy_tree`, `move`, `delete`).
+        """
+        return await asyncio.to_thread(read_authored_text, self._resolve(path))
 
     async def write_text(self, path: str, content: str) -> None:
         """Write UTF-8 text to a local path."""

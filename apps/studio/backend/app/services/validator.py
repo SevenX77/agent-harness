@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from app.core.adapters.engine import GraphAgentError, GraphManifest, SkillLoader
+from app.core.authored_text import read_authored_text
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.services.skill_resolver import build_studio_skill_resolver
@@ -94,7 +95,7 @@ def _parse_input_file(path: Path) -> Any:
 
     suffix = path.suffix.lower()
     try:
-        content = path.read_text(encoding="utf-8")
+        content = read_authored_text(path)
         if suffix == ".json":
             return json.loads(content)
         if suffix in {".yaml", ".yml"}:

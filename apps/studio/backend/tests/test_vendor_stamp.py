@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -147,6 +148,19 @@ def test_the_combined_digest_moves_when_any_package_moves(
     assert before != after
 
 
+def iter_strings(value: object) -> Iterator[str]:
+    """Every string anywhere in a nested mapping/sequence, keys included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from iter_strings(key)
+            yield from iter_strings(item)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            yield from iter_strings(item)
+
+
 def test_the_stamp_does_not_carry_build_machine_paths(
     build_vendor: ModuleType, tmp_path: Path
 ) -> None:
@@ -156,6 +170,10 @@ def test_the_stamp_does_not_carry_build_machine_paths(
     build account's home directory and tells a user nothing. The ABI fact worth
     keeping is the interpreter VERSION, which is what the vendored native wheels
     were built against.
+
+    Checked over the parsed values rather than over `json.dumps` output: on
+    Windows the dump escapes `\\` as `\\\\`, so a substring search for the path
+    would miss it and the test would pass while the leak was there.
     """
     engine = write_package(tmp_path / "graph_agent", {"__init__.py": ""})
 
@@ -166,7 +184,9 @@ def test_the_stamp_does_not_carry_build_machine_paths(
         target_triple="x86_64-pc-windows-msvc",
     )
 
-    assert str(tmp_path) not in json.dumps(stamp)
+    needles = {str(tmp_path), tmp_path.as_posix(), str(engine), engine.as_posix()}
+    leaked = [text for text in iter_strings(stamp) if any(needle in text for needle in needles)]
+    assert leaked == []
 
 
 def test_write_stamp_lands_inside_the_snapshot_it_describes(

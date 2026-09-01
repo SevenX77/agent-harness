@@ -555,21 +555,28 @@ name: fake-canvas-fanout
 2. **不立项**:本阶段不做 updater,也不预留它的配置项与界面入口。
 3. **行为决议(替代 updater 的明确承诺)**:**升级 = 用户手动下载新安装包覆盖安装**。**卸载行为与数据目录搬家行为**随**发货平台域**立项时写明(该域要回答:卸载删什么、留什么;配置与运行数据目录在哪、能不能搬),本节不代裁。
 
-### 11.5 命名:产品名与主仓名 = gskill
+### 11.5 命名:主仓名 = graph-skill-runtime(已定),gskill = 产品短名
 
 **待裁问题(盘点 §8-5 / 本文 §4.4-2)**:新仓的**发布身份名**。已核验的冲突事实:`gskill` 与 G.SKILL 硬件品牌撞名;`graph-skill` 在 npm 与 GitHub 上均已有同名占用(§4.4-2,以及新仓 `docs/design/v1-alignment.md` §2.2)。这是批C(搬迁)的**硬前置**——包名是发布身份,改名代价随发布时间单调上升。
 
-**用户原话**:
+**用户原话(2026-08-31)**:
 
 > 「gskill已经确定了,gateway和studio可以加后缀」
 
-**执行**:
+**用户原话(2026-09-01,订正协调方对上句的解读)**:
 
-1. **产品名与主仓名 = `gskill`**。
-2. **gateway 与 studio 以 `gskill-` 词缀命名**(如 `gskill-gateway`、`gskill-studio`);**精确拼法(前缀还是后缀、连字符还是下划线、各 registry 上的具体标识符)由批C 定**,本节只定"词根 = gskill、组件带 gskill- 词缀"这条规则。
-3. **推翻**新仓 `docs/design/v1-alignment.md` §2.1 工作名表中偏好 `graph-skill-runtime` 的那部分(GitHub repository / PyPI distribution / Display name / Python import),该节以本裁决为准重写;该表中 **console command 与 MCP namespace 已经是 `gskill`**,与本裁决同向,保留。
-4. **保留发布前工序——裁名不免检**:该文档 §2.2 要求的 **PyPI / GitHub 占名、包名混淆检查、域名与商标复核**全部保留为批C 与发布前的工序。本裁决定的是**用哪个名字**,不是**这个名字可用**;复核失败仍按 §2.2 原文在发布前**一次性重裁新名**,**不留 alias**。
-5. **对 §4.4-2 的影响**:该步「包名裁决」的**选名部分由本条完成**,**发布前复核部分仍未完成**;批C 的前置条件**不因本条自动满足**。
+> 「引擎主仓不是已经有了吗? https://github.com/SevenX77/graph-skill-runtime」
+> 「我说了主仓库已经命名过了,不是gskill」
+
+**执行(2026-09-01 按订正后口径重写;原口径与被推翻处见文末修正记录)**:
+
+1. **主仓名 = `graph-skill-runtime`**(GitHub repository `SevenX77/graph-skill-runtime`),**早已命名,不改**;批C 不含"仓库改名"项。新仓 `docs/design/v1-alignment.md` §2.1 工作名表**整表维持**——GitHub repository / PyPI distribution / Display name / Python import 取 `graph-skill-runtime` 族,console command 与 MCP namespace 取 `gskill`,两半都与用户裁决同向,**无需重写**。
+2. **`gskill` = 产品短名**:console command、MCP namespace、skill 格式标识(`gskill.graph.v1`)。「gskill 已经确定」确认的是这一层,不是仓库名。
+3. **gateway 与 studio 带 `gskill` 词缀短名**(如 `gskill-gateway`、`gskill-studio`);精确拼法(前缀还是后缀、连字符还是下划线、各 registry 上的具体标识符)由批C 定。
+4. **占名与商标复核已执行(2026-09-01),结论按订正后口径定性**:复核报告(证据原文见 `gskill-restructure-inventory-2026-08-31/name-clearance-2026-09-01.md`)按"gskill 作为发布身份名"的口径判七项五败;订正后发布身份实为 `graph-skill-runtime` 族——该族 PyPI 全空闲、系统级包管理器无冲突,§2.2 的"复核失败则重裁名"**不触发**。遗留两条降级为**发布前清单注记**,不阻塞任何批次:①裸命令 `gskill` 已被 npm 两个活体同域工具(`gskill@0.3.1`、`@glapsfun/gskill@0.7.0`)声明为 bin,发布 CLI 前须裁定命令冲突姿态;②G.SKILL 的 US 文字商标(Reg. 7127358,Class 9)明文含"用于应用程序开发的可下载软件平台"且 2026 年在英/欧/加/澳四地扩张申请中——`gskill` 仅作命令名/命名空间的功能性使用,风险面小于品牌性使用,发布前正式 clearance 时一并评估。
+5. **对 §4.4-2 的影响**:「包名裁决」的选名与复核**均已完成**;批C 的该项前置**已满足**。
+
+**修正记录(2026-09-01)**:本节初版(2026-09-01 落盘)把用户 2026-08-31 原话解读为「产品名**与主仓名** = gskill」,并据此写了"推翻 v1-alignment §2.1 偏好 graph-skill-runtime 的部分"与"批C 含仓库改名"。用户 2026-09-01 原话(上引)推翻该解读:主仓名早已定为 `graph-skill-runtime`,`gskill` 只是产品短名。原执行第 1、3 条作废,第 4、5 条按复核实测结果收口。
 
 ### 11.6 随仓模板:收敛为两个真实业务场景
 
@@ -629,6 +636,7 @@ name: fake-canvas-fanout
 
 | 日期 | 变更 | 说明 |
 |---|---|---|
+| 2026-09-01 | §11.5 按用户订正重写 + 占名复核收口 | 用户原话推翻协调方解读:主仓名早已定为 `graph-skill-runtime`,**不改名**;`gskill` 仅为产品短名(console command / MCP namespace / 格式标识)。批C 删除"仓库改名"项。占名与商标复核已执行,证据归档 `gskill-restructure-inventory-2026-08-31/name-clearance-2026-09-01.md`;按订正后口径发布身份族无冲突,§2.2 重裁不触发,遗留两条(裸命令 `gskill` 的 npm bin 撞车、G.SKILL Class 9 商标)降级为发布前清单注记。 |
 | 2026-09-01 | 第二轮裁决落盘(新增 §11) | 2026-08-31 用户就 §6 格式载体、盘点交付物六项待裁、新仓 git 历史与权威文档处置作答,**七条用户裁决 + 一条按用户长期有效指令生效的批准**落盘为 §11:拓扑载体**维持 `graph.yaml`**(§11.1,并认账"对机器没区别"的挑战成立、该类论据作废)、副作用轴含计费且治理从宽 + 测试 provider 优先级(§11.2)、媒体 `endpoint` 字段删(§11.3)、updater 不立项(§11.4)、命名定为 **gskill**(§11.5)、随仓模板收敛为两个真实业务场景(§11.6)、新仓不接 `agent-harness` 历史且权威文档重写(§11.7)、域树与七批 DAG 生效且批B/批B′ 获准开工(§11.8)。**§6 由"待用户裁决"改为裁决前的事实与依据留底**,结论指向 §11.1;原 §11 修订记录顺延为 §12。 |
 | 2026-08-31 | 同日修订:执行模型收敛 | **`host-native` 经用户裁决移除**(理由落在 §5.1),executor 闭集由三个成员缩为两个(`embedded`、`ah`);§5 整节按新裁决改写,新增删除清单(§5.6)、异步 run 任务模型(§5.7)、被接受的代价(§5.8);**Studio 切换门禁由六条改为五条**(§4.5:原①Phase 3b 与原④ModelResolver 契约合并为新①,原③实时事件订阅并入新③的异步 run 任务模型)。 |
 | 2026-08-31 | 初稿落盘 | 内容为**同日会话中用户逐项批准的决定**(北极星五条、引擎归属与整体搬仓、双场景统一执行模型、全局盘点方法、规范验收清单、逐模块流水线与完成定义、资源与实施方案),**落盘即存证**。格式载体裁决(§6)**显式留待用户**,本文不代为下结论。 |

@@ -198,11 +198,14 @@ async function advance(ms: number): Promise<void> {
 // connection to 127.0.0.1:8787 and the result of this gate would depend on
 // whether a sidecar happens to be running on the machine: green on a clean box,
 // and silently skipping every restart below for a developer with the app open.
-// The default is "connection refused", which is what these tests mean by a dead
-// sidecar.
+// The default is a `fetch` that throws, which is what these tests mean by a dead
+// sidecar — and deliberately NOT named after connection-refused, because the
+// production code cannot tell that apart from a reset or a CORS rejection
+// either. A helper that claimed to stub one specific cause would assert a
+// distinction the code does not make.
 let probeFetch: ReturnType<typeof vi.fn>
 
-function sidecarPortRefusesConnections(): void {
+function nothingAnswersOnTheSidecarPort(): void {
   probeFetch.mockRejectedValue(new TypeError('Failed to fetch'))
 }
 
@@ -216,7 +219,7 @@ beforeEach(() => {
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
   probeFetch = vi.fn()
   vi.stubGlobal('fetch', probeFetch)
-  sidecarPortRefusesConnections()
+  nothingAnswersOnTheSidecarPort()
   configureApiBaseURL('http://127.0.0.1:8787/api')
   configureApiToken('token')
   runtimeMocks.initializeRuntimeConfig.mockReset().mockResolvedValue(READY_CONFIG)
@@ -308,7 +311,7 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
   })
 
   it('still restarts when nothing answers, exactly as before', async () => {
-    sidecarPortRefusesConnections()
+    nothingAnswersOnTheSidecarPort()
     runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
     await mountReady()
 
@@ -320,6 +323,52 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
     expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
     expect(bannerText()).toContain('app-shell-content')
     expect(bannerText().toLowerCase()).not.toContain('unavailable')
+  })
+
+  /**
+   * The probe took an ACTION that used to be instantaneous and gave it a
+   * duration, and anything with a duration can be overtaken. `handleRetry`
+   * cancels the pending timer, but a probe already in flight is not a timer —
+   * so its verdict came back after the person's own restart had finished and
+   * killed the sidecar they had just been given.
+   *
+   * This is the same hazard the boot effect above already guards with its
+   * `cancelled` flag: an async result must be discarded when the episode it was
+   * started for is over. The probe answers a question about a PARTICULAR sidecar
+   * instance, and after a manual restart that instance no longer exists.
+   */
+  it('drops a probe verdict that arrives after a manual Retry already restarted', async () => {
+    let answerTheProbe: (() => void) | undefined
+    probeFetch.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          answerTheProbe = () => reject(new TypeError('Failed to fetch'))
+        }),
+    )
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    // The scheduled attempt fires and the probe is now in flight, unanswered.
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+    expect(probeFetch).toHaveBeenCalledTimes(1)
+
+    // The person does not wait for it. Retry restarts the sidecar itself.
+    clickRetry()
+    await flush()
+    expect(runtimeMocks.restartSidecar).toHaveBeenCalledTimes(1)
+
+    // Only now does the probe report that nothing was answering — true of the
+    // instance it asked about, and irrelevant to the one now running.
+    await act(async () => {
+      answerTheProbe?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
   })
 })
 

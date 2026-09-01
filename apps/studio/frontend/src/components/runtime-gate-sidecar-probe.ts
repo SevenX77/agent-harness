@@ -22,18 +22,30 @@ import { getApiBaseURL } from '@/api/client'
  * evidence.
  *
  * That split also settles what to do when the answer is unclear, because the
- * two directions are no longer symmetric. Skipping a restart we could have made
+ * two directions stopped being symmetric. Skipping a restart we could have made
  * costs a delay, with the banner and Retry already on screen. Making a restart
- * we should have skipped destroys live work. So anything short of "nothing is
- * there" declines to restart.
+ * we should have skipped destroys live work.
  *
- * What it cannot do. `fetch` collapses several failures into one `TypeError` —
- * connection refused, connection reset, a CORS rejection — so this is evidence
- * against destroying the process, not proof of health. `/health` is also
- * unauthenticated and carries no instance id, so another local process holding
- * the port would pass; that limit is the Rust supervisor's too
- * (`sidecar.rs::wait_for_health` probes the same endpoint). Both limits are
- * survivable precisely because a wrong answer here means "did not restart".
+ * How far that asymmetry can actually be pushed. Not all the way: `fetch`
+ * collapses several outcomes into one `TypeError` — connection refused,
+ * connection reset, a CORS rejection — and a dead port is IN that class. Declining
+ * on the whole class would therefore decline always, which is not caution, it is
+ * deleting the auto-restart. So the class permits a restart, and what the probe
+ * buys is a real narrowing rather than certainty: from "one call failed / the
+ * socket flapped" to "a fresh unauthenticated GET got no reply at all". The two
+ * companions of a refused connection are not states worth protecting anyway — a
+ * reset means the connection was torn down, and a CORS rejection on `/health`
+ * means the page's origin is not one the backend allows (`config.py`'s
+ * `CORS_ORIGINS` covers the origins Studio actually ships), which is a broken
+ * configuration rather than a healthy backend to preserve.
+ *
+ * What stays outside its reach. `/health` is unauthenticated and carries no
+ * instance id, so another local process holding the port would pass as our
+ * sidecar; that limit is the Rust supervisor's too
+ * (`sidecar.rs::wait_for_health` probes the same endpoint). And the check and the
+ * kill are separate steps here, so a process that dies in between still gets
+ * "restarted" — closing that window needs the check to happen inside the
+ * supervisor that owns the process, which is where it ultimately belongs.
  */
 
 /**
@@ -49,9 +61,16 @@ const PROBE_TIMEOUT_MS = 5_000
  * middleware whitelists it) and the same one the Rust supervisor probes. It is
  * reached by dropping the base URL's trailing `/api`, because `/health` is the
  * only registered route — `/api/health` is in the auth whitelist but no router
- * serves it, so it 404s. The Vite dev proxy forwards `/health` alongside `/api`
- * so the worktree preview reaches the real sidecar rather than its own SPA
- * fallback.
+ * serves it, so it 404s.
+ *
+ * In the desktop app this is an absolute `http://127.0.0.1:{port}` the shell
+ * handed us, so the request reaches the sidecar directly. In a browser it is the
+ * relative `/api`, and the Vite dev proxy (which forwards `/health` alongside
+ * `/api`) sits in between — where a REFUSED upstream becomes Vite's own 502,
+ * which this reads as "answering". That inversion is harmless exactly there and
+ * nowhere else: outside Tauri `performShellRestart` has no shell to ask and falls
+ * back to re-reading the config, so the verdict it distorts governs nothing
+ * destructive.
  */
 function healthProbeUrl(): string {
   const base = getApiBaseURL().replace(/\/+$/, '')
@@ -59,12 +78,16 @@ function healthProbeUrl(): string {
 }
 
 /**
- * Resolves false ONLY when nothing answered at all.
+ * Resolves false only when the request produced no reply at all.
  *
  * Any HTTP status counts as an answer, including 5xx: a process that replies
  * 503 has just proved it is running, which is the only claim the restart rests
  * on. This also keeps the verdict aligned with the supervisor's, and two
  * components disagreeing about liveness would be worse than either rule alone.
+ *
+ * A `fetch` that throws is read as no reply — see the module docstring for why
+ * that class cannot be narrowed further, and what it therefore does and does not
+ * establish.
  *
  * Deliberately uses `fetch`, not the shared axios instance: that client's
  * response interceptor dispatches `BACKEND_UNAVAILABLE_HTTP_EVENT` on a failed

@@ -4,6 +4,6 @@
     "unavailablePrefix": "Backend unavailable — some features are disabled.",
     "retry": "Retry",
     "connectionLostReconnecting": "Backend connection lost. Reconnecting…",
-    "unreachableButAnswering": "Backend connection lost, but its port is still answering — not restarting it automatically. Press Retry to reconnect."
+    "unreachableButAnswering": "Backend connection lost, but its port is still answering, so it will not be restarted automatically. Retry restarts the backend — anything still running is lost."
   }
 }

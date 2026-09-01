@@ -13,7 +13,22 @@ def test_health_endpoint_returns_ok(client: TestClient) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "pid": os.getpid()}
+
+
+def test_health_names_the_process_that_answered(client: TestClient) -> None:
+    """The desktop supervisor kills on this answer, so it must be attributable.
+
+    Without `pid`, "something answered 200 on that port" is all the answer says,
+    and an unrelated local listener holding the port is indistinguishable from
+    the sidecar the supervisor owns. The supervisor compares this value against
+    the process handle it holds (`sidecar.rs::confirm_serving`); the test client
+    runs in THIS process, so the expected value is this process's own pid.
+    """
+    body = client.get("/health").json()
+
+    assert body["pid"] == os.getpid()
+    assert isinstance(body["pid"], int)
 
 
 def test_shutdown_requires_bearer_token(

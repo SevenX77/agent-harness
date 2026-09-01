@@ -1,6 +1,6 @@
 use command_group::{CommandGroup, GroupChild};
 use rand::{distr::Alphanumeric, Rng};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     ffi::OsString,
@@ -180,8 +180,9 @@ impl SidecarManager {
             let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_LINES)));
             let mut child =
                 spawn_sidecar_process(&config, port, &api_token, Arc::clone(&stderr_lines))?;
+            let child_pid = child.inner().id();
 
-            if wait_for_health(port, config.health_timeout) {
+            if wait_for_health(port, config.health_timeout, child_pid) {
                 return Ok(Self {
                     state: Mutex::new(SidecarState {
                         child: Some(child),
@@ -225,35 +226,44 @@ impl SidecarManager {
         )
     }
 
-    /// Whether THIS instance is still both present and able to answer for
-    /// itself. Two facts, asked in this order because each covers what the
-    /// other cannot, and because the cheap one settles the common case:
+    /// Whether THIS instance is still present and still serving — as ONE fact
+    /// about ONE process, not two facts that happen to both hold.
     ///
-    /// 1. The process handle. `try_wait` reports whether the child this manager
-    ///    owns has exited — the only liveness answer that is bound to the
-    ///    INSTANCE rather than to a port number. A port is a rendezvous anyone
-    ///    can occupy; a handle is not. It is also the cheap one, and on the
-    ///    primary platform that is not a rounding error: a connect to a closed
-    ///    loopback port on Windows takes ~2.04s to come back refused (measured
-    ///    2026-09-01, pinned by `health_probe_once_is_bounded_by_the_timeout_
-    ///    it_was_given`), so asking the network first would stall recovery from
-    ///    the ORDINARY case — the sidecar really died — by two seconds every
-    ///    time.
-    /// 2. Its `/health` endpoint. A child that has not exited can still be
-    ///    wedged, and a supervisor that stopped at fact 1 would refuse to ever
-    ///    restart one.
+    /// 1. The process handle says the child has not exited (`try_wait`). This is
+    ///    also the cheap half, and on the primary platform that is not a
+    ///    rounding error: a connect to a closed loopback port on Windows takes
+    ///    ~2.04s to come back refused (measured 2026-09-01, pinned by
+    ///    `health_probe_once_is_bounded_by_the_timeout_it_was_given`), so asking
+    ///    the network first would stall recovery from the ORDINARY case — the
+    ///    sidecar really died — by two seconds every time.
+    /// 2. `/health` on the recorded port answers successfully AND reports the
+    ///    pid of THAT child (`health_probe_once`).
     ///
-    /// Both must hold. Neither alone answers the question the destruction gate
-    /// asks: "is there a working sidecar here that killing would destroy?"
+    /// Step 2 must name the process, or the two steps are about different
+    /// things. "The child is alive" and "somebody answers on the port" can both
+    /// be true while the child's listener is dead and an unrelated process holds
+    /// the port — the child alive for its own reasons, the answer coming from a
+    /// stranger. Sparing a sidecar on that evidence hands the frontend a config
+    /// for a process that cannot serve it, and the frontend, told this is
+    /// recovery, clears the banner and stops retrying: a silent dead end, worse
+    /// than the spurious restart this gate exists to prevent. Requiring the
+    /// answer to carry the child's pid collapses both steps onto one process.
+    ///
+    /// A child that is alive but whose `/health` does not name it is therefore
+    /// treated exactly like a wedged one: restart. That is the recoverable
+    /// direction, and it is the only direction available — there is no third
+    /// answer for "something else lives on my port".
     ///
     /// The manager's own lock is released before the probe. Exclusion for the
     /// restart decision is the SUPERVISOR's lock (which the caller holds); this
     /// lock only guards this manager's fields, and holding it across a network
     /// wait would block `runtime_config()` readers — the frontend's
-    /// `get_sidecar_config` among them — for no benefit.
+    /// `get_sidecar_config` among them — for no benefit. The pid and port are
+    /// read together under it, so they describe the same recorded instance.
     fn confirm_serving(&self, probe_timeout: Duration) -> bool {
-        let port = {
+        let (port, child_pid) = {
             let mut state = self.state.lock().expect("sidecar state poisoned");
+            let port = state.runtime_config.port;
             let Some(child) = state.child.as_mut() else {
                 return false;
             };
@@ -262,9 +272,14 @@ impl SidecarManager {
             if child.try_wait().is_ok_and(|status| status.is_some()) {
                 return false;
             }
-            state.runtime_config.port
+            (port, child.inner().id())
         };
-        health_probe_once(&reqwest::blocking::Client::new(), port, probe_timeout)
+        health_probe_once(
+            &reqwest::blocking::Client::new(),
+            port,
+            probe_timeout,
+            child_pid,
+        )
     }
 
     pub fn shutdown_blocking(&self) {
@@ -305,8 +320,9 @@ impl SidecarManager {
             let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_LINES)));
             let mut child =
                 spawn_sidecar_process(&launch_config, port, &api_token, Arc::clone(&stderr_lines))?;
+            let child_pid = child.inner().id();
 
-            if wait_for_health(port, launch_config.health_timeout) {
+            if wait_for_health(port, launch_config.health_timeout, child_pid) {
                 let runtime_config = SidecarRuntimeConfig::new(
                     port,
                     &launch_config.resource_dir,
@@ -392,12 +408,15 @@ impl SidecarManager {
 ///   already sent cannot be recalled, so a manual Retry landing in that window
 ///   left the automatic path killing the healthy replacement it had never
 ///   examined.
-/// - **A verdict has to be about a particular instance.** `/health` is
-///   unauthenticated and identifies nobody, so "something answered on that
-///   port" is not "our sidecar answered". Here the verdict is bound to the
-///   instance three ways: the state lock (nothing else may swap it), the
-///   process handle (`try_wait` asks the OS about THIS child), and the port
-///   read from that same recorded instance.
+/// - **A verdict has to be about a particular instance.** A port identifies
+///   nobody — any local process can occupy one — so "something answered on that
+///   port" was never "our sidecar answered", and being inside the supervisor
+///   does not fix that by itself. `/health` therefore reports the answering
+///   process's own pid (`apps/studio/backend/app/routers/system.py`), and the
+///   gate requires it to equal the pid of the child this supervisor holds a
+///   handle to. Three things then bind the verdict to one instance: the state
+///   lock (nothing else may swap it), the process handle (`try_wait` asks the
+///   OS about THIS child), and the answer naming that same child.
 ///
 /// A refusal is not an error. It is `AutoRestartOutcome::Declined`, carrying
 /// the live instance's own runtime config — see that variant for why the
@@ -929,19 +948,49 @@ fn capture_stdout(stream: impl std::io::Read + Send + 'static) {
     });
 }
 
-/// The ONE definition of "this port is serving": the sidecar's own `/health`
-/// endpoint answered with a SUCCESS status.
+/// What `/health` answers (`apps/studio/backend/app/routers/system.py`). `pid`
+/// is REQUIRED here: an answer that does not name the process that produced it
+/// cannot be attributed to anything, so it does not count as an answer at all
+/// and this struct refuses to deserialize it.
+#[derive(Deserialize)]
+struct HealthAnswer {
+    pid: u32,
+}
+
+/// The ONE definition of "the process I mean is serving on this port": its own
+/// `/health` endpoint answered with a SUCCESS status AND named itself as
+/// `expected_pid`.
 ///
 /// One request, one verdict — no polling, no retry. Every caller that wants
 /// repetition builds it on top (`wait_for_health` below loops; the destruction
 /// gate lets the frontend's 1s/4s/16s schedule provide the repetition), so the
-/// threshold and the URL exist in exactly one place and cannot drift between
-/// the question "has the process I just launched come up" and the question "is
-/// the process I am about to kill still working".
+/// threshold, the URL and the identity rule exist in exactly one place and
+/// cannot drift between the question "has the process I just launched come up"
+/// and the question "is the process I am about to kill still working".
 ///
-/// `is_success()` is that threshold, and it is now the only one in the tree.
-/// A looser "any HTTP reply counts" reading used to live in the frontend probe
-/// this replaced, on the argument that a 503 at least proves a process is
+/// **Identity, because a port identifies nobody.** A loopback port is a
+/// rendezvous any local process can occupy. Without the pid, "something
+/// answered 200 there" was compatible with a case that is fully reachable: the
+/// child is alive but its listener is gone and an unrelated process now holds
+/// the port. The destruction gate would then spare a sidecar that cannot serve
+/// and hand the frontend a config for it, and the frontend — being told this is
+/// recovery — would clear the banner and stop retrying. A live process reporting
+/// its own pid is the OS's own answer to "who are you", and the supervisor
+/// already holds the other half in the child handle.
+///
+/// Deliberately the pid rather than a launch nonce we inject and echo. Both bind
+/// the answer to something; the pid binds it to the PROCESS, needs no new state
+/// plumbed through the spawn, and puts no value that looks like a credential in
+/// an unauthenticated response. Its one assumption is that the process serving
+/// `/health` IS the child we spawned — true because `uvicorn_args` runs a single
+/// in-process app (no `--workers`, no `--reload`). If that ever changes, the
+/// answering worker's pid stops matching and this gate starts saying "not my
+/// instance", i.e. it restarts rather than falsely sparing — the safe direction —
+/// and the fix at that point is a nonce injected at spawn, which workers inherit.
+///
+/// `is_success()` is the status threshold, and it is now the only one in the
+/// tree. A looser "any HTTP reply counts" reading used to live in the frontend
+/// probe this replaced, on the argument that a 503 at least proves a process is
 /// alive. Inside the supervisor that argument has nothing left to do: liveness
 /// is established by the process handle (`confirm_serving`), exactly, and
 /// without inference from network behaviour. What remains for the probe is
@@ -949,20 +998,41 @@ fn capture_stdout(stream: impl std::io::Read + Send + 'static) {
 /// precisely what an automatic restart is for. systemd's `WatchdogSec` draws
 /// the same line: a service still running but no longer answering gets
 /// restarted, not spared.
-fn health_probe_once(client: &reqwest::blocking::Client, port: u16, timeout: Duration) -> bool {
-    client
+fn health_probe_once(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    timeout: Duration,
+    expected_pid: u32,
+) -> bool {
+    let Ok(response) = client
         .get(format!("http://127.0.0.1:{port}/health"))
         .timeout(timeout)
         .send()
-        .is_ok_and(|response| response.status().is_success())
+    else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Ok(body) = response.text() else {
+        return false;
+    };
+    serde_json::from_str::<HealthAnswer>(&body).is_ok_and(|answer| answer.pid == expected_pid)
 }
 
-fn wait_for_health(port: u16, timeout: Duration) -> bool {
+/// Poll until the process `expected_pid` answers for itself on `port`, or the
+/// budget runs out. The identity requirement matters here too, and for a case
+/// that actually happens: with `STUDIO_SIDECAR_PORT` pinned, a leftover sidecar
+/// from an earlier run can still hold the port, our fresh child then fails to
+/// bind and exits, and an identity-blind wait would read the ORPHAN's 200 as
+/// "my sidecar came up" — leaving the supervisor believing it owns a process it
+/// never started, whose token nothing here knows.
+fn wait_for_health(port: u16, timeout: Duration, expected_pid: u32) -> bool {
     let client = reqwest::blocking::Client::new();
     let deadline = Instant::now() + timeout;
 
     while Instant::now() < deadline {
-        if health_probe_once(&client, port, HEALTH_POLL_REQUEST_TIMEOUT) {
+        if health_probe_once(&client, port, HEALTH_POLL_REQUEST_TIMEOUT, expected_pid) {
             return true;
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
@@ -1094,7 +1164,11 @@ mod tests {
         // A dynamic port explicitly: this test only needs a free port, and must
         // not pick up a pinned env value that might actually be listening.
         let port = allocate_loopback_port_from(None).expect("port");
-        assert!(!wait_for_health(port, Duration::from_millis(20)));
+        assert!(!wait_for_health(
+            port,
+            Duration::from_millis(20),
+            std::process::id()
+        ));
     }
 
     #[test]
@@ -1322,11 +1396,12 @@ mod tests {
     // instance under test is a real child process plus a real socket, both of
     // which every host has.
 
-    /// A TCP listener that answers one fixed HTTP status line to whatever
-    /// connects, standing in for a sidecar that serves (`200 OK`), one that
-    /// replies without being healthy (`503`), or — once stopped — a port with
-    /// nobody on it. Deliberately not a real HTTP server: the only behaviour
-    /// under test is what `health_probe_once` concludes from a status line.
+    /// A TCP listener that answers one fixed HTTP status line and body to
+    /// whatever connects: a sidecar serving and naming itself, a stranger on the
+    /// port naming somebody else, an answer with no identity at all, an
+    /// unhealthy reply, or — once stopped — a port with nobody on it.
+    /// Deliberately not a real HTTP server: the only behaviour under test is
+    /// what `health_probe_once` concludes from a status line and a body.
     struct FakeHealthEndpoint {
         port: u16,
         stop: Arc<AtomicBool>,
@@ -1334,7 +1409,7 @@ mod tests {
     }
 
     impl FakeHealthEndpoint {
-        fn answering(status_line: &'static str) -> Self {
+        fn answering(status_line: &'static str, body: String) -> Self {
             let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind fake health endpoint");
             let port = listener.local_addr().expect("local addr").port();
             listener
@@ -1342,6 +1417,10 @@ mod tests {
                 .expect("non-blocking accept so the thread can observe `stop`");
             let stop = Arc::new(AtomicBool::new(false));
             let stop_for_server = Arc::clone(&stop);
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
             let server = thread::spawn(move || {
                 while !stop_for_server.load(AtomicOrdering::Relaxed) {
                     match listener.accept() {
@@ -1355,10 +1434,7 @@ mod tests {
                             // and destroy the response before the client sees it.
                             let mut request = [0_u8; 1024];
                             let _ = stream.read(&mut request);
-                            let _ = stream.write_all(
-                                format!("HTTP/1.1 {status_line}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
-                                    .as_bytes(),
-                            );
+                            let _ = stream.write_all(response.as_bytes());
                             let _ = stream.flush();
                         }
                         Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -1457,20 +1533,51 @@ mod tests {
         }
     }
 
+    /// How the port answers, relative to the child the supervisor owns. The
+    /// distinction these variants draw is the whole point of the identity rule:
+    /// every one of them is a live child plus a 200 on the recorded port, and
+    /// only the first is actually our sidecar serving.
+    #[derive(Clone, Copy)]
+    enum FakeHealth {
+        /// A sidecar answering for itself — 200 naming the child's own pid.
+        OwnedByTheChild,
+        /// A stranger holding the port: 200, but it names a different process.
+        /// The child is alive for its own reasons and its listener is gone.
+        OwnedBySomeoneElse,
+        /// 200 with no identity at all — an answer that cannot be attributed.
+        Anonymous,
+        /// A reply from the right process, but not a healthy one.
+        UnhealthyFromTheChild,
+    }
+
     /// A supervisor whose instance is a live child plus a port answering
-    /// `status_line`, and whose launch recipe provably cannot produce a
+    /// according to `answer`, and whose launch recipe provably cannot produce a
     /// replacement — so any restart it does perform is unmistakable in the
     /// outcome (`Failed`, "failed to spawn") rather than being inferred.
     fn supervisor_over_fake_instance(
-        status_line: &'static str,
+        answer: FakeHealth,
     ) -> (SidecarSupervisor, FakeHealthEndpoint) {
-        let endpoint = FakeHealthEndpoint::answering(status_line);
+        let mut child = spawn_long_lived_child();
+        let child_pid = child.inner().id();
+        let (status_line, body) = match answer {
+            FakeHealth::OwnedByTheChild => {
+                ("200 OK", format!("{{\"status\":\"ok\",\"pid\":{child_pid}}}"))
+            }
+            FakeHealth::OwnedBySomeoneElse => (
+                "200 OK",
+                // This test process: a real, live, unrelated pid.
+                format!("{{\"status\":\"ok\",\"pid\":{}}}", std::process::id()),
+            ),
+            FakeHealth::Anonymous => ("200 OK", "{\"status\":\"ok\"}".to_string()),
+            FakeHealth::UnhealthyFromTheChild => (
+                "503 Service Unavailable",
+                format!("{{\"status\":\"down\",\"pid\":{child_pid}}}"),
+            ),
+        };
+        let endpoint = FakeHealthEndpoint::answering(status_line, body);
         let launch = unstartable_launch_config();
-        let manager = SidecarManager::around_running_child_for_test(
-            spawn_long_lived_child(),
-            endpoint.port,
-            launch.clone(),
-        );
+        let manager =
+            SidecarManager::around_running_child_for_test(child, endpoint.port, launch.clone());
         (
             SidecarSupervisor::around_running_manager_for_test(launch, manager),
             endpoint,
@@ -1493,26 +1600,70 @@ mod tests {
         }
     }
 
+    fn health_body_for(pid: u32) -> String {
+        format!("{{\"status\":\"ok\",\"pid\":{pid}}}")
+    }
+
     #[test]
     fn health_probe_once_accepts_only_a_success_status() {
         let client = reqwest::blocking::Client::new();
+        let me = std::process::id();
 
-        let serving = FakeHealthEndpoint::answering("200 OK");
+        let serving = FakeHealthEndpoint::answering("200 OK", health_body_for(me));
         assert!(health_probe_once(
             &client,
             serving.port,
-            CONFIRM_SERVING_REQUEST_TIMEOUT
+            CONFIRM_SERVING_REQUEST_TIMEOUT,
+            me
         ));
 
         // The deliberate threshold choice, pinned: a reply is not a verdict.
         // Something that answers 503 is running but not serving, and this gate
         // decides whether a restart is warranted — not whether a process exists.
-        let unhealthy = FakeHealthEndpoint::answering("503 Service Unavailable");
+        let unhealthy =
+            FakeHealthEndpoint::answering("503 Service Unavailable", health_body_for(me));
         assert!(!health_probe_once(
             &client,
             unhealthy.port,
-            CONFIRM_SERVING_REQUEST_TIMEOUT
+            CONFIRM_SERVING_REQUEST_TIMEOUT,
+            me
         ));
+    }
+
+    #[test]
+    fn health_probe_once_requires_the_answer_to_name_the_expected_process() {
+        // A port identifies nobody. Everything below is a healthy 200 on the
+        // port we asked about, and none of it is the process we asked about.
+        let client = reqwest::blocking::Client::new();
+        let me = std::process::id();
+
+        let stranger = FakeHealthEndpoint::answering("200 OK", health_body_for(me + 1));
+        assert!(
+            !health_probe_once(
+                &client,
+                stranger.port,
+                CONFIRM_SERVING_REQUEST_TIMEOUT,
+                me
+            ),
+            "an answer from a different process was accepted as ours"
+        );
+
+        let anonymous = FakeHealthEndpoint::answering("200 OK", "{\"status\":\"ok\"}".to_string());
+        assert!(
+            !health_probe_once(
+                &client,
+                anonymous.port,
+                CONFIRM_SERVING_REQUEST_TIMEOUT,
+                me
+            ),
+            "an answer naming nobody was accepted as ours"
+        );
+
+        let not_json = FakeHealthEndpoint::answering("200 OK", "ok".to_string());
+        assert!(
+            !health_probe_once(&client, not_json.port, CONFIRM_SERVING_REQUEST_TIMEOUT, me),
+            "a body that carries no identity at all was accepted as ours"
+        );
     }
 
     #[test]
@@ -1532,7 +1683,12 @@ mod tests {
         let port = allocate_loopback_port_from(None).expect("port");
         let started = Instant::now();
 
-        assert!(!health_probe_once(&client, port, Duration::from_millis(300)));
+        assert!(!health_probe_once(
+            &client,
+            port,
+            Duration::from_millis(300),
+            std::process::id()
+        ));
 
         assert!(
             started.elapsed() < Duration::from_secs(2),
@@ -1543,7 +1699,7 @@ mod tests {
 
     #[test]
     fn an_automatic_restart_declines_and_touches_nothing_while_the_instance_serves() {
-        let (supervisor, _endpoint) = supervisor_over_fake_instance("200 OK");
+        let (supervisor, _endpoint) = supervisor_over_fake_instance(FakeHealth::OwnedByTheChild);
         let instance = supervisor.runtime_config().expect("a running instance");
 
         let declined_config = match supervisor.restart_automatic() {
@@ -1568,7 +1724,7 @@ mod tests {
 
     #[test]
     fn a_decline_spends_no_budget_so_a_real_death_is_still_recoverable() {
-        let (supervisor, mut endpoint) = supervisor_over_fake_instance("200 OK");
+        let (supervisor, mut endpoint) = supervisor_over_fake_instance(FakeHealth::OwnedByTheChild);
 
         // Twice the attempt cap, all refused. A budget charged for refusals
         // would be long gone by now.
@@ -1597,7 +1753,7 @@ mod tests {
         // exited, so `try_wait` says "running", but it no longer answers. A gate
         // that stopped at the handle would refuse to ever restart a wedged
         // sidecar — the exact failure an automatic restart exists for.
-        let (supervisor, mut endpoint) = supervisor_over_fake_instance("200 OK");
+        let (supervisor, mut endpoint) = supervisor_over_fake_instance(FakeHealth::OwnedByTheChild);
         assert!(instance_child_is_running(&supervisor));
         endpoint.stop();
 
@@ -1612,7 +1768,8 @@ mod tests {
 
     #[test]
     fn an_instance_answering_a_non_success_status_is_not_spared() {
-        let (supervisor, _endpoint) = supervisor_over_fake_instance("503 Service Unavailable");
+        let (supervisor, _endpoint) =
+            supervisor_over_fake_instance(FakeHealth::UnhealthyFromTheChild);
 
         match supervisor.restart_automatic() {
             AutoRestartOutcome::Failed(error) => assert!(
@@ -1623,12 +1780,79 @@ mod tests {
         }
     }
 
+    /// The hole this fixture used to encode as CORRECT, now asserted the other
+    /// way round. A live child plus a healthy 200 on the recorded port was
+    /// treated as "our sidecar is serving" — but a port is a rendezvous, and
+    /// this is the fully reachable case where the child is alive while its
+    /// listener is gone and an unrelated process holds the port. Sparing it
+    /// would hand the frontend a config for a sidecar that cannot serve it, and
+    /// the frontend — told this is recovery — clears the banner and stops
+    /// retrying. A silent dead end, and the decline costs no budget, so the app
+    /// could sit in it indefinitely.
+    #[test]
+    fn an_answer_from_an_unrelated_process_does_not_spare_the_instance() {
+        let (supervisor, _endpoint) =
+            supervisor_over_fake_instance(FakeHealth::OwnedBySomeoneElse);
+        assert!(
+            instance_child_is_running(&supervisor),
+            "the fixture must present a LIVE child, or it tests nothing"
+        );
+
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::Failed(error) => assert!(
+                error.contains("failed to spawn"),
+                "expected a real (failed) attempt: {error}"
+            ),
+            other => panic!(
+                "a stranger on the port was accepted as our serving sidecar, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn an_answer_naming_nobody_does_not_spare_the_instance() {
+        // Same shape, weaker attacker: a 200 with no identity at all. It cannot
+        // be attributed, so it cannot authorise sparing — an answer that names
+        // nobody is not an answer about this instance.
+        let (supervisor, _endpoint) = supervisor_over_fake_instance(FakeHealth::Anonymous);
+        assert!(instance_child_is_running(&supervisor));
+
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::Failed(error) => assert!(
+                error.contains("failed to spawn"),
+                "expected a real (failed) attempt: {error}"
+            ),
+            other => panic!("an unattributable answer spared the instance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn only_an_answer_from_the_child_itself_spares_it() {
+        // The positive half of the pair above, stated as the contrast: the ONLY
+        // difference between this and `an_answer_from_an_unrelated_process_…`
+        // is which pid the port reports.
+        let (serving, _serving_endpoint) =
+            supervisor_over_fake_instance(FakeHealth::OwnedByTheChild);
+        assert!(matches!(
+            serving.restart_automatic(),
+            AutoRestartOutcome::Declined(_)
+        ));
+        serving.shutdown_blocking();
+
+        let (stranger, _stranger_endpoint) =
+            supervisor_over_fake_instance(FakeHealth::OwnedBySomeoneElse);
+        assert!(matches!(
+            stranger.restart_automatic(),
+            AutoRestartOutcome::Failed(_)
+        ));
+    }
+
     #[test]
     fn a_manual_retry_is_never_refused_by_the_confirmation() {
         // The counterpart to the whole gate: it protects the app from acting on
         // evidence it cannot interpret, and a person pressing Retry is not that
         // evidence. This is also why the two live on separate commands.
-        let (supervisor, _endpoint) = supervisor_over_fake_instance("200 OK");
+        let (supervisor, _endpoint) = supervisor_over_fake_instance(FakeHealth::OwnedByTheChild);
 
         let error = supervisor
             .restart()

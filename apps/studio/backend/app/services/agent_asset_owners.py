@@ -128,7 +128,7 @@ OWNERS: tuple[MoiraiAssetOwner, ...] = (
         stance="authoritative",
         relative_path="",
         version_anchor="1.1.0",
-        tree_digest="6353a90dd8242868153df9afc65575d4c2d5da58b3ba5dc5d326540287093824",
+        tree_digest="3a24bb9d637dd9b752a6d4080c0feb4e50a9ec13f962aacce15025fb37643578",
         file_count=29,
         source_reference=(
             "SevenX77/graph-skill-runtime "
@@ -140,7 +140,7 @@ OWNERS: tuple[MoiraiAssetOwner, ...] = (
         stance="retiring-reader",
         relative_path="apps/studio/backend/app/agents",
         version_anchor=None,
-        tree_digest="fe53ad3005f79c6449b02e7ed8d152541c5497f4999f348ea600197ae6ef822d",
+        tree_digest="8cc7ad0eafff49647a825ad2b73a604e42a201398b10a3cb20ee7e5fb41d264e",
         file_count=35,
         source_reference="this checkout",
     ),
@@ -155,18 +155,31 @@ _REPIN_REMEDIATION = (
 def tree_digest(root: Path) -> tuple[str, int]:
     """SHA-256 over every file under ``root`` — relpath plus LF-normalized bytes.
 
-    Line endings belong to a checkout, not to content, so normalizing them keeps
-    one piece of content from having two identities on two machines.
+    Two normalizations, each removing a way for one piece of content to have two
+    identities on two machines:
+
+    *   **Line endings** belong to a checkout, not to content.
+    *   **Order** is taken from the POSIX relative path *string*, never from
+        sorting ``Path`` objects. ``PurePath`` comparison is case-insensitive on
+        Windows and case-sensitive on POSIX, so sorting paths puts ``README.md``
+        after ``operating-manual.md`` on Windows and before ``agent-skill-map``
+        on Linux — the same tree, two digests. Field evidence: the first pinned
+        value was computed on Windows and failed `pytest studio backend` on both
+        the Ubuntu and macOS runners.
     """
 
+    entries = sorted(
+        (path.relative_to(root).as_posix(), path)
+        for path in root.rglob("*")
+        if path.is_file()
+    )
     digest = hashlib.sha256()
-    files = sorted(path for path in root.rglob("*") if path.is_file())
-    for path in files:
-        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+    for relative_posix, path in entries:
+        digest.update(relative_posix.encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
         digest.update(b"\0")
-    return digest.hexdigest(), len(files)
+    return digest.hexdigest(), len(entries)
 
 
 def authoritative_owner() -> MoiraiAssetOwner:

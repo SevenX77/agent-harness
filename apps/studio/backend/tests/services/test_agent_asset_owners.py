@@ -14,6 +14,7 @@ graph-skill-runtime,主仓这一份是**即将退役的读者副本**;一个只�
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -47,6 +48,47 @@ def test_pinned_digest_is_checkout_independent() -> None:
     digest_lf, count_lf = owners.tree_digest(owners.retiring_owner().resolved_path())
     assert digest_lf == owners.retiring_owner().tree_digest
     assert count_lf == owners.retiring_owner().file_count
+
+
+def test_digest_order_does_not_depend_on_platform_path_comparison(tmp_path: Path) -> None:
+    """指纹的顺序必须来自 POSIX 相对路径**字符串**,不能来自 `Path` 对象排序。
+
+    `PurePath` 的比较在 Windows 上不区分大小写、在 POSIX 上区分,于是 `README.md`
+    在 Windows 上排在 `operating-manual.md` 之后、在 Linux 上排在
+    `agent-skill-map.json` 之前 —— 同一棵树,两个指纹。实证:第一版钉子在 Windows
+    上算出,Ubuntu 与 macOS 两个 runner 的 `pytest studio backend` 同时红。
+
+    本测试用一棵大小写混排的最小树把这条不变量钉住:两种排序键会给出不同的
+    digest,只有按字符串排的那个与两个平台一致。
+    """
+
+    tree = tmp_path / "mixed-case"
+    tree.mkdir()
+    (tree / "README.md").write_bytes(b"upper\n")
+    (tree / "agent-skill-map.json").write_bytes(b"lower\n")
+    (tree / "operating-manual.md").write_bytes(b"middle\n")
+
+    digest, count = owners.tree_digest(tree)
+    assert count == 3
+
+    expected = hashlib.sha256()
+    for name in ("README.md", "agent-skill-map.json", "operating-manual.md"):
+        expected.update(name.encode("utf-8"))
+        expected.update(b"\0")
+        expected.update((tree / name).read_bytes())
+        expected.update(b"\0")
+    assert digest == expected.hexdigest()
+
+
+def test_digest_ignores_the_checkout_line_ending(tmp_path: Path) -> None:
+    crlf = tmp_path / "crlf"
+    crlf.mkdir()
+    (crlf / "a.md").write_bytes(b"one\r\ntwo\r\n")
+    lf = tmp_path / "lf"
+    lf.mkdir()
+    (lf / "a.md").write_bytes(b"one\ntwo\n")
+
+    assert owners.tree_digest(crlf) == owners.tree_digest(lf)
 
 
 def test_unrecorded_drift_in_either_owner_is_reported(tmp_path: Path) -> None:

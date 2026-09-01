@@ -51,6 +51,16 @@ describe("translateErrorCode", () => {
     expect(translateErrorCode("MYSTERIOUS_FAILURE")).toBe("Provider returned error code: MYSTERIOUS_FAILURE")
   })
 
+  // The mirror image of the assertion in `utils/errors.test.ts`: this reader
+  // resolves `providerCodes.*` only, so a STUDIO backend code reaching it is an
+  // unknown provider code and gets quoted verbatim. While both readers shared
+  // one `codes.*` table it was answered with the Studio sentence instead, which
+  // blamed the backend for a provider failure.
+  it("never answers a provider code with a Studio backend sentence", () => {
+    expect(translateErrorCode("STUDIO_INTERNAL_ERROR"))
+      .toBe("Provider returned error code: STUDIO_INTERNAL_ERROR")
+  })
+
   it("uses the active locale for known provider error codes", async () => {
     await i18n.changeLanguage("zh-CN")
 

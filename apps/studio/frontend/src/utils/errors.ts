@@ -233,14 +233,17 @@ export function lintErrorsFromError(error: unknown): LintError[] {
  * the code's developer-facing text, which is the right thing to show when nobody
  * has written a reader-facing one yet.
  *
- * CAUTION — `codes.*` is a SHARED key space, and lookups are exact-match. The
- * other reader is `llm-error-messages.ts`'s `translateErrorCode`, which resolves
- * codes a remote LLM PROVIDER returned (`vendor_error_code` in the gateway hands
- * back the vendor's own `code`/`type`/`status` verbatim). So a Studio code and a
- * vendor code that spell the same string resolve to the same sentence, and one of
- * the two readers is then told the wrong thing about who failed. Whoever adds a
- * Studio code here owes it a name no vendor plausibly emits until the two key
- * spaces are actually separated.
+ * Resolves `studioCodes.*` — the key space for codes the STUDIO BACKEND mints,
+ * which is a closed set we own, so an entry missing from it is our own gap.
+ * `providerCodes.*` is the separate space `lib/llm-error-messages.ts` reads for
+ * codes a remote LLM provider returned; that one is open-ended by nature
+ * (`vendor_error_code` in the gateway hands back the vendor's own
+ * `code`/`type`/`status` string verbatim), which is exactly why the two cannot
+ * share a table. Lookups are exact-match, so while both readers resolved one
+ * `codes.*` table, a Studio code and a vendor code spelling the same string got
+ * the same sentence and one of the two readers was told the wrong machine had
+ * failed. Separate prefixes make that collision unrepresentable rather than
+ * something each new code has to be named around.
  */
 function translatedErrorCode(payload: Partial<ErrorResponse> | undefined): string | null {
   const code = payload?.error_code
@@ -248,7 +251,7 @@ function translatedErrorCode(payload: Partial<ErrorResponse> | undefined): strin
     return null
   }
   const values = isRecord(payload?.details) ? payload.details : {}
-  const translated = i18n.t(`codes.${code}`, { ns: 'errors', defaultValue: '', ...values })
+  const translated = i18n.t(`studioCodes.${code}`, { ns: 'errors', defaultValue: '', ...values })
   return translated || null
 }
 

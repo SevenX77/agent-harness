@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -202,6 +203,35 @@ def test_graph_serialize_still_serializes_the_skill_it_names(client: TestClient)
     )
 
     assert response.status_code == 200, response.text
+
+
+def test_graph_serialize_still_serializes_a_drilled_subgraph_by_path(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """The shape ``workspace_root`` exists for: a child graph inside the skill tree.
+
+    MVP1 identifies a subgraph by PATH rather than by registry id, and the id the
+    canvas sends alongside it is DERIVED from that path
+    (``workspace-identity.ts::skillIdFromWorkspaceRoot``), so it need not be in
+    the skill index at all. That is why the bound is "a workspace Studio has
+    open" and not "the named skill's own tree" — and this test is what keeps the
+    bound from quietly becoming the latter.
+    """
+    skills_dir, _ = studio_roots
+    child = skills_dir / "text-segmentation" / "subgraphs" / "child-graph"
+    shutil.copytree(skills_dir / "text-segmentation", child)
+
+    response = client.post(
+        "/api/skills/child-graph/graph/serialize",
+        json={
+            "phases": [{"id": "setup", "src": "phases/setup", "depends_on": [], "output": True}],
+            "workspace_root": str(child),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert "setup" in response.json()["markdown_content"]
 
 
 def test_lint_refuses_a_workspace_root_outside_the_managed_roots(

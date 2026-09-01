@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 
@@ -84,11 +85,18 @@ class RunRequest(BaseModel):
         mapping is the one place this transformation is part of the contract
         rather than fighting it.
 
-        Non-dict input is handed back untouched — that is validation from an
-        existing instance or from something that is about to be rejected as the
-        wrong type, and neither is this validator's business.
+        ``Mapping`` and not ``dict``: pydantic accepts any mapping here, so an
+        ``isinstance(data, dict)`` gate silently skipped the fold for a caller
+        passing e.g. a ``UserDict`` — the input validated fine and the paste
+        simply never arrived. The rewritten value is a plain ``dict`` because
+        that is what the field builder wants, and rebuilding it is also what
+        keeps the caller's own mapping unmutated.
+
+        Anything that is not a mapping is handed back untouched — that is
+        validation from an existing instance, or from something about to be
+        rejected as the wrong type, and neither is this validator's business.
         """
-        if not isinstance(data, dict):
+        if not isinstance(data, Mapping):
             return data
         pasted_json = data.get("paste_json")
         if not pasted_json:

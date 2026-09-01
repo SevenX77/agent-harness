@@ -169,6 +169,64 @@ def test_resolve_within_roots_refuses_an_empty_path(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     os.name != "nt",
+    reason="drive letters only exist on Windows; POSIX anchors are all '/' and cannot differ in case",
+)
+@pytest.mark.parametrize("drive_case", ["lower", "upper"])
+def test_the_same_drive_spelled_either_case_is_the_same_volume(
+    tmp_path: Path,
+    drive_case: str,
+) -> None:
+    """``d:\\`` and ``D:\\`` are ONE volume, so the gate must accept both.
+
+    ``Path.anchor`` is a plain ``str``, so comparing two of them was a
+    case-SENSITIVE comparison — while ``Path.resolve()`` normalises the drive to
+    upper case and the caller's spelling is whatever they typed. A request, or a
+    skill-index entry, holding a lower-case drive was therefore refused as "not
+    on a volume we manage": a legitimate save turned into a 422 by the case of
+    one letter.
+
+    Both spellings are exercised because the fix has to be a NORMALISATION. A
+    one-way ``.upper()`` would pass this half and then fail the mirror case
+    below, where the oddly-spelled side is the root.
+    """
+    inside = tmp_path / "skill"
+    inside.mkdir()
+    raw = str(inside)
+    drive = raw[:2].lower() if drive_case == "lower" else raw[:2].upper()
+
+    assert resolve_within_roots(drive + raw[2:], [tmp_path]) == inside.resolve()
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="drive letters only exist on Windows; POSIX anchors are all '/' and cannot differ in case",
+)
+@pytest.mark.parametrize("drive_case", ["lower", "upper"])
+def test_a_differently_cased_root_drive_still_accepts_the_path(
+    tmp_path: Path,
+    drive_case: str,
+) -> None:
+    """The mirror case: the ROOT is the oddly-spelled side.
+
+    Honestly labelled — this direction passes even WITHOUT the normalisation,
+    because the roots go through ``resolve()`` and that upper-cases the drive on
+    the way. Only the candidate side, which is deliberately not resolved yet, can
+    reach the comparison oddly cased, and that is the half that was broken.
+
+    Kept anyway: it pins the property to the comparison rather than to a side
+    effect of ``resolve()``, so if root resolution ever stops normalising, this
+    fails here instead of in a user's 422.
+    """
+    inside = tmp_path / "skill"
+    inside.mkdir()
+    raw_root = str(tmp_path)
+    drive = raw_root[:2].lower() if drive_case == "lower" else raw_root[:2].upper()
+
+    assert resolve_within_roots(str(inside), [Path(drive + raw_root[2:])]) == inside.resolve()
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
     reason="the anchor gate has only one possible answer on POSIX: every absolute path is /",
 )
 def test_resolve_within_roots_refuses_a_path_on_another_drive(tmp_path: Path) -> None:

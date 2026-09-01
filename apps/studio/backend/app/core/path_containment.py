@@ -45,6 +45,7 @@ two share is a three-line predicate, not a decision.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -178,7 +179,18 @@ def resolve_within_roots(raw_path: str, roots: Iterable[Path]) -> Path:
         raise PathEscapesDirectory(candidate, tuple(roots), reason="path is not absolute")
 
     resolved_roots = tuple(root.resolve(strict=False) for root in roots)
-    if not any(candidate.anchor == root.anchor for root in resolved_roots):
+    # `normcase`, not `==`: `Path.anchor` is a plain `str`, so comparing two of
+    # them is a case-SENSITIVE comparison — and Windows drive letters are not
+    # case-sensitive. `d:\` and `D:\` are one volume, so a request (or a skill
+    # index entry) that happens to spell the drive in lower case was being
+    # refused as "not on a volume we manage". `normcase` is the stdlib's answer
+    # to "is this the same path spelling": on Windows it folds case and slashes,
+    # on POSIX it is the identity function, so this introduces no platform fork.
+    # It is also how `pathlib` compares Windows paths internally
+    # (`PurePath._str_normcase`), which is exactly why dropping to the raw `str`
+    # lost the property.
+    candidate_volume = os.path.normcase(candidate.anchor)
+    if not any(candidate_volume == os.path.normcase(root.anchor) for root in resolved_roots):
         raise PathEscapesDirectory(
             candidate,
             resolved_roots,

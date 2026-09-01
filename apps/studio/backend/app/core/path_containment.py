@@ -123,16 +123,15 @@ def resolve_within_roots(raw_path: str, roots: Iterable[Path]) -> Path:
     and a relative name would mean "wherever this server happens to be running
     from" — an answer that depends on how the app was launched is not an answer.
     """
-    candidate = Path(raw_path.strip()).expanduser()
+    # Building and resolving the path IS the check: containment is a fact about
+    # the RESOLVED path, so there is no way to establish it without first making
+    # one. A taint scanner sees an untrusted value reaching a path expression and
+    # is right about the value and wrong about the expression — nothing is opened
+    # here, and this function's only exits are "inside one of `roots`" or a raise.
+    candidate = Path(raw_path.strip()).expanduser()  # codeql[py/path-injection]
     if not candidate.is_absolute():
         raise PathEscapesDirectory(candidate, tuple(roots))
-    # Resolving IS the check: containment is a fact about the resolved path, so
-    # there is no way to establish it without resolving first. A taint scanner
-    # sees an untrusted value reaching a path expression and is right about the
-    # value and wrong about the expression — nothing is opened here, and the
-    # function's only exits are "inside one of `roots`" or a raise.
-    # codeql[py/path-injection] this call is the containment check itself; the verdict is below.
-    resolved = candidate.resolve(strict=False)
+    resolved = candidate.resolve(strict=False)  # codeql[py/path-injection]
     resolved_roots = tuple(root.resolve(strict=False) for root in roots)
     if not any(resolved.is_relative_to(root) for root in resolved_roots):
         raise PathEscapesDirectory(resolved, resolved_roots)

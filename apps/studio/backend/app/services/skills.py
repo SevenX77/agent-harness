@@ -604,7 +604,12 @@ def _requested_workspace_root_or_none(skill_id: str, workspace_root: str) -> Pat
         _raise_workspace_root_outside_boundary(safe_skill_id, workspace_root)
     if root.is_dir():
         return root
-    logger.info(
+    # `safe_skill_id` passed `^[A-Za-z0-9][A-Za-z0-9._-]*$`, which admits no
+    # newline, so it cannot forge a second log line. The scanner cannot see
+    # through the validator, and scrubbing an already-proved value at the call
+    # site would be the very "remember it at every reader" shape this repo
+    # rejects — so the reason is written down instead.
+    logger.info(  # codeql[py/log-injection]
         "lint skill_id=%s requested workspace root is not on disk yet; falling back",
         safe_skill_id,
     )

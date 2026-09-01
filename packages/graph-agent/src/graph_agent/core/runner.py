@@ -2230,8 +2230,7 @@ def _write_workflow_result_artifacts(
     # the one place a run id becomes a directory name and refuses an id that
     # cannot name one child of the root. Re-checking here would put the same
     # decision in two places, which is how the two come to disagree.
-    # codeql[py/path-injection] run_directory comes from run_layout.run_dir, which refuses a non-segment run id.
-    run_directory.mkdir(parents=True, exist_ok=True)
+    run_directory.mkdir(parents=True, exist_ok=True)  # codeql[py/path-injection]
     _write_json(run_directory / "result.json", result.model_dump(mode="json"))
     _write_json(run_directory / "final_state.json", result.context)
     _write_json(run_directory / "metrics.json", result.metrics.model_dump(mode="json"))

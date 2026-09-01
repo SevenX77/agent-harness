@@ -38,10 +38,22 @@ WebView2 只对**由设置了环境变量的进程启动的**实例生效,所以
 「并行任务的运行时资源黑板」),所以这一步不是可选的礼貌。
 
 **它也不再只是约定:会驱动窗口的工具自己会查。** `click.mjs`、`emulate.mjs` 和两个
-launcher 在动手前都问一次 `wt-board.sh holds cdp-9222`,答不出"这块板是我的"就退出 4,
-一个字都不点。查不动黑板(缺 bash、板没了)同样算答不出——**失败一律关向安全侧**,因为
-"问不出来"不是往别人窗口里打字的许可。2026-08-15 两个 agent 在同一个窗口上互相打了几个
-小时的点击,当时黑板已经合并、文档也写着要占位:只靠文档约束的纪律,实证不成立。
+launcher 在动手前都问一次 `wt-board.sh holds cdp-9222`,答不出"这块板是我的"就**拒绝**,
+一个字都不点、app 一次都不重启。拒绝分两种退出码,因为它们是两个不同的
+问题:**4 = 黑板说这块板不是你的**(纪律问题,去占位),**5 = 守卫根本问不到黑板**
+(环境问题,机器上没有 Git Bash 或找不到 `wt-board.sh`)。以前两者都报 4,于是"你没占位"
+被打给了明明占着位的人,人只能往错的方向找。**失败一律关向安全侧**——"问不出来"不是
+往别人窗口里打字的许可。
+
+两次实证摆在这里,方向一致:2026-08-15 两个 agent 在同一个窗口上互相打了几个小时的
+点击,当时黑板已经合并、文档也写着要占位;2026-08-31 又查出**两个 launcher 的守卫其实
+一直是失守的**——`assert-claim.ps1` 当时是被 dot-source 进 launcher 的,而 PowerShell 里
+**dot-source 进来的 `exit` 只结束那个文件,调用方照跑**,于是 launcher 打印完"拒绝"就
+把共享 app 重启了,而这份文档还写着它会拦住。**只靠文档约束的纪律,在这件事上两次都
+不成立**;现在守卫改成被调用并查退出码,且拒绝时直接结束进程(见下面的自测)。
+
+launcher 是分离且隐藏启动的,拒绝信息不会出现在任何人的屏幕上,所以它同时落盘一份:
+**`%TEMP%\studio-verify-guard.log`**。app 迟迟不出现在 9222 上时先读它,再怀疑冷启动慢。
 
 **读永远不需要占位**:`cdp.mjs` / `shot.mjs` / `console.mjs` 是观察工具,不设卡。
 这条线是故意画的——你必须能先看一眼才知道别人是不是正在用,占位前无法观察等于逼人盲抢。
@@ -87,11 +99,46 @@ scripts/wt-board.sh release cdp-9222
 | `emulate.mjs` | `node emulate.mjs 1400 1200` / `clear` | 视口仿真。**坑**:`clear` 并不还原,验完要显式 set 回真实尺寸(如 1400 900);点击坐标超出真实窗口高度不落地 |
 | `console.mjs` | `node console.mjs "<js 表达式>" [等待 ms]` | 执行表达式并收 4s(可调)内 console/异常——点了没反应时用它抓静默失败 |
 
-`click.mjs` / `emulate.mjs` 会先过 `lease-guard.mjs`(两个 launcher 过 `assert-claim.ps1`),
-没占位就退出 4 并告诉你怎么占。**改这两个守卫之后要真跑一遍**:无占位必须被拒、占位后
-必须放行、换个 `WT_BOARD_AGENT` 必须再次被拒——恒真的判断在纯文本断言下能活很久。
-跑的时候把 `WT_BOARD_DIR` 指到临时目录,别污染真板;**也别拿活着的 app 当靶子**,
-放行那一档是真的会点下去(2026-08-15 我自己就这么误点了一次)。
+`click.mjs` / `emulate.mjs` 会先过 `lease-guard.mjs`;两个 launcher 过 `assert-claim.ps1`,
+它被当成**独立子进程**执行(`powershell -NoProfile -ExecutionPolicy Bypass -File
+assert-claim.ps1`),由 launcher 查 `$LASTEXITCODE` 决定走不走下去——这是 PowerShell 里
+"跑一个脚本再按它的结果决定"的标准写法。**既不是 dot-source,也不在 launcher 自己的
+进程里跑**,两者各有前车之鉴:dot-source 是 2026-08-31 那次失守的成因;而"在 launcher
+进程里跑 + 拒绝时结束进程"是那次的**过度修正**——谁从既有 PowerShell 会话里
+`& launch-studio-cdp.ps1`,丢的就不是这次启动而是**整个会话**,而且 .NET 明确写了
+`Environment.Exit` 不执行 finally,连收尾都做不了。
+
+放到子进程之后,守卫拒绝时结束的是**它自己那个子进程**,这才和 `lease-guard.mjs` 的
+`process.exit(4)` 真正同义:结束"本来要动手的那个进程",到此为止。你从交互式会话里调
+launcher,被拒时只丢这次启动,终端还在。至于"将来有人漏写那句退出码检查"——那由下面的
+自测兜住(它真的把 launcher 跑起来),不靠扩大杀伤范围来保证。
+
+**改这三个守卫(`assert-claim.ps1` 和两个 launcher)之后跑一遍它的自测**:
+
+```bash
+bash .claude/skills/studio-verify/scripts/tests/guard-selftest.sh
+```
+
+它**真的把两个 launcher 跑起来**,而不是对源码做文本断言——恒真的判断在纯文本断言下
+能活很久,上一次就活了十六天。覆盖:无占位必须被拒、占位后必须放行、换个
+`WT_BOARD_AGENT` 必须再次被拒,外加"问不到黑板"报 5 而不是 4、守卫文件本身丢失、拒绝
+必须落盘留痕,以及两条**从修法本身学来的**断言:①`PATH` 清空后一切答案不变(守卫按
+绝对路径找 bash,launcher 按绝对路径找自己的解释器);②从既有 PowerShell 会话里 `&` 调
+launcher 被拒后,**那个会话必须还活着、它的 finally 必须跑过**。
+
+它在临时目录里搭一份复制品仓库(真的 `.ps1` + 真的 `wt-board.sh` + 一个只打印标记的假
+`studio-dev.ps1`),`WT_BOARD_DIR` 和 `TEMP` 都指向那里,所以**既不动真板、也绝不可能
+启动真 app**——放行那一档是真的会执行下去的,别拿活着的 app 当靶子(2026-08-15 我自己
+就这么误点了一次)。复制品的路径**故意带空格**:PowerShell 5.1 的 `-ArgumentList` 数组
+是用空格拼接且完全不加引号的,所以仓库落在 `C:\Users\Jane Doe\...` 这类路径下时,守卫
+递给 bash 的是一条**被截断的**板路径,而 bash 的失败会被当成"你没占位"——占着位的人被
+告知没占位。在不带空格的路径上测,这条轴永远看不见。CI 的 pytest 到不了 `.claude/`,
+所以这是手动门禁,与 `scripts/tests/wt-board-selftest.sh` 同一性质。
+
+改这几个 `.ps1` 时**只写 ASCII**:`.gitattributes` 让 `.ps1` 不带 BOM 入库,而 Windows
+PowerShell 5.1 会用系统 ANSI 代码页(本机 cp936)去解码不带 BOM 的 `.ps1`。2026-08-31 实测:
+字符串里一个 U+2014 破折号,它的 `0x94` 字节被当成 GBK 前导字节吃掉了后面的引号,整个
+文件**解析失败**。守卫解析不了 = 守卫不存在。自测第 0 项就是卡这个的。
 
 ## 纪律与已知坑
 

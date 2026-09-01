@@ -1,10 +1,10 @@
 """What an outside editor prepends is encoding, and the backend must not read it as text.
 
-Windows editors write a UTF-8 byte-order mark (bytes ``EF BB BF``) at the start
-of a file by default — Notepad does, PowerShell redirection does. A skill
-authored outside Studio therefore arrives with one, and every reader that
-decodes it as ``utf-8`` gets a ``\\ufeff`` character sitting in front of the
-author's first real character.
+A skill authored outside Studio can arrive with a UTF-8 byte-order mark (bytes
+``EF BB BF``) in front — see ``app.core.authored_text`` for which tools still
+produce one and why "not the default any more" does not mean "will not happen".
+Every reader that decodes such a file as ``utf-8`` gets a ``\\ufeff`` character
+sitting in front of the author's first real character.
 
 The backend used to answer this two ways at once: ``runtime_config`` reads a
 workspace JSON file with ``utf-8-sig`` and, twelve lines away, an authored
@@ -225,11 +225,13 @@ def test_signed_local_settings_still_load(tmp_path: Path) -> None:
 async def test_the_storage_port_reads_authored_text_without_the_signature(tmp_path: Path) -> None:
     """The async transport has to answer the same as the sync one.
 
-    ``StorageBackend`` is how services reach the disk, so a service that needs a
-    signature-free read had only two options before this method existed: bypass
-    the port, or keep the mark. Both are defects — the first drops the boundary
-    and does blocking I/O on the event loop, the second is K7 again — so the port
-    itself carries the rule.
+    ``serialize_skill_graph_markdown`` was already reaching the disk through this
+    port and needed the signature dropped. Without this method its only choices
+    were to keep the mark, or to leave the port for a direct sync read — so the
+    port grew the rule instead. It does not read the file itself: it calls the
+    same ``read_authored_text`` every sync caller uses, on a thread, which is
+    what makes "one decision" true rather than "two implementations that agree
+    today".
     """
     _signed(tmp_path / "GRAPH.md", GRAPH_MARKDOWN)
     backend = LocalFilesystemBackend(tmp_path)

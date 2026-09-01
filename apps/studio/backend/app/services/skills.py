@@ -592,15 +592,21 @@ def _requested_workspace_root_or_none(skill_id: str, workspace_root: str) -> Pat
     - **Is it there yet?** A root inside our boundary that does not exist is the
       brand-new-skill case the fallback exists for, and it keeps it.
     """
+    # The id is validated here rather than only on the fallback path, so the two
+    # branches cannot disagree about what a skill id is — and so the log line
+    # below carries a value that has been PROVED to be one name. A raw request
+    # value in a log entry is how a caller writes their own lines into a record
+    # people read as what happened (CodeQL ``py/log-injection``).
+    safe_skill_id = _validate_skill_id_segment(skill_id)
     try:
         root = resolve_within_roots(workspace_root, studio_workspace_roots())
     except PathEscapesDirectory:
-        _raise_workspace_root_outside_boundary(skill_id, workspace_root)
+        _raise_workspace_root_outside_boundary(safe_skill_id, workspace_root)
     if root.is_dir():
         return root
     logger.info(
         "lint skill_id=%s requested workspace root is not on disk yet; falling back",
-        skill_id,
+        safe_skill_id,
     )
     return None
 

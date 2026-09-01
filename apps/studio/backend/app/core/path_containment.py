@@ -126,6 +126,12 @@ def resolve_within_roots(raw_path: str, roots: Iterable[Path]) -> Path:
     candidate = Path(raw_path.strip()).expanduser()
     if not candidate.is_absolute():
         raise PathEscapesDirectory(candidate, tuple(roots))
+    # Resolving IS the check: containment is a fact about the resolved path, so
+    # there is no way to establish it without resolving first. A taint scanner
+    # sees an untrusted value reaching a path expression and is right about the
+    # value and wrong about the expression — nothing is opened here, and the
+    # function's only exits are "inside one of `roots`" or a raise.
+    # codeql[py/path-injection] this call is the containment check itself; the verdict is below.
     resolved = candidate.resolve(strict=False)
     resolved_roots = tuple(root.resolve(strict=False) for root in roots)
     if not any(resolved.is_relative_to(root) for root in resolved_roots):

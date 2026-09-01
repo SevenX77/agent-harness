@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import {
   initializeRuntimeConfig,
+  reconnectSidecar,
   restartSidecar,
   restartSidecarAutomatic,
   subscribeToSidecarRestart,
@@ -16,6 +17,7 @@ import {
   recordAutoRestartAttempt,
   type AutoRestartState,
 } from './runtime-gate-auto-restart'
+import { sidecarPortAnswers } from './runtime-gate-sidecar-probe'
 
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 
@@ -100,12 +102,26 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
     }
   }, [])
 
-  const markReady = useCallback((): void => {
+  // Recovery episodes are numbered so that work started inside one can tell
+  // whether it still belongs to the present. Clearing the timer is not enough
+  // any more: the port probe below runs for up to its own timeout, and a verdict
+  // that lands after the episode ended describes a sidecar instance that is gone
+  // — acting on it would restart the healthy one that replaced it. Same idea as
+  // the `cancelled` flag in the boot effect below, kept in a ref because the
+  // schedule lives outside React's render cycle.
+  const recoveryEpisodeRef = useRef(0)
+
+  const endRecoveryEpisode = useCallback((): void => {
     clearScheduledAutoRestart()
+    recoveryEpisodeRef.current += 1
     autoRestartStateRef.current = initialAutoRestartState()
+  }, [clearScheduledAutoRestart])
+
+  const markReady = useCallback((): void => {
+    endRecoveryEpisode()
     setMessage('')
     setStatus('ready')
-  }, [clearScheduledAutoRestart])
+  }, [endRecoveryEpisode])
 
   // Paces automatic attempts on AUTO_RESTART_DELAYS_MS (1s/4s/16s), calling
   // `restartSidecarAutomatic` — never `restartSidecar` — so a spent budget
@@ -120,11 +136,47 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
     autoRestartTimerRef.current = setTimeout(() => {
       autoRestartTimerRef.current = undefined
       autoRestartStateRef.current = recordAutoRestartAttempt(autoRestartStateRef.current, Date.now())
-      restartSidecarAutomatic()
-        .then(() => {
-          markReady()
+      const episode = recoveryEpisodeRef.current
+      // confirm-before-you-kill: both signals that get us here are weak, and
+      // this is the moment the weakness would cost something irreversible. See
+      // `runtime-gate-sidecar-probe.ts` for why the check sits HERE rather than
+      // in front of the banner.
+      sidecarPortAnswers()
+        .then((answers) => {
+          // A manual Retry (or a restart that already succeeded) ended this
+          // episode while the probe was in flight. Its verdict is about a
+          // sidecar instance that no longer exists, so it decides nothing.
+          if (episode !== recoveryEpisodeRef.current) return undefined
+          if (answers) {
+            // Something is serving on that port, so the process is not gone and
+            // this is not ours to kill. RECONNECT instead of restarting, rather
+            // than stopping here: leaving `status` on 'error' would disarm
+            // `useBackendDownSignal` below for good, so a branch meant to be
+            // gentler than a restart would end up costing the app its ability to
+            // notice the next outage at all. `reconnectSidecar` — not
+            // `initializeRuntimeConfig`, which keeps an existing token — because
+            // a rotated sidecar token is a leading suspect here: it fails every
+            // authenticated call while `/health`, which needs none, answers fine.
+            return reconnectSidecar().then(() => {
+              if (episode !== recoveryEpisodeRef.current) return
+              markReady()
+            })
+          }
+          return restartSidecarAutomatic().then(() => {
+            // Checked again: the restart itself takes time, and the person may
+            // have pressed Retry during it. We cannot recall a command already
+            // sent — that needs the check and the kill to happen together inside
+            // the supervisor that owns the process — but we can at least not
+            // report a stale episode's success as the current state.
+            if (episode !== recoveryEpisodeRef.current) return
+            markReady()
+          })
         })
         .catch((error: unknown) => {
+          // Same test, and for the sharper reason: without it a failed attempt
+          // from an abandoned episode would schedule the NEXT one, reviving a
+          // recovery loop the person had already taken over.
+          if (episode !== recoveryEpisodeRef.current) return
           setMessage(errorMessage(error))
           scheduleAutoRestart()
         })
@@ -172,7 +224,11 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
     scheduleAutoRestart()
   })
 
-  useEffect(() => clearScheduledAutoRestart, [clearScheduledAutoRestart])
+  // `endRecoveryEpisode`, not just the timer: unmounting has to invalidate a
+  // probe that is already in flight too, or its verdict comes back after the
+  // component is gone and restarts a sidecar nobody is watching — during an HMR
+  // reload, a root remount, or app shutdown.
+  useEffect(() => endRecoveryEpisode, [endRecoveryEpisode])
 
   // R-F13 — listen for `sidecar-restarted` Tauri events so a sidecar token
   // rotation propagates into `currentApiToken` before `useStudioEventStream`
@@ -200,8 +256,7 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
   // `::restart`) and always wins any race with a pending automatic attempt —
   // cancel the timer first so the two never fire back-to-back into the shell.
   function handleRetry(): void {
-    clearScheduledAutoRestart()
-    autoRestartStateRef.current = initialAutoRestartState()
+    endRecoveryEpisode()
     setAttempt((value) => value + 1)
   }
 

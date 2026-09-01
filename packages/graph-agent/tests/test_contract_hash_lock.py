@@ -31,9 +31,14 @@ EXPECTED_CONTRACT_HASHES = {
     # docs/skill-spec/01-PORTABLE-GSKILL-V1.md (audited-ready); its own
     # 00-FORMAT-GROUND-TRUTH.md is superseded. Both repos carry a file by
     # this name, so an unqualified "00" was a two-referent ambiguity.
-    # Text-only change: no field, rule, or template was altered, so no
-    # engine code or contract map moves with it.
-    "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "899aa20009ddabed1f07b4281ab0c3c65482961bbe93c0cea118a8bd95e6a14b",
+    # The pointer is deliberately STATELESS: it names which repo owns the new
+    # format and stops there, because copying the other repo's status values
+    # (audited-ready / superseded / phase progress) would fork a second,
+    # staleable copy of facts that document owns — F-T3 is already queued to
+    # flip that document's status, which would have falsified a copy on
+    # arrival. Text-only change: no field, rule, or template was altered, so
+    # no engine code or contract map moves with it.
+    "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "d442e4dcb0dcefdc855f88efc9a015e318d6753decdd573beffceeeb6ae98200",
     # Re-pinned 2026-08-15 (PR E, legacy execution family removal): the
     # CallbackEvent union dropped the ten zero-emitter event classes
     # (ValidationPass/ValidationFail/Retry/RetryExhausted/ModelResolved/

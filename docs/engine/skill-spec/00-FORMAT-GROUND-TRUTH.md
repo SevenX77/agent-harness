@@ -15,7 +15,7 @@ supersedes:
 由此得出三条边界：
 
 - 本文仍是本仓 loader/compiler、contract maps、测试 fixture 与 Studio Properties 面板所消费格式的唯一真相源，在本仓内不得被绕过；
-- 本文**不**定义新 engine 的格式。**新格式的权威是新仓 `graph-skill-runtime` 的 `docs/skill-spec/01-PORTABLE-GSKILL-V1.md`**（`status: audited-ready`）；新仓自己那份同名 `00-FORMAT-GROUND-TRUTH.md` 已被它取代（`status: superseded`）。注意两个仓各有一份 `00-FORMAT-GROUND-TRUTH.md`，引用时必须指明是哪一个仓的；
+- 本文**不**定义新 engine 的格式。**新格式的权威是新仓 `graph-skill-runtime` 的 `docs/skill-spec/01-PORTABLE-GSKILL-V1.md`**；该文档的当前状态与适用范围以它自身的 frontmatter 为准，本文不复制这些会变的取值。注意两个仓各有一份 `00-FORMAT-GROUND-TRUTH.md`，引用时必须指明是哪一个仓的，本文指的始终是**本仓**这一份；
 - 这里的 `FROZEN` 表示**本文正文不再随新格式演进**（新格式的演进落在新仓），不表示本文是跨仓的当前格式规范。
 
 跨仓指针的实况与本次修订的举证链见同目录 [`README.md`](./README.md) 的「修订记录」。

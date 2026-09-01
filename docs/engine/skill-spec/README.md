@@ -10,11 +10,11 @@ updated: 2026-09-01
 
 [`00-FORMAT-GROUND-TRUTH.md`](./00-FORMAT-GROUND-TRUTH.md) 是**本仓** `packages/graph-agent` 所接受的 `graph_skill` 文件格式模板唯一真相源。它的状态是 `FROZEN`，仍被本仓代码与 contract maps 消费。它**不**定义新 engine 仓的格式，边界见下一段。
 
-独立 Graph Skill Runtime 的 portable gSkill v1 格式**已经实现**，它的格式真相源在**新仓** `graph-skill-runtime`（远端 `SevenX77/graph-skill-runtime`）的 `docs/skill-spec/01-PORTABLE-GSKILL-V1.md`，该文 frontmatter 为 `status: audited-ready`、`ssot: graph_skill_format_templates`，开篇原文：「Phase 2 已完成原子切换：production compile、predict、run、inspect、SDK、CLI 与 MCP 只读取本文格式；legacy v0.3 parser 只在显式 `gskill migrate studio-skill` converter 边界可达。」它提出的根 `SKILL.md` + `graph.yaml` + phase `AGENT.md` + 扁平 `graphs/` registry 就是新仓当前的实现形态，不再是「未来目标」。
+**新 engine 的格式权威不在本仓**：它是独立仓库 `graph-skill-runtime`（远端 `SevenX77/graph-skill-runtime`）的 `docs/skill-spec/01-PORTABLE-GSKILL-V1.md`（portable gSkill v1 格式规范）。该文档的**当前状态、适用范围与演进进度一律以它自身的 frontmatter 与正文为准**；本文只登记「哪份文档是哪件事的权威」这一条不变的事实，不在此复制任何会变的状态取值或进度描述——复制一次就等于造出第二份会过期的并行副本。
 
-**两个 `00-FORMAT-GROUND-TRUTH.md` 是不同的文件，不要混指。** 新仓那一份已是 `status: superseded`、`superseded_by: ./01-PORTABLE-GSKILL-V1.md`，只留作 converter 输入契约与历史证据；**本目录**这一份 [`00-FORMAT-GROUND-TRUTH.md`](./00-FORMAT-GROUND-TRUTH.md) 仍是本仓 `packages/graph-agent` 所消费格式的真相源。按 [`gskill-restructure-decision-2026-08-31.md`](../../design/gskill-restructure-decision-2026-08-31.md) §4.2「engine 的唯一 owner 立即收敛到 graph-skill-runtime」——原文「本仓 `packages/graph-agent` **冻结为只读镜像**，只接受『从新仓回灌』这一个方向的变更」——本仓 `00` 的效力范围随之收窄为**已冻结的本仓 engine 代码**；新格式的权威只在新仓 `01-PORTABLE-GSKILL-V1.md`，本目录不另立一套，也不再需要「实现后再 cutover」这一前置条件（cutover 已在新仓内部完成）。
+**两个仓各有一份 `00-FORMAT-GROUND-TRUTH.md`，引用时必须指明是哪一个仓的。** 新仓那一份的状态与效力以新仓自身文档为准（顺上一段的指针去读）；**本目录**这一份 [`00-FORMAT-GROUND-TRUTH.md`](./00-FORMAT-GROUND-TRUTH.md) 是本仓 `packages/graph-agent` 所消费格式的真相源。按 [`gskill-restructure-decision-2026-08-31.md`](../../design/gskill-restructure-decision-2026-08-31.md) §4.2「engine 的唯一 owner 立即收敛到 graph-skill-runtime」——原文「本仓 `packages/graph-agent` **冻结为只读镜像**，只接受『从新仓回灌』这一个方向的变更」——本仓 `00` 的效力范围因此限于**已冻结的本仓 engine 代码**；新格式不在本目录另立一套。
 
-新仓 runtime 的实现进度、验收边界与发布状态由新仓 `docs/design/v1-alignment.md` 自己维护；本文只给指针，不复制它的状态，以免留下第二份会过期的并行副本。本仓 [`../graph-skill-runtime/v1-alignment.md`](../graph-skill-runtime/v1-alignment.md) 是 2026-08-28 提取设计当时（PR #1046）的本仓快照，已落后于新仓同名文档，不作为格式或进度依据。
+新仓 runtime 的实现进度、验收边界与发布状态由新仓自己的文档维护（`docs/design/v1-alignment.md`）；本文同样只给指针，不复制其状态。本仓 [`../graph-skill-runtime/v1-alignment.md`](../graph-skill-runtime/v1-alignment.md) 是 2026-08-28 提取设计当时（PR #1046）落在本仓的一份快照，**不随新仓更新**，因此不作为格式或进度依据。
 
 当前规则：
 
@@ -53,7 +53,7 @@ updated: 2026-09-01
 **被什么实证推翻**（按仓规「三道检验」，三道同向）：
 
 1. **日期**：本文这句由 PR #1046（`be6edcf3`，2026-08-28）写下；新仓同日的 `1e1a3540`（PR #5，`feat: adopt portable gSkill v1 format`）已把该格式实现并切换为唯一读取格式。两者时间上擦肩而过，本文自落笔即滞后。
-2. **原话**：新仓 `docs/skill-spec/01-PORTABLE-GSKILL-V1.md` frontmatter `status: audited-ready`（非 `drafted`）、`ssot: graph_skill_format_templates`，正文「Phase 2 已完成原子切换：production compile、predict、run、inspect、SDK、CLI 与 MCP 只读取本文格式」；同仓 `docs/skill-spec/00-FORMAT-GROUND-TRUTH.md` 已 `status: superseded`、`superseded_by: ./01-PORTABLE-GSKILL-V1.md`。「尚未实现」与「没有替代当前 `00`」两句因此均被推翻——后者仅对**本仓**的 `00` 仍成立，对**新仓**的 `00` 已不成立。
+2. **原话**（以下是 **2026-09-01 核对新仓 `main` 当时**读到的取值，属当日观察记录，**不是对新仓当前状态的断言**——新仓状态随时可变，要用就去读新仓文档自身）：`docs/skill-spec/01-PORTABLE-GSKILL-V1.md` 的 frontmatter 当时为 `status: audited-ready`（**非** `drafted`）、`ssot: graph_skill_format_templates`，正文当时写「Phase 2 已完成原子切换：production compile、predict、run、inspect、SDK、CLI 与 MCP 只读取本文格式」；同仓 `docs/skill-spec/00-FORMAT-GROUND-TRUTH.md` 当时为 `status: superseded`、`superseded_by: ./01-PORTABLE-GSKILL-V1.md`。据此，「尚未实现」与「没有替代当前 `00`」两句均被推翻——后者仅对**本仓**的 `00` 仍成立，对**新仓**的 `00` 已不成立。
 3. **第一性原理**：原句把两件事捆在一句里——「提出某结构」（仍为真）与「尚未实现」（已为假）；且「替代当前 `00`」中的 `00` 未限定属于哪个仓，一个词指向两个文件，本身就是一次歧义。本次修订按「指代落到唯一对象」把两个 `00` 分别限定，并按「文档事实唯一所有权」只留指针、不复制新仓的进度状态。
 
 **同批改动**：`00-FORMAT-GROUND-TRUTH.md` 卷首新增「适用范围边界」一节，明确其 `FROZEN` 只覆盖已冻结的本仓 engine 代码（依据同一决议 §4.2）。该文件受 `packages/graph-agent/tests/test_contract_hash_lock.py` 的 SHA-256 哈希锁保护，已在同一 PR 内重钉。

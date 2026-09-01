@@ -142,43 +142,43 @@ function fileHash(file) {
  * drift, and the ledger already records that shape of defect (P11, #732 — a
  * hand-copied SDK module tree in JS that the Python side outgrew).
  */
+// One package's source tree against its vendored copy: what differs, and in
+// which direction. Three separable questions, kept separable.
+function comparePackageTree(packageName, sourceRoot, vendorRoot) {
+  const sourceFiles = collectPackageFiles(sourceRoot)
+  const vendorFiles = collectPackageFiles(vendorRoot)
+  if (sourceFiles === null) return [`${packageName}: no sources at ${sourceRoot}`]
+  if (vendorFiles === null) return [`${packageName}: not vendored at ${vendorRoot}`]
+
+  const vendored = new Set(vendorFiles)
+  const sourced = new Set(sourceFiles)
+  const resolve = (root, file) => path.join(root, ...file.split('/'))
+
+  const missing = sourceFiles
+    .filter((file) => !vendored.has(file))
+    .map((file) => `${packageName}/${file}: in the sources, missing from the snapshot`)
+  const differing = sourceFiles
+    .filter((file) => vendored.has(file))
+    .filter((file) => fileHash(resolve(sourceRoot, file)) !== fileHash(resolve(vendorRoot, file)))
+    .map((file) => `${packageName}/${file}: the snapshot holds a different version`)
+  const orphaned = vendorFiles
+    .filter((file) => !sourced.has(file))
+    .map((file) => `${packageName}/${file}: in the snapshot, gone from the sources`)
+
+  return [...missing, ...differing, ...orphaned]
+}
+
 function packageSourceDrift({
   packages = LOCAL_PACKAGE_SOURCES,
   target = sitePackages(),
 } = {}) {
-  const drift = []
-  for (const packageInfo of packages) {
-    const vendorRoot = packageInfo.vendorRoot ?? path.join(target, packageInfo.packageName)
-    const sourceFiles = collectPackageFiles(packageInfo.sourceRoot)
-    const vendorFiles = collectPackageFiles(vendorRoot)
-    if (sourceFiles === null) {
-      drift.push(`${packageInfo.packageName}: no sources at ${packageInfo.sourceRoot}`)
-      continue
-    }
-    if (vendorFiles === null) {
-      drift.push(`${packageInfo.packageName}: not vendored at ${vendorRoot}`)
-      continue
-    }
-    const vendored = new Set(vendorFiles)
-    const sourced = new Set(sourceFiles)
-    for (const file of sourceFiles) {
-      if (!vendored.has(file)) {
-        drift.push(`${packageInfo.packageName}/${file}: in the sources, missing from the snapshot`)
-        continue
-      }
-      const sourceFile = path.join(packageInfo.sourceRoot, ...file.split('/'))
-      const vendorFile = path.join(vendorRoot, ...file.split('/'))
-      if (fileHash(sourceFile) !== fileHash(vendorFile)) {
-        drift.push(`${packageInfo.packageName}/${file}: the snapshot holds a different version`)
-      }
-    }
-    for (const file of vendorFiles) {
-      if (!sourced.has(file)) {
-        drift.push(`${packageInfo.packageName}/${file}: in the snapshot, gone from the sources`)
-      }
-    }
-  }
-  return drift
+  return packages.flatMap((packageInfo) =>
+    comparePackageTree(
+      packageInfo.packageName,
+      packageInfo.sourceRoot,
+      packageInfo.vendorRoot ?? path.join(target, packageInfo.packageName),
+    ),
+  )
 }
 
 function localPackageSourcesAreVendored(options = {}) {
@@ -276,13 +276,10 @@ function rebuildVendor({
 }
 
 function snapshotDrift(options = {}) {
-  const drift = []
-  if (!canImportVendoredPackages(options)) {
-    drift.push('the vendored interpreter cannot import the SDK packages')
-  }
-  drift.push(...packageSourceDrift(options))
-  drift.push(...vendorStampDrift(options))
-  return drift
+  const importFailure = canImportVendoredPackages(options)
+    ? []
+    : ['the vendored interpreter cannot import the SDK packages']
+  return [...importFailure, ...packageSourceDrift(options), ...vendorStampDrift(options)]
 }
 
 // Only the first few, so a package-wide rename does not bury the fix under a

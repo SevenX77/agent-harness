@@ -7,15 +7,15 @@
   A Tauri release build that is missing its resources does not fail loudly. When
   the packaged resource root has no `vendor/`, `resource_root_for_runtime_mode`
   (apps/studio/tauri/src/sidecar.rs) falls back to `default_tauri_dir()`, which
-  is `env!("CARGO_MANIFEST_DIR")` — the absolute path of the source tree ON THE
+  is `env!("CARGO_MANIFEST_DIR")` -- the absolute path of the source tree ON THE
   MACHINE THAT COMPILED IT, baked into the binary. That path still exists on the
   builder's own box, so a broken package launches perfectly there and fails only
   for a user who has no `D:\coding\agent-harness\...` directory.
 
   Building an installer therefore proves nothing on its own. This script closes
   that gap by installing the artifact and asserting that everything the app
-  resolves from its resource root — the sidecar's interpreter, vendored
-  site-packages and backend, plus the one-click CLI installer script — lands
+  resolves from its resource root -- the sidecar's interpreter, vendored
+  site-packages and backend, plus the one-click CLI installer script -- lands
   UNDER the install directory. It is the difference between "the bundler
   produced a file" and "the file installs a working app".
 
@@ -49,14 +49,14 @@ Write-Host "Looking for an installer under $BundleDir"
 $setup = Get-ChildItem -Path $BundleDir -Filter '*-setup.exe' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
-if (-not $setup) { Fail "no *-setup.exe in $BundleDir — the bundler produced no installer" }
+if (-not $setup) { Fail "no *-setup.exe in $BundleDir -- the bundler produced no installer" }
 Write-Host ("Installer: {0} ({1:N1} MB)" -f $setup.Name, ($setup.Length / 1MB))
 
 $installDir = Join-Path ([System.IO.Path]::GetTempPath()) 'studio-package-check'
 if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
 
 # NSIS takes everything after `/D=` literally to the end of the command line, so
-# the switch must come last and the path must NOT be quoted — even when it
+# the switch must come last and the path must NOT be quoted -- even when it
 # contains spaces. That rules out passing the switches as separate list
 # elements: PowerShell quotes any element containing a space when it assembles
 # the command line, and NSIS would then read the quote as part of the directory
@@ -79,16 +79,16 @@ Write-Host "Installed: $($exe.Name)"
 # sidecar.rs builds them: `vendor/python/<triple>/python.exe`,
 # `vendor/site-packages`, and `vendor/backend`.
 #
-# On Windows the resource root IS the install directory — Tauri's NSIS installer
+# On Windows the resource root IS the install directory -- Tauri's NSIS installer
 # lays bundled resources out beside the executable, with no `resources/`
 # subdirectory (that is a macOS `.app` shape). Getting this wrong is not a
 # theoretical risk: the first version of this script looked under `resources\`,
 # found nothing, and reported a perfectly good package as broken.
 #
 # The fourth entry is not the sidecar's. The one-click CLI installer button
-# resolves ITS script the same way — `cli_installer_script()` in
+# resolves ITS script the same way -- `cli_installer_script()` in
 # apps/studio/tauri/src/lib.rs looks under
-# `<resource root>/vendor/resources/scripts/` — and it fails differently from
+# `<resource root>/vendor/resources/scripts/` -- and it fails differently from
 # the other three: a missing sidecar is an app that will not start, while a
 # missing installer script leaves a button on screen that is guaranteed to
 # answer `installer script missing at ...` the moment anyone presses it. That
@@ -113,7 +113,7 @@ foreach ($name in $required.Keys) {
     }
 }
 if ($missing.Count -gt 0) {
-    Fail ("the installed app is missing: {0}. It would still start on the machine that built it, because sidecar.rs falls back to the compile-time source path — which is exactly the failure this check exists to catch." -f ($missing -join ', '))
+    Fail ("the installed app is missing: {0}. It would still start on the machine that built it, because sidecar.rs falls back to the compile-time source path -- which is exactly the failure this check exists to catch." -f ($missing -join ', '))
 }
 
 # The point of the whole exercise: every resolved path is inside the install
@@ -129,9 +129,9 @@ foreach ($name in $required.Keys) {
 # that exists but holds no engine passes every check above and still cannot run.
 #
 # Printing where the import RESOLVED, rather than just that it worked, is what
-# makes this the real test: it is the same question the whole script asks — did
+# makes this the real test: it is the same question the whole script asks -- did
 # the app load its own bundled copy, or something that happens to be on this
-# machine — answered by the interpreter itself.
+# machine -- answered by the interpreter itself.
 $env:PYTHONPATH = $required['vendored site-packages']
 $probe = 'import graph_agent, graph_agent_gateway; print(graph_agent.__file__)'
 $resolvedEngine = & $required['python interpreter'] -c $probe
@@ -143,10 +143,30 @@ if (-not $resolvedEngine.StartsWith($installDir, [System.StringComparison]::Ordi
 }
 Write-Host "  OK   installed interpreter imports graph_agent from $resolvedEngine"
 
+# The installed app must be able to say WHICH engine it carries, not only that it
+# carries one. On a developer's box the launcher gate answers that by comparing
+# the snapshot against the working tree (`ensure_vendor.js`); a user has no
+# working tree, so the stamp `build_vendor.py` writes into the snapshot is the
+# only thing that can name the sources the shipped engine came from -- in the
+# app's own logs, and in any bug report about it. Asserting it here is what keeps
+# the release chain from quietly shipping an anonymous snapshot: this job runs a
+# real `tauri build`, so a stamp missing from the package means the build step
+# that writes it did not run.
+$stampPath = Join-Path $required['vendored site-packages'] 'vendor-stamp.json'
+if (-not (Test-Path $stampPath)) {
+    Fail "the installed snapshot carries no vendor-stamp.json, so nothing can say which engine sources it holds"
+}
+$stamp = Get-Content $stampPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($stamp.source_digest)) {
+    Fail "vendor-stamp.json names no source_digest, so it attests to nothing"
+}
+Write-Host ("  OK   snapshot stamped: sources {0}, built {1}, python {2}" -f `
+    $stamp.source_digest.Substring(0, 12), $stamp.built_at, $stamp.python_version)
+
 # Nothing a user downloads should be an archive the BUILD needed. `vendor/` is
 # shipped whole (`bundle.resources: vendor/**/*`), so anything left in it rides
 # along: the download cache used to sit at `vendor/downloads/` and put 48.9 MB
-# of .tar.gz/.tar.xz into a 154.7 MB installer — a third of it, for files
+# of .tar.gz/.tar.xz into a 154.7 MB installer -- a third of it, for files
 # nothing opens after the build (ledger D4). The cache now lives outside the
 # payload; this makes that stay true.
 $archives = Get-ChildItem $installDir -Recurse -File -Include '*.tar.gz', '*.tar.xz', '*.tar.bz2' -ErrorAction SilentlyContinue

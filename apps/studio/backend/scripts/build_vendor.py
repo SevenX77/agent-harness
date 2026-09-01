@@ -14,16 +14,22 @@ Two correctness rules this script enforces (both were latent bugs before):
   2. Install the full workspace closure, including the local ``graph-agent`` /
      ``graph-agent-gateway`` packages, so the bundled sidecar can ``import
      graph_agent`` at startup.
+
+The build also leaves a provenance stamp (``vendor-stamp.json``) inside the
+snapshot. See ``build_stamp`` for what it records and why.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import logging
 import platform
 import shutil
 import subprocess
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="[build_vendor] %(message)s")
@@ -32,6 +38,9 @@ logger = logging.getLogger("build_vendor")
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 STUDIO_DIR = BACKEND_DIR.parent
 DEFAULT_TARGET = STUDIO_DIR / "tauri" / "vendor" / "site-packages"
+
+STAMP_FILENAME = "vendor-stamp.json"
+STAMP_SCHEMA = 1
 
 _TRIPLE_BY_HOST: dict[tuple[str, str], str] = {
     ("darwin", "arm64"): "aarch64-apple-darwin",
@@ -129,6 +138,138 @@ def install_local_wheels(*, python: Path, local_paths: list[str], target: Path, 
         )
 
 
+def iter_source_files(root: Path) -> list[str]:
+    """Every file the wheel ships for a package, relative, ``/``-separated, sorted.
+
+    ``__pycache__`` and dotfiles are excluded: bytecode is an output of importing
+    the tree, not an input to it, and the wheel carries neither. The launcher
+    gate's ``collectPackageFiles``
+    (``apps/studio/tauri/scripts/ensure_vendor.js``) excludes the same two, so
+    the stamp describes the same file set the gate compares.
+    """
+    files: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if any(part == "__pycache__" or part.startswith(".") for part in relative.parts):
+            continue
+        files.append(relative.as_posix())
+    return sorted(files)
+
+
+def hash_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def source_tree_digest(root: Path) -> str:
+    """One digest for a package's whole source tree.
+
+    Content-addressed, following Bazel's and Nix's treatment of build inputs: an
+    input is identified by what it contains, never by where it sits or when it
+    was last touched. That is the property that makes the value comparable at
+    all -- mtimes and absolute paths differ on every machine and every checkout,
+    so a digest that included them could never be matched against anything.
+
+    Paths are part of the digest as well as contents, so a pure rename moves it.
+    The layout borrows from a wheel's ``RECORD`` (PEP 376): a sorted
+    ``path -> hash`` manifest as the canonical description of an installed tree.
+    What it does NOT borrow is ``RECORD`` itself. ``uv pip install`` writes one
+    per distribution over the INSTALLED files, which answers "was this install
+    corrupted"; the fact needed here is the other one -- which repo state these
+    files came from -- and no per-distribution metadata can express it.
+    """
+    manifest = "".join(f"{relative}\0{hash_file(root / relative)}\n" for relative in iter_source_files(root))
+    return hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+
+
+def package_source_roots(workspace_root: Path, local_paths: list[str]) -> dict[str, Path]:
+    """Map module name -> source root for each local workspace path dep.
+
+    Discovered from the ``src/`` layout rather than by turning ``graph-agent``
+    into ``graph_agent``: the distribution name and the module name are separate
+    facts, and reading the one that exists on disk cannot be wrong about a
+    package that spells them differently.
+    """
+    roots: dict[str, Path] = {}
+    for entry in local_paths:
+        src = workspace_root / entry.strip() / "src"
+        if not src.is_dir():
+            continue
+        for candidate in sorted(src.iterdir()):
+            if (candidate / "__init__.py").is_file():
+                roots[candidate.name] = candidate
+    return roots
+
+
+def build_stamp(
+    *,
+    package_roots: dict[str, Path],
+    built_at: str,
+    python_version: str,
+    target_triple: str,
+) -> dict[str, object]:
+    """The snapshot's account of what it was built from.
+
+    The desktop app's sidecar imports ``graph_agent`` / ``graph_agent_gateway``
+    from this frozen snapshot in dev builds too, so "which engine am I running"
+    is a real question with no other answer. On a developer's machine the
+    launcher gate answers it by comparing the snapshot against the working tree;
+    on an installed app there IS no working tree, and without this file the
+    snapshot is anonymous -- neither the app nor a bug report about it can name
+    the source state it carries.
+
+    Deliberately absent: the absolute path of the interpreter that built it. The
+    stamp ships inside the installer (``bundle.resources: vendor/**/*``), a
+    build-machine path tells a user nothing, and baking one into a shipped file
+    is the mistake ``verify_installed_sidecar.ps1`` exists to catch elsewhere.
+    The interpreter VERSION stays, because that is the ABI the vendored native
+    wheels were built against.
+
+    This stamp is provenance, not enforcement. The launcher gate decides
+    staleness by comparing the actual bytes in both trees, never by trusting a
+    digest recorded here -- a stamp says what a build intended to install, while
+    the bytes say what is there.
+    """
+    packages = {
+        name: {"digest": source_tree_digest(root), "files": len(iter_source_files(root))}
+        for name, root in sorted(package_roots.items())
+    }
+    combined = "".join(f"{name}\0{info['digest']}\n" for name, info in packages.items())
+    return {
+        "schema": STAMP_SCHEMA,
+        "source_digest": hashlib.sha256(combined.encode("utf-8")).hexdigest(),
+        "packages": packages,
+        "built_at": built_at,
+        "python_version": python_version,
+        "target_triple": target_triple,
+    }
+
+
+def write_stamp(target: Path, stamp: dict[str, object]) -> Path:
+    """Write the stamp INSIDE the snapshot it describes.
+
+    Not one level up in ``vendor/``: ``build_vendor(clean=True)`` removes the
+    target before installing, so a stamp stored outside it would survive a build
+    that then failed and go on describing a snapshot that no longer exists.
+    Inside, its lifetime is exactly the snapshot's -- a wiped snapshot correctly
+    reports "no provenance" and the launcher gate rebuilds it.
+    """
+    path = target / STAMP_FILENAME
+    path.write_text(json.dumps(stamp, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def interpreter_version(python: Path) -> str:
+    completed = subprocess.run(
+        [str(python), "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return completed.stdout.strip()
+
+
 def build_vendor(*, python: Path, target: Path, clean: bool = True) -> None:
     if shutil.which("uv") is None:
         raise SystemExit("uv is required to vendor the backend closure; install uv first")
@@ -142,7 +283,22 @@ def build_vendor(*, python: Path, target: Path, clean: bool = True) -> None:
     local_paths, thirdparty = split_local_paths(requirements)
     install_thirdparty(python=python, requirements=thirdparty, target=target, root=workspace_root)
     install_local_wheels(python=python, local_paths=local_paths, target=target, root=workspace_root)
-    logger.info("vendored backend closure (%d local pkgs) into %s", len(local_paths), target)
+
+    # Last, and only on a build that got this far: a stamp written before the
+    # install could describe a snapshot the install then failed to produce.
+    stamp = build_stamp(
+        package_roots=package_source_roots(workspace_root, local_paths),
+        built_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        python_version=interpreter_version(python),
+        target_triple=host_target_triple(),
+    )
+    write_stamp(target, stamp)
+    logger.info(
+        "vendored backend closure (%d local pkgs) into %s, sources %s",
+        len(local_paths),
+        target,
+        str(stamp["source_digest"])[:12],
+    )
 
 
 def main(argv: list[str] | None = None) -> None:

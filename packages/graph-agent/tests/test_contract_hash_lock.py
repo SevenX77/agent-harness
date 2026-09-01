@@ -22,7 +22,18 @@ EXPECTED_CONTRACT_HASHES = {
     # graph_agent fallback — unset stays unset, and a governed compile
     # rejects it as [F-v3-agent-llm-role-missing]. Same PR as the engine
     # change (design and implementation land together).
-    "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "a1834a937f5be9653f0535c6f20829a4e26fb2827a7a9c9b6d3e5064ba5ad6cb",
+    # Re-pinned 2026-09-01 (F-T2, cross-repo pointer currency): added a
+    # scope-boundary section at the top. FROZEN now says what it covers —
+    # the frozen in-repo engine (packages/graph-agent) only — because
+    # docs/design/gskill-restructure-decision-2026-08-31.md §4.2 moved the
+    # sole engine owner to graph-skill-runtime and froze this repo's copy to
+    # a read-only mirror. The NEW format's authority is that repo's
+    # docs/skill-spec/01-PORTABLE-GSKILL-V1.md (audited-ready); its own
+    # 00-FORMAT-GROUND-TRUTH.md is superseded. Both repos carry a file by
+    # this name, so an unqualified "00" was a two-referent ambiguity.
+    # Text-only change: no field, rule, or template was altered, so no
+    # engine code or contract map moves with it.
+    "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "899aa20009ddabed1f07b4281ab0c3c65482961bbe93c0cea118a8bd95e6a14b",
     # Re-pinned 2026-08-15 (PR E, legacy execution family removal): the
     # CallbackEvent union dropped the ten zero-emitter event classes
     # (ValidationPass/ValidationFail/Retry/RetryExhausted/ModelResolved/

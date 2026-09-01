@@ -246,13 +246,24 @@ def _call_method_catalog() -> CallMethodCatalog:
     for definition in table.values():
         # `wire_family` names the family's canonical method, so the family's wire
         # owner is that method's provider_backend (see `wire_backend_for_method`).
-        # Checked once here rather than at every lookup: a dangling family name is
-        # a broken catalog, and the catalog is loaded at a boundary where failing
-        # is free.
-        if definition.wire_family not in table:
+        # Checked once here rather than at every lookup: a broken family name is a
+        # broken catalog, and the catalog is loaded at a boundary where failing is
+        # free.
+        family = table.get(definition.wire_family)
+        if family is None:
             raise ValueError(
                 f"{definition.method_id}: wire_family names no registered call method: "
                 f"{definition.wire_family}"
+            )
+        # The canonical method of a family must be its OWN family. Without this,
+        # a chain (A -> B -> C) loads happily while the one-hop lookup stops at B
+        # and answers with B's vendor rather than the wire C actually owns — the
+        # exact vendor-for-wire confusion `wire_backend_for_method` exists to end.
+        # Requiring self-reference also rules out cycles by construction.
+        if family.wire_family != family.method_id:
+            raise ValueError(
+                f"{definition.method_id}: wire_family {definition.wire_family!r} is not a "
+                f"canonical family (its own wire_family is {family.wire_family!r})"
             )
     protocol_defaults, host_overrides = _endpoint_method_candidates_from_raw(raw, table)
     return CallMethodCatalog(

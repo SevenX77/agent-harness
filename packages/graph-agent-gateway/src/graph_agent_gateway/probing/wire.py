@@ -234,10 +234,14 @@ async def probe_official_call_method(
         status = probe_status(
             answer,
             model_not_found_status="invalid_model",
-            # The WIRE this probe spoke, so `probe_status` can tell a misroute (an
-            # answer describing a DIFFERENT protocol's API) from a real failure on
-            # this one. Omitting it turns that correction off silently, and a
-            # misrouted 401 then reads as "your key is invalid".
+            # The WIRE this probe spoke. It enables exactly one correction in
+            # `probe_status`: an ERROR body that names another protocol's API in so
+            # many words ("OpenAI API error: ...", see
+            # `_FOREIGN_API_ERROR_SIGNATURES`) is a misroute rather than a failure
+            # on this wire. That is a narrow signature check, not general
+            # misroute detection — a 2xx is still taken at face value. Omitting the
+            # argument turns even that off silently, and a misrouted 401 then reads
+            # as "your key is invalid".
             #
             # The wire, not the vendor: `ark_anthropic_messages` and
             # `deepseek_anthropic_messages` belong to Ark and DeepSeek but speak

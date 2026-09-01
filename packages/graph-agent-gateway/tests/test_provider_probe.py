@@ -796,6 +796,45 @@ async def test_official_method_probe_uses_the_wire_not_the_vendor(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("method_id", "probe_base_url", "model_id"),
+    [
+        ("ark_anthropic_messages", "https://ark.cn-beijing.volces.com", "doubao-x"),
+        ("deepseek_anthropic_messages", "https://api.deepseek.com/anthropic", "deepseek-x"),
+    ],
+)
+async def test_vendor_hosted_anthropic_wire_keeps_a_real_bad_key_as_invalid_key(
+    method_id: str, probe_base_url: str, model_id: str
+) -> None:
+    """Passing the WIRE must not turn every 401 on a vendor-hosted Anthropic
+    surface into a protocol verdict.
+
+    The correction keys off a body that NAMES another protocol's API, not off the
+    brand mismatch between wire and vendor. Ark's and DeepSeek's own auth
+    rejections carry no such name, so they stay `invalid_key` — which is what keeps
+    "fix your key" reachable on exactly the two methods whose wire and vendor
+    differ.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"error": {"message": "Authentication failed", "type": "authentication_error"}},
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        method_id,
+        "secret",
+        probe_base_url,
+        model_id,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "invalid_key"
+
+
+@pytest.mark.anyio
 async def test_official_method_probe_own_auth_error_stays_invalid_key() -> None:
     """The correction must not swallow a real auth failure on the MATCHING protocol:
     an anthropic_messages probe answered by Anthropic's own 401 is an invalid key,

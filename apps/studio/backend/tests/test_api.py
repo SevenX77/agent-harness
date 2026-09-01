@@ -1364,42 +1364,72 @@ def test_delete_golden_requires_explicit_browser_fallback_header(
     assert golden_dir.exists()
 
 
-def test_value_error_handler_returns_studio_error_response(client: TestClient) -> None:
-    response = client.get("/api/_debug/value-error")
+def test_an_unclaimed_value_error_answers_the_internal_error_envelope(
+    client: TestClient,
+) -> None:
+    """`ValueError` is not a claimed exception, so it takes the fallback path.
 
-    assert response.status_code == 422
-    body = response.json()
-    assert body == {
-        "error_code": "MANIFEST_VALIDATION_FAILED",
-        "http_status": 422,
-        "message": "Studio debug ValueError",
+    It used to have a global handler that answered 422 with `str(exc)` verbatim.
+    Because `ValueError` is also how internal invariants, path errors and
+    configuration problems are raised throughout the backend, that handler put
+    internal text on screen as though the user had sent bad input, and swallowed
+    the exception before `UnhandledExceptionEnvelopeMiddleware` could give it
+    either the fixed safe message or the server-log traceback. Input validation
+    now raises `BoundaryValidationError`, and a bare `ValueError` is treated as
+    what it is: a defect, answered like any other unclaimed exception.
+
+    This endpoint is deliberately kept rather than deleted. It is the only
+    envelope smoke endpoint that exists in the SHIPPED app — the one place a
+    packaged build can be asked for an error envelope without mounting a test
+    route — and until this change its coverage stopped exactly short of the
+    fallback path. Now it exercises that path and nothing else.
+    """
+    reader = _envelope_reader(client)
+
+    response = reader.get("/api/_debug/value-error")
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error_code": "STUDIO_INTERNAL_ERROR",
+        "http_status": 500,
+        "message": "Internal server error",
         "details": None,
         "retry_strategy": "not_retryable",
     }
+    # The raise site's own text is a server-side fact for the log alone.
+    assert "Studio debug" not in response.text
 
 
 _UNHANDLED_ERROR_PATH = "/api/_test/unhandled-error"
 
 
+def _envelope_reader(client: TestClient) -> TestClient:
+    """A second client on the app under test that READS a 500 instead of raising.
+
+    `raise_server_exceptions=False` is required to inspect the envelope. The
+    middleware re-raises after sending it, deliberately, so an unexpected route
+    crash keeps failing tests loudly; a test that wants to read the reply has to
+    say so, and this is the same opt-out the suite already uses elsewhere for
+    error responses.
+    """
+    reader = TestClient(cast(FastAPI, client.app), raise_server_exceptions=False)
+    reader.headers["Authorization"] = client.headers["Authorization"]
+    return reader
+
+
 def _client_seeing_an_unhandled_route(client: TestClient) -> TestClient:
-    """A client for the app under test, plus one route that raises unclaimed.
+    """An envelope reader, plus one route that raises unclaimed.
 
     The route is mounted on the fixture's own app instance rather than shipped in
-    `app/routers/debug.py`: nothing in the product needs an endpoint whose
+    `app/routers/debug.py`: nothing in the product needs a second endpoint whose
     purpose is to crash the server, and the behaviour under test is a property
     of `create_app()`'s middleware ORDER, which a route added here exercises
     exactly as well. Registering routes after startup is fine — the router is
     the innermost app and resolves its `routes` list per request.
 
-    It must raise something no handler claims. `/api/_debug/value-error` cannot
-    stand in: `ValueError` has a registered handler, and a claimed exception
-    never reaches the middleware at all.
-
-    `raise_server_exceptions=False` is required to READ the envelope. The
-    middleware re-raises after sending it, deliberately, so an unexpected route
-    crash keeps failing tests loudly; a test that wants to inspect the reply has
-    to say so, and this is the same opt-out the suite already uses elsewhere for
-    error responses.
+    `RuntimeError` rather than the shipped endpoint's `ValueError` because the
+    two tests below are about the middleware's treatment of ANY unclaimed
+    exception, not about `ValueError` in particular.
     """
     studio_app = cast(FastAPI, client.app)
 
@@ -1407,9 +1437,7 @@ def _client_seeing_an_unhandled_route(client: TestClient) -> TestClient:
     async def _raise_unhandled() -> None:
         raise RuntimeError("Studio test unhandled RuntimeError")
 
-    reader = TestClient(studio_app, raise_server_exceptions=False)
-    reader.headers["Authorization"] = client.headers["Authorization"]
-    return reader
+    return _envelope_reader(client)
 
 
 def test_an_unhandled_exception_still_reaches_the_server(client: TestClient) -> None:

@@ -32,6 +32,7 @@ from typing import Any
 import yaml
 
 from app.core.adapters.engine import AgentNodeAST, compile_skill, effective_llm_role
+from app.core.exceptions import BoundaryValidationError
 from app.models.llm_config import RoleEntry, RolesData
 from app.models.model_compare import CompareCandidate
 
@@ -81,10 +82,10 @@ def materialize_single_node_skill(skill_dir: Path, node_id: str, dest: Path) -> 
     compiled = compile_skill(skill_dir, cache=False)
     doc = next((n for n in compiled.nodes if n.phase_name == node_id), None)
     if doc is None:
-        raise ValueError(f"node {node_id!r} not found in skill {skill_dir}")
+        raise BoundaryValidationError(f"node {node_id!r} not found in skill {skill_dir}")
     io = getattr(doc.ast, "io", None)
     if io is None:
-        raise ValueError(f"node {node_id!r} has no declared io; cannot compare")
+        raise BoundaryValidationError(f"node {node_id!r} has no declared io; cannot compare")
     io_plain = io.model_dump(mode="json")
 
     graph_fm: dict[str, Any] = {
@@ -128,11 +129,11 @@ def node_effective_role(skill_dir: Path, node_id: str) -> str | None:
     compiled = compile_skill(skill_dir, cache=False)
     doc = next((n for n in compiled.nodes if n.phase_name == node_id), None)
     if doc is None:
-        raise ValueError(f"node {node_id!r} not found in skill {skill_dir}")
+        raise BoundaryValidationError(f"node {node_id!r} not found in skill {skill_dir}")
     if isinstance(doc.ast, AgentNodeAST):
         role = effective_llm_role(doc.ast, compiled.manifest.llm_role)
         if role is None:
-            raise ValueError(
+            raise BoundaryValidationError(
                 f"node {node_id!r} resolves no LLM role: set `llm_role` in the phase "
                 "frontmatter or a graph default `llm_role` in GRAPH.md"
             )

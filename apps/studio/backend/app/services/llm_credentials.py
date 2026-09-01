@@ -22,6 +22,7 @@ from app.core.adapters.atomic_file import read_published_text, write_text_atomic
 from app.core.adapters.gateway import (
     canonicalize_base_url,
 )
+from app.core.exceptions import BoundaryValidationError
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
 from app.services.provider_config import official_endpoint_id_for_host_protocol
@@ -38,6 +39,10 @@ LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE = "Needs retest after v4 provider probe upg
 CATALOG_ONLY_PROBE_MESSAGE = "No verified language route profile."
 _SUPPORTED_CREDENTIALS_SCHEMA_VERSIONS = (4, 5)
 _LEGACY_CREDENTIALS_FIELDS = ("providers", "provider_credentials")
+# What a caller is told to read when their credentials file is refused. Declared
+# beside the schema it documents rather than in the error module: the error
+# module knows how to project a code, not which document explains this file.
+CREDENTIALS_SCHEMA_ERROR_DETAILS = {"docs_path": "docs/development/CREDENTIALS_V4_BOOTSTRAP.md"}
 CURATED_PROVIDER_KIND_BY_ENDPOINT_ID = {
     "anthropic-official": "official",
     "ark-openai-official": "official",
@@ -61,11 +66,19 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     try:
         payload = json.loads(read_published_text(credential_path))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}") from exc
+        raise BoundaryValidationError(
+            f"invalid llm_credentials.json: {credential_path}",
+            error_code="LLM_CREDENTIALS_SCHEMA",
+            details=CREDENTIALS_SCHEMA_ERROR_DETAILS,
+        ) from exc
     try:
         return validate_credentials_payload(payload)
     except ValidationError as exc:
-        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid v5 llm credentials schema: {credential_path}") from exc
+        raise BoundaryValidationError(
+            f"invalid v5 llm credentials schema: {credential_path}",
+            error_code="LLM_CREDENTIALS_SCHEMA",
+            details=CREDENTIALS_SCHEMA_ERROR_DETAILS,
+        ) from exc
 
 
 def validate_credentials_payload(payload: Any) -> LLMCredentialsFile:
@@ -81,10 +94,12 @@ def validate_credentials_payload(payload: Any) -> LLMCredentialsFile:
         schema_version = payload.get("schema_version")
         legacy = sorted(field for field in _LEGACY_CREDENTIALS_FIELDS if field in payload)
         if schema_version not in _SUPPORTED_CREDENTIALS_SCHEMA_VERSIONS or legacy:
-            raise ValueError(
-                "LLM_CREDENTIALS_SCHEMA: credentials must use schema_version 4 or 5; "
+            raise BoundaryValidationError(
+                "credentials must use schema_version 4 or 5; "
                 f"legacy provider credentials are rejected (schema_version={schema_version!r}, "
-                f"legacy_fields={legacy})"
+                f"legacy_fields={legacy})",
+                error_code="LLM_CREDENTIALS_SCHEMA",
+                details=CREDENTIALS_SCHEMA_ERROR_DETAILS,
             )
         payload = _upgrade_v4_payload_to_v5(payload)
     return _normalize_loaded_credentials(LLMCredentialsFile.model_validate(payload))
@@ -320,9 +335,9 @@ def upsert_routes(
             else:
                 route = ProviderRoute.model_validate(payload)
             if route.route_id != route_id:
-                raise ValueError(f"route payload key does not match route_id: {route_id}")
+                raise BoundaryValidationError(f"route payload key does not match route_id: {route_id}")
             if route.endpoint_id not in data.provider_endpoints:
-                raise ValueError(f"route references unknown endpoint: {route.endpoint_id}")
+                raise BoundaryValidationError(f"route references unknown endpoint: {route.endpoint_id}")
             routes[route_id] = route
         data = data.model_copy(update={"provider_routes": routes})
         _save_credentials_unlocked(data, credential_path)

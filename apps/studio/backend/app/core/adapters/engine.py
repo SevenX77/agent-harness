@@ -118,6 +118,7 @@ from graph_agent.core.topology_projection import read_subgraph_path as read_subg
 from graph_agent_gateway import answer_restarts_here
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
+from app.core.exceptions import BoundaryValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,13 @@ _SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
 
 
 def _safe_studio_segment(value: str, label: str) -> str:
+    """Reject a skill_id / artifact_id that is not a single safe path segment.
+
+    A boundary rejection, not an invariant: both values arrive from the caller —
+    ``skill_id`` out of the request URL, ``artifact_id`` out of a request body —
+    and this is the first check either meets, so the caller is told which one is
+    malformed rather than being handed a 500.
+    """
     segment = Path(value).name
     if (
         not value
@@ -135,7 +143,7 @@ def _safe_studio_segment(value: str, label: str) -> str:
         or "\\" in value
         or not _SAFE_STUDIO_SEGMENT_RE.fullmatch(value)
     ):
-        raise ValueError(f"Invalid {label}: {value}")
+        raise BoundaryValidationError(f"Invalid {label}: {value}")
     return segment
 
 

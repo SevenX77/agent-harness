@@ -82,10 +82,11 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
 # The one code a CALLER may not select. `STUDIO_INTERNAL_ERROR` is the framework's
 # answer for an exception nobody claimed, and its message is a fixed placeholder
 # precisely so that internal detail reaches the log and not the UI. A
-# caller-chosen message would defeat that: both routes below let a caller name a
-# code AND supply the text, so `raise ValueError("STUDIO_INTERNAL_ERROR: <a path
-# with a secret in it>")` would be recognized by the prefix protocol and echoed
-# verbatim. It stays registered in the map above because that is where a code's
+# caller-chosen message would defeat that: every route below lets a caller name a
+# code AND supply the text, so a selectable `STUDIO_INTERNAL_ERROR` would be a way
+# to put `<a path with a secret in it>` on screen under the one code whose whole
+# point is that its message says nothing. It stays registered in the map above
+# because that is where a code's
 # HTTP projection is declared and where the exhaustive test over those
 # projections looks (the map is NOT the whole of Studio's error-code vocabulary:
 # `NOT_IMPLEMENTED` and `HTTP_ERROR` in this file, and `UNAUTHORIZED` /
@@ -132,6 +133,66 @@ class StudioHTTPException(HTTPException):
             retry_strategy=definition.retry_strategy,
         )
         super().__init__(status_code=definition.http_status, detail=response.model_dump())
+
+
+class BoundaryValidationError(ValueError):
+    """Input that failed validation at the boundary where it entered the backend.
+
+    This type exists to separate two things a bare ``ValueError`` cannot tell
+    apart. One is "what arrived is not valid input" — a request field, a path
+    segment, or a config file on disk that the user edits — which the caller has
+    to be told about in words, as a 422. The other is "this code reached a state
+    it declared impossible", which is a defect: its text names internal paths and
+    state, belongs in the server log, and must reach the UI as nothing but
+    ``STUDIO_INTERNAL_ERROR``.
+
+    There is deliberately NO global ``ValueError`` handler, so every
+    ``ValueError`` that is not this class is the second kind by default and a
+    raise site opts into the first kind explicitly. The handler that used to
+    claim all of them answered 422 with ``str(exc)`` verbatim, which meant an
+    invariant violation anywhere in the backend presented its own internal text
+    as though the user had sent bad input, and never reached
+    ``UnhandledExceptionEnvelopeMiddleware`` — so it got neither the fixed safe
+    message nor the traceback the server logs for an unclaimed exception.
+
+    Which sites qualify: the raise must be the FIRST check a value from outside
+    the backend meets. A defence-in-depth guard on data Studio itself produced,
+    an adapter or dependency-injection construction check, and a schema check on
+    data bundled inside the app are all the second kind — a caller cannot act on
+    them, and a 422 would blame a request that was in fact fine.
+
+    Subclasses ``ValueError`` rather than ``Exception``, for two reasons that
+    both predate this class: the read layer already tolerates a malformed config
+    file with ``except ValueError`` in a dozen places, and Pydantic converts only
+    ``ValueError`` and ``AssertionError`` raised inside a validator into a
+    ``ValidationError``. The ancestry costs nothing, because handler lookup is by
+    type: Starlette walks ``type(exc).__mro__`` and finds this class first.
+
+    ``error_code`` is a keyword field and NOT a prefix on the message. Its
+    predecessor parsed ``str(exc)`` for a ``"CODE: text"`` shape, which handed
+    the HTTP status to the message text — a sentence that happened to open with a
+    capitalized word and a colon selected a code, and any prefix that matched
+    nothing fell through to a 422 echoing the raw text. An unregistered or
+    framework-reserved code is refused here at construction, the same way
+    :class:`StudioHTTPException` refuses one, so a malformed envelope cannot be
+    built and then discovered on the way out.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "MANIFEST_VALIDATION_FAILED",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        definition = _caller_selectable(error_code)
+        if definition is None:
+            raise KeyError(error_code)
+        super().__init__(message)
+        self.error_code = error_code
+        self.http_status = definition.http_status
+        self.retry_strategy = definition.retry_strategy
+        self.details = details
 
 
 def error_response(
@@ -230,7 +291,7 @@ def _json_response(response: ErrorResponse) -> JSONResponse:
     """Project an envelope, replacing a reserved code's outright.
 
     A backstop, not the boundary. The boundary is construction: the three ways to
-    NAME a code — `StudioHTTPException`, the ValueError prefix protocol, and
+    NAME a code — `StudioHTTPException`, `BoundaryValidationError`, and
     `error_response` — each refuse the reserved one, so a reserved envelope
     cannot legitimately exist outside `internal_error_response`. What reaches
     here with one anyway got there by hand-building an `ErrorResponse` or a raw
@@ -276,46 +337,26 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
     return _json_response(response)
 
 
-async def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
-    standard_response = _standard_error_from_value_error(exc)
-    if standard_response is not None:
-        return _json_response(standard_response)
+async def boundary_validation_error_handler(
+    _request: Request,
+    exc: BoundaryValidationError,
+) -> JSONResponse:
+    """Project a boundary rejection, message included.
 
-    response = error_response(
-        error_code="MANIFEST_VALIDATION_FAILED",
-        http_status=422,
-        message=str(exc),
-        details=None,
-        retry_strategy="not_retryable",
+    The message is safe to send BY CONSTRUCTION rather than by inspection: the
+    only way to reach this handler is to raise the class above, and the class is
+    documented as the one a raise site picks when it has something the caller
+    needs to read. Nothing here parses, filters or guesses at the text.
+    """
+    return _json_response(
+        error_response(
+            error_code=exc.error_code,
+            http_status=exc.http_status,
+            message=str(exc),
+            details=exc.details,
+            retry_strategy=exc.retry_strategy,
+        ),
     )
-    return _json_response(response)
-
-
-def _standard_error_from_value_error(exc: ValueError) -> ErrorResponse | None:
-    text = str(exc)
-    raw_code, separator, raw_message = text.partition(":")
-    error_code = raw_code.strip()
-    definition = _caller_selectable(error_code)
-    if definition is None:
-        return None
-
-    return error_response(
-        error_code=error_code,
-        http_status=definition.http_status,
-        message=raw_message.strip() if separator else _default_standard_error_message(error_code),
-        details=_standard_error_details(error_code),
-        retry_strategy=definition.retry_strategy,
-    )
-
-
-def _standard_error_details(error_code: str) -> dict[str, Any] | None:
-    if error_code == "LLM_CREDENTIALS_SCHEMA":
-        return {"docs_path": "docs/development/CREDENTIALS_V4_BOOTSTRAP.md"}
-    return None
-
-
-def _default_standard_error_message(error_code: str) -> str:
-    return error_code.lower().replace("_", " ").capitalize()
 
 
 async def file_not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
@@ -369,7 +410,10 @@ async def skill_compile_error_handler(_request: Request, exc: GraphCompileError)
 def register_exception_handlers(app: FastAPI) -> None:
     """Install all Studio exception handlers on a FastAPI app."""
     app.add_exception_handler(HTTPException, cast(ExceptionHandler, http_exception_handler))
-    app.add_exception_handler(ValueError, cast(ExceptionHandler, value_error_handler))
+    app.add_exception_handler(
+        BoundaryValidationError,
+        cast(ExceptionHandler, boundary_validation_error_handler),
+    )
     app.add_exception_handler(FileNotFoundError, cast(ExceptionHandler, file_not_found_handler))
     app.add_exception_handler(ValidationError, cast(ExceptionHandler, validation_error_handler))
     app.add_exception_handler(

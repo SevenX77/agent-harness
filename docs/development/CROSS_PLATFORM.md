@@ -103,6 +103,18 @@ bug 的温床：同一份代码在中文 Windows、英文 macOS、Linux CI 上�
 - 开发工作流脚本以 bash 为准（Windows 走 Git Bash），行尾由
   `.gitattributes` 钉死 LF——CRLF 的 bash 脚本会直接报错。
 - Windows 专用入口用 `.ps1`（如 `studio-dev.ps1`），检出为 CRLF。
+- **`.ps1` 源码只写 ASCII 字符——非 ASCII 可以让脚本直接解析失败。**
+  依据（2026-09-01 实测，PR #1088）：`.gitattributes` 规定 `.ps1` 不带
+  BOM 入库，而 Windows PowerShell 5.1 对无 BOM 的 `.ps1` 按**系统 ANSI
+  代码页**解码（中文机是 cp936/GBK）。UTF-8 编码的中文或 U+2014 破折号
+  的某些字节会被当成 GBK 前导字节，把后面的引号一起吞掉——实测报
+  `字符串缺少终止符`（`UnexpectedToken`），**整个脚本不执行**。更坏的是
+  它可能碰巧不炸（旧 `assert-claim.ps1` 里的中文就没炸），控制台回显还会
+  把乱码编码回原字节、看起来一切正常，掩盖问题。脚本要输出/读取非 ASCII
+  文本时，走显式 UTF-8 的文件通道（如 `Get-Content -Encoding UTF8`），
+  不写进 `.ps1` 源码本身。守卫性范本：
+  `.claude/skills/studio-verify/scripts/tests/guard-selftest.sh` 第 0 项
+  对三个 `.ps1` 做纯 ASCII 断言。
 - Git Bash 下给原生 Windows 程序传"像 POSIX 路径"的环境变量会被改写，
   用 `MSYS2_ENV_CONV_EXCL` 排除（范本：`scripts/wt-dev.sh`）。
 

@@ -322,7 +322,7 @@ async def write_skill_file_tool(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def bind_test_input_tool(args: dict[str, Any]) -> dict[str, Any]:
-    from app.routers.io_scan import _IMPORT_NAME_RE
+    from app.core.path_containment import is_workspace_entry_name
     from app.services.runtime_config import read_runtime_config, refresh_runtime_config
     from app.services.skills import ensure_workspace_skill_dir
 
@@ -331,7 +331,7 @@ async def bind_test_input_tool(args: dict[str, Any]) -> dict[str, Any]:
     content = args.get("content")
     if not skill_id or not name:
         return _text_result("skill_id 与 name 都不能为空", is_error=True)
-    if not _IMPORT_NAME_RE.match(name):
+    if not is_workspace_entry_name(name):
         return _text_result(f"非法的测试输入名(同 I/O 面板 import 命名规则): {name}", is_error=True)
     if not isinstance(content, dict):
         return _text_result("content 必须是 JSON 对象(顶层键 = 要绑定的输入字段)", is_error=True)

@@ -37,6 +37,7 @@ __all__ = [
     "RUNS_DIRNAME",
     "TRACE_FILENAME",
     "predicts_root",
+    "run_dir",
     "runs_root",
 ]
 
@@ -49,3 +50,34 @@ def runs_root(workspace_dir: Path) -> Path:
 def predicts_root(workspace_dir: Path) -> Path:
     """The directory that holds one subdirectory per predict."""
     return workspace_dir / PREDICTS_DIRNAME
+
+
+def run_dir(root: Path, run_id: str) -> Path:
+    """The one subdirectory of ``root`` that holds this execution's artifacts.
+
+    "One subdirectory per run" is the invariant this module is FOR, stated in
+    its first paragraph — and an id is not obliged to satisfy it. The id is
+    minted by whoever called the SDK: ``run_skill(thread_id=...)`` and
+    ``resume_skill(run_id=...)`` take it verbatim, and a host that passes one
+    through from a request has handed the library a string, not a directory
+    name. ``root / "../.."`` is still a valid ``Path``; it is just not a
+    subdirectory of anything, and everything downstream — the trace the sink
+    opens, the artifacts written beside it, the spend ledger re-read on a
+    resume — then lands somewhere that is not this run's directory.
+
+    So the join happens HERE, once, and refuses an id that cannot name one
+    child. What it checks is exactly the invariant and nothing more: the id
+    must be a single path segment. It deliberately does NOT impose a character
+    vocabulary — which characters an id may contain is a naming convention of
+    whoever minted it, the same reasoning this module already gives for
+    refusing to read the storage root out of an id's shape.
+
+    ``ValueError`` because this is a caller-contract violation, not a runtime
+    condition the SDK can recover from or report as a run failure — the same
+    answer ``_validate_workspace_dir`` gives a relative workspace path.
+    """
+    if not run_id or Path(run_id).name != run_id or run_id in {".", ".."}:
+        raise ValueError(
+            f"run_id must name one directory under {root}, not a path: {run_id!r}",
+        )
+    return root / run_id

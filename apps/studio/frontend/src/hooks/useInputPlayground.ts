@@ -177,7 +177,11 @@ export function useInputPlayground(inputs: PlaygroundInputSpec[]) {
   }, [inputs, state.values])
 
   const validateRemote = useCallback(async (skillId: string, values: JsonObject) => {
-    await api.post(`/skills/${skillId}/validate_input`, values)
+    // `{ input_data: … }`, the same envelope /runs and /runs/predict take. The
+    // values used to be posted at the top level while the backend's
+    // ValidateInputReq declared `input_file_path` and read that path off disk —
+    // two halves of a contract that never met, so this call could only ever 422.
+    await api.post(`/skills/${skillId}/validate_input`, { input_data: values })
   }, [])
 
   return {

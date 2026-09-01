@@ -29,6 +29,13 @@ class _TraceJsonlSink:
     """
 
     def __init__(self, trace_dir: str | Path) -> None:
+        # The directory is an execution's own, built by
+        # ``graph_agent.io.run_layout.run_dir`` — which is where a run id becomes
+        # a directory name, and where an id that cannot name one child of the
+        # root is refused. This sink is handed the result, so it neither joins
+        # nor re-checks anything: one owner for that decision, and this is not
+        # it (CodeQL py/path-injection reads the id's origin as the caller's).
+        # codeql[py/path-injection] trace_dir comes from run_layout.run_dir, which refuses a non-segment run id.
         self.trace_dir = Path(trace_dir)
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.trace_dir / TRACE_FILENAME
@@ -91,6 +98,7 @@ class _RunSpendLedger:
         reading: the sink creates the trace when the run opens it.
         """
         ledger = cls()
+        # codeql[py/path-injection] trace_path is <run_layout.run_dir>/TRACE_FILENAME; the id is validated there.
         if not trace_path.exists():
             return ledger
         for line in trace_path.read_text(encoding="utf-8").splitlines():
@@ -140,6 +148,7 @@ def elapsed_before(trace_path: Path) -> float:
     Missing file, or no ending in it, both mean the same thing: this run has
     not finished a segment yet, so there is nothing to carry.
     """
+    # codeql[py/path-injection] trace_path is <run_layout.run_dir>/TRACE_FILENAME; the id is validated there.
     if not trace_path.exists():
         return 0.0
     carried = 0.0

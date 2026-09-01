@@ -53,6 +53,7 @@ from app.core.adapters.run_layout import predicts_root, runs_root
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.authored_text import read_authored_text
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
+from app.core.path_containment import PathEscapesDirectory, resolve_within_roots
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
@@ -354,14 +355,9 @@ def lint_skill_on_disk(skill_id: str, workspace_root: str | None = None) -> Lint
     workspace-based skills; without it the skill resolves from the global store.
     """
     if workspace_root:
-        root = Path(workspace_root).expanduser().resolve()
-        if root.exists() and root.is_dir():
+        root = _requested_workspace_root_or_none(skill_id, workspace_root)
+        if root is not None:
             return lint_skill_path(root)
-        logger.info(
-            "lint on-disk skill_id=%s workspace_root=%s missing; falling back to skill store",
-            skill_id,
-            workspace_root,
-        )
     return lint_skill(skill_id)
 
 
@@ -571,21 +567,42 @@ def _resolve_skill_dir_for_lint(skill_id: str, *, workspace_root: str | None = N
     sandbox is built from the body alone.
     """
     if workspace_root:
-        root = Path(workspace_root).expanduser().resolve()
-        if root.exists() and root.is_dir():
-            return root
-        logger.info(
-            "lint changed-markdown skill_id=%s workspace_root=%s missing; body-only sandbox",
-            skill_id,
-            workspace_root,
-        )
-        return None
+        return _requested_workspace_root_or_none(skill_id, workspace_root)
 
     try:
         return resolve_skill_dir(skill_id)
     except HTTPException:
         logger.info("lint changed-markdown skill_id=%s has no disk tree; body-only sandbox", skill_id)
         return None
+
+
+def _requested_workspace_root_or_none(skill_id: str, workspace_root: str) -> Path | None:
+    """The requested workspace root if it is one of ours, else ``None`` to fall back.
+
+    Two different answers to two different questions, which the previous single
+    ``root.exists() and root.is_dir()`` check ran together:
+
+    - **Is it ours?** A directory outside every workspace this Studio has open is
+      REFUSED, not fallen back from. Falling back was the hole: any directory on
+      the machine passed the existence test, so lint read (and, on the
+      changed-markdown branch, copied into a sandbox) trees belonging to nobody.
+      A refusal is also why the value no longer reaches ``logger`` — a string
+      nobody had proved was a path became a line in a log people read as the
+      record of what happened (CodeQL ``py/log-injection``).
+    - **Is it there yet?** A root inside our boundary that does not exist is the
+      brand-new-skill case the fallback exists for, and it keeps it.
+    """
+    try:
+        root = resolve_within_roots(workspace_root, studio_workspace_roots())
+    except PathEscapesDirectory:
+        _raise_workspace_root_outside_boundary(skill_id, workspace_root)
+    if root.is_dir():
+        return root
+    logger.info(
+        "lint skill_id=%s requested workspace root is not on disk yet; falling back",
+        skill_id,
+    )
+    return None
 
 
 def _safe_lint_overlay_path(file_path: str | None) -> Path:
@@ -1430,10 +1447,21 @@ async def _resolve_canvas_serialize_dir(
     whose bare name collides with another skill (e.g. a top-level skill of the
     same name) is never mis-resolved through the global index / public dir.
     Without a path we fall back to bare-id resolution for the parent graph.
+
+    The path is BOUNDED to the workspaces this Studio has open
+    (:func:`studio_workspace_roots`). Absolute-plus-holds-a-GRAPH.md was not a
+    bound: it is true of any directory on the machine that happens to hold one,
+    and this endpoint hands the file's full text back to the caller in
+    ``current_markdown_content`` whenever the optimistic-lock hash disagrees — so
+    an unbounded root plus a deliberately wrong ``expected_hash`` read any
+    GRAPH.md on disk.
     """
     if workspace_root:
-        skill_dir = Path(workspace_root)
-        if skill_dir.is_absolute() and await storage.exists(str(skill_dir / "GRAPH.md")):
+        try:
+            skill_dir = resolve_within_roots(workspace_root, studio_workspace_roots())
+        except PathEscapesDirectory:
+            _raise_workspace_root_outside_boundary(skill_id, workspace_root)
+        if await storage.exists(str(skill_dir / "GRAPH.md")):
             return skill_dir
         _raise_skill_not_found(skill_id)
     return await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
@@ -1934,6 +1962,50 @@ def _read_current_graph_markdown(skill_dir: Path) -> str:
     if not graph_path.exists():
         return ""
     return read_authored_text(graph_path)
+
+
+def studio_workspace_roots() -> list[Path]:
+    """Every directory a caller-supplied ``workspace_root`` is allowed to be inside.
+
+    A request may name the directory whose ``GRAPH.md`` it is editing — the canvas
+    does it for a drilled subgraph, because MVP1 identifies a subgraph by PATH
+    rather than by registry id (``_resolve_canvas_serialize_dir``). That value has
+    to be bounded, and the honest bound is the set of places Studio is actually
+    editing: the managed skills root, plus the absolute path of every skill this
+    Studio has open.
+
+    Not "the named skill's own tree", which is the tighter rule
+    :func:`_allowed_child_graph_roots` states for a subgraph CHILD path. It
+    cannot be used here: for a drilled child the frontend derives the skill id
+    FROM the path (``workspace-identity.ts::skillIdFromWorkspaceRoot``), so that
+    id need not be in the index at all, and requiring it to resolve would refuse
+    exactly the legitimate drilled-child saves the field exists for. Nothing is
+    lost by the wider set: to have drilled in, the user went through
+    ``get_child_graph_topology``, which already enforced the tighter rule, so
+    every reachable child path is inside an opened workspace anyway.
+    """
+    roots = [config.DEFAULT_SKILLS_ROOT]
+    roots.extend(Path(entry["absolute_path"]) for entry in _sync_skill_index().values())
+    return roots
+
+
+def _raise_workspace_root_outside_boundary(skill_id: str, workspace_root: str) -> NoReturn:
+    """Refuse a ``workspace_root`` that is not inside a workspace we have open.
+
+    Reuses ``SUBGRAPH_PATH_INVALID`` because that is what the value IS — the
+    absolute path of a drilled subgraph — and the frontend already renders that
+    code as the red "this path does not resolve" state
+    (``panels/PropertiesPanel.tsx``, ``subgraph-path.ts``).
+
+    Echoes the value AS SENT rather than as resolved. The caller learns nothing
+    from being told its own string back, whereas the resolved form would report
+    where a symlink it named actually points — a fact about this machine that a
+    refused request has no business returning.
+    """
+    _raise_subgraph_path_invalid(
+        workspace_root,
+        f"workspace_root is not inside a workspace Studio has open (skill {skill_id})",
+    )
 
 
 def _allowed_child_graph_roots(parent_skill_dir: Path) -> list[Path]:

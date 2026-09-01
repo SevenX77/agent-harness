@@ -41,6 +41,11 @@ from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.authored_text import read_authored_text
 from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
+from app.core.path_containment import (
+    PathEscapesDirectory,
+    WorkspaceEntryName,
+    resolve_inside,
+)
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.runs import (
@@ -794,7 +799,7 @@ class RunManager:
         # when no matching passing predict is on record.
         require_passing_predict(skill_id, content_hash=art_ref["content_hash"])
 
-        inputs = _runtime_inputs_from_request(request)
+        inputs = dict(request.input_data or {})
         run_id = new_run_id()
         run_dir = run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -1048,7 +1053,7 @@ class RunManager:
         *,
         artifact_ref: dict[str, Any],
     ) -> RunMetadata:
-        inputs = _runtime_inputs_from_request(request)
+        inputs = dict(request.input_data or {})
         runtime_config: dict[str, Any] | None = None
         with contextlib.suppress(Exception):
             runtime_config = refresh_runtime_config(resolve_skill_dir(skill_id))
@@ -1101,11 +1106,19 @@ class RunManager:
         task.add_done_callback(self._tasks.discard)
         return metadata
 
-    async def start_batch_run(self, skill_id: str, input_ids: list[str]) -> BatchRunResponse:
-        resolve_skill_dir(skill_id)
-        if not input_ids:
-            raise ValueError("input_ids must not be empty")
+    async def start_batch_run(
+        self,
+        skill_id: str,
+        input_ids: list[WorkspaceEntryName],
+    ) -> BatchRunResponse:
+        """One run per named test input, in the order the caller named them.
 
+        ``WorkspaceEntryName`` rather than ``str`` so the signature says which
+        vocabulary these ids belong to; the request model
+        (``BatchRunRequest.input_ids``) is where that is enforced, and
+        ``_load_test_input`` proves containment for the path each id resolves to.
+        """
+        resolve_skill_dir(skill_id)
         batch_id = f"batch-{new_run_id()}"
         items: list[tuple[str, str]] = []
         for input_id in input_ids:
@@ -1954,15 +1967,6 @@ class RunManager:
         return get_storage()
 
 
-def _runtime_inputs_from_request(request: RunRequest) -> dict[str, Any]:
-    if request.paste_json:
-        loaded = json.loads(request.paste_json)
-        if not isinstance(loaded, dict):
-            raise ValueError("paste_json must decode to a JSON object")
-        return loaded
-    return dict(request.input_data or {})
-
-
 def _resumed(metadata: RunMetadata, report: ResumeReport) -> RunMetadata:
     """The run, as it stands after one resumed segment reported in.
 
@@ -2314,10 +2318,23 @@ def test_inputs_dir_for(skill_id: str) -> Path:
 
 
 def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:
-    candidates = [
-        test_inputs_dir_for(skill_id) / input_id,
-        test_inputs_dir_for(skill_id) / f"{input_id}.json",
-    ]
+    # The id's SPELLING is already constrained by the request model
+    # (`BatchRunRequest.input_ids`), which is what keeps `..` out. What that
+    # cannot see is where the name resolves TO: a well-formed name that happens
+    # to be a symlink lands wherever the link points, so the second proof is
+    # about the resolved path rather than the string.
+    inputs_dir = test_inputs_dir_for(skill_id)
+    try:
+        candidates = [
+            resolve_inside(inputs_dir, input_id),
+            resolve_inside(inputs_dir, f"{input_id}.json"),
+        ]
+    except PathEscapesDirectory as exc:
+        raise standard_http_exception(
+            "TEST_INPUT_VALIDATION_FAILED",
+            f"Test input is not inside this skill's import_files: {input_id}",
+            {"skill_id": skill_id, "input_id": input_id},
+        ) from exc
     input_path = next((path for path in candidates if path.is_file()), None)
     if input_path is None:
         raise standard_http_exception(
@@ -2330,7 +2347,16 @@ def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:
         return dict(loaded["input_data"])
     if isinstance(loaded, dict):
         return loaded
-    raise ValueError(f"Test input must be a JSON object: {input_id}")
+    # A file's CONTENTS are past every schema: the request model can constrain
+    # the id, not what the id points at. So this answers with the code that says
+    # which test input is wrong, rather than raising a bare ValueError for a
+    # generic handler to relabel `MANIFEST_VALIDATION_FAILED` — naming the
+    # skill's manifest for a defect in one of its inputs.
+    raise standard_http_exception(
+        "TEST_INPUT_VALIDATION_FAILED",
+        f"Test input must be a JSON object: {input_id}",
+        {"skill_id": skill_id, "input_id": input_id},
+    )
 
 
 def _metadata_with_input_summary(metadata_path: Path) -> RunMetadata:

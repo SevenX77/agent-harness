@@ -16,6 +16,7 @@ import {
   recordAutoRestartAttempt,
   type AutoRestartState,
 } from './runtime-gate-auto-restart'
+import { sidecarPortAnswers } from './runtime-gate-sidecar-probe'
 
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 
@@ -78,6 +79,14 @@ function backendDownInitialMessage(): string {
   return i18n.t('banner.connectionLostReconnecting', { ns: 'runtimeGate' })
 }
 
+// Shown when the automatic restart declined to fire because the sidecar's port
+// still answered. The banner stays up because something IS wrong — the app could
+// not reach the backend — but the cause is not a dead process, so the remedy is
+// the person's own Retry rather than a restart we would be guessing at.
+function backendAnsweringButUnreachableMessage(): string {
+  return i18n.t('banner.unreachableButAnswering', { ns: 'runtimeGate' })
+}
+
 export function RuntimeGate({ children }: RuntimeGateProps) {
   const [status, setStatus] = useState<RuntimeStatus>('loading')
   const [message, setMessage] = useState('')
@@ -120,9 +129,23 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
     autoRestartTimerRef.current = setTimeout(() => {
       autoRestartTimerRef.current = undefined
       autoRestartStateRef.current = recordAutoRestartAttempt(autoRestartStateRef.current, Date.now())
-      restartSidecarAutomatic()
-        .then(() => {
-          markReady()
+      // confirm-before-you-kill: both signals that get us here are weak, and
+      // this is the moment the weakness would cost something irreversible. See
+      // `runtime-gate-sidecar-probe.ts` for why the check sits HERE rather than
+      // in front of the banner, and why an unclear answer declines to restart.
+      sidecarPortAnswers()
+        .then((answers) => {
+          if (answers) {
+            // Something is serving on that port, so the process is not gone —
+            // whatever the weak signal saw, this is not ours to kill. The banner
+            // and its Retry are already on screen; stop here rather than
+            // rescheduling, so nothing turns into a restart poller.
+            setMessage(backendAnsweringButUnreachableMessage())
+            return undefined
+          }
+          return restartSidecarAutomatic().then(() => {
+            markReady()
+          })
         })
         .catch((error: unknown) => {
           setMessage(errorMessage(error))

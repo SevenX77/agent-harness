@@ -3,6 +3,7 @@
     "connecting": "正在连接后端…",
     "unavailablePrefix": "后端不可用 —— 部分功能已禁用。",
     "retry": "重试",
-    "connectionLostReconnecting": "后端连接已断开，正在重新连接…"
+    "connectionLostReconnecting": "后端连接已断开，正在重新连接…",
+    "unreachableButAnswering": "后端连接已断开,但它的端口仍在应答——不会自动重启它。点 Retry 重新连接。"
   }
 }

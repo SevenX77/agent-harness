@@ -193,21 +193,30 @@ async function advance(ms: number): Promise<void> {
   })
 }
 
+// The automatic restart now asks the sidecar's port whether anything is still
+// answering before it fires. Left unstubbed, `fetch` would attempt a REAL
+// connection to 127.0.0.1:8787 and the result of this gate would depend on
+// whether a sidecar happens to be running on the machine: green on a clean box,
+// and silently skipping every restart below for a developer with the app open.
+// The default is "connection refused", which is what these tests mean by a dead
+// sidecar.
+let probeFetch: ReturnType<typeof vi.fn>
+
+function sidecarPortRefusesConnections(): void {
+  probeFetch.mockRejectedValue(new TypeError('Failed to fetch'))
+}
+
+function sidecarPortAnswersWith(status: number): void {
+  probeFetch.mockResolvedValue({ ok: status >= 200 && status < 300, status })
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   FakeWebSocket.instances = []
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
-  // These tests drive the REAL `useBackendDownSignal`, which now confirms a weak
-  // signal against `/health` before reporting the backend down. Left unstubbed,
-  // `fetch` would attempt a genuine connection to 127.0.0.1:8787 and the outcome
-  // of this gate would depend on whether a sidecar happens to be running on the
-  // machine — passing on a clean box, silently VETOING every down-signal below
-  // for a developer who has the app open. Stubbed to "unreachable", which is
-  // what these tests mean by a dead sidecar.
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
-  )
+  probeFetch = vi.fn()
+  vi.stubGlobal('fetch', probeFetch)
+  sidecarPortRefusesConnections()
   configureApiBaseURL('http://127.0.0.1:8787/api')
   configureApiToken('token')
   runtimeMocks.initializeRuntimeConfig.mockReset().mockResolvedValue(READY_CONFIG)
@@ -222,6 +231,96 @@ afterEach(() => {
   vi.unstubAllGlobals()
   ;(globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = originalWebSocket
   configureApiToken(null)
+})
+
+/**
+ * confirm-before-you-kill — the automatic restart is the destructive act, so it
+ * is where the weak liveness signals get checked.
+ *
+ * Both signals that reach RuntimeGate mean less than they look like.
+ * `BACKEND_UNAVAILABLE_HTTP_EVENT` means "a call got no HTTP RESPONSE", which is
+ * not "the process is gone" — a 500 the browser discards for missing
+ * `Access-Control-Allow-Origin` reaches axios as ERR_NETWORK and looks exactly
+ * the same from inside the interceptor. Acting on that restarted sidecars that
+ * were serving fine, rotating their token and port and dropping in-flight runs.
+ *
+ * The check deliberately does NOT gate the banner. Banner and Retry appear only
+ * once RuntimeGate leaves 'ready', so confirming before reporting would hide
+ * both and leave a broken app with no message and no affordance — worse than
+ * the spurious restart. Detection stays as sensitive as it was; only the
+ * irreversible half asks for more evidence, and an unclear answer declines.
+ */
+describe('RuntimeGate — confirm-before-you-kill (the restart asks the port first)', () => {
+  it('reports the outage as before: the recheck never delays or hides the banner', async () => {
+    sidecarPortAnswersWith(200)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+
+    // Banner and Retry are up immediately, with no probe awaited first.
+    expect(bannerText().toLowerCase()).toContain('unavailable')
+    expect(findButton()).not.toBeNull()
+    expect(probeFetch).not.toHaveBeenCalled()
+  })
+
+  it('does NOT restart when the port still answers, and says so in the banner', async () => {
+    sidecarPortAnswersWith(200)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+
+    expect(probeFetch).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
+    expect(bannerText()).toContain('still answering')
+    expect(findButton()).not.toBeNull()
+  })
+
+  it('treats a 503 as an answer: a process that replies is not a process to kill', async () => {
+    sidecarPortAnswersWith(503)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+
+    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
+  })
+
+  it('does not turn into a restart poller after declining once', async () => {
+    sidecarPortAnswersWith(200)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+    // Far past every remaining delay in the schedule.
+    await advance(120_000)
+
+    expect(probeFetch).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
+  })
+
+  it('still restarts when nothing answers, exactly as before', async () => {
+    sidecarPortRefusesConnections()
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
+    expect(bannerText()).toContain('app-shell-content')
+    expect(bannerText().toLowerCase()).not.toContain('unavailable')
+  })
 })
 
 describe('RuntimeGate — post-ready sidecar death is observable (dead-sidecar-says-so)', () => {

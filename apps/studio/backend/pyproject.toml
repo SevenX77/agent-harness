@@ -10,7 +10,7 @@ dependencies = [
     # dependency closure comes from `uv export --package studio-backend`. Without
     # it every google_genai route in the packaged app dies on the ImportError
     # `call/factory.py` raises, while a dev tree synced with `--all-extras` shows
-    # nothing wrong. Gate: test_the_backend_declares_every_gateway_extra_its_routes_need.
+    # nothing wrong. Gate: test_the_locked_closure_covers_every_gateway_lazy_import.
     "graph-agent-gateway[google]",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

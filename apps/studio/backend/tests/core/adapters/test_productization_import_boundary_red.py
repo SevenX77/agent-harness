@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import tomllib
 from collections.abc import Iterable
+from importlib.metadata import packages_distributions
 from pathlib import Path
 
 BACKEND_ROOT = next(
@@ -139,49 +140,58 @@ def test_the_backend_declares_every_sdk_it_imports() -> None:
     assert undeclared == []
 
 
-def test_the_backend_requires_every_gateway_extra_its_lazy_imports_need() -> None:
-    """Naming a dependency is not enough if the part you use lives behind an extra.
+def test_the_locked_closure_covers_every_gateway_lazy_import() -> None:
+    """The desktop app must be able to import everything the gateway it bundles can.
 
-    The gateway keeps provider clients it cannot always install behind lazy
-    imports. The backend declared `graph-agent-gateway` with NO extras, so the
-    desktop app's vendored closure — built by `uv export --package studio-backend`
-    — simply did not contain `langchain-google-genai`, and every gemini route in
-    the packaged app died on ImportError while the dev tree (synced with
-    `--all-extras`) looked fine.
+    The gateway keeps provider clients behind lazy imports and ships them in
+    optional extras. The backend declared `graph-agent-gateway` with NO extras, so
+    the vendored dependency closure — `uv export --package studio-backend`, see
+    `apps/studio/backend/scripts/build_vendor.py` — simply did not contain
+    `langchain-google-genai`, and every gemini route in the packaged app died on
+    ImportError while the dev tree (synced with `--all-extras`) looked fine.
 
-    Both halves are read structurally rather than from prose, because the failure
-    mode is a mismatch between two manifests and an import, and any of the three
-    can be edited without touching the others:
+    The assertion is therefore about the CLOSURE, not about a manifest field: for
+    every module the gateway can lazily import, the distribution providing it must
+    be reachable from `studio-backend` in `uv.lock`. Reading the lock rather than
+    `pyproject.toml` is what makes this causal — a declaration added without
+    re-running `uv lock` changes nothing about what gets exported, and would sail
+    through a manifest-only check while the packaged app stayed broken.
 
-    * the lazily imported modules come from the `importlib.import_module("...")`
-      calls in the gateway's own source (AST, not a grep for an error message —
-      error text gets reworded);
-    * which extra ships a module comes from the gateway's
-      `optional-dependencies`;
-    * and the requirement is checked against the backend's REQUIRED dependencies
-      only. An extra parked in the backend's own `optional-dependencies` would
-      not be in the default export either, so counting it here would let the bug
-      back in while the gate stayed green.
+    Both ends are resolved rather than guessed: the module names come from the AST
+    of the gateway's own `importlib.import_module("...")` calls, and module →
+    distribution comes from installed metadata, because an import name is not a
+    package name (`google-genai` provides `google`, `PyYAML` provides `yaml`). A
+    module nothing installed provides is reported, not skipped.
 
-    A lazily imported module that some non-optional dependency already provides
-    needs no extra and is therefore not demanded here. A dynamic import whose
-    argument is not a literal cannot be resolved statically and is out of this
-    check's reach.
+    Scope is deliberately "everything the bundled gateway can lazily import",
+    which is wider than "the protocols Studio exposes today": a provider path
+    present in the shipped SDK that raises ImportError when a user picks it is a
+    defect either way, and this version of the rule needs no hand-kept list of
+    which routes count. A dynamic import whose argument is not a literal cannot be
+    resolved statically and is out of reach.
     """
     gateway_root = BACKEND_ROOT.parents[2] / "packages" / "graph-agent-gateway"
-    extra_by_distribution = _extra_by_distribution(gateway_root / "pyproject.toml")
-    assert extra_by_distribution, "the gateway declares no optional dependencies to check against"
+    lazy_modules = _lazily_imported_modules(gateway_root / "src")
+    assert lazy_modules, "no literal `importlib.import_module` call found in the gateway source"
 
-    needed = {
-        extra_by_distribution[distribution]
-        for module in _lazily_imported_modules(gateway_root / "src")
-        if (distribution := module.split(".", 1)[0].replace("_", "-")) in extra_by_distribution
-    }
-    assert needed, "no lazy import in the gateway resolves to one of its optional extras"
+    closure = _locked_closure(BACKEND_ROOT.parents[2] / "uv.lock", "studio-backend")
+    module_owners = packages_distributions()
 
-    required = _required_extras(BACKEND_ROOT / "pyproject.toml", "graph-agent-gateway")
+    unreachable: list[str] = []
+    for module in sorted(lazy_modules):
+        top_level = module.split(".", 1)[0]
+        providers = module_owners.get(top_level)
+        if not providers:
+            # Not installed here at all. The dev tree syncs `--all-extras`, so this
+            # is a typo or a dependency nobody declared — never a thing to skip.
+            unreachable.append(f"{module}: nothing installed provides {top_level!r}")
+            continue
+        if not any(_normalize_distribution(name) in closure for name in providers):
+            unreachable.append(
+                f"{module}: provided by {sorted(providers)}, none of them in the closure"
+            )
 
-    assert sorted(needed - required) == []
+    assert unreachable == []
 
 
 def test_boundary_guard_auto_discovers_all_production_modules() -> None:
@@ -304,29 +314,40 @@ def _lazily_imported_modules(source_root: Path) -> set[str]:
     return modules
 
 
-def _extra_by_distribution(manifest: Path) -> dict[str, str]:
-    """Which optional extra ships each distribution, from the package's manifest."""
-    optional = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"].get(
-        "optional-dependencies"
-    ) or {}
-    return {
-        _distribution_name(requirement): extra
-        for extra, requirements in optional.items()
-        for requirement in requirements
-    }
+def _locked_closure(lock_path: Path, root: str) -> set[str]:
+    """Distributions reachable from `root` in a uv lock, extras followed as requested.
 
-
-def _required_extras(manifest: Path, distribution: str) -> set[str]:
-    """Extras requested on a REQUIRED dependency — the ones a default export gets."""
-    project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
-    requested: set[str] = set()
-    for requirement in project.get("dependencies") or []:
-        if _distribution_name(requirement) != distribution:
+    This is the set an export of `root` installs: a dependency edge may carry
+    `extra = [...]`, which pulls that package's matching `optional-dependencies`
+    group and nothing else from it. Dev groups are not walked, so the result is a
+    subset of what the vendor build installs — enough to prove a distribution IS
+    present, which is the direction this gate needs.
+    """
+    lock = tomllib.loads(lock_path.read_text(encoding="utf-8"))
+    packages = {package["name"]: package for package in lock.get("package") or []}
+    reached: set[str] = set()
+    visited: set[tuple[str, frozenset[str]]] = set()
+    pending: list[tuple[str, frozenset[str]]] = [(root, frozenset())]
+    while pending:
+        name, extras = pending.pop()
+        if (name, extras) in visited:
             continue
-        if "[" in requirement and "]" in requirement:
-            inside = requirement.split("[", 1)[1].split("]", 1)[0]
-            requested.update(part.strip().lower() for part in inside.split(",") if part.strip())
-    return requested
+        visited.add((name, extras))
+        reached.add(_normalize_distribution(name))
+        package = packages.get(name)
+        if package is None:
+            continue
+        requirements = list(package.get("dependencies") or [])
+        optional = package.get("optional-dependencies") or {}
+        for extra in extras:
+            requirements.extend(optional.get(extra) or [])
+        for requirement in requirements:
+            pending.append((requirement["name"], frozenset(requirement.get("extra") or ())))
+    return reached
+
+
+def _normalize_distribution(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
 
 
 def _distribution_name(requirement: str) -> str:

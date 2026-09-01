@@ -61,29 +61,42 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "SUBGRAPH_PATH_INVALID": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
     "SUBGRAPH_PATH_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
     # The answer when NO other code applies: an exception no handler claimed.
+    #
     # `not_retryable` rather than the `idempotent` the other 500s carry — those
     # two name a specific, side-effect-free spawn failure that is safe to repeat,
     # whereas an unclaimed exception is a defect at an unknown point in an
     # unknown endpoint. We cannot promise the request had no partial effect, and
     # repeating it re-runs the same defect, so the honest label is "do not retry".
-    "INTERNAL_ERROR": ErrorDefinition(http_status=500, retry_strategy="not_retryable"),
+    #
+    # Alone in this map it carries a `STUDIO_` prefix, and the reason is that
+    # every other name here is already unmistakably ours. The frontend resolves a
+    # code's reader-facing sentence out of the `codes.*` table in
+    # `locales/*/errors.json`, and that table is shared with the translator for
+    # codes a remote LLM PROVIDER returned. A bare `INTERNAL_ERROR` is a string a
+    # vendor plausibly emits, and the shared table would then answer a provider
+    # outage with "the backend failed" — blaming the wrong machine. `SKILL_NOT_FOUND`
+    # and its neighbours name things only Studio has, so they cannot collide.
+    "STUDIO_INTERNAL_ERROR": ErrorDefinition(http_status=500, retry_strategy="not_retryable"),
 }
 
-# The one code a CALLER may not select. `INTERNAL_ERROR` is the framework's
+# The one code a CALLER may not select. `STUDIO_INTERNAL_ERROR` is the framework's
 # answer for an exception nobody claimed, and its message is a fixed placeholder
 # precisely so that internal detail reaches the log and not the UI. A
 # caller-chosen message would defeat that: both routes below let a caller name a
-# code AND supply the text, so `raise ValueError("INTERNAL_ERROR: <a path with a
-# secret in it>")` would be recognized by the prefix protocol and echoed
-# verbatim. It stays registered here because this map is the single registry of
-# Studio's error-code vocabulary — it is the caller-facing VIEW of the map that
-# must not contain it.
-_FRAMEWORK_RESERVED_ERROR_CODES = frozenset({"INTERNAL_ERROR"})
+# code AND supply the text, so `raise ValueError("STUDIO_INTERNAL_ERROR: <a path
+# with a secret in it>")` would be recognized by the prefix protocol and echoed
+# verbatim. It stays registered in the map above because that is where a code's
+# HTTP projection is declared and where the exhaustive test over those
+# projections looks (the map is NOT the whole of Studio's error-code vocabulary:
+# `NOT_IMPLEMENTED` and `HTTP_ERROR` in this file, and `UNAUTHORIZED` /
+# `INVALID_TOKEN` in the auth middleware, are live codes that never enter it).
+# What must not contain it is the caller-facing VIEW of the map.
+_FRAMEWORK_RESERVED_ERROR_CODES = frozenset({"STUDIO_INTERNAL_ERROR"})
 
-# The only message INTERNAL_ERROR is ever allowed to carry, defined once here
-# because two places need it: the middleware that produces it, and the
+# The only message STUDIO_INTERNAL_ERROR is ever allowed to carry, defined once
+# here because two places need it: the middleware that produces it, and the
 # projection below that enforces it.
-INTERNAL_ERROR_MESSAGE = "Internal server error"
+STUDIO_INTERNAL_ERROR_MESSAGE = "Internal server error"
 
 
 def _caller_selectable(error_code: str) -> ErrorDefinition | None:
@@ -167,29 +180,40 @@ def raise_not_implemented(feature: str) -> NoReturn:
 
 def internal_error_response() -> ErrorResponse:
     """The framework's answer for an exception no handler claimed."""
-    definition = STANDARD_ERROR_MAP["INTERNAL_ERROR"]
+    definition = STANDARD_ERROR_MAP["STUDIO_INTERNAL_ERROR"]
     return error_response(
-        error_code="INTERNAL_ERROR",
+        error_code="STUDIO_INTERNAL_ERROR",
         http_status=definition.http_status,
-        message=INTERNAL_ERROR_MESSAGE,
+        message=STUDIO_INTERNAL_ERROR_MESSAGE,
         details=None,
         retry_strategy=definition.retry_strategy,
     )
 
 
 def _json_response(response: ErrorResponse) -> JSONResponse:
-    """Every handler-produced envelope leaves through here, so the reserved-code
-    rule is enforced here rather than at each way IN.
+    """Project an envelope, replacing a reserved code's outright.
 
-    Blocking the two code-SELECTION routes is not enough on its own: a caller can
-    also hand-build an envelope with `error_response(...)` and raise it, or raise
-    an `HTTPException` whose detail is already a full envelope, and both arrive
-    at this function. Normalizing the message at the single exit is what makes
-    "INTERNAL_ERROR never carries caller text" true of every path instead of
-    true of the two that were checked.
+    Blocking the two code-SELECTION routes is not enough on its own: a caller
+    can also hand-build an envelope with `error_response(...)` and raise it, or
+    raise an `HTTPException` whose detail is already a full envelope, and both
+    arrive here.
+
+    The whole envelope is replaced, not just `message`. Normalizing one field
+    would leave the others forgeable, and every one of them matters: an
+    `STUDIO_INTERNAL_ERROR` carrying `http_status=200` is read as SUCCESS by axios,
+    `details` is rendered verbatim by the frontend's diagnostic view, and
+    `retry_strategy` tells the caller whether repeating a half-applied write is
+    safe. A code that only the framework may answer with only ever carries the
+    framework's own answer.
+
+    This is the exit for every envelope BUILT IN THIS MODULE. It is not a
+    whole-app choke point, and two things sit outside it: the loopback branch of
+    `http_exception_handler` below, whose payload is a different shape entirely,
+    and any router that returns its own `JSONResponse` — which is outside every
+    guarantee this module makes, not just this one.
     """
     if response.error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
-        response = response.model_copy(update={"message": INTERNAL_ERROR_MESSAGE})
+        response = internal_error_response()
     return JSONResponse(status_code=response.http_status, content=response.model_dump())
 
 

@@ -28,7 +28,7 @@
     "quota_exceeded": "Quota is exhausted (402/403).",
     "network_error": "Network error. The provider could not be reached.",
     "http_error": "The provider returned an unexpected HTTP status.",
-    "INTERNAL_ERROR": "Something went wrong inside the backend. Whether this request took effect is unknown — check before trying it again."
+    "STUDIO_INTERNAL_ERROR": "Something went wrong inside the backend. Whether this request took effect is unknown — check before trying it again."
   },
   "httpStatus": {
     "400": "The request parameters are invalid.",

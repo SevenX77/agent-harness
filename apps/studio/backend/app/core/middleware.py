@@ -51,12 +51,21 @@ class UnhandledExceptionEnvelopeMiddleware:
     placed INSIDE ``CORSMiddleware`` is the only position from which the reply
     gets the header.
 
-    *Borrowed* from ``ServerErrorMiddleware`` itself: the ``response_started``
-    flag threaded through a wrapped ``send``, because once response headers are
-    on the wire an envelope can no longer be substituted for them.
-    *Rejected*: its unconditional ``raise exc`` re-raise. It re-raises so the
-    server still logs the traceback; we log it here instead, and swallowing is
-    what keeps the connection answering a readable 500 rather than aborting.
+    *Borrowed* from ``ServerErrorMiddleware``, including the part that first
+    looked wrong: the ``response_started`` flag threaded through a wrapped
+    ``send``, AND the unconditional re-raise afterwards. Sending and re-raising
+    are not alternatives — the response is already flushed by then, and the
+    layer above sees ``response_started`` and does not try to overwrite it. So
+    the caller still gets this readable, CORS-carrying 500 while the exception
+    still reaches the server.
+
+    Re-raising is not optional here. Swallowing also swallows the fail-fast that
+    ``TestClient(raise_server_exceptions=True)`` gives the whole test suite: a
+    route that starts crashing would answer a tidy 500 and every test that does
+    not explicitly assert a status code would keep passing. Tests that mean to
+    inspect this envelope opt out per-client with
+    ``raise_server_exceptions=False``, which is how the suite already reads
+    error responses elsewhere.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -83,20 +92,20 @@ class UnhandledExceptionEnvelopeMiddleware:
                 scope.get("method", "?"),
                 scope.get("path", "?"),
             )
-            if response_started:
-                # Headers are already on the wire; there is no envelope to send
-                # any more. Propagate so the server tears the connection down
-                # instead of appending a second, contradictory body.
-                raise
-            # Fixed text, never the exception's own: what went wrong is a
-            # server-side fact for the log, and the UI is a remote surface that
-            # must not be handed stack or internal-state detail.
-            envelope = internal_error_response()
-            response = JSONResponse(
-                status_code=envelope.http_status,
-                content=envelope.model_dump(),
-            )
-            await response(scope, receive, send)
+            if not response_started:
+                # Fixed text, never the exception's own: what went wrong is a
+                # server-side fact for the log, and the UI is a remote surface
+                # that must not be handed stack or internal-state detail.
+                envelope = internal_error_response()
+                response = JSONResponse(
+                    status_code=envelope.http_status,
+                    content=envelope.model_dump(),
+                )
+                await response(scope, receive, send)
+            # Always, whether or not an envelope went out: the caller has its
+            # answer, and the exception must still surface to the server log and
+            # to any test client that has not opted out of seeing it.
+            raise
 
 
 def configure_unhandled_exception_envelope(app: FastAPI) -> None:

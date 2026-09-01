@@ -1,9 +1,12 @@
 """Reading a file a person wrote in some other editor.
 
-A skill is authored outside this engine — in Studio, in VS Code, in Notepad —
-and what arrives is bytes plus whatever the editor decided to put in front of
-them. On Windows that is routinely a UTF-8 byte-order mark (``EF BB BF``):
-Notepad writes one by default, and so does PowerShell redirection.
+A skill is authored outside this engine — in Studio, in VS Code, in some other
+editor — and what arrives is bytes plus whatever the editor decided to put in
+front of them. Sometimes that is a UTF-8 byte-order mark (``EF BB BF``). Which
+tools still produce one, and why "not the Windows default any more" does not
+mean "will not happen", is stated once, in
+``docs/development/CROSS_PLATFORM.md``; it is not restated here, because a fact
+kept in several places is a fact that will disagree with itself.
 
 The mark is part of the ENCODING, not of the content. Decoding it as content is
 what produced ledger K7: ``GRAPH.md`` began with ``\\ufeff---``, the anchored

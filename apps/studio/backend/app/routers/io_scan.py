@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.authored_text import open_authored_text, read_authored_text
+from app.core.path_containment import is_workspace_entry_name
 
 router = APIRouter(prefix="/api/io", tags=["io"])
 
@@ -284,7 +285,9 @@ class ImportRequest(BaseModel):
     node_id: str | None = None
 
 
-_IMPORT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# The imported entry's name follows the shared workspace-entry rule
+# (`app.core.path_containment`); a node id is its own, narrower vocabulary — no
+# dots — so it keeps its own pattern here.
 _NODE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 skill_io_router = APIRouter(prefix="/api/skills/{skill_id}/io", tags=["io"])
@@ -320,7 +323,7 @@ def import_into_workspace(skill_id: str, request: ImportRequest) -> dict[str, An
         raise HTTPException(status_code=404, detail=f"path not found: {request.path}")
 
     raw_name = request.name or (source.stem if source.is_file() else source.name)
-    if not _IMPORT_NAME_RE.match(raw_name or ""):
+    if not is_workspace_entry_name(raw_name or ""):
         raise HTTPException(status_code=422, detail=f"unsafe import name: {raw_name!r}")
     if request.node_id is not None and not _NODE_ID_RE.match(request.node_id):
         raise HTTPException(status_code=422, detail=f"unsafe node id: {request.node_id!r}")

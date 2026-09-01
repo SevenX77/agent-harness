@@ -1,11 +1,9 @@
-"""File-backed skill input validation."""
+"""Skill input validation: does this payload satisfy the skill's declared inputs."""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,7 +21,6 @@ from pydantic import (
 )
 
 from app.core.adapters.engine import GraphAgentError, GraphManifest, SkillLoader
-from app.core.authored_text import read_authored_text
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.services.skill_resolver import build_studio_skill_resolver
@@ -42,7 +39,6 @@ _TYPE_MAP: dict[str, Any] = {
     "list": list[Any],
     "array": list[Any],
 }
-_YAML: Any = import_module("yaml")
 
 
 @dataclass(frozen=True)
@@ -51,21 +47,20 @@ class ValidationHttpError(Exception):
     body: dict[str, Any]
 
 
-async def validate_skill_input_file(
+async def validate_skill_input(
     user_id: str,
     skill_id: str,
-    input_file_path: str,
+    input_data: dict[str, Any],
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> dict[str, Any]:
-    """Validate a JSON/YAML file against a skill's declared runtime inputs."""
+    """Validate a submitted input payload against a skill's declared runtime inputs."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     manifest, raw_io = _compile_manifest_or_raise(skill_dir)
-    parsed_data = _parse_input_file(Path(input_file_path))
     input_model = _input_model_for_manifest(manifest, raw_io)
 
     try:
-        validated = input_model.model_validate(parsed_data)
+        validated = input_model.model_validate(input_data)
     except ValidationError as exc:
         raise ValidationHttpError(
             status_code=422,
@@ -87,38 +82,6 @@ def _compile_manifest_or_raise(skill_path: Path) -> tuple[GraphManifest, dict[st
             body={"detail": "skill itself failed to compile, fix it first"},
         ) from None
     return compiled.manifest, dict(compiled.raw["io"]["inputs"])
-
-
-def _parse_input_file(path: Path) -> Any:
-    if not path.exists():
-        raise ValidationHttpError(status_code=404, body={"detail": "input file not found"})
-
-    suffix = path.suffix.lower()
-    try:
-        content = read_authored_text(path)
-        if suffix == ".json":
-            return json.loads(content)
-        if suffix in {".yaml", ".yml"}:
-            return _YAML.safe_load(content)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, _YAML.YAMLError) as exc:
-        raise _parse_error(exc) from exc
-
-    raise _parse_error(ValueError(f"unsupported input file extension: {suffix or '<none>'}"))
-
-
-def _parse_error(exc: Exception) -> ValidationHttpError:
-    return ValidationHttpError(
-        status_code=422,
-        body={
-            "errors": [
-                {
-                    "loc": ["__file__"],
-                    "msg": f"JSON/YAML parse error: {exc}",
-                    "type": "value_error.parse",
-                },
-            ],
-        },
-    )
 
 
 def _input_model_for_manifest(

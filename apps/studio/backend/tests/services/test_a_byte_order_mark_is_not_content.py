@@ -35,7 +35,6 @@ from app.services.runtime_config import (
     read_runtime_config,
 )
 from app.services.skills import _graph_content_hash, _read_current_graph_markdown
-from app.services.validator import _parse_input_file
 
 BOM = b"\xef\xbb\xbf"
 
@@ -190,18 +189,6 @@ def test_a_signed_test_input_still_runs(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(run_manager, "resolve_skill_dir", lambda _skill_id: skill_dir)
 
     assert run_manager._load_test_input("signed-skill", "smoke") == {"topic": "signed"}
-
-
-def test_a_signed_validation_input_still_validates(tmp_path: Path) -> None:
-    """``/validate_input`` reads a file the user picked out of their own workspace.
-
-    Its failure is the one that misdirects hardest: the endpoint catches the
-    decode error and answers 422 "invalid input file", which reads as a verdict
-    on the CONTENT the user wrote rather than on how we opened it.
-    """
-    signed = _signed(tmp_path / "case.json", json.dumps({"topic": "signed"}))
-
-    assert _parse_input_file(signed) == {"topic": "signed"}
 
 
 def test_signed_local_settings_still_load(tmp_path: Path) -> None:

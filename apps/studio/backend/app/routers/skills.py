@@ -78,7 +78,7 @@ from app.services.skills import (
     update_skill_file,
     update_skill_files,
 )
-from app.services.validator import ValidationHttpError, validate_skill_input_file
+from app.services.validator import ValidationHttpError, validate_skill_input
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 git_service = GitLocalService()
@@ -970,10 +970,10 @@ async def validate_input(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> ValidateInputResponse | JSONResponse:
     try:
-        validated_data = await validate_skill_input_file(
+        validated_data = await validate_skill_input(
             user_id,
             skill_id,
-            request.input_file_path,
+            request.input_data,
             storage,
             metadata,
         )

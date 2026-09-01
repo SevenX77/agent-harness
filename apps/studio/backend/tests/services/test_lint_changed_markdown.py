@@ -16,6 +16,8 @@ import pytest
 from app.core.adapters.engine import GraphCompileError, make_error_payload
 from app.services import skills as skill_service
 
+from tests.conftest import register_skill_index_entry
+
 
 @pytest.fixture(autouse=True)
 def _roots(studio_roots: tuple[Path, Path]) -> tuple[Path, Path]:
@@ -204,6 +206,12 @@ def test_lint_on_disk_with_workspace_root_reflects_disk_truth(
         ),
         encoding="utf-8",
     )
+
+    # A `workspace_root` is only honoured for a workspace Studio has OPEN — the
+    # boundary that stops the field from naming any directory on the machine
+    # (`studio_workspace_roots`). Registering it is what the desktop app does
+    # when the user opens a skill, so the fixture has to do it too.
+    register_skill_index_entry("demo-skill", ws_skill)
 
     result = skill_service.lint_skill_on_disk("demo-skill", workspace_root=str(ws_skill))
 

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, Response, status
 
 from app.core.authored_text import read_authored_text
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
+from app.core.path_containment import is_workspace_entry_name
 from app.models.errors import ErrorResponse
 from app.models.test_inputs import (
     TestInputCreateRequest,
@@ -32,10 +32,9 @@ __test__ = False
 
 router = APIRouter(prefix="/api/skills/{skill_id}/test_inputs", tags=["test-inputs"])
 
-# Filenames must be a safe slug: start alphanumeric, then word/dot/dash. This
-# blocks path traversal (no `/`, `\`, leading-dot `..`) and odd shell names.
-_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_MAX_NAME_LEN = 100
+# The name rule itself lives in `app.core.path_containment` — the same rule the
+# batch-run request model and the import endpoint apply, and one rule spelled in
+# three places is three rules the day one of them is tightened.
 
 
 @router.get(
@@ -176,7 +175,7 @@ def _validated_input_name(raw: str) -> str:
     name = raw.strip()
     if name.lower().endswith(".json"):
         name = name[: -len(".json")]
-    if not name or len(name) > _MAX_NAME_LEN or _NAME_RE.fullmatch(name) is None:
+    if not is_workspace_entry_name(name):
         raise standard_http_exception(
             "TEST_INPUT_VALIDATION_FAILED",
             f"Invalid test input name: {raw!r}",

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 
 from graph_agent import PathDiff, PhaseRecord
 from graph_agent.core.event_contracts import EventEnvelope
 from graph_agent.core.exceptions import ErrorPayload
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.core.path_containment import WorkspaceEntryName
 
 
 class TokensMetrics(BaseModel):
@@ -40,11 +44,72 @@ class RunError(BaseModel):
 
 
 class RunRequest(BaseModel):
+    """What to feed a run.
+
+    ``paste_json`` carries the same thing as ``input_data`` — a person typed it
+    into the paste box instead of filling in fields — so it is decoded HERE and
+    folded into ``input_data``. Two consequences, and both are the reason:
+
+    - After validation a run's inputs live in exactly one field, so no service
+      has a second shape to branch on and no branch can be the one that forgot.
+    - A malformed paste becomes a 422 that names ``paste_json``. It used to be
+      ``json.loads`` inside the run path, and because ``json.JSONDecodeError`` is
+      a ``ValueError`` the mistake was answered by a process-wide ValueError
+      handler as ``MANIFEST_VALIDATION_FAILED`` — the wrong thing named, and only
+      when the run gate did not refuse the request first, which it usually did.
+
+    The fold is asserted by CONSTRUCTING the model
+    (``tests/models/test_a_pasted_input_is_decoded_at_the_boundary.py``) rather
+    than through a route, because a route stops at the run gate before anything
+    reads the inputs: a fold that silently produced nothing passed every
+    route-level test there was.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     input_data: dict[str, Any] | None = None
     golden_id: str | None = None
     paste_json: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def fold_pasted_json_into_input_data(cls, data: Any) -> Any:
+        """Rewrite the incoming mapping, before the fields are built from it.
+
+        ``mode="before"`` and not ``mode="after"``: an after-validator is
+        specified to return the CURRENT instance, and pydantic warns and then
+        DISCARDS the result of a ``model_copy`` on the ``RunRequest(...)``
+        construction path — so the fold silently did nothing for every caller
+        that builds the model in Python rather than through ``model_validate``,
+        and a paste would have reached the run as ``None``. Rewriting the raw
+        mapping is the one place this transformation is part of the contract
+        rather than fighting it.
+
+        ``Mapping`` and not ``dict``: pydantic accepts any mapping here, so an
+        ``isinstance(data, dict)`` gate silently skipped the fold for a caller
+        passing e.g. a ``UserDict`` — the input validated fine and the paste
+        simply never arrived. The rewritten value is a plain ``dict`` because
+        that is what the field builder wants, and rebuilding it is also what
+        keeps the caller's own mapping unmutated.
+
+        Anything that is not a mapping is handed back untouched — that is
+        validation from an existing instance, or from something about to be
+        rejected as the wrong type, and neither is this validator's business.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        pasted_json = data.get("paste_json")
+        if not pasted_json:
+            return data
+        if not isinstance(pasted_json, str):
+            raise ValueError("paste_json must be a string containing JSON")
+        try:
+            pasted = json.loads(pasted_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"paste_json is not valid JSON: {exc}") from exc
+        if not isinstance(pasted, dict):
+            raise ValueError("paste_json must decode to a JSON object")
+        return {**data, "input_data": pasted, "paste_json": None}
 
 
 class NodeCompareRunRequest(BaseModel):
@@ -83,9 +148,19 @@ class PredictDiagnosticExport(BaseModel):
 
 
 class BatchRunRequest(BaseModel):
+    """Which of the skill's saved test inputs to run, one run per id.
+
+    ``WorkspaceEntryName`` rather than ``str``: each id is joined onto the
+    skill's own ``.workspace/import_files/`` and the JSON it lands on is fed to
+    a run as its input data, so an id spelled ``../../../secret`` was a read of
+    any file on the machine followed by a run over its contents. The constraint
+    lives on the type so the schema refuses it — the request never reaches the
+    code that would do the joining.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    input_ids: list[str]
+    input_ids: list[WorkspaceEntryName] = Field(..., min_length=1)
 
 
 #: What a run can be.

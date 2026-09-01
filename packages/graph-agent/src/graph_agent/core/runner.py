@@ -83,7 +83,7 @@ from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, requ
 from graph_agent.core.state import BusinessData
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
 from graph_agent.io.artifact_manifest import write_manifest_artifacts
-from graph_agent.io.run_layout import TRACE_FILENAME, predicts_root, runs_root
+from graph_agent.io.run_layout import TRACE_FILENAME, predicts_root, run_dir, runs_root
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -356,7 +356,7 @@ def predict_skill(  # noqa: C901
 
     run_id = thread_id or str(uuid.uuid4())
     run_root = predicts_root(workspace_root)
-    trace_output = run_root / run_id
+    trace_output = run_dir(run_root, run_id)
 
     raw = _run_v030_skill_dict(
         skill_path_obj,
@@ -493,8 +493,8 @@ def run_skill(
     # ``runs/485af68a-.../trace.jsonl`` vs ``runs/a7b0aeed-.../result.json``).
     run_id = thread_id or str(uuid.uuid4())
     run_root = runs_root(workspace_root)
-    run_dir = run_root / run_id
-    trace_file = run_dir / TRACE_FILENAME
+    run_directory = run_dir(run_root, run_id)
+    trace_file = run_directory / TRACE_FILENAME
 
     # The run's spend belongs to the same set of decisions, for the same
     # reason: a run that dies still made the calls it made, and this function
@@ -548,7 +548,7 @@ def run_skill(
             finished_at=finished_at,
             wall_time_sec=wall_time,
         )
-        _write_workflow_result_artifacts(run_dir, failed_result)
+        _write_workflow_result_artifacts(run_directory, failed_result)
         return failed_result
 
     finished_at = datetime.now(UTC)
@@ -565,7 +565,7 @@ def run_skill(
         finished_at=finished_at,
         wall_time_sec=wall_time,
     )
-    _write_workflow_result_artifacts(run_dir, workflow_result)
+    _write_workflow_result_artifacts(run_directory, workflow_result)
     return workflow_result
 
 
@@ -606,7 +606,7 @@ def resume_skill(
         else skill_path_obj.stem
     )
 
-    trace_output = runs_root(workspace_root) / run_id
+    trace_output = run_dir(runs_root(workspace_root), run_id)
     # Continuing a run, not starting one: the ledger opens with what the run has
     # already spent, so `metrics.json` keeps describing the same run its trace
     # and its report describe.
@@ -1060,7 +1060,7 @@ def _run_compiled_artifact_graph(
         checkpointer_spec = request.execution_context.get("checkpointer")
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
-    run_dir = runs_root(workspace_dir) / run_id
+    run_directory = run_dir(runs_root(workspace_dir), run_id)
     spend = _RunSpendLedger()
     try:
         raw = _run_v030_skill_dict(
@@ -1095,7 +1095,7 @@ def _run_compiled_artifact_graph(
         # BEFORE a run exists — no artifact root, no workspace — never reach
         # here and still come back as ``RunArtifactErrorResult``.
         wall_time = round(time.monotonic() - started_monotonic, 3)
-        trace_file = run_dir / TRACE_FILENAME
+        trace_file = run_directory / TRACE_FILENAME
         failed_result = WorkflowResult(
             success=False,
             run_id=run_id,
@@ -1115,7 +1115,7 @@ def _run_compiled_artifact_graph(
             finished_at=datetime.now(UTC),
             wall_time_sec=wall_time,
         )
-        _write_workflow_result_artifacts(run_dir, failed_result)
+        _write_workflow_result_artifacts(run_directory, failed_result)
         return failed_result
     wall_time = float(raw.get("wall_time_sec", 0.0))
     # A run that stopped part-way is not a failure and is not a finish; saying
@@ -1137,7 +1137,7 @@ def _run_compiled_artifact_graph(
         wall_time_sec=wall_time,
     )
     _write_workflow_result_artifacts(
-        Path(raw.get("run_dir") or runs_root(workspace_dir) / workflow_result.run_id),
+        Path(raw.get("run_dir") or run_dir(runs_root(workspace_dir), workflow_result.run_id)),
         workflow_result,
     )
     return workflow_result
@@ -2222,11 +2222,18 @@ def _write_json(path: Path, payload: Any) -> None:
     )
 
 
-def _write_workflow_result_artifacts(run_dir: Path, result: WorkflowResult | RunResult) -> None:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(run_dir / "result.json", result.model_dump(mode="json"))
-    _write_json(run_dir / "final_state.json", result.context)
-    _write_json(run_dir / "metrics.json", result.metrics.model_dump(mode="json"))
+def _write_workflow_result_artifacts(
+    run_directory: Path,
+    result: WorkflowResult | RunResult,
+) -> None:
+    # Every caller obtains `run_directory` from `run_layout.run_dir`, which is
+    # the one place a run id becomes a directory name and refuses an id that
+    # cannot name one child of the root. Re-checking here would put the same
+    # decision in two places, which is how the two come to disagree.
+    run_directory.mkdir(parents=True, exist_ok=True)  # codeql[py/path-injection]
+    _write_json(run_directory / "result.json", result.model_dump(mode="json"))
+    _write_json(run_directory / "final_state.json", result.context)
+    _write_json(run_directory / "metrics.json", result.metrics.model_dump(mode="json"))
 
 
 def _prepare_v030_event_sink(
@@ -2374,7 +2381,7 @@ def _run_v030_skill_dict(
     resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()
     run_id = thread_id or str(uuid.uuid4())
-    trace_output = run_root / run_id
+    trace_output = run_dir(run_root, run_id)
     root_runtime_inputs = _runtime_root_inputs_from_config(runtime_config, workspace_dir)
     if root_runtime_inputs:
         inputs = {**inputs, **root_runtime_inputs}

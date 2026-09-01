@@ -53,7 +53,6 @@ describe('RuntimeShell — D10 non-blocking startup gate', () => {
 // just the static RuntimeShell) through a post-ready death and back.
 const runtimeMocks = vi.hoisted(() => ({
   initializeRuntimeConfig: vi.fn(),
-  reconnectSidecar: vi.fn(),
   restartSidecar: vi.fn(),
   restartSidecarAutomatic: vi.fn(),
   subscribeToSidecarRestart: vi.fn(async () => () => {}),
@@ -69,6 +68,12 @@ const READY_CONFIG = {
   configDir: '/config',
   api_token: 'token',
 }
+
+// The two answers `restartSidecarAutomatic` can give without failing: a sidecar
+// was replaced, or the supervisor confirmed the one already there was serving
+// and refused to replace it (`AutoRestartOutcome::Declined`).
+const RESTARTED = { outcome: 'restarted' as const, config: READY_CONFIG }
+const DECLINED = { outcome: 'declined' as const, config: READY_CONFIG }
 
 interface FakeCloseEvent {
   code: number
@@ -194,37 +199,23 @@ async function advance(ms: number): Promise<void> {
   })
 }
 
-// The automatic restart now asks the sidecar's port whether anything is still
-// answering before it fires. Left unstubbed, `fetch` would attempt a REAL
-// connection to 127.0.0.1:8787 and the result of this gate would depend on
-// whether a sidecar happens to be running on the machine: green on a clean box,
-// and silently skipping every restart below for a developer with the app open.
-// The default is a `fetch` that throws, which is what these tests mean by a dead
-// sidecar — and deliberately NOT named after connection-refused, because the
-// production code cannot tell that apart from a reset or a CORS rejection
-// either. A helper that claimed to stub one specific cause would assert a
-// distinction the code does not make.
-let probeFetch: ReturnType<typeof vi.fn>
-
-function nothingAnswersOnTheSidecarPort(): void {
-  probeFetch.mockRejectedValue(new TypeError('Failed to fetch'))
-}
-
-function sidecarPortAnswersWith(status: number): void {
-  probeFetch.mockResolvedValue({ ok: status >= 200 && status < 300, status })
-}
+// RuntimeGate must never reach the network itself. It briefly did — a `/health`
+// probe in front of the automatic restart — and that could not be made correct
+// from here: the check and the kill sat on opposite sides of the Tauri command
+// boundary, and `/health` names no instance, so the verdict could not be tied
+// to the sidecar being killed. The confirmation now lives in the supervisor.
+// This spy is what fails loudly if a probe is ever reintroduced at this layer.
+let networkFetch: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.useFakeTimers()
   FakeWebSocket.instances = []
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
-  probeFetch = vi.fn()
-  vi.stubGlobal('fetch', probeFetch)
-  nothingAnswersOnTheSidecarPort()
+  networkFetch = vi.fn(() => Promise.reject(new TypeError('RuntimeGate must not fetch')))
+  vi.stubGlobal('fetch', networkFetch)
   configureApiBaseURL('http://127.0.0.1:8787/api')
   configureApiToken('token')
   runtimeMocks.initializeRuntimeConfig.mockReset().mockResolvedValue(READY_CONFIG)
-  runtimeMocks.reconnectSidecar.mockReset().mockResolvedValue(READY_CONFIG)
   runtimeMocks.restartSidecar.mockReset().mockResolvedValue(READY_CONFIG)
   runtimeMocks.restartSidecarAutomatic.mockReset()
   runtimeMocks.subscribeToSidecarRestart.mockReset().mockResolvedValue(() => {})
@@ -239,177 +230,144 @@ afterEach(() => {
 })
 
 /**
- * confirm-before-you-kill — the automatic restart is the destructive act, so it
- * is where the weak liveness signals get checked.
- *
- * Both signals that reach RuntimeGate mean less than they look like.
+ * confirm-before-you-kill — the automatic restart is the destructive act, and
+ * both signals that reach RuntimeGate are too weak to authorise it on their own.
  * `BACKEND_UNAVAILABLE_HTTP_EVENT` means "a call got no HTTP RESPONSE", which is
  * not "the process is gone" — a 500 the browser discards for missing
  * `Access-Control-Allow-Origin` reaches axios as ERR_NETWORK and looks exactly
  * the same from inside the interceptor. Acting on that restarted sidecars that
  * were serving fine, rotating their token and port and dropping in-flight runs.
  *
- * The check deliberately does NOT gate the banner. Banner and Retry appear only
- * once RuntimeGate leaves 'ready', so confirming before reporting would hide
- * both and leave a broken app with no message and no affordance — worse than
- * the spurious restart. Detection stays as sensitive as it was; only the
- * irreversible half asks for more evidence, and an unclear answer declines.
+ * So RuntimeGate ASKS FOR a restart; it does not decide one. The confirmation
+ * lives in the supervisor that owns the process, under the lock that serializes
+ * restarts (`apps/studio/tauri/src/sidecar.rs`), because only there are the
+ * check and the kill one step about one instance. What this file pins is
+ * RuntimeGate's half of that contract: it probes nothing itself, and it handles
+ * a refusal as the success it is.
+ *
+ * The confirmation deliberately does NOT gate the banner. Banner and Retry
+ * appear only once RuntimeGate leaves 'ready', so confirming before reporting
+ * would hide both and leave a broken app with no message and no affordance —
+ * worse than a spurious restart. Detection stays as sensitive as it was; only
+ * the irreversible half asks for more evidence.
  */
-describe('RuntimeGate — confirm-before-you-kill (the restart asks the port first)', () => {
-  it('reports the outage as before: the recheck never delays or hides the banner', async () => {
-    sidecarPortAnswersWith(200)
+describe('RuntimeGate — confirm-before-you-kill (the supervisor decides, this asks)', () => {
+  it('never probes the sidecar itself: the confirmation is not this layer\'s job', async () => {
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(RESTARTED)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
+    expect(networkFetch).not.toHaveBeenCalled()
+  })
+
+  it('reports the outage immediately: nothing is awaited before the banner', async () => {
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(RESTARTED)
     await mountReady()
 
     await act(async () => {
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
     })
 
-    // Banner and Retry are up immediately, with no probe awaited first.
     expect(bannerText().toLowerCase()).toContain('unavailable')
     expect(findButton()).not.toBeNull()
-    expect(probeFetch).not.toHaveBeenCalled()
+    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
   })
 
-  it('does NOT restart when the port still answers: it reconnects instead', async () => {
-    sidecarPortAnswersWith(200)
+  it('treats a declined restart as recovery: banner clears, nothing rescheduled', async () => {
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(DECLINED)
     await mountReady()
-    runtimeMocks.initializeRuntimeConfig.mockClear()
 
     await act(async () => {
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
     })
     await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
 
-    expect(probeFetch).toHaveBeenCalledTimes(1)
-    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
-    // The non-destructive half of what Retry does. `reconnectSidecar`
-    // specifically, not the boot path: boot keeps a token that is already set,
-    // and a stale token is one of the things that gets us here.
-    expect(runtimeMocks.reconnectSidecar).toHaveBeenCalledTimes(1)
-    expect(runtimeMocks.initializeRuntimeConfig).not.toHaveBeenCalled()
+    // The refusal ended the episode. Far past every remaining delay in the
+    // schedule, nothing fires again: a new cycle needs a new outage, not the
+    // passage of time. A decline handled as a FAILURE would show here as a
+    // second and third ask on the backoff.
+    await advance(120_000)
+
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
     expect(bannerText().toLowerCase()).not.toContain('unavailable')
+    expect(findButton()).toBeNull()
   })
 
   /**
-   * Declining to restart must not be a dead end. Detection is armed by
-   * `useBackendDownSignal(status === 'ready', …)`, so a branch that leaves
-   * `status` on 'error' also leaves the app unable to notice the NEXT outage —
-   * and the only way out would be the destructive Retry this whole change
-   * exists to avoid. Whatever the branch decides, it has to end somewhere the
-   * machine can leave.
+   * Declining must not be a dead end. Detection is armed by
+   * `useBackendDownSignal(status === 'ready', …)`, so a branch that left
+   * `status` on 'error' would also leave the app unable to notice the NEXT
+   * outage — and the only way out would be the destructive Retry this whole
+   * change exists to avoid.
    */
-  it('re-arms detection after declining: a second outage is still noticed', async () => {
-    sidecarPortAnswersWith(200)
+  it('re-arms detection after a decline: a second outage is still noticed', async () => {
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValueOnce(DECLINED)
     await mountReady()
 
     await act(async () => {
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
     })
     await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
-    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
-    // Back to a working app: no banner, nothing killed.
     expect(bannerText().toLowerCase()).not.toContain('unavailable')
 
-    // The sidecar dies for real this time.
-    nothingAnswersOnTheSidecarPort()
-    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
+    // The sidecar dies for real this time, and the supervisor confirms it.
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(RESTARTED)
     await act(async () => {
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
     })
     expect(bannerText().toLowerCase()).toContain('unavailable')
     await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
 
-    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
-  })
-
-  it('treats a 503 as an answer: a process that replies is not a process to kill', async () => {
-    sidecarPortAnswersWith(503)
-    await mountReady()
-
-    await act(async () => {
-      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
-    })
-    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
-
-    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
-  })
-
-  it('does not turn into a probe poller after reconnecting once', async () => {
-    sidecarPortAnswersWith(200)
-    await mountReady()
-
-    await act(async () => {
-      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
-    })
-    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
-    // Far past every remaining delay in the schedule. The reconnect ends the
-    // episode, so nothing is left to fire: a new cycle needs a new outage, not
-    // the passage of time.
-    await advance(120_000)
-
-    expect(probeFetch).toHaveBeenCalledTimes(1)
-    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
-  })
-
-  it('still restarts when nothing answers, exactly as before', async () => {
-    nothingAnswersOnTheSidecarPort()
-    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
-    await mountReady()
-
-    await act(async () => {
-      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
-    })
-    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
-
-    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
-    expect(bannerText()).toContain('app-shell-content')
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(2)
     expect(bannerText().toLowerCase()).not.toContain('unavailable')
   })
 
   /**
-   * The probe took an ACTION that used to be instantaneous and gave it a
-   * duration, and anything with a duration can be overtaken. `handleRetry`
-   * cancels the pending timer, but a probe already in flight is not a timer —
-   * so its verdict came back after the person's own restart had finished and
-   * killed the sidecar they had just been given.
-   *
-   * This is the same hazard the boot effect above already guards with its
-   * `cancelled` flag: an async result must be discarded when the episode it was
-   * started for is over. The probe answers a question about a PARTICULAR sidecar
-   * instance, and after a manual restart that instance no longer exists.
+   * A restart request has a duration, and anything with a duration can be
+   * overtaken. `handleRetry` cancels the pending timer, but a request already
+   * in flight is not a timer — its answer describes the instance it was sent
+   * about, which a manual Retry has since replaced. The supervisor makes that
+   * answer harmless (it re-confirms under the lock and would decline); this
+   * side must still not report a superseded episode's result as the current
+   * state.
    */
-  it('drops a probe verdict that arrives after a manual Retry already restarted', async () => {
-    let answerTheProbe: (() => void) | undefined
-    probeFetch.mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          answerTheProbe = () => reject(new TypeError('Failed to fetch'))
-        }),
+  it('drops an answer that arrives after a manual Retry already restarted', async () => {
+    let answerTheRequest: ((result: typeof RESTARTED) => void) | undefined
+    runtimeMocks.restartSidecarAutomatic.mockReturnValue(
+      new Promise((resolve) => {
+        answerTheRequest = resolve
+      }),
     )
-    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
     await mountReady()
 
     await act(async () => {
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
     })
-    // The scheduled attempt fires and the probe is now in flight, unanswered.
+    // The scheduled attempt fired and its request is in flight, unanswered.
     await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
-    expect(probeFetch).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
 
     // The person does not wait for it. Retry restarts the sidecar itself.
     clickRetry()
     await flush()
     expect(runtimeMocks.restartSidecar).toHaveBeenCalledTimes(1)
 
-    // Only now does the probe report that nothing was answering — true of the
-    // instance it asked about, and irrelevant to the one now running.
+    // Only now does the automatic attempt answer. It must change nothing: no
+    // second ask, and no revived recovery loop.
     await act(async () => {
-      answerTheProbe?.()
+      answerTheRequest?.(RESTARTED)
       await Promise.resolve()
       await Promise.resolve()
     })
+    await advance(120_000)
 
-    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
+    expect(bannerText().toLowerCase()).not.toContain('unavailable')
   })
 })
 
@@ -491,7 +449,7 @@ describe('RuntimeGate — post-ready sidecar death is observable (dead-sidecar-s
   it('a successful automatic attempt clears the banner and returns to ready', async () => {
     runtimeMocks.restartSidecarAutomatic
       .mockRejectedValueOnce(new Error('first attempt failed'))
-      .mockResolvedValueOnce(READY_CONFIG)
+      .mockResolvedValueOnce(RESTARTED)
     await mountReady()
 
     await act(async () => {
@@ -605,10 +563,10 @@ describe('RuntimeGate — post-ready sidecar death is observable (dead-sidecar-s
  */
 describe('RuntimeGate — recovery-stops-when-it-succeeds (a successful restart ends its own episode)', () => {
   async function driveIntoADownEpisodeWithStaleConnectionLost(): Promise<{
-    resolveFirstAttempt: (value: typeof READY_CONFIG) => void
+    resolveFirstAttempt: (value: typeof RESTARTED) => void
   }> {
-    let resolveFirstAttempt: (value: typeof READY_CONFIG) => void = () => {}
-    const firstAttempt = new Promise<typeof READY_CONFIG>((resolve) => {
+    let resolveFirstAttempt: (value: typeof RESTARTED) => void = () => {}
+    const firstAttempt = new Promise<typeof RESTARTED>((resolve) => {
       resolveFirstAttempt = resolve
     })
     runtimeMocks.restartSidecarAutomatic.mockReturnValueOnce(firstAttempt)
@@ -640,7 +598,7 @@ describe('RuntimeGate — recovery-stops-when-it-succeeds (a successful restart 
     const { resolveFirstAttempt } = await driveIntoADownEpisodeWithStaleConnectionLost()
 
     await act(async () => {
-      resolveFirstAttempt(READY_CONFIG)
+      resolveFirstAttempt(RESTARTED)
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -658,7 +616,7 @@ describe('RuntimeGate — recovery-stops-when-it-succeeds (a successful restart 
     const { resolveFirstAttempt } = await driveIntoADownEpisodeWithStaleConnectionLost()
 
     await act(async () => {
-      resolveFirstAttempt(READY_CONFIG)
+      resolveFirstAttempt(RESTARTED)
       await Promise.resolve()
       await Promise.resolve()
     })

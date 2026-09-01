@@ -1313,11 +1313,15 @@ fn restart_sidecar(
 /// WebSocket event stream reports `connectionLost`, or an HTTP call gets no
 /// response at all) — never a person pressing Retry, which stays on
 /// `restart_sidecar` above and is never subject to this budget.
+///
+/// Neither of those triggers can tell a dead sidecar from a live one it merely
+/// cannot reach, so the supervisor confirms before destroying anything and may
+/// answer `declined` — see `AutoRestartReply`.
 #[tauri::command]
 fn restart_sidecar_automatic(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, SidecarAppState>,
-) -> Result<sidecar::SidecarRuntimeConfig, String> {
+) -> Result<AutoRestartReply, String> {
     match supervisor(&state)?.restart_automatic() {
         sidecar::AutoRestartOutcome::Restarted(runtime_config) => {
             if let Err(err) = app_handle.emit(sidecar::SIDECAR_RESTARTED_EVENT, &runtime_config) {
@@ -1332,7 +1336,21 @@ fn restart_sidecar_automatic(
                     runtime_config.port
                 );
             }
-            Ok(runtime_config)
+            Ok(AutoRestartReply::Restarted {
+                config: runtime_config,
+            })
+        }
+        sidecar::AutoRestartOutcome::Declined(runtime_config) => {
+            // No `SIDECAR_RESTARTED_EVENT`: nothing restarted, and the event
+            // means "a new instance exists, rotate to it". The config travels
+            // in the reply instead, to the one caller that asked.
+            log::info!(
+                "phase=sidecar-restart action=declined trigger=automatic reason=instance-still-serving port={}",
+                runtime_config.port
+            );
+            Ok(AutoRestartReply::Declined {
+                config: runtime_config,
+            })
         }
         sidecar::AutoRestartOutcome::BudgetExhausted => {
             log::warn!("phase=sidecar-restart action=refused trigger=automatic reason=budget-exhausted");
@@ -1343,6 +1361,25 @@ fn restart_sidecar_automatic(
             Err(error)
         }
     }
+}
+
+/// What `restart_sidecar_automatic` answers the frontend when it did NOT fail.
+///
+/// Two shapes, one for each thing that can honestly be reported: a sidecar was
+/// replaced, or the one already there was found serving and left alone. Both
+/// carry the config the caller should now be talking to, so the frontend's
+/// handling is the same in both cases (apply it — which rotates the bearer
+/// token) and only the diagnosis differs.
+///
+/// `declined` is deliberately NOT an `Err`. The frontend renders an `Err` as
+/// the failed-attempt banner and schedules the next attempt on its backoff, so
+/// reporting a healthy sidecar that way would keep asking for the destruction
+/// the supervisor just refused.
+#[derive(Debug, Serialize)]
+#[serde(tag = "outcome", rename_all = "camelCase")]
+enum AutoRestartReply {
+    Restarted { config: sidecar::SidecarRuntimeConfig },
+    Declined { config: sidecar::SidecarRuntimeConfig },
 }
 
 #[tauri::command]

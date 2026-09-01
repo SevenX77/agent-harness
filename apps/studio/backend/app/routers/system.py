@@ -18,8 +18,25 @@ router = APIRouter(tags=["system"])
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, str | int]:
+    """Liveness, plus the identity of the process that answered.
+
+    `pid` exists for exactly one consumer: the desktop shell's
+    `SidecarSupervisor` (`apps/studio/tauri/src/sidecar.rs`), which must decide
+    whether to KILL and replace the sidecar it owns. A bare "something on that
+    port answered 200" cannot carry that decision — a port is a rendezvous any
+    local process can occupy, so an unrelated listener would look exactly like a
+    healthy sidecar and get one spared (or, worse, get the real one's config
+    handed back to a frontend that then reports itself recovered). Answering with
+    `os.getpid()` lets the supervisor compare against the process handle it
+    holds, so the verdict names one process instead of one port.
+
+    Not a secret, and this endpoint's lack of auth is unchanged by it: the pid
+    owning a loopback listener is already readable by any local process
+    (`Get-NetTCPConnection -OwningProcess`, `lsof -i`, `ss -p`), and a pid
+    authorizes nothing. It is an identifier, not a credential.
+    """
+    return {"status": "ok", "pid": os.getpid()}
 
 
 @router.get("/api/system/truth-sources")

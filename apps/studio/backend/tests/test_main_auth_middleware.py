@@ -66,7 +66,7 @@ def test_health_endpoint_bypass(
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
 
 
 def test_dev_mode_bypass_when_token_unset(

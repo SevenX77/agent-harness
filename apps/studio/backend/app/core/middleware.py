@@ -87,7 +87,13 @@ class UnhandledExceptionEnvelopeMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception:
-            logger.exception(
+            # No traceback here on purpose. The re-raise below hands the
+            # exception to the server, which logs the full stack itself
+            # (uvicorn: "Exception in ASGI application"); `logger.exception`
+            # would print a second identical copy of it. What that copy would
+            # NOT contain is which request it was, so this line contributes
+            # exactly that and stops.
+            logger.error(
                 "Unhandled exception serving %s %s",
                 scope.get("method", "?"),
                 scope.get("path", "?"),

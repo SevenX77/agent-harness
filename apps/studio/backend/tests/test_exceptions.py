@@ -100,7 +100,10 @@ async def test_the_value_error_prefix_protocol_does_not_honour_internal_error() 
 
     assert response.status_code == 422
     assert b'"error_code":"MANIFEST_VALIDATION_FAILED"' in response.body
-    assert b"a database path with a secret in it" in response.body
+    # Nothing here asserts what happens to the caller's TEXT. Today it is echoed,
+    # and that is the leak described above — pinning it with an assertion would
+    # turn a defect into a promise, and would put this test in the way of the
+    # change that fixes it.
 
 
 @pytest.mark.anyio

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import re
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
@@ -140,28 +139,49 @@ def test_the_backend_declares_every_sdk_it_imports() -> None:
     assert undeclared == []
 
 
-def test_the_backend_declares_every_gateway_extra_its_routes_need() -> None:
+def test_the_backend_requires_every_gateway_extra_its_lazy_imports_need() -> None:
     """Naming a dependency is not enough if the part you use lives behind an extra.
 
     The gateway keeps provider clients it cannot always install behind lazy
-    imports, and says so in the error it raises: "requires the
-    graph-agent-gateway[google] optional extra". The backend declared
-    `graph-agent-gateway` with NO extras, so the desktop app's vendored
-    dependency closure — built by `uv export --package studio-backend` — simply
-    did not contain `langchain-google-genai`, and every gemini route in the
-    packaged app died on ImportError while the dev tree (synced with
+    imports. The backend declared `graph-agent-gateway` with NO extras, so the
+    desktop app's vendored closure — built by `uv export --package studio-backend`
+    — simply did not contain `langchain-google-genai`, and every gemini route in
+    the packaged app died on ImportError while the dev tree (synced with
     `--all-extras`) looked fine.
 
-    The check derives its expectations from the gateway's own message rather than
-    a list kept here, so a second provider put behind a second extra is caught the
-    day it is added instead of the day someone ships it.
+    Both halves are read structurally rather than from prose, because the failure
+    mode is a mismatch between two manifests and an import, and any of the three
+    can be edited without touching the others:
+
+    * the lazily imported modules come from the `importlib.import_module("...")`
+      calls in the gateway's own source (AST, not a grep for an error message —
+      error text gets reworded);
+    * which extra ships a module comes from the gateway's
+      `optional-dependencies`;
+    * and the requirement is checked against the backend's REQUIRED dependencies
+      only. An extra parked in the backend's own `optional-dependencies` would
+      not be in the default export either, so counting it here would let the bug
+      back in while the gate stayed green.
+
+    A lazily imported module that some non-optional dependency already provides
+    needs no extra and is therefore not demanded here. A dynamic import whose
+    argument is not a literal cannot be resolved statically and is out of this
+    check's reach.
     """
-    advertised = _extras_the_gateway_says_it_needs()
-    assert advertised, "no `graph-agent-gateway[...]` requirement is advertised in the gateway source"
+    gateway_root = BACKEND_ROOT.parents[2] / "packages" / "graph-agent-gateway"
+    extra_by_distribution = _extra_by_distribution(gateway_root / "pyproject.toml")
+    assert extra_by_distribution, "the gateway declares no optional dependencies to check against"
 
-    declared = _requested_extras(BACKEND_ROOT / "pyproject.toml", "graph-agent-gateway")
+    needed = {
+        extra_by_distribution[distribution]
+        for module in _lazily_imported_modules(gateway_root / "src")
+        if (distribution := module.split(".", 1)[0].replace("_", "-")) in extra_by_distribution
+    }
+    assert needed, "no lazy import in the gateway resolves to one of its optional extras"
 
-    assert sorted(advertised - declared) == []
+    required = _required_extras(BACKEND_ROOT / "pyproject.toml", "graph-agent-gateway")
+
+    assert sorted(needed - required) == []
 
 
 def test_boundary_guard_auto_discovers_all_production_modules() -> None:
@@ -261,30 +281,46 @@ def _declared_distributions(manifest: Path) -> set[str]:
     return {_distribution_name(requirement) for requirement in requirements}
 
 
-def _extras_the_gateway_says_it_needs() -> set[str]:
-    """Extras the gateway names in its own "you need this to use that" errors.
+def _lazily_imported_modules(source_root: Path) -> set[str]:
+    """Module names passed as literals to `importlib.import_module` in a package.
 
-    Read out of the SDK source because that message IS the contract: a lazy import
-    guarded by it means the code path is unreachable unless the extra is
-    installed. Anything the gateway advertises that way, an app that can route to
-    it has to ask for.
+    A lazy import is how a package says "this path only works if something else
+    is installed", so these are exactly the names whose absence turns a feature
+    into an ImportError at run time.
     """
-    gateway_source = BACKEND_ROOT.parents[2] / "packages" / "graph-agent-gateway" / "src"
-    pattern = re.compile(r"graph-agent-gateway\[([a-z0-9_-]+)\]")
+    modules: set[str] = set()
+    for path in source_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target = node.func
+            name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", None)
+            if name != "import_module" or not node.args:
+                continue
+            first = node.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                modules.add(first.value)
+    return modules
+
+
+def _extra_by_distribution(manifest: Path) -> dict[str, str]:
+    """Which optional extra ships each distribution, from the package's manifest."""
+    optional = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"].get(
+        "optional-dependencies"
+    ) or {}
     return {
-        match
-        for path in gateway_source.rglob("*.py")
-        for match in pattern.findall(path.read_text(encoding="utf-8"))
+        _distribution_name(requirement): extra
+        for extra, requirements in optional.items()
+        for requirement in requirements
     }
 
 
-def _requested_extras(manifest: Path, distribution: str) -> set[str]:
+def _required_extras(manifest: Path, distribution: str) -> set[str]:
+    """Extras requested on a REQUIRED dependency — the ones a default export gets."""
     project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
-    requirements: list[str] = list(project.get("dependencies") or [])
-    for extra in (project.get("optional-dependencies") or {}).values():
-        requirements.extend(extra)
     requested: set[str] = set()
-    for requirement in requirements:
+    for requirement in project.get("dependencies") or []:
         if _distribution_name(requirement) != distribution:
             continue
         if "[" in requirement and "]" in requirement:

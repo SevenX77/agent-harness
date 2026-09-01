@@ -66,10 +66,15 @@ Notes:
   builds included), and those two are vendored as pre-built wheels from
   `packages/graph-agent` / `packages/graph-agent-gateway` — so any SOURCE
   change to those two packages, not just a dependency-manifest change, leaves
-  the running app on stale engine/gateway code until you re-run
-  `build_vendor.py` (+ re-warm `.pyc`) and restart. See `AGENTS.md`
-  "Workflow Pipeline" step 7 for the exact recipe and the close-app-first
-  Windows file-lock gotcha.
+  the RUNNING app on stale engine/gateway code. Restarting through the standard
+  launcher is enough to fix it: `beforeDevCommand` runs
+  `apps/studio/tauri/scripts/ensure_vendor.js`, which compares every file of
+  both packages against the snapshot byte for byte and re-vendors when they
+  differ. Running `build_vendor.py` by hand is for when you want the rebuild
+  NOW without restarting, or want to skip the wait at next launch. Either way
+  re-warm `.pyc`. See `AGENTS.md` "Workflow Pipeline" step 7 for the exact
+  recipe, the provenance stamp, the `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT`
+  escape hatch, and the close-app-first Windows file-lock gotcha.
 - Symptoms → cause: `No module named uvicorn` = step 2 never ran
   (`vendor/site-packages` missing). Banner stays red for ~30s+ then the sidecar
   dies = step 3 never ran (cold `.pyc` compile exceeded the health check).

@@ -8,6 +8,7 @@ from app.core.exceptions import (
     standard_http_exception,
     value_error_handler,
 )
+from app.models.errors import ErrorResponse
 from fastapi import HTTPException
 
 # Codes only the framework may answer with; a caller naming one is refused. Kept
@@ -106,21 +107,39 @@ async def test_the_value_error_prefix_protocol_does_not_honour_internal_error() 
     # change that fixes it.
 
 
+def test_the_envelope_builder_refuses_the_frameworks_own_code() -> None:
+    """The rule is enforced where the envelope is BUILT, not only where it exits.
+
+    Projection-time normalization is not enough on its own, because not every
+    envelope goes through a handler: a router may `return error_response(...)`
+    from an endpoint and FastAPI serializes it directly. So the builder refuses
+    the code, which makes the envelope impossible to have rather than harmless to
+    have.
+    """
+    with pytest.raises(ValueError, match="STUDIO_INTERNAL_ERROR"):
+        error_response(
+            error_code="STUDIO_INTERNAL_ERROR",
+            http_status=200,
+            message="a database path with a secret in it",
+            retry_strategy="idempotent",
+        )
+
+
 @pytest.mark.anyio
 async def test_a_hand_built_internal_error_envelope_cannot_carry_caller_text() -> None:
-    """The reserved-code rule is enforced at the way OUT, not only at the ways in.
+    """And the way out normalizes one that skipped the builder entirely.
 
-    Blocking the two code-selection routes leaves others open: a caller can
-    hand-build an envelope with `error_response(...)` and raise it, which arrives
-    as an `HTTPException` whose detail is already a complete envelope. Every one
-    of those still leaves through `_json_response`, so that is where the fixed
-    message is imposed.
+    Constructing `ErrorResponse` directly goes around `error_response` and its
+    refusal above — nothing can stop that, since it is the shared model every
+    envelope is made of. What can be stopped is such an envelope REACHING a
+    reader, which is what `_json_response` does for anything leaving through
+    this module's handlers.
     """
     # Every field is forged, not just the message, because normalizing one would
     # leave the others: `http_status=200` is read as SUCCESS by axios, `details`
     # is rendered verbatim by the frontend's diagnostic view, and
     # `retry_strategy` would invite repeating a possibly half-applied write.
-    smuggled = error_response(
+    smuggled = ErrorResponse(
         error_code="STUDIO_INTERNAL_ERROR",
         http_status=200,
         message="a database path with a secret in it",

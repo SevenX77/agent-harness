@@ -142,7 +142,38 @@ def error_response(
     retry_strategy: RetryStrategy,
     details: dict[str, Any] | None = None,
 ) -> ErrorResponse:
-    """Build a validated Studio error response."""
+    """Build a validated Studio error response.
+
+    Refuses a framework-reserved code outright rather than letting one be built
+    and normalized later. Projection-time normalization (`_json_response`) only
+    covers envelopes that leave through this module's handlers; a router is free
+    to `return error_response(...)` from an endpoint, and that response goes
+    straight out. Blocking construction is the only version of the rule that does
+    not depend on which exit the envelope happens to take.
+    """
+    if error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
+        raise ValueError(
+            f"{error_code} is the framework's own answer for an unclaimed exception "
+            "and cannot be constructed by a caller; let the exception propagate instead",
+        )
+    return _validated_error_response(
+        error_code=error_code,
+        http_status=http_status,
+        message=message,
+        retry_strategy=retry_strategy,
+        details=details,
+    )
+
+
+def _validated_error_response(
+    *,
+    error_code: str,
+    http_status: int,
+    message: str,
+    retry_strategy: RetryStrategy,
+    details: dict[str, Any] | None = None,
+) -> ErrorResponse:
+    """The unchecked builder, for the framework's own reserved-code envelope."""
     return ErrorResponse(
         error_code=error_code,
         http_status=http_status,
@@ -179,9 +210,14 @@ def raise_not_implemented(feature: str) -> NoReturn:
 
 
 def internal_error_response() -> ErrorResponse:
-    """The framework's answer for an exception no handler claimed."""
+    """The framework's answer for an exception no handler claimed.
+
+    The one producer of this envelope, and the reason `error_response` above
+    refuses the code: there is exactly one place it can come from, so there is
+    exactly one message and one status it can carry.
+    """
     definition = STANDARD_ERROR_MAP["STUDIO_INTERNAL_ERROR"]
-    return error_response(
+    return _validated_error_response(
         error_code="STUDIO_INTERNAL_ERROR",
         http_status=definition.http_status,
         message=STUDIO_INTERNAL_ERROR_MESSAGE,
@@ -193,24 +229,25 @@ def internal_error_response() -> ErrorResponse:
 def _json_response(response: ErrorResponse) -> JSONResponse:
     """Project an envelope, replacing a reserved code's outright.
 
-    Blocking the two code-SELECTION routes is not enough on its own: a caller
-    can also hand-build an envelope with `error_response(...)` and raise it, or
-    raise an `HTTPException` whose detail is already a full envelope, and both
-    arrive here.
+    A backstop, not the boundary. The boundary is construction: the three ways to
+    NAME a code — `StudioHTTPException`, the ValueError prefix protocol, and
+    `error_response` — each refuse the reserved one, so a reserved envelope
+    cannot legitimately exist outside `internal_error_response`. What reaches
+    here with one anyway got there by hand-building an `ErrorResponse` or a raw
+    dict, i.e. by going around the module rather than through it.
 
-    The whole envelope is replaced, not just `message`. Normalizing one field
-    would leave the others forgeable, and every one of them matters: an
-    `STUDIO_INTERNAL_ERROR` carrying `http_status=200` is read as SUCCESS by axios,
-    `details` is rendered verbatim by the frontend's diagnostic view, and
-    `retry_strategy` tells the caller whether repeating a half-applied write is
-    safe. A code that only the framework may answer with only ever carries the
-    framework's own answer.
+    Kept anyway, and the whole envelope is replaced rather than just `message`,
+    because every field decides something: `http_status=200` is read as SUCCESS
+    by axios, `details` is rendered verbatim by the frontend's diagnostic view,
+    and `retry_strategy` tells the caller whether repeating a possibly
+    half-applied write is safe. Normalizing one and not the others would be a
+    rule that looks enforced and is not.
 
-    This is the exit for every envelope BUILT IN THIS MODULE. It is not a
-    whole-app choke point, and two things sit outside it: the loopback branch of
-    `http_exception_handler` below, whose payload is a different shape entirely,
-    and any router that returns its own `JSONResponse` — which is outside every
-    guarantee this module makes, not just this one.
+    What this cannot reach: the loopback branch of `http_exception_handler`
+    below, whose payload is a different shape carrying ENGINE error codes, and
+    any router that returns its own `JSONResponse`. Neither is a hole in the
+    reserved-code rule now that construction is blocked — both would require
+    hand-writing the payload.
     """
     if response.error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
         response = internal_error_response()

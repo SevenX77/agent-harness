@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ast
+import sys
 import tomllib
 from collections.abc import Iterable
+from importlib.metadata import packages_distributions
 from pathlib import Path
 
 BACKEND_ROOT = next(
@@ -139,6 +141,73 @@ def test_the_backend_declares_every_sdk_it_imports() -> None:
     assert undeclared == []
 
 
+def test_the_locked_closure_covers_every_gateway_lazy_import() -> None:
+    """The desktop app must be able to import everything the gateway it bundles can.
+
+    The gateway keeps provider clients behind lazy imports and ships them in
+    optional extras. The backend declared `graph-agent-gateway` with NO extras, so
+    the vendored dependency closure — `uv export --package studio-backend`, see
+    `apps/studio/backend/scripts/build_vendor.py` — simply did not contain
+    `langchain-google-genai`, and every gemini route in the packaged app died on
+    ImportError while the dev tree (synced with `--all-extras`) looked fine.
+
+    The assertion is therefore about the CLOSURE, not about a manifest field: for
+    every module the gateway can lazily import, the distribution providing it must
+    be reachable from `studio-backend` in `uv.lock` — the same graph
+    `uv export --package studio-backend` walks, rather than a declaration that has
+    not been resolved yet.
+
+    Both ends are resolved rather than guessed: the module names come from the AST
+    of the gateway's own `importlib.import_module("...")` calls, and module →
+    distribution comes from installed metadata, because an import name is not a
+    package name (`google-genai` provides `google`, `PyYAML` provides `yaml`). A
+    module nothing installed provides is reported, not skipped.
+
+    Scope is deliberately "everything the bundled gateway can lazily import",
+    which is wider than "the protocols Studio exposes today": a provider path
+    present in the shipped SDK that raises ImportError when a user picks it is a
+    defect either way, and this version of the rule needs no hand-kept list of
+    which routes count.
+
+    What it does NOT catch, so nobody reads more into a green run than it earns:
+
+    * a stale COMMITTED lock. CI runs `uv sync` before pytest and `build_vendor`'s
+      export is not `--locked`, so both silently refresh an out-of-date lock in the
+      workspace. This reads whatever lock is on disk by then.
+    * a dependency edge whose environment marker excludes the target platform or
+      Python version — markers are not evaluated here.
+    * a top-level name shared by several distributions (namespace packages such as
+      `google.*`): finding ANY of its providers in the closure is accepted, which
+      does not prove the specific submodule ships. No lazy import in the gateway is
+      a namespace package today.
+    * a lock with two nodes of the same distribution name; the walk keys on name,
+      so it would follow one of them.
+    * a dynamic import whose argument is not a literal string.
+    """
+    gateway_root = BACKEND_ROOT.parents[2] / "packages" / "graph-agent-gateway"
+    lazy_modules = _lazily_imported_modules(gateway_root / "src")
+    assert lazy_modules, "no literal `importlib.import_module` call found in the gateway source"
+
+    closure = _locked_closure(BACKEND_ROOT.parents[2] / "uv.lock", "studio-backend")
+    module_owners = packages_distributions()
+
+    unreachable: list[str] = []
+    for module in sorted(lazy_modules):
+        top_level = module.split(".", 1)[0]
+        providers = module_owners.get(top_level)
+        if not providers:
+            # Not installed here at all. The dev tree syncs `--all-extras`, so this
+            # is a typo or a dependency nobody declared — never a thing to skip.
+            unreachable.append(f"{module}: nothing installed provides {top_level!r}")
+            continue
+        if not any(_normalize_distribution(name) in closure for name in providers):
+            unreachable.append(
+                f"{module}: provided by {sorted(providers)}, none of them in the closure"
+            )
+
+    assert unreachable == []
+
+
 def test_boundary_guard_auto_discovers_all_production_modules() -> None:
     scanned_paths = {path.relative_to(BACKEND_ROOT) for path in _production_files()}
 
@@ -234,6 +303,78 @@ def _declared_distributions(manifest: Path) -> set[str]:
     for extra in (project.get("optional-dependencies") or {}).values():
         requirements.extend(extra)
     return {_distribution_name(requirement) for requirement in requirements}
+
+
+def _lazily_imported_modules(source_root: Path) -> set[str]:
+    """Third-party module names passed as literals to `importlib.import_module`.
+
+    A lazy import is how a package says "this path only works if something else
+    is installed", so these are exactly the names whose absence turns a feature
+    into an ImportError at run time.
+
+    Only `importlib.import_module(...)` counts — matching a bare `import_module`
+    attribute on anything at all would pick up an unrelated local helper that
+    happens to share the name. Standard-library targets and relative imports are
+    dropped because no distribution ships them, so demanding one would be a false
+    alarm rather than a finding.
+    """
+    modules: set[str] = set()
+    for path in source_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target = node.func
+            if not isinstance(target, ast.Attribute) or target.attr != "import_module":
+                continue
+            if not isinstance(target.value, ast.Name) or target.value.id != "importlib":
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+                continue
+            module = first.value
+            if module.startswith(".") or module.split(".", 1)[0] in sys.stdlib_module_names:
+                continue
+            modules.add(module)
+    return modules
+
+
+def _locked_closure(lock_path: Path, root: str) -> set[str]:
+    """Distributions reachable from `root` in a uv lock, extras followed as requested.
+
+    This is the set an export of `root` installs: a dependency edge may carry
+    `extra = [...]`, which pulls that package's matching `optional-dependencies`
+    group and nothing else from it. Dev groups are not walked, so the result is a
+    subset of what the vendor build installs — enough to prove a distribution IS
+    present, which is the direction this gate needs.
+    """
+    lock = tomllib.loads(lock_path.read_text(encoding="utf-8"))
+    packages = {package["name"]: package for package in lock.get("package") or []}
+    reached: set[str] = set()
+    visited: set[tuple[str, frozenset[str]]] = set()
+    pending: list[tuple[str, frozenset[str]]] = [(root, frozenset())]
+    while pending:
+        name, extras = pending.pop()
+        if (name, extras) in visited:
+            continue
+        visited.add((name, extras))
+        reached.add(_normalize_distribution(name))
+        package = packages.get(name)
+        if package is None:
+            continue
+        requirements = list(package.get("dependencies") or [])
+        optional = package.get("optional-dependencies") or {}
+        for extra in extras:
+            requirements.extend(optional.get(extra) or [])
+        for requirement in requirements:
+            pending.append((requirement["name"], frozenset(requirement.get("extra") or ())))
+    return reached
+
+
+def _normalize_distribution(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
 
 
 def _distribution_name(requirement: str) -> str:

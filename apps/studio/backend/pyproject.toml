@@ -5,7 +5,13 @@ description = "Skill Studio backend (FastAPI sidecar)"
 requires-python = ">=3.11"
 dependencies = [
     "graph-agent",
-    "graph-agent-gateway",
+    # [google] is required, not optional, for this app: the gateway keeps
+    # langchain-google-genai behind that extra, and the desktop app's vendored
+    # dependency closure comes from `uv export --package studio-backend`. Without
+    # it every google_genai route in the packaged app dies on the ImportError
+    # `call/factory.py` raises, while a dev tree synced with `--all-extras` shows
+    # nothing wrong. Gate: test_the_locked_closure_covers_every_gateway_lazy_import.
+    "graph-agent-gateway[google]",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.12,<3.0",

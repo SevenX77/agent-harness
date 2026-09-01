@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services import agent_assets, copilot
+from app.services import agent_asset_owners, agent_assets, copilot
 from claude_agent_sdk import PermissionResultAllow
 
 from tests.support.copilot_binding import binding_for
@@ -171,9 +171,19 @@ def test_materialize_copies_agents_skills_into_workspace(tmp_path: Path) -> None
     assert copilot._materialize_copilot_skills(tmp_path) == names  # idempotent
 
 
-def test_context_resolved_event_echoes_assets_fingerprint() -> None:
+def test_context_resolved_event_echoes_the_cross_owner_provenance() -> None:
+    """批B′ 第 4 阶段:回显不能只说"我吃了一棵树的什么指纹"。
+
+    这棵树是**即将退役的读者副本**,权威 owner 是 graph-skill-runtime 的资产包。
+    只回显 `assets@<hex>` 会被读成"这就是 MoirAI 资产的身份",而那正是旧机制
+    给出的错误安心感。所以事件同时说出:实际读到的树,以及权威 owner 与其版本。
+    """
+
     event = copilot._context_resolved_event("skill-a")
+
     assert f"assets@{agent_assets.assets_fingerprint()}" in event.summary
+    assert agent_asset_owners.provenance_label() in event.summary
+    assert agent_asset_owners.authoritative_owner().owner_id in event.summary
     assert event.detail == "(no request context)"
 
 

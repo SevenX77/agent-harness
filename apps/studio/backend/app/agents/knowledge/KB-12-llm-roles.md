@@ -9,10 +9,10 @@ related:
 
 # KB-12: LLM Roles & Gateway Routing
 
-The大模型 Gateway provides a robust, decoupled layer between high-level agent intents and specific model API endpoints. It manages credentials, endpoints, routes, roles, and automated fallbacks.
+The LLM Gateway provides a robust, decoupled layer between high-level agent intents and specific model API endpoints. It manages credentials, endpoints, routes, roles, and automated fallbacks.
 
 ## 1. The Gateway Concept Chain
-To map a user's request to a running 대형 언어 모델 (LLM) instance, the gateway executes the following conceptual chain:
+To map a user's request to a running large language model (LLM) instance, the gateway executes the following conceptual chain:
 
 ```text
 Credential ──> Endpoint ──> Route ──> Role ──> GatewayChatModel (Fallback)

@@ -16,6 +16,23 @@ use std::{
 const MAX_STARTUP_ATTEMPTS: usize = 3;
 const STDERR_RING_LINES: usize = 50;
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// Per-request budget for one poll of the startup health wait. Short on
+/// purpose: `wait_for_health` is a LOOP, so a request that hangs costs the loop
+/// its cadence, and the next poll a moment later is a better use of the
+/// remaining time than waiting out one slow attempt.
+const HEALTH_POLL_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
+/// Per-request budget for the destruction gate (`confirm_serving`), which asks
+/// ONCE and lets the caller's own retry schedule provide the repetition.
+///
+/// Deliberately more patient than `HEALTH_POLL_REQUEST_TIMEOUT`, because the
+/// two ask under opposite stakes. A slow poll during startup costs nothing — the
+/// loop asks again in 200ms. A slow answer HERE is read as "not serving", and
+/// the consequence is killing a sidecar that may have a run in flight; a busy
+/// interpreter that would have answered in 700ms must not be destroyed for
+/// being busy. Two seconds is long enough that only a genuinely wedged event
+/// loop misses it, and short enough that recovery from a real death is not
+/// visibly stalled by the confirmation.
+const CONFIRM_SERVING_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub enum SidecarError {
@@ -208,6 +225,48 @@ impl SidecarManager {
         )
     }
 
+    /// Whether THIS instance is still both present and able to answer for
+    /// itself. Two facts, asked in this order because each covers what the
+    /// other cannot, and because the cheap one settles the common case:
+    ///
+    /// 1. The process handle. `try_wait` reports whether the child this manager
+    ///    owns has exited — the only liveness answer that is bound to the
+    ///    INSTANCE rather than to a port number. A port is a rendezvous anyone
+    ///    can occupy; a handle is not. It is also the cheap one, and on the
+    ///    primary platform that is not a rounding error: a connect to a closed
+    ///    loopback port on Windows takes ~2.04s to come back refused (measured
+    ///    2026-09-01, pinned by `health_probe_once_is_bounded_by_the_timeout_
+    ///    it_was_given`), so asking the network first would stall recovery from
+    ///    the ORDINARY case — the sidecar really died — by two seconds every
+    ///    time.
+    /// 2. Its `/health` endpoint. A child that has not exited can still be
+    ///    wedged, and a supervisor that stopped at fact 1 would refuse to ever
+    ///    restart one.
+    ///
+    /// Both must hold. Neither alone answers the question the destruction gate
+    /// asks: "is there a working sidecar here that killing would destroy?"
+    ///
+    /// The manager's own lock is released before the probe. Exclusion for the
+    /// restart decision is the SUPERVISOR's lock (which the caller holds); this
+    /// lock only guards this manager's fields, and holding it across a network
+    /// wait would block `runtime_config()` readers — the frontend's
+    /// `get_sidecar_config` among them — for no benefit.
+    fn confirm_serving(&self, probe_timeout: Duration) -> bool {
+        let port = {
+            let mut state = self.state.lock().expect("sidecar state poisoned");
+            let Some(child) = state.child.as_mut() else {
+                return false;
+            };
+            // An Err from try_wait is not evidence of exit, so it falls through
+            // to the probe rather than authorising a kill.
+            if child.try_wait().is_ok_and(|status| status.is_some()) {
+                return false;
+            }
+            state.runtime_config.port
+        };
+        health_probe_once(&reqwest::blocking::Client::new(), port, probe_timeout)
+    }
+
     pub fn shutdown_blocking(&self) {
         let mut state = self.state.lock().expect("sidecar state poisoned");
         if let Some(mut child) = state.child.take() {
@@ -318,12 +377,50 @@ impl SidecarManager {
 /// something. A manual `restart()` is therefore ALWAYS attempted (never
 /// refused by the automatic budget) and resets that budget for a fresh
 /// episode, so pressing Retry is never a dead click.
+///
+/// confirm-before-you-kill (2026-09-01): `restart_automatic` also CONFIRMS,
+/// before it destroys anything, that the instance it is about to replace is
+/// not still working (`SidecarManager::confirm_serving`). The confirmation
+/// lives here, and could not live anywhere else, for two reasons that are
+/// really one reason:
+///
+/// - **The check and the kill must be one indivisible step.** They are
+///   performed under the same `state` lock, in the same critical section, so
+///   nothing can swap the instance in between. The first attempt at this check
+///   was in the frontend (`RuntimeGate`, deleted with this change), where the
+///   two halves sat on opposite sides of a process boundary: a Tauri command
+///   already sent cannot be recalled, so a manual Retry landing in that window
+///   left the automatic path killing the healthy replacement it had never
+///   examined.
+/// - **A verdict has to be about a particular instance.** `/health` is
+///   unauthenticated and identifies nobody, so "something answered on that
+///   port" is not "our sidecar answered". Here the verdict is bound to the
+///   instance three ways: the state lock (nothing else may swap it), the
+///   process handle (`try_wait` asks the OS about THIS child), and the port
+///   read from that same recorded instance.
+///
+/// A refusal is not an error. It is `AutoRestartOutcome::Declined`, carrying
+/// the live instance's own runtime config — see that variant for why the
+/// distinction matters to the caller.
 pub struct SidecarSupervisor {
     launch: SidecarLaunchConfig,
-    state: Mutex<SupervisedSidecar>,
+    state: Mutex<SupervisorState>,
+}
+
+/// Everything one restart decision reads or writes, behind ONE lock.
+///
+/// The budget used to have a lock of its own. That is a lock-order inversion
+/// waiting to be written: a manual restart naturally resets the budget and then
+/// touches the sidecar, while an automatic one must inspect the sidecar before
+/// spending budget — opposite orders, two locks, and a deadlock the day both
+/// run at once. Merging them removes the ordering question instead of
+/// documenting an answer to it, and it is also what makes "confirm, decide,
+/// act" a single critical section rather than three that happen to be adjacent.
+struct SupervisorState {
+    sidecar: SupervisedSidecar,
     /// Bookkeeping for `restart_automatic` ONLY — a manual `restart()` always
-    /// attempts and resets this (see the struct doc above).
-    auto_restart_budget: Mutex<AutoRestartBudget>,
+    /// attempts and resets this (see the `SidecarSupervisor` doc above).
+    auto_restart_budget: AutoRestartBudget,
 }
 
 /// At most this many AUTOMATIC restart attempts (see `restart_automatic`)
@@ -379,6 +476,22 @@ impl AutoRestartBudget {
 pub enum AutoRestartOutcome {
     /// A real attempt was made and it produced a running sidecar.
     Restarted(SidecarRuntimeConfig),
+    /// The confirmation found the supervised instance still alive and serving,
+    /// so nothing was touched. Carries THAT instance's runtime config — the
+    /// one read under the lock at the moment of the decision.
+    ///
+    /// Why a distinct outcome rather than an `Err`. The caller asked for a
+    /// restart because its connection to the sidecar broke, and the honest
+    /// answer is not "your request failed" but "the sidecar is fine; your
+    /// connection is what needs repairing, and here is where it is". An `Err`
+    /// would be rendered by the frontend as the failed-attempt banner and would
+    /// schedule the next attempt on the backoff — treating a healthy sidecar as
+    /// a failure, which is the whole class of behaviour this gate exists to
+    /// stop. Shipping the config with the refusal is also what makes the
+    /// caller's repair one step: applying it rotates the bearer token, which is
+    /// the single most likely reason a live sidecar looks dead from the UI
+    /// (`/health` needs no token; every other call does).
+    Declined(SidecarRuntimeConfig),
     /// The budget was already spent — no process was touched at all.
     BudgetExhausted,
     /// A real attempt was made (the budget admitted it) and it failed.
@@ -404,7 +517,7 @@ impl SidecarSupervisor {
     /// Attempt a first sidecar. Never fails: a failure to start is a state the
     /// supervisor can be in and recover from, not a reason to have no supervisor.
     pub fn start(launch: SidecarLaunchConfig) -> Self {
-        let state = match SidecarManager::start(launch.clone()) {
+        let sidecar = match SidecarManager::start(launch.clone()) {
             Ok(manager) => SupervisedSidecar::Running(manager),
             Err(error) => {
                 SupervisedSidecar::Absent(format!("failed to start Python sidecar: {error}"))
@@ -412,13 +525,15 @@ impl SidecarSupervisor {
         };
         Self {
             launch,
-            state: Mutex::new(state),
-            auto_restart_budget: Mutex::new(AutoRestartBudget::default()),
+            state: Mutex::new(SupervisorState {
+                sidecar,
+                auto_restart_budget: AutoRestartBudget::default(),
+            }),
         }
     }
 
     pub fn runtime_config(&self) -> Result<SidecarRuntimeConfig, String> {
-        match &*self.state.lock().expect("sidecar state poisoned") {
+        match &self.state.lock().expect("sidecar state poisoned").sidecar {
             SupervisedSidecar::Running(manager) => Ok(manager.runtime_config()),
             SupervisedSidecar::Absent(error) => Err(error.clone()),
         }
@@ -430,14 +545,18 @@ impl SidecarSupervisor {
     /// not a verdict frozen at boot.
     ///
     /// A person pressing Retry. ALWAYS attempts — never refused by the
-    /// automatic budget (struct doc above) — and resets that budget, so this
-    /// is also how a fresh automatic-restart episode begins after one ran out.
+    /// automatic budget (struct doc above), and never refused by the
+    /// confirmation either: someone who can see the app is asking for this
+    /// sidecar to be replaced, and "but it answers `/health`" is not an answer
+    /// to a person who has already concluded otherwise. The confirmation exists
+    /// to keep the app from destroying a working sidecar on evidence it cannot
+    /// interpret; a human pressing a button is not that. It also resets the
+    /// automatic budget, so this is how a fresh automatic episode begins after
+    /// one ran out.
     pub fn restart(&self) -> Result<SidecarRuntimeConfig, String> {
-        *self
-            .auto_restart_budget
-            .lock()
-            .expect("sidecar auto-restart budget poisoned") = AutoRestartBudget::default();
-        self.perform_restart()
+        let mut state = self.state.lock().expect("sidecar state poisoned");
+        state.auto_restart_budget = AutoRestartBudget::default();
+        self.perform_restart(&mut state.sidecar)
     }
 
     /// Studio's OWN bounded recovery attempt after the sidecar goes down
@@ -449,18 +568,43 @@ impl SidecarSupervisor {
     /// start-limit is enforced by the unit rather than by whoever asked for the
     /// restart — see the struct doc for why that borrowing stops at the count/
     /// window ceiling and does not extend to blocking a manual retry.
+    ///
+    /// The caller's evidence for "the sidecar died" is weak — a websocket that
+    /// dropped, or an HTTP call that got no response, neither of which can tell
+    /// a dead process apart from a rotated token or a discarded CORS reply — so
+    /// this method does not take it on trust. It CONFIRMS first, and the whole
+    /// decision (confirm, budget, act) happens inside ONE hold of the state
+    /// lock, which is what makes "the sidecar I examined" and "the sidecar I
+    /// replaced" provably the same instance (struct doc above).
+    ///
+    /// The price is that the lock is held across the confirmation's network
+    /// wait, so a concurrent `get_sidecar_config` or a manual `restart` waits
+    /// up to `CONFIRM_SERVING_REQUEST_TIMEOUT` for it. That is the same lock a
+    /// restart already holds for as long as a sidecar takes to boot, and the
+    /// alternative — releasing it between the check and the act — is precisely
+    /// the defect being fixed.
     pub fn restart_automatic(&self) -> AutoRestartOutcome {
-        let admitted = {
-            let mut budget = self
-                .auto_restart_budget
-                .lock()
-                .expect("sidecar auto-restart budget poisoned");
-            budget.record_attempt_if_allowed(Instant::now())
-        };
-        if !admitted {
+        let mut state = self.state.lock().expect("sidecar state poisoned");
+
+        if let SupervisedSidecar::Running(manager) = &state.sidecar {
+            if manager.confirm_serving(CONFIRM_SERVING_REQUEST_TIMEOUT) {
+                return AutoRestartOutcome::Declined(manager.runtime_config());
+            }
+        }
+
+        // Budget AFTER the confirmation, so a refusal costs nothing. The budget
+        // bounds ATTEMPTS — restarts that actually happened — and a decline is
+        // the absence of one. Charging for it would let a healthy sidecar the
+        // UI keeps mistrusting (a rotated token does exactly that) drain the
+        // budget it never used, and the next REAL death would then find nothing
+        // left and refuse to recover.
+        if !state
+            .auto_restart_budget
+            .record_attempt_if_allowed(Instant::now())
+        {
             return AutoRestartOutcome::BudgetExhausted;
         }
-        match self.perform_restart() {
+        match self.perform_restart(&mut state.sidecar) {
             Ok(runtime_config) => AutoRestartOutcome::Restarted(runtime_config),
             Err(error) => AutoRestartOutcome::Failed(error),
         }
@@ -469,8 +613,15 @@ impl SidecarSupervisor {
     /// The actual restart-or-start attempt, shared by `restart` and
     /// `restart_automatic` — everything above this line is only about WHETHER
     /// an attempt is allowed, never about how the attempt itself works.
-    fn perform_restart(&self) -> Result<SidecarRuntimeConfig, String> {
-        let mut state = self.state.lock().expect("sidecar state poisoned");
+    ///
+    /// Takes the already-locked state rather than locking: both callers have
+    /// decided something about the instance in `state` and must act on THAT
+    /// instance, which is only guaranteed while the lock they made the decision
+    /// under is still held.
+    fn perform_restart(
+        &self,
+        state: &mut SupervisedSidecar,
+    ) -> Result<SidecarRuntimeConfig, String> {
         let attempt = match &*state {
             SupervisedSidecar::Running(manager) => manager
                 .restart()
@@ -497,7 +648,7 @@ impl SidecarSupervisor {
     /// Recent sidecar stderr, or — with no sidecar to have written any — the
     /// reason there isn't one. Both answer the same operator question.
     pub fn recent_stderr(&self) -> Vec<String> {
-        match &*self.state.lock().expect("sidecar state poisoned") {
+        match &self.state.lock().expect("sidecar state poisoned").sidecar {
             SupervisedSidecar::Running(manager) => manager.recent_stderr(),
             SupervisedSidecar::Absent(error) => error.lines().map(str::to_string).collect(),
         }
@@ -505,10 +656,10 @@ impl SidecarSupervisor {
 
     pub fn shutdown_blocking(&self) {
         let mut state = self.state.lock().expect("sidecar state poisoned");
-        if let SupervisedSidecar::Running(manager) = &*state {
+        if let SupervisedSidecar::Running(manager) = &state.sidecar {
             manager.shutdown_blocking();
         }
-        *state = SupervisedSidecar::Absent("Python sidecar was shut down".to_string());
+        state.sidecar = SupervisedSidecar::Absent("Python sidecar was shut down".to_string());
     }
 }
 
@@ -778,18 +929,40 @@ fn capture_stdout(stream: impl std::io::Read + Send + 'static) {
     });
 }
 
+/// The ONE definition of "this port is serving": the sidecar's own `/health`
+/// endpoint answered with a SUCCESS status.
+///
+/// One request, one verdict — no polling, no retry. Every caller that wants
+/// repetition builds it on top (`wait_for_health` below loops; the destruction
+/// gate lets the frontend's 1s/4s/16s schedule provide the repetition), so the
+/// threshold and the URL exist in exactly one place and cannot drift between
+/// the question "has the process I just launched come up" and the question "is
+/// the process I am about to kill still working".
+///
+/// `is_success()` is that threshold, and it is now the only one in the tree.
+/// A looser "any HTTP reply counts" reading used to live in the frontend probe
+/// this replaced, on the argument that a 503 at least proves a process is
+/// alive. Inside the supervisor that argument has nothing left to do: liveness
+/// is established by the process handle (`confirm_serving`), exactly, and
+/// without inference from network behaviour. What remains for the probe is
+/// whether a live child can still SERVE — and an alive-but-not-serving child is
+/// precisely what an automatic restart is for. systemd's `WatchdogSec` draws
+/// the same line: a service still running but no longer answering gets
+/// restarted, not spared.
+fn health_probe_once(client: &reqwest::blocking::Client, port: u16, timeout: Duration) -> bool {
+    client
+        .get(format!("http://127.0.0.1:{port}/health"))
+        .timeout(timeout)
+        .send()
+        .is_ok_and(|response| response.status().is_success())
+}
+
 fn wait_for_health(port: u16, timeout: Duration) -> bool {
     let client = reqwest::blocking::Client::new();
-    let url = format!("http://127.0.0.1:{port}/health");
     let deadline = Instant::now() + timeout;
 
     while Instant::now() < deadline {
-        if client
-            .get(&url)
-            .timeout(Duration::from_millis(500))
-            .send()
-            .is_ok_and(|response| response.status().is_success())
-        {
+        if health_probe_once(&client, port, HEALTH_POLL_REQUEST_TIMEOUT) {
             return true;
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
@@ -850,6 +1023,8 @@ fn generate_api_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
     // These feed allocate_loopback_port_from explicit input instead of mutating
     // STUDIO_SIDECAR_PORT: process env is shared by every test thread, and the
@@ -1136,6 +1311,336 @@ mod tests {
             AutoRestartOutcome::Failed(_) => {}
             other => panic!("expected the reset budget to allow a real attempt, got {other:?}"),
         }
+    }
+
+    // --- confirm-before-you-kill: the destruction gate ------------------------
+    //
+    // These run wherever `cargo test --lib` runs, which is the
+    // `cross-platform-smoke` job on BOTH windows-latest and macos-latest (see
+    // .github/workflows/ci.yml). Nothing here is `#[cfg]`-gated to one platform,
+    // and nothing here needs a Python interpreter or the vendor closure: the
+    // instance under test is a real child process plus a real socket, both of
+    // which every host has.
+
+    /// A TCP listener that answers one fixed HTTP status line to whatever
+    /// connects, standing in for a sidecar that serves (`200 OK`), one that
+    /// replies without being healthy (`503`), or — once stopped — a port with
+    /// nobody on it. Deliberately not a real HTTP server: the only behaviour
+    /// under test is what `health_probe_once` concludes from a status line.
+    struct FakeHealthEndpoint {
+        port: u16,
+        stop: Arc<AtomicBool>,
+        server: Option<thread::JoinHandle<()>>,
+    }
+
+    impl FakeHealthEndpoint {
+        fn answering(status_line: &'static str) -> Self {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind fake health endpoint");
+            let port = listener.local_addr().expect("local addr").port();
+            listener
+                .set_nonblocking(true)
+                .expect("non-blocking accept so the thread can observe `stop`");
+            let stop = Arc::new(AtomicBool::new(false));
+            let stop_for_server = Arc::clone(&stop);
+            let server = thread::spawn(move || {
+                while !stop_for_server.load(AtomicOrdering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).ok();
+                            stream
+                                .set_read_timeout(Some(Duration::from_millis(500)))
+                                .ok();
+                            // Drain the request before replying: answering and
+                            // closing without reading can reset the connection
+                            // and destroy the response before the client sees it.
+                            let mut request = [0_u8; 1024];
+                            let _ = stream.read(&mut request);
+                            let _ = stream.write_all(
+                                format!("HTTP/1.1 {status_line}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                                    .as_bytes(),
+                            );
+                            let _ = stream.flush();
+                        }
+                        Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            Self {
+                port,
+                stop,
+                server: Some(server),
+            }
+        }
+
+        /// Stop answering — the port goes quiet while the child that "owns" it
+        /// stays alive, which is the wedged-sidecar case.
+        fn stop(&mut self) {
+            self.stop.store(true, AtomicOrdering::Relaxed);
+            if let Some(server) = self.server.take() {
+                server.join().ok();
+            }
+        }
+    }
+
+    impl Drop for FakeHealthEndpoint {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    /// A process that stays alive long enough to be asked whether it is.
+    /// `ping`/`sleep` are the "do nothing for a while" programs present on both
+    /// CI legs of the job that runs these tests.
+    fn spawn_long_lived_child() -> GroupChild {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "ping -n 60 127.0.0.1"]);
+            command
+        } else {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 60"]);
+            command
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .group_spawn()
+            .expect("spawn long-lived child")
+    }
+
+    impl SidecarManager {
+        /// A manager wrapped around a child that is ALREADY running and a port
+        /// something already listens on. `start` cannot serve here: it insists
+        /// on spawning a Python interpreter and waiting for the real backend,
+        /// which is the dependency these tests exist to avoid.
+        fn around_running_child_for_test(
+            child: GroupChild,
+            port: u16,
+            launch_config: SidecarLaunchConfig,
+        ) -> Self {
+            Self {
+                state: Mutex::new(SidecarState {
+                    child: Some(child),
+                    token: "test-token".to_string(),
+                    runtime_config: SidecarRuntimeConfig::new(
+                        port,
+                        &launch_config.resource_dir,
+                        &launch_config.config_dir,
+                        "test-token",
+                    ),
+                    stderr_lines: Arc::new(Mutex::new(VecDeque::new())),
+                    // Small on purpose: a test that waits out a graceful-shutdown
+                    // budget is measuring the clock, not the decision.
+                    shutdown_timeout: Duration::from_millis(50),
+                    launch_config,
+                }),
+            }
+        }
+    }
+
+    impl SidecarSupervisor {
+        fn around_running_manager_for_test(
+            launch: SidecarLaunchConfig,
+            manager: SidecarManager,
+        ) -> Self {
+            Self {
+                launch,
+                state: Mutex::new(SupervisorState {
+                    sidecar: SupervisedSidecar::Running(manager),
+                    auto_restart_budget: AutoRestartBudget::default(),
+                }),
+            }
+        }
+    }
+
+    /// A supervisor whose instance is a live child plus a port answering
+    /// `status_line`, and whose launch recipe provably cannot produce a
+    /// replacement — so any restart it does perform is unmistakable in the
+    /// outcome (`Failed`, "failed to spawn") rather than being inferred.
+    fn supervisor_over_fake_instance(
+        status_line: &'static str,
+    ) -> (SidecarSupervisor, FakeHealthEndpoint) {
+        let endpoint = FakeHealthEndpoint::answering(status_line);
+        let launch = unstartable_launch_config();
+        let manager = SidecarManager::around_running_child_for_test(
+            spawn_long_lived_child(),
+            endpoint.port,
+            launch.clone(),
+        );
+        (
+            SidecarSupervisor::around_running_manager_for_test(launch, manager),
+            endpoint,
+        )
+    }
+
+    /// Reads the OS's answer for the child the supervisor currently owns —
+    /// "was anything actually killed", asked of the process table rather than
+    /// of the code under test.
+    fn instance_child_is_running(supervisor: &SidecarSupervisor) -> bool {
+        match &supervisor.state.lock().expect("sidecar state poisoned").sidecar {
+            SupervisedSidecar::Running(manager) => {
+                let mut state = manager.state.lock().expect("sidecar state poisoned");
+                match state.child.as_mut() {
+                    Some(child) => child.try_wait().expect("try_wait").is_none(),
+                    None => false,
+                }
+            }
+            SupervisedSidecar::Absent(_) => false,
+        }
+    }
+
+    #[test]
+    fn health_probe_once_accepts_only_a_success_status() {
+        let client = reqwest::blocking::Client::new();
+
+        let serving = FakeHealthEndpoint::answering("200 OK");
+        assert!(health_probe_once(
+            &client,
+            serving.port,
+            CONFIRM_SERVING_REQUEST_TIMEOUT
+        ));
+
+        // The deliberate threshold choice, pinned: a reply is not a verdict.
+        // Something that answers 503 is running but not serving, and this gate
+        // decides whether a restart is warranted — not whether a process exists.
+        let unhealthy = FakeHealthEndpoint::answering("503 Service Unavailable");
+        assert!(!health_probe_once(
+            &client,
+            unhealthy.port,
+            CONFIRM_SERVING_REQUEST_TIMEOUT
+        ));
+    }
+
+    #[test]
+    fn health_probe_once_is_bounded_by_the_timeout_it_was_given() {
+        // The single-shot primitive must not behave like the poll loop, which
+        // spends its WHOLE budget on a closed port (`health_wait_times_out_for_
+        // closed_port` above). One request, bounded by the timeout passed in.
+        //
+        // The bound has to come from that timeout and nothing else. "Nobody is
+        // listening" is not a free answer on every host: measured on Windows
+        // 2026-09-01, a connect to a CLOSED loopback port takes ~2.04s to be
+        // reported as refused (the stack retransmits the SYN) where unix
+        // refuses at once. A 300ms budget must therefore still return in
+        // roughly 300ms — which is the assertion below, and the reason
+        // `confirm_serving` asks the process handle BEFORE it asks the network.
+        let client = reqwest::blocking::Client::new();
+        let port = allocate_loopback_port_from(None).expect("port");
+        let started = Instant::now();
+
+        assert!(!health_probe_once(&client, port, Duration::from_millis(300)));
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the probe outlived the timeout it was given, taking {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn an_automatic_restart_declines_and_touches_nothing_while_the_instance_serves() {
+        let (supervisor, _endpoint) = supervisor_over_fake_instance("200 OK");
+        let instance = supervisor.runtime_config().expect("a running instance");
+
+        let declined_config = match supervisor.restart_automatic() {
+            AutoRestartOutcome::Declined(config) => config,
+            other => panic!("a serving instance must not be replaced, got {other:?}"),
+        };
+
+        // The refusal names the instance it spared, not some other truth read
+        // later: this is what the caller reconnects to.
+        assert_eq!(declined_config.port, instance.port);
+        assert!(
+            instance_child_is_running(&supervisor),
+            "the child was killed despite the decline"
+        );
+        assert_eq!(
+            supervisor.runtime_config().expect("still running").port,
+            instance.port
+        );
+
+        supervisor.shutdown_blocking();
+    }
+
+    #[test]
+    fn a_decline_spends_no_budget_so_a_real_death_is_still_recoverable() {
+        let (supervisor, mut endpoint) = supervisor_over_fake_instance("200 OK");
+
+        // Twice the attempt cap, all refused. A budget charged for refusals
+        // would be long gone by now.
+        for ask in 0..(AUTO_RESTART_MAX_ATTEMPTS * 2) {
+            match supervisor.restart_automatic() {
+                AutoRestartOutcome::Declined(_) => {}
+                other => panic!("ask {ask}: expected a decline, got {other:?}"),
+            }
+        }
+
+        // Now the sidecar stops serving for real.
+        endpoint.stop();
+
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::Failed(error) => assert!(
+                error.contains("failed to spawn"),
+                "expected a real (failed) attempt: {error}"
+            ),
+            other => panic!("the refusals consumed the recovery budget, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_alive_but_unresponsive_instance_is_restarted_rather_than_spared() {
+        // The case the process handle alone cannot decide: the child never
+        // exited, so `try_wait` says "running", but it no longer answers. A gate
+        // that stopped at the handle would refuse to ever restart a wedged
+        // sidecar — the exact failure an automatic restart exists for.
+        let (supervisor, mut endpoint) = supervisor_over_fake_instance("200 OK");
+        assert!(instance_child_is_running(&supervisor));
+        endpoint.stop();
+
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::Failed(error) => assert!(
+                error.contains("failed to spawn"),
+                "expected a real (failed) attempt: {error}"
+            ),
+            other => panic!("a wedged sidecar must not be spared, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_instance_answering_a_non_success_status_is_not_spared() {
+        let (supervisor, _endpoint) = supervisor_over_fake_instance("503 Service Unavailable");
+
+        match supervisor.restart_automatic() {
+            AutoRestartOutcome::Failed(error) => assert!(
+                error.contains("failed to spawn"),
+                "expected a real (failed) attempt: {error}"
+            ),
+            other => panic!("answering 503 is not serving, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_manual_retry_is_never_refused_by_the_confirmation() {
+        // The counterpart to the whole gate: it protects the app from acting on
+        // evidence it cannot interpret, and a person pressing Retry is not that
+        // evidence. This is also why the two live on separate commands.
+        let (supervisor, _endpoint) = supervisor_over_fake_instance("200 OK");
+
+        let error = supervisor
+            .restart()
+            .expect_err("this recipe cannot produce a replacement");
+
+        assert!(
+            error.contains("failed to spawn"),
+            "manual retry should attempt, not decline: {error}"
+        );
+        // It really went through with the teardown — the serving instance was
+        // replaced (and the replacement failed), not spared.
+        assert!(supervisor.runtime_config().is_err());
     }
 
     #[test]

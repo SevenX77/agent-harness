@@ -19,7 +19,6 @@ import {
   initializeRuntimeConfig,
   isTauriRuntime,
   resolveRuntimeConfig,
-  reconnectSidecar,
   restartSidecar,
   restartSidecarAutomatic,
   subscribeToSidecarRestart,
@@ -263,87 +262,44 @@ describe('retrying asks the shell for a sidecar, not for its config', () => {
 })
 
 /**
- * `reconnectSidecar` — what RuntimeGate does INSTEAD of restarting when the
- * sidecar's port turns out to still be answering. It is the non-destructive
- * half of a Retry: ask the shell where the sidecar is and start using that
- * answer, without asking it to kill anything.
- *
- * The distinction from `initializeRuntimeConfig` is the whole reason it exists.
- * That one is a BOOT step and deliberately does not overwrite a token that is
- * already set (a `#tkn=` in the URL must win over the shell's). Reconnecting is
- * the opposite situation: a token already being set is exactly the condition,
- * and a stale one is a leading suspect for why the connection was lost — so the
- * shell's answer has to win.
- */
-describe('reconnectSidecar — re-reading the shell without restarting anything', () => {
-  const running = {
-    port: 41236,
-    baseURL: 'http://127.0.0.1:41236/api',
-    wsURL: 'ws://127.0.0.1:41236/ws',
-    resourceDir: '/resources',
-    configDir: '/config',
-    api_token: 'token-the-sidecar-rotated-to',
-  }
-
-  it('asks for the config and does NOT send a restart command', async () => {
-    const commands: string[] = []
-
-    await reconnectSidecar({
-      windowRef: { __TAURI_INTERNALS__: {} },
-      invoke: async <T,>(command: string): Promise<T> => {
-        commands.push(command)
-        return running as T
-      },
-    })
-
-    expect(commands).toEqual(['get_sidecar_config'])
-  })
-
-  it('replaces a token that is already set, which boot would have kept', async () => {
-    configureApiToken('the-token-that-stopped-working')
-
-    await reconnectSidecar({
-      windowRef: { __TAURI_INTERNALS__: {} },
-      invoke: async <T,>(): Promise<T> => running as T,
-    })
-
-    // Read back through `wsUrl`, because that is where the token VALUE is
-    // observable — the HTTP side keeps it in a module variable that a request
-    // interceptor applies, so `api.defaults` never carries it. This file runs in
-    // the node environment, so `wsUrl` needs a `window` to resolve against.
-    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:41236' } })
-    try {
-      expect(wsUrl('/ws')).toContain('token=token-the-sidecar-rotated-to')
-    } finally {
-      vi.unstubAllGlobals()
-    }
-    // And the websocket has to be told, not just re-read later: it carries the
-    // token in its URL, so without this it keeps retrying with the credential
-    // that just failed.
-    expect(notifySidecarTokenRotatedMock).toHaveBeenCalled()
-  })
-})
-
-/**
  * dead-sidecar-says-so — RuntimeGate's bounded automatic-restart loop calls a
  * DIFFERENT shell command than a manual Retry, so the Rust-side supervisor can
  * bound automatic attempts independently without ever refusing a person
  * pressing Retry (`SidecarSupervisor::restart_automatic` vs `::restart`).
+ *
+ * confirm-before-you-kill — that command answers with an OUTCOME, because the
+ * supervisor confirms the instance is really gone before replacing it and may
+ * decline. Both outcomes are successes carrying a config to start using; only a
+ * genuine failure rejects.
  */
 describe('restartSidecarAutomatic — the bounded-loop counterpart to restartSidecar', () => {
   const restarted = {
-    port: 41235,
-    baseURL: 'http://127.0.0.1:41235/api',
-    wsURL: 'ws://127.0.0.1:41235/ws',
-    resourceDir: '/resources',
-    configDir: '/config',
-    api_token: 'token-from-the-automatically-restarted-sidecar',
+    outcome: 'restarted',
+    config: {
+      port: 41235,
+      baseURL: 'http://127.0.0.1:41235/api',
+      wsURL: 'ws://127.0.0.1:41235/ws',
+      resourceDir: '/resources',
+      configDir: '/config',
+      api_token: 'token-from-the-automatically-restarted-sidecar',
+    },
+  }
+  const declined = {
+    outcome: 'declined',
+    config: {
+      port: 41236,
+      baseURL: 'http://127.0.0.1:41236/api',
+      wsURL: 'ws://127.0.0.1:41236/ws',
+      resourceDir: '/resources',
+      configDir: '/config',
+      api_token: 'token-the-surviving-sidecar-rotated-to',
+    },
   }
 
   it('calls restart_sidecar_automatic, not restart_sidecar', async () => {
     const commands: string[] = []
 
-    const config = await restartSidecarAutomatic({
+    const result = await restartSidecarAutomatic({
       windowRef: { __TAURI_INTERNALS__: {} },
       invoke: async <T,>(command: string): Promise<T> => {
         commands.push(command)
@@ -352,7 +308,8 @@ describe('restartSidecarAutomatic — the bounded-loop counterpart to restartSid
     })
 
     expect(commands).toEqual(['restart_sidecar_automatic'])
-    expect(config.port).toBe(41235)
+    expect(result.outcome).toBe('restarted')
+    expect(result.config.port).toBe(41235)
   })
 
   it('applies the fresh config on success, same as a manual restart', async () => {
@@ -364,6 +321,54 @@ describe('restartSidecarAutomatic — the bounded-loop counterpart to restartSid
     expect(getRuntimeStatus({ __TAURI_INTERNALS__: {} }).sidecar).toBe('ready')
     expect(api.defaults.baseURL).toBe('http://127.0.0.1:41235/api')
     expect(currentApiTokenIsSet()).toBe(true)
+  })
+
+  /**
+   * A decline means the supervisor found the sidecar alive and serving and
+   * refused to replace it. It is reported as a success on purpose: an error
+   * would put the failed-attempt text in the banner and schedule the next
+   * attempt, i.e. keep asking for the destruction that was just refused.
+   */
+  it('reports a decline as a success and names it as such', async () => {
+    const result = await restartSidecarAutomatic({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(): Promise<T> => declined as T,
+    })
+
+    expect(result.outcome).toBe('declined')
+    expect(result.config.port).toBe(41236)
+    expect(getRuntimeStatus({ __TAURI_INTERNALS__: {} }).sidecar).toBe('ready')
+  })
+
+  /**
+   * The repair the surviving instance needs. A rotated bearer token is the case
+   * a decline cannot rule out — `/health` needs no token, so the supervisor sees
+   * a healthy sidecar while every authenticated call from here fails — so the
+   * declined config must REPLACE a token that is already set, which the boot
+   * path deliberately would not do.
+   */
+  it('applies the declined config too, replacing a token that is already set', async () => {
+    configureApiToken('the-token-that-stopped-working')
+
+    await restartSidecarAutomatic({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(): Promise<T> => declined as T,
+    })
+
+    // Read back through `wsUrl`, because that is where the token VALUE is
+    // observable — the HTTP side keeps it in a module variable that a request
+    // interceptor applies, so `api.defaults` never carries it. This file runs in
+    // the node environment, so `wsUrl` needs a `window` to resolve against.
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:41236' } })
+    try {
+      expect(wsUrl('/ws')).toContain('token=token-the-surviving-sidecar-rotated-to')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    // And the websocket has to be told, not just re-read later: it carries the
+    // token in its URL, so without this it keeps retrying with the credential
+    // that just failed.
+    expect(notifySidecarTokenRotatedMock).toHaveBeenCalled()
   })
 
   it('surfaces a refusal (budget exhausted) the same way it surfaces a real failure', async () => {
@@ -380,11 +385,12 @@ describe('restartSidecarAutomatic — the bounded-loop counterpart to restartSid
   })
 
   it('outside Tauri there is no shell to ask, so it re-reads the dev backend', async () => {
-    const config = await restartSidecarAutomatic({
+    const result = await restartSidecarAutomatic({
       windowRef: {},
       fallbackBaseURL: 'http://localhost:8787/api',
     })
 
-    expect(config.baseURL).toBe('http://localhost:8787/api')
+    expect(result.outcome).toBe('restarted')
+    expect(result.config.baseURL).toBe('http://localhost:8787/api')
   })
 })

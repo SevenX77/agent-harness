@@ -103,12 +103,17 @@ fn workspace_text_hash(content: &str) -> String {
 
 /// The one place workspace bytes become text.
 ///
-/// A skill is authored outside this app as often as inside it, and a Windows
-/// editor routinely puts a UTF-8 byte-order mark (`EF BB BF`) in front of what
-/// the author typed — Notepad does it by default, so does PowerShell
-/// redirection. That mark is part of the ENCODING, not of the content, and
-/// `read_to_string` keeps it: the frontend then parses the text with anchored
-/// frontmatter regexes and reads a whole graph as having none (ledger K7).
+/// A skill is authored outside this app as often as inside it, and some of the
+/// tools an author might use write a UTF-8 byte-order mark (`EF BB BF`) in
+/// front of what they typed. WHICH tools those are — and why "no longer the
+/// default on Windows" is not the same as "will not happen" — is stated once,
+/// in `docs/development/CROSS_PLATFORM.md` ("写代码时的具体规则" → Python, the
+/// BOM paragraph). That is the only place the list is maintained; a second copy
+/// here would be the one that goes stale, and did.
+///
+/// The mark is part of the ENCODING, not of the content, and `read_to_string`
+/// keeps it: the frontend then parses the text with anchored frontmatter
+/// regexes and reads a whole graph as having none (ledger K7).
 ///
 /// It is dropped HERE, where bytes become text, rather than at each parser that
 /// trips over it — otherwise every reader has to remember, and the ones that

@@ -111,6 +111,29 @@ export async function restartSidecar(options: RuntimeOptions = {}): Promise<Side
 }
 
 /**
+ * What the shell answers an automatic restart that did NOT fail.
+ *
+ * `'restarted'` — a fresh sidecar exists and `config` describes it.
+ * `'declined'` — the supervisor confirmed, under the lock that serializes
+ * restarts, that the instance it owns is still alive AND still serving, so it
+ * destroyed nothing; `config` describes that surviving instance
+ * (`apps/studio/tauri/src/sidecar.rs::AutoRestartOutcome::Declined`).
+ *
+ * Both are successes and both carry a config to start using, so the caller's
+ * repair is the same either way — which is the point of not reporting a
+ * decline as an error. What differs is what it MEANS, and therefore what gets
+ * rendered: a failure keeps the banner up with the attempt's error text and
+ * schedules the next attempt, a decline ends the episode with the app working
+ * again.
+ */
+export type SidecarAutoRestartOutcome = 'restarted' | 'declined'
+
+export interface SidecarAutoRestartResult {
+  outcome: SidecarAutoRestartOutcome
+  config: SidecarConfig
+}
+
+/**
  * dead-sidecar-says-so — the bounded-loop counterpart to `restartSidecar`,
  * called by `RuntimeGate`'s own automatic recovery attempts (never by a
  * person pressing Retry, which stays on `restartSidecar` above). Invokes a
@@ -119,44 +142,50 @@ export async function restartSidecar(options: RuntimeOptions = {}): Promise<Side
  * budget independently — a manual Retry must never be refused by that budget,
  * so it cannot share the same command.
  *
- * Outside Tauri there is no shell-side budget to enforce (no shell to ask at
- * all), so this falls back to the same dev-backend re-read as `restartSidecar`.
- */
-export async function restartSidecarAutomatic(options: RuntimeOptions = {}): Promise<SidecarConfig> {
-  return performShellRestart('restart_sidecar_automatic', options)
-}
-
-/**
- * Re-read where the sidecar is and start using that answer — without asking the
- * shell to kill anything. What RuntimeGate does when its liveness probe finds
- * the port still answering: something is serving there, so the remedy cannot be
- * a restart, but the connection still has to be repaired somehow.
+ * confirm-before-you-kill — that same command may also DECLINE (see
+ * `SidecarAutoRestartResult`). The signals that get RuntimeGate here cannot
+ * tell a dead sidecar from a live one this app has lost its grip on, so the
+ * supervisor checks before destroying anything. Applying the returned config
+ * is the repair in both cases: it replaces the bearer token, which is the most
+ * likely reason a live sidecar looks dead from here (`/health` needs no token;
+ * every other call does), and tells the websocket, which carries its token in
+ * the URL and would otherwise keep retrying with the credential that failed.
  *
- * Not `initializeRuntimeConfig`, and the difference is the point. That one is a
- * BOOT step, and it deliberately keeps a token that is already set so a `#tkn=`
- * in the URL wins over the shell's. Reconnecting is the opposite situation: a
- * token already being set is the precondition, and a STALE one is a leading
- * suspect for the lost connection in the first place — a rotated sidecar token
- * makes every authenticated call fail while `/health`, which needs none, answers
- * perfectly. So the shell's answer wins here, and `applySidecarConfig` also
- * tells the websocket, which carries its token in the URL and would otherwise
- * keep retrying with the credential that just failed.
+ * Outside Tauri there is no shell to ask, no process to kill and nothing to
+ * confirm, so this falls back to the same dev-backend re-read as
+ * `restartSidecar` — reported as `'restarted'` because re-reading the URL is
+ * everything "restart" can mean without a shell.
  */
-export async function reconnectSidecar(options: RuntimeOptions = {}): Promise<SidecarConfig> {
-  const config = await resolveRuntimeConfig(options)
+export async function restartSidecarAutomatic(
+  options: RuntimeOptions = {},
+): Promise<SidecarAutoRestartResult> {
+  if (!isTauriRuntime(options.windowRef)) {
+    return { outcome: 'restarted', config: await initializeRuntimeConfig(options) }
+  }
+  const reply = await invokeShell<SidecarAutoRestartResult>('restart_sidecar_automatic', options)
+  const config = normalizeSidecarConfig(reply.config)
   applySidecarConfig(config)
-  return config
+  return { outcome: reply.outcome, config }
 }
 
 async function performShellRestart(command: string, options: RuntimeOptions): Promise<SidecarConfig> {
   if (!isTauriRuntime(options.windowRef)) {
     return initializeRuntimeConfig(options)
   }
+  const config = normalizeSidecarConfig(await invokeShell<SidecarConfig>(command, options))
+  applySidecarConfig(config)
+  return config
+}
+
+/**
+ * One shell command, with the module's degraded-status bookkeeping attached to
+ * its failure. Shared by both restart paths because "the shell could not do it"
+ * has the same consequence for this module's status whatever was asked.
+ */
+async function invokeShell<T>(command: string, options: RuntimeOptions): Promise<T> {
   const invoke = options.invoke ?? (await loadTauriInvoke())
   try {
-    const config = normalizeSidecarConfig(await invoke<SidecarConfig>(command))
-    applySidecarConfig(config)
-    return config
+    return await invoke<T>(command)
   } catch (error) {
     runtimeConfig = null
     runtimeSidecarStatus = 'degraded'

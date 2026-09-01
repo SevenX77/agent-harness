@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
@@ -139,6 +140,30 @@ def test_the_backend_declares_every_sdk_it_imports() -> None:
     assert undeclared == []
 
 
+def test_the_backend_declares_every_gateway_extra_its_routes_need() -> None:
+    """Naming a dependency is not enough if the part you use lives behind an extra.
+
+    The gateway keeps provider clients it cannot always install behind lazy
+    imports, and says so in the error it raises: "requires the
+    graph-agent-gateway[google] optional extra". The backend declared
+    `graph-agent-gateway` with NO extras, so the desktop app's vendored
+    dependency closure — built by `uv export --package studio-backend` — simply
+    did not contain `langchain-google-genai`, and every gemini route in the
+    packaged app died on ImportError while the dev tree (synced with
+    `--all-extras`) looked fine.
+
+    The check derives its expectations from the gateway's own message rather than
+    a list kept here, so a second provider put behind a second extra is caught the
+    day it is added instead of the day someone ships it.
+    """
+    advertised = _extras_the_gateway_says_it_needs()
+    assert advertised, "no `graph-agent-gateway[...]` requirement is advertised in the gateway source"
+
+    declared = _requested_extras(BACKEND_ROOT / "pyproject.toml", "graph-agent-gateway")
+
+    assert sorted(advertised - declared) == []
+
+
 def test_boundary_guard_auto_discovers_all_production_modules() -> None:
     scanned_paths = {path.relative_to(BACKEND_ROOT) for path in _production_files()}
 
@@ -234,6 +259,38 @@ def _declared_distributions(manifest: Path) -> set[str]:
     for extra in (project.get("optional-dependencies") or {}).values():
         requirements.extend(extra)
     return {_distribution_name(requirement) for requirement in requirements}
+
+
+def _extras_the_gateway_says_it_needs() -> set[str]:
+    """Extras the gateway names in its own "you need this to use that" errors.
+
+    Read out of the SDK source because that message IS the contract: a lazy import
+    guarded by it means the code path is unreachable unless the extra is
+    installed. Anything the gateway advertises that way, an app that can route to
+    it has to ask for.
+    """
+    gateway_source = BACKEND_ROOT.parents[2] / "packages" / "graph-agent-gateway" / "src"
+    pattern = re.compile(r"graph-agent-gateway\[([a-z0-9_-]+)\]")
+    return {
+        match
+        for path in gateway_source.rglob("*.py")
+        for match in pattern.findall(path.read_text(encoding="utf-8"))
+    }
+
+
+def _requested_extras(manifest: Path, distribution: str) -> set[str]:
+    project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+    requirements: list[str] = list(project.get("dependencies") or [])
+    for extra in (project.get("optional-dependencies") or {}).values():
+        requirements.extend(extra)
+    requested: set[str] = set()
+    for requirement in requirements:
+        if _distribution_name(requirement) != distribution:
+            continue
+        if "[" in requirement and "]" in requirement:
+            inside = requirement.split("[", 1)[1].split("]", 1)[0]
+            requested.update(part.strip().lower() for part in inside.split(",") if part.strip())
+    return requested
 
 
 def _distribution_name(requirement: str) -> str:

@@ -480,7 +480,8 @@ scripts/wt-board.sh note    "<一行>"                                   # 追�
 `holderIdentity` / Terraform 状态锁的 `ID`——租约不能指名持有者就不成其为互斥。
 
 **`holds` 是给工具用的,不是给人看的。** 真机验证里会驱动窗口的工具
-(`click.mjs`、`emulate.mjs`、两个 launcher)在动手前自己问一次,答不出就退出 4。
+(`click.mjs`、`emulate.mjs`、两个 launcher)在动手前自己问一次,答不出就拒绝退出:
+没占位是 4,连黑板都问不到(缺 Git Bash / 找不到 `wt-board.sh`)是 5。
 只读观察(`cdp.mjs`/`shot.mjs`/`console.mjs`)不设卡——先看得见,才谈得上不抢。
 理由是实证:黑板合并当天,文档已经写着"点验前先 claim",撞车照样发生;
 **只靠文档约束的纪律,在这件事上不成立。**

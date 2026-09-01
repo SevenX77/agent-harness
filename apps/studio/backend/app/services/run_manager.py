@@ -2191,13 +2191,6 @@ def _read_events_from_bytes(raw: bytes, *, run_id: str) -> list[EventEnvelope]:
     return events
 
 
-def _read_optional_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    loaded = json.loads(path.read_text(encoding="utf-8"))
-    return loaded if isinstance(loaded, dict) else {"value": loaded}
-
-
 def _read_run_artifact_json(run_dir: Path, path: str) -> dict[str, Any] | None:
     from app.core.adapters.http_transport import StudioAdapterError
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore

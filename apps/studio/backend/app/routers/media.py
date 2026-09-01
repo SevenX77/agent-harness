@@ -62,8 +62,8 @@ async def put_media_credential(provider_id: str, request: CredentialUpdate) -> d
             # including the absurd pairing of "no key set" with a successful probe.
             # Retiring it here, at the edit that invalidates it, is the same rule
             # the LLM registry applies on key rotation (design §1.2 matrix point 3:
-            # "换密钥即作废旧观察"). Re-submitting the same values changes nothing
-            # and therefore retires nothing.
+            # "换密钥即作废旧观察"). Re-submitting the same values leaves the
+            # observation standing — the identity it describes did not move.
             provider.last_probe = None
     return media_generation.registry_view(state)
 
@@ -96,10 +96,19 @@ async def probe_media_provider(provider_id: str) -> dict[str, Any]:
         # the old credential's verdict — its success, its failure, its balance — as
         # the new one's.
         #
-        # A late probe therefore writes NOTHING; it does not clear the field
+        # A late probe therefore records nothing — and does not clear the field
         # either. Retiring the old observation is the job of whoever changed the
-        # credential (see `put_media_credential`), and a slow probe that clears on
-        # its way out would delete a newer probe's perfectly good result.
+        # credential (see `put_media_credential`), and a slow probe that cleared on
+        # its way out would delete the result of a probe of the NEW credential that
+        # had already landed. (The document is still republished unchanged: the
+        # section always writes on exit. What is guaranteed here is that no FIELD
+        # changes, not that the file is left untouched.)
+        #
+        # This orders probes against CREDENTIAL CHANGES only. Two probes of the
+        # same credential are two valid observations of the same account, and the
+        # later-starting one can still land first — telling those apart needs a
+        # per-attempt sequence number, which is a persisted field this fix does not
+        # introduce.
         if (current.api_key, current.base_url) == (provider.api_key, provider.base_url):
             current.last_probe = probe
     return media_generation.registry_view(state)

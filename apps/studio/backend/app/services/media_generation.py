@@ -114,9 +114,17 @@ def locked_state(path: Path | None = None) -> Iterator[MediaFileState]:
     "save this state I assembled earlier" entry point, because such a call is
     exactly the stale-snapshot overwrite this exists to prevent.
 
-    An exception from the body propagates and NOTHING is written, which is what a
+    An exception from the body propagates and nothing is written, which is what a
     rejected edit needs (validation refuses the change after the state object has
     already been mutated in memory, and that in-memory edit must not reach disk).
+    A body that returns normally always publishes, even when it changed nothing —
+    there is no dirty tracking, so a no-op edit republishes an identical document.
+
+    The state handed out is the whole mutable document, so cross-field rules
+    (retiring a probe when its credential moves, say) live with their callers
+    rather than being enforced here. That is the smallest thing that works for
+    four call sites in one router; the moment a second module writes this file,
+    those rules belong in domain-level mutations instead.
 
     The lock is not reentrant and is held across the whole body, so the body must
     not perform slow or awaiting work — see `probe_media_provider` for the shape

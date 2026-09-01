@@ -9,10 +9,11 @@
 
 ## 当前活动：gskill 重整（北极星 / 搬仓 / 模块化 / 执行模型）（2026-08-31）
 
-- **状态**：决议已落盘。决议文档见 `docs/design/gskill-restructure-decision-2026-08-31.md`。
-- **范围**：该文档承载 2026-08-31 用户逐项批准的决定——北极星五条、四层权威链与裁决规则、八条行为原则、engine 唯一 owner 收敛到 `graph-skill-runtime` 并整体搬仓（含 Studio 切换五条门禁）、双场景统一执行模型（`AgentExecutor` 唯一分叉点，executor 闭集只有 `embedded` 与 `ah`；`host-native` 经用户裁决移除）、全局盘点方法、十一条规范验收清单、逐模块流水线与完成定义、资源与实施方案。
-- **边界**：本行只记状态；决定内容不在台账复制。格式载体裁决（拓扑写 markdown 正文 XML 还是 `graph.yaml`）在该文档 §6 显式标记为**待用户裁决**，不得代裁。
-- **下一步**：全局模块盘点（决议文档 §7 的三层由上而下 + §7.6 功能验收推导链），产物为域树与逐模块闭包清单。
+- **状态**：决议已落盘（#1074，§5 执行模型修订 #1075）；全局盘点已完成——盘点交付物 v5 + 七路域级对账证据 + codex（GPT-5.6-sol xhigh）五轮对抗审裁定记录见 `docs/design/gskill-restructure-inventory-2026-08-31/`。**域树 + 七批工单 DAG 待用户批准**，另有六项待裁（格式载体 XML/YAML、副作用轴是否含计费、媒体 endpoint 字段命运、updater、新仓命名、随仓模板去留——清单见交付物 §7）；批准前不开工批B/批B′/批C。
+- **血止批（批A，用户既有裁决授权下的已确认缺陷小修补）**：✅ 7 个 PR 已全部合并——#1076（M0：protocol_unsupported 不销毁 route/角色引用）、#1077（T1：统一异常信封 + CORS 兜底）、#1078（T2：掉线判定钉在重启动作上）、#1079（BOM 十处容错）、#1080（M1：`wire_backend_for_method` 公共 API）、#1081（X0：媒体配置原子写 + 观察作废）、#1082（M2：`[google]` extra + AST 惰性导入闭包门禁）。vendor 已重建并预热。**真机点验已回**：6 项 verified、V7（M1）如实标注无真机观察面，报告 `docs/design/gskill-restructure-inventory-2026-08-31/verification-bloodstop.md`。点验附带发现 studio-verify launcher 占位守卫 fail-open（dot-source 的 `exit 4` 拦不住调用方），已立独立修复任务。
+- **范围**：决议文档承载 2026-08-31 用户逐项批准的决定——北极星五条、四层权威链与裁决规则、八条行为原则、engine 唯一 owner 收敛到 `graph-skill-runtime` 并整体搬仓（含 Studio 切换五条门禁）、双场景统一执行模型（`AgentExecutor` 唯一分叉点，executor 闭集只有 `embedded` 与 `ah`；`host-native` 经用户裁决移除）、全局盘点方法、十一条规范验收清单、逐模块流水线与完成定义、资源与实施方案。
+- **边界**：本行只记状态；决定与盘点内容不在台账复制。待裁项一律**不得代裁**。
+- **下一步**：等待用户裁决（域树 + DAG + 六项）→ 批B（交接门）与批B′（MoirAI 迁移）并行开工 → 批C 搬迁方案呈批（结构性变更，先呈完整方案）。
 
 ## 当前活动：Graph Skill Runtime 独立化设计（2026-08-27）
 

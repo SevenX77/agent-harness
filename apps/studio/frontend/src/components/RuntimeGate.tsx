@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import {
   initializeRuntimeConfig,
+  reconnectSidecar,
   restartSidecar,
   restartSidecarAutomatic,
   subscribeToSidecarRestart,
@@ -152,11 +153,11 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
             // than stopping here: leaving `status` on 'error' would disarm
             // `useBackendDownSignal` below for good, so a branch meant to be
             // gentler than a restart would end up costing the app its ability to
-            // notice the next outage at all. Re-reading the shell's config is
-            // the non-destructive half of what Retry does, and it also picks up
-            // a ROTATED TOKEN — one of the things that produces this signal in
-            // the first place.
-            return initializeRuntimeConfig().then(() => {
+            // notice the next outage at all. `reconnectSidecar` — not
+            // `initializeRuntimeConfig`, which keeps an existing token — because
+            // a rotated sidecar token is a leading suspect here: it fails every
+            // authenticated call while `/health`, which needs none, answers fine.
+            return reconnectSidecar().then(() => {
               if (episode !== recoveryEpisodeRef.current) return
               markReady()
             })
@@ -223,7 +224,11 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
     scheduleAutoRestart()
   })
 
-  useEffect(() => clearScheduledAutoRestart, [clearScheduledAutoRestart])
+  // `endRecoveryEpisode`, not just the timer: unmounting has to invalidate a
+  // probe that is already in flight too, or its verdict comes back after the
+  // component is gone and restarts a sidecar nobody is watching — during an HMR
+  // reload, a root remount, or app shutdown.
+  useEffect(() => endRecoveryEpisode, [endRecoveryEpisode])
 
   // R-F13 — listen for `sidecar-restarted` Tauri events so a sidecar token
   // rotation propagates into `currentApiToken` before `useStudioEventStream`

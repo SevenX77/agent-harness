@@ -126,6 +126,28 @@ export async function restartSidecarAutomatic(options: RuntimeOptions = {}): Pro
   return performShellRestart('restart_sidecar_automatic', options)
 }
 
+/**
+ * Re-read where the sidecar is and start using that answer — without asking the
+ * shell to kill anything. What RuntimeGate does when its liveness probe finds
+ * the port still answering: something is serving there, so the remedy cannot be
+ * a restart, but the connection still has to be repaired somehow.
+ *
+ * Not `initializeRuntimeConfig`, and the difference is the point. That one is a
+ * BOOT step, and it deliberately keeps a token that is already set so a `#tkn=`
+ * in the URL wins over the shell's. Reconnecting is the opposite situation: a
+ * token already being set is the precondition, and a STALE one is a leading
+ * suspect for the lost connection in the first place — a rotated sidecar token
+ * makes every authenticated call fail while `/health`, which needs none, answers
+ * perfectly. So the shell's answer wins here, and `applySidecarConfig` also
+ * tells the websocket, which carries its token in the URL and would otherwise
+ * keep retrying with the credential that just failed.
+ */
+export async function reconnectSidecar(options: RuntimeOptions = {}): Promise<SidecarConfig> {
+  const config = await resolveRuntimeConfig(options)
+  applySidecarConfig(config)
+  return config
+}
+
 async function performShellRestart(command: string, options: RuntimeOptions): Promise<SidecarConfig> {
   if (!isTauriRuntime(options.windowRef)) {
     return initializeRuntimeConfig(options)

@@ -53,6 +53,7 @@ describe('RuntimeShell — D10 non-blocking startup gate', () => {
 // just the static RuntimeShell) through a post-ready death and back.
 const runtimeMocks = vi.hoisted(() => ({
   initializeRuntimeConfig: vi.fn(),
+  reconnectSidecar: vi.fn(),
   restartSidecar: vi.fn(),
   restartSidecarAutomatic: vi.fn(),
   subscribeToSidecarRestart: vi.fn(async () => () => {}),
@@ -223,6 +224,7 @@ beforeEach(() => {
   configureApiBaseURL('http://127.0.0.1:8787/api')
   configureApiToken('token')
   runtimeMocks.initializeRuntimeConfig.mockReset().mockResolvedValue(READY_CONFIG)
+  runtimeMocks.reconnectSidecar.mockReset().mockResolvedValue(READY_CONFIG)
   runtimeMocks.restartSidecar.mockReset().mockResolvedValue(READY_CONFIG)
   runtimeMocks.restartSidecarAutomatic.mockReset()
   runtimeMocks.subscribeToSidecarRestart.mockReset().mockResolvedValue(() => {})
@@ -280,9 +282,11 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
 
     expect(probeFetch).toHaveBeenCalledTimes(1)
     expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
-    // The non-destructive half of what Retry does: re-read the shell's config,
-    // which is also how a rotated token gets picked up.
-    expect(runtimeMocks.initializeRuntimeConfig).toHaveBeenCalledTimes(1)
+    // The non-destructive half of what Retry does. `reconnectSidecar`
+    // specifically, not the boot path: boot keeps a token that is already set,
+    // and a stale token is one of the things that gets us here.
+    expect(runtimeMocks.reconnectSidecar).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.initializeRuntimeConfig).not.toHaveBeenCalled()
     expect(bannerText().toLowerCase()).not.toContain('unavailable')
   })
 

@@ -4,6 +4,7 @@ import {
   configureApiBaseURL,
   configureApiToken,
   currentApiTokenIsSet,
+  wsUrl,
 } from '../api/client'
 
 const notifySidecarTokenRotatedMock = vi.fn()
@@ -18,6 +19,7 @@ import {
   initializeRuntimeConfig,
   isTauriRuntime,
   resolveRuntimeConfig,
+  reconnectSidecar,
   restartSidecar,
   restartSidecarAutomatic,
   subscribeToSidecarRestart,
@@ -257,6 +259,68 @@ describe('retrying asks the shell for a sidecar, not for its config', () => {
     })
 
     expect(config.baseURL).toBe('http://localhost:8787/api')
+  })
+})
+
+/**
+ * `reconnectSidecar` — what RuntimeGate does INSTEAD of restarting when the
+ * sidecar's port turns out to still be answering. It is the non-destructive
+ * half of a Retry: ask the shell where the sidecar is and start using that
+ * answer, without asking it to kill anything.
+ *
+ * The distinction from `initializeRuntimeConfig` is the whole reason it exists.
+ * That one is a BOOT step and deliberately does not overwrite a token that is
+ * already set (a `#tkn=` in the URL must win over the shell's). Reconnecting is
+ * the opposite situation: a token already being set is exactly the condition,
+ * and a stale one is a leading suspect for why the connection was lost — so the
+ * shell's answer has to win.
+ */
+describe('reconnectSidecar — re-reading the shell without restarting anything', () => {
+  const running = {
+    port: 41236,
+    baseURL: 'http://127.0.0.1:41236/api',
+    wsURL: 'ws://127.0.0.1:41236/ws',
+    resourceDir: '/resources',
+    configDir: '/config',
+    api_token: 'token-the-sidecar-rotated-to',
+  }
+
+  it('asks for the config and does NOT send a restart command', async () => {
+    const commands: string[] = []
+
+    await reconnectSidecar({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(command: string): Promise<T> => {
+        commands.push(command)
+        return running as T
+      },
+    })
+
+    expect(commands).toEqual(['get_sidecar_config'])
+  })
+
+  it('replaces a token that is already set, which boot would have kept', async () => {
+    configureApiToken('the-token-that-stopped-working')
+
+    await reconnectSidecar({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async <T,>(): Promise<T> => running as T,
+    })
+
+    // Read back through `wsUrl`, because that is where the token VALUE is
+    // observable — the HTTP side keeps it in a module variable that a request
+    // interceptor applies, so `api.defaults` never carries it. This file runs in
+    // the node environment, so `wsUrl` needs a `window` to resolve against.
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:41236' } })
+    try {
+      expect(wsUrl('/ws')).toContain('token=token-the-sidecar-rotated-to')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    // And the websocket has to be told, not just re-read later: it carries the
+    // token in its URL, so without this it keeps retrying with the credential
+    // that just failed.
+    expect(notifySidecarTokenRotatedMock).toHaveBeenCalled()
   })
 })
 

@@ -1,6 +1,6 @@
 ---
 doc: gskill-restructure-inventory-2026-08-31
-status: drafted(交付物 v5 已经五轮对抗审收敛;域树+批次 DAG 待用户批准,六项待裁见 inventory-synthesis.md §7;批准前不得按本目录开工批B/批B′/批C)
+status: drafted(交付物 v5 已经五轮对抗审收敛;域树+批次 DAG 已按用户长期有效指令生效,六项待裁——原列于 inventory-synthesis.md §8——已于 2026-08-31 全部裁定,见决议 §11;批B/批B′ 获准开工,批C 仍须先呈完整方案)
 role: workflow-record
 ---
 
@@ -9,8 +9,16 @@ role: workflow-record
 > **本目录是什么**:决议 `docs/design/gskill-restructure-decision-2026-08-31.md` §7 要求的全局盘点的完整产出——
 > 交付物正本、七路域级对账证据、五轮 codex 对抗审的裁定记录,以及血止批(批A)的真机点验报告。
 > **本目录不是什么**:不是进度状态(唯一可变状态在 `docs/development/DELIVERY_LEDGER.md`),
-> 也不是已批准的实施授权——域树与批次 DAG 尚待用户批准,批A(血止)是用户既有裁决授权下的
-> 已确认缺陷小修补,已完成并点验。
+> 也不是裁决正本——**用户对本目录待裁项的裁决落在决议 §11**,本目录保持为裁决当时的历史快照。
+>
+> **裁决状态(2026-08-31,落盘 2026-09-01)**:域树与七批工单 DAG 按用户长期有效指令生效;
+> `inventory-synthesis.md` §8 的六项待裁**已全部裁定**——格式载体维持 `graph.yaml`、副作用轴含计费
+> 且治理从宽、媒体 `endpoint` 字段删、updater 不立项、命名定为 gskill、随仓模板收敛为
+> `text-segmentation` 与 `story-deconstruction`(复杂版)两个真实业务场景。**逐条正文、用户原话与
+> 执行口径见 `../gskill-restructure-decision-2026-08-31.md` §11**;`inventory-synthesis.md` §8 里的
+> "推荐"是裁决前的建议,凡与 §11 冲突处**一律以 §11 为准**。批B(交接门)与批B′(MoirAI 单 owner
+> 迁移)获准开工;批C(搬迁)仍须先呈完整方案。批A(血止)是用户既有裁决授权下的已确认缺陷
+> 小修补,已完成并点验。
 
 ## 文件地图
 
@@ -24,8 +32,10 @@ role: workflow-record
 
 ## 阅读顺序
 
-1. 上位决议:`../gskill-restructure-decision-2026-08-31.md`(用户已批;§5 执行模型按 #1075 修订)。
-2. 交付物正本 `inventory-synthesis.md` —— 看域树、旅程、DAG 与待裁项。
+1. 上位决议:`../gskill-restructure-decision-2026-08-31.md`(用户已批;§5 执行模型按 #1075 修订;
+   **§11 = 本目录待裁项的裁决正本**)。
+2. 交付物正本 `inventory-synthesis.md` —— 看域树、旅程、DAG;它 §8 的"待用户裁决"六项
+   **已在决议 §11 裁定**,该节保持为裁决前的历史快照,读它时对照 §11 的结论。
 3. 对断言有疑问时:顺 `domain-reports/MANIFEST.md` 找到对应域报告的 file:line 证据;
    对"为什么这样定"有疑问时:查 `adjudication-record.md` 的对应轮次。
 

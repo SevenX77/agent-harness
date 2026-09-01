@@ -774,6 +774,22 @@ fn allocate_loopback_port_from(pinned_env: Option<&str>) -> std::io::Result<u16>
     Ok(listener.local_addr()?.port())
 }
 
+/// `--workers 1` is load-bearing, not decoration. The supervisor attributes a
+/// `/health` answer by comparing the pid in it against the pid of the child it
+/// spawned (`health_probe_once`), and that only holds while the process serving
+/// the app IS that child. Uvicorn runs the server in a SEPARATE process as soon
+/// as workers exceed one, and — this is the part that made the old code wrong —
+/// leaving the flag off does not mean one worker, it means *the environment
+/// decides*: `Config` falls back to `WEB_CONCURRENCY` when `--workers` was not
+/// passed. A single inherited variable was therefore enough to make every
+/// startup health wait time out. Passing the flag makes the premise a property
+/// of the launch rather than of whatever shell happened to start the app;
+/// command-line arguments also beat click's env lookups, so this cannot be
+/// overridden by `UVICORN_WORKERS` either (and `sidecar_command` strips those
+/// anyway — belt and braces, because each guards a different way in).
+///
+/// Verified against uvicorn 0.46.0's dispatch: `workers == 1` and no reload
+/// takes the plain `server.run()` path, i.e. no supervisor process at all.
 pub fn uvicorn_args(port: u16) -> Vec<String> {
     [
         "-m",
@@ -783,6 +799,8 @@ pub fn uvicorn_args(port: u16) -> Vec<String> {
         "127.0.0.1",
         "--port",
         &port.to_string(),
+        "--workers",
+        "1",
     ]
     .into_iter()
     .map(String::from)
@@ -831,12 +849,50 @@ fn host_target_triple() -> &'static str {
     }
 }
 
-fn spawn_sidecar_process(
-    config: &SidecarLaunchConfig,
-    port: u16,
-    api_token: &str,
-    stderr_lines: Arc<Mutex<VecDeque<String>>>,
-) -> Result<GroupChild, SidecarError> {
+/// Env switches that let the ambient shell rewrite the sidecar's launch, and so
+/// must not be inherited.
+///
+/// Checked against uvicorn 0.46.0's own source rather than assumed:
+/// `config.py` reads `WEB_CONCURRENCY` whenever `--workers` was not passed
+/// (`if workers is None and "WEB_CONCURRENCY" in os.environ`), and `main.py`
+/// declares its CLI with `auto_envvar_prefix="UVICORN"`, which makes EVERY
+/// option settable as `UVICORN_<OPTION>` — `UVICORN_WORKERS`, `UVICORN_RELOAD`,
+/// `UVICORN_FACTORY` included.
+///
+/// Two of those change the PROCESS MODEL, which is what this supervisor's whole
+/// identity story rests on: with workers > 1 or reload on, uvicorn runs a
+/// supervisor process that spawns the server elsewhere (`main.py`:
+/// `if config.should_reload: ChangeReload(...) elif config.workers > 1:
+/// Multiprocess(...) else: server.run()`). The child handle would then point at
+/// that supervisor while `/health` answered with a worker's pid — the pid could
+/// never match, so startup would time out three times over and the app would
+/// simply not come up.
+///
+/// Command-line arguments beat click's env lookups, so the switches we DO pass
+/// explicitly are already safe; the residue is the ones we do not pass. Rather
+/// than maintain a list of those and re-audit it at every uvicorn upgrade, this
+/// strips the whole `UVICORN_` namespace plus `WEB_CONCURRENCY` (which does not
+/// carry the prefix). The launch is then a function of `SidecarLaunchConfig`
+/// alone, which is the property worth having independent of any one option.
+fn env_key_rewrites_uvicorn_launch(key: &str) -> bool {
+    let key = key.to_ascii_uppercase();
+    key == "WEB_CONCURRENCY" || key.starts_with("UVICORN_")
+}
+
+/// Removed unconditionally, so the guarantee does not depend on what happened to
+/// be set in the parent when the command was built — and so a test can observe
+/// it without mutating process-global env (which races cargo's parallel runner;
+/// see the note above `python_runtime_dir_names_one_place_and_ignores_retired_names`).
+const UVICORN_ENV_OVERRIDES_ALWAYS_STRIPPED: [&str; 4] = [
+    "WEB_CONCURRENCY",
+    "UVICORN_WORKERS",
+    "UVICORN_RELOAD",
+    "UVICORN_FACTORY",
+];
+
+/// The sidecar's launch, as a value. Separated from the spawn so the recipe can
+/// be asserted without starting a Python interpreter.
+fn sidecar_command(config: &SidecarLaunchConfig, port: u16, api_token: &str) -> Command {
     let mut command = Command::new(&config.python);
     command
         .args(uvicorn_args(port))
@@ -858,6 +914,26 @@ fn spawn_sidecar_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    for key in UVICORN_ENV_OVERRIDES_ALWAYS_STRIPPED {
+        command.env_remove(key);
+    }
+    for (key, _) in std::env::vars_os() {
+        if env_key_rewrites_uvicorn_launch(&key.to_string_lossy()) {
+            command.env_remove(&key);
+        }
+    }
+
+    command
+}
+
+fn spawn_sidecar_process(
+    config: &SidecarLaunchConfig,
+    port: u16,
+    api_token: &str,
+    stderr_lines: Arc<Mutex<VecDeque<String>>>,
+) -> Result<GroupChild, SidecarError> {
+    let mut command = sidecar_command(config, port, api_token);
 
     let mut child = command.group_spawn().map_err(|err| {
         SidecarError::SpawnFailed(format!("failed to spawn Python sidecar: {err}"))
@@ -981,12 +1057,20 @@ struct HealthAnswer {
 /// Deliberately the pid rather than a launch nonce we inject and echo. Both bind
 /// the answer to something; the pid binds it to the PROCESS, needs no new state
 /// plumbed through the spawn, and puts no value that looks like a credential in
-/// an unauthenticated response. Its one assumption is that the process serving
-/// `/health` IS the child we spawned — true because `uvicorn_args` runs a single
-/// in-process app (no `--workers`, no `--reload`). If that ever changes, the
-/// answering worker's pid stops matching and this gate starts saying "not my
-/// instance", i.e. it restarts rather than falsely sparing — the safe direction —
-/// and the fix at that point is a nonce injected at spawn, which workers inherit.
+/// an unauthenticated response.
+///
+/// Its one assumption is that the process serving `/health` IS the child we
+/// spawned, and that assumption is now ENFORCED at the launch boundary rather
+/// than hoped for: `uvicorn_args` passes `--workers 1`, and `sidecar_command`
+/// strips the inherited env switches that would change the process model. This
+/// comment previously argued the premise held "because there is no `--workers`
+/// flag" — which was exactly wrong, because a missing flag hands the decision to
+/// `WEB_CONCURRENCY` instead of settling it (uvicorn `config.py`). A single
+/// inherited variable made every startup health wait time out; a default is not
+/// a guarantee. If a future design genuinely needs multiple workers, the pid
+/// stops being the right identifier and the replacement is a nonce injected at
+/// spawn, which workers inherit — and until then, mismatched pids fail toward
+/// restarting rather than falsely sparing.
 ///
 /// `is_success()` is the status threshold, and it is now the only one in the
 /// tree. A looser "any HTTP reply counts" reading used to live in the frontend
@@ -1150,6 +1234,95 @@ mod tests {
         assert!(!args.contains(&"8787".to_string()));
         assert_eq!(args[0], "-m");
         assert_eq!(args[1], "uvicorn");
+    }
+
+    #[test]
+    fn uvicorn_args_pin_one_worker_so_the_environment_cannot_add_more() {
+        // The pid comparison in `health_probe_once` is only sound while the
+        // process serving the app is the child we spawned. Uvicorn moves the
+        // server into a separate process as soon as workers exceed one, and
+        // omitting `--workers` does not mean "one" — it means `WEB_CONCURRENCY`
+        // decides (uvicorn `config.py`). With `WEB_CONCURRENCY=2` inherited, the
+        // handle pointed at a supervisor while `/health` answered with a
+        // worker's pid: no match, ever, so all three startup attempts timed out
+        // and the app did not come up at all.
+        let args = uvicorn_args(43210);
+        let workers = args
+            .iter()
+            .position(|arg| arg == "--workers")
+            .expect("the worker count must be pinned on the command line");
+        assert_eq!(args.get(workers + 1), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn env_key_rewrites_uvicorn_launch_names_the_process_model_switches() {
+        // uvicorn 0.46.0 declares its CLI with `auto_envvar_prefix="UVICORN"`,
+        // so every option has an env twin; `WEB_CONCURRENCY` is the one that
+        // does not carry the prefix. Case-insensitive because Windows env keys
+        // are, and Python upper-cases them in `os.environ` on that platform.
+        for rewrites in [
+            "WEB_CONCURRENCY",
+            "web_concurrency",
+            "UVICORN_WORKERS",
+            "UVICORN_RELOAD",
+            "UVICORN_FACTORY",
+            "uvicorn_reload",
+        ] {
+            assert!(
+                env_key_rewrites_uvicorn_launch(rewrites),
+                "{rewrites} can rewrite the launch and must not be inherited"
+            );
+        }
+        // The sidecar's OWN configuration travels this way and must survive.
+        for keeps in [
+            "PYTHONPATH",
+            "PYTHONUTF8",
+            "PATH",
+            "STUDIO_API_TOKEN",
+            "STUDIO_CONFIG_DIR",
+            "STUDIO_SIDECAR_PORT",
+            "WEB_CONCURRENCY_LIMIT",
+        ] {
+            assert!(
+                !env_key_rewrites_uvicorn_launch(keeps),
+                "{keeps} is ours to set, not an inherited override"
+            );
+        }
+    }
+
+    #[test]
+    fn sidecar_command_strips_the_env_switches_that_would_change_the_process_model() {
+        // Asserted on the built command rather than by setting the variable for
+        // real: process env is shared by every test thread and the set/remove
+        // dance raced under cargo's parallel runner (see the note at the top of
+        // this module). The removals are unconditional precisely so this is
+        // observable without touching the environment.
+        let command = sidecar_command(&unstartable_launch_config(), 45999, "token");
+        let removed: Vec<String> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(key, _)| key.to_string_lossy().to_ascii_uppercase())
+            .collect();
+
+        for switch in UVICORN_ENV_OVERRIDES_ALWAYS_STRIPPED {
+            assert!(
+                removed.contains(&switch.to_string()),
+                "{switch} must be removed from the child's environment; removed: {removed:?}"
+            );
+        }
+
+        // And the sidecar's own environment is still handed over.
+        let provided: Vec<String> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_some())
+            .map(|(key, _)| key.to_string_lossy().to_string())
+            .collect();
+        for own in ["STUDIO_API_TOKEN", "PYTHONPATH", "PYTHONUTF8"] {
+            assert!(
+                provided.contains(&own.to_string()),
+                "{own} went missing from the launch"
+            );
+        }
     }
 
     #[test]

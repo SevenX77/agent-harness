@@ -128,7 +128,7 @@ OWNERS: tuple[MoiraiAssetOwner, ...] = (
         stance="authoritative",
         relative_path="",
         version_anchor="1.1.0",
-        tree_digest="a4cbf954a30c33f7837285c0dee3aa6dfe05645b3de3a2fe5460498d9f759ca1",
+        tree_digest="6353a90dd8242868153df9afc65575d4c2d5da58b3ba5dc5d326540287093824",
         file_count=29,
         source_reference=(
             "SevenX77/graph-skill-runtime "

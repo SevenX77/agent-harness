@@ -708,3 +708,155 @@ def test_text_probe_unchanged_when_not_multimodal() -> None:
         )
     )
     assert captured["messages"][0]["content"] == "Reply with one short word."  # type: ignore[index]
+
+
+@pytest.mark.anyio
+async def test_official_method_probe_misrouted_to_foreign_protocol_is_protocol_unsupported() -> None:
+    """The official-method probe must apply the same foreign-protocol correction the
+    other two probe channels do.
+
+    Design §1.2 protocol matrix point 2 supplement (PM 2026-07-02): "探 X 协议却收到
+    Y 协议的 API 错误 = 该 URL 不说 X", and "此判据须早于 401 分支,否则异协议的 401
+    会被误当成'我这把 key 失效'". `probe_provider_endpoint` and `probe_provider_route`
+    both hand `probe_status` the wire they probed so it can make that call; the
+    official channel did not, which silently turned the correction OFF for every
+    official-method probe — a misroute there was reported as this key being invalid.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        # An anthropic_messages probe (backend `claude`) answered by an OpenAI
+        # upstream: the host does not speak Anthropic's wire.
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": 'OpenAI API error: 401 {"error":{"message":"invalid api key"}}',
+                    "type": "authentication_error",
+                }
+            },
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        "anthropic_messages",
+        "secret",
+        "https://anthropic.qnaigc.example",
+        "claude-x",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    # NOT `base_url`: that name collides with pytest-base-url's session-scoped
+    # fixture and the parametrized cases error out with ScopeMismatch.
+    ("method_id", "probe_base_url", "model_id"),
+    [
+        ("ark_anthropic_messages", "https://ark.cn-beijing.volces.com", "doubao-x"),
+        ("deepseek_anthropic_messages", "https://api.deepseek.com/anthropic", "deepseek-x"),
+    ],
+)
+async def test_official_method_probe_uses_the_wire_not_the_vendor(
+    method_id: str, probe_base_url: str, model_id: str
+) -> None:
+    """The correction must key off the WIRE the method speaks, not the vendor that
+    publishes it.
+
+    Ark and DeepSeek both publish Anthropic's `/v1/messages` wire. Their
+    `provider_backend` is "ark" / "deepseek", and an OpenAI-shaped error is NATIVE
+    to those two backends (`_FOREIGN_API_ERROR_SIGNATURES`), so handing
+    `probe_status` the vendor leaves precisely these misroutes looking native — the
+    argument would be present and still do nothing. `wire_family` says
+    `anthropic_messages`, whose owner is `claude`, and an OpenAI error on Anthropic's
+    wire is foreign.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": 'OpenAI API error: 401 {"error":{"message":"invalid api key"}}',
+                    "type": "authentication_error",
+                }
+            },
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        method_id,
+        "secret",
+        probe_base_url,
+        model_id,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("method_id", "probe_base_url", "model_id"),
+    [
+        ("ark_anthropic_messages", "https://ark.cn-beijing.volces.com", "doubao-x"),
+        ("deepseek_anthropic_messages", "https://api.deepseek.com/anthropic", "deepseek-x"),
+    ],
+)
+async def test_vendor_hosted_anthropic_wire_keeps_a_real_bad_key_as_invalid_key(
+    method_id: str, probe_base_url: str, model_id: str
+) -> None:
+    """Passing the WIRE must not turn every 401 on a vendor-hosted Anthropic
+    surface into a protocol verdict.
+
+    The correction keys off a body that NAMES another protocol's API, not off the
+    brand mismatch between wire and vendor. Ark's and DeepSeek's own auth
+    rejections carry no such name, so they stay `invalid_key` — which is what keeps
+    "fix your key" reachable on exactly the two methods whose wire and vendor
+    differ.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"error": {"message": "Authentication failed", "type": "authentication_error"}},
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        method_id,
+        "secret",
+        probe_base_url,
+        model_id,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "invalid_key"
+
+
+@pytest.mark.anyio
+async def test_official_method_probe_own_auth_error_stays_invalid_key() -> None:
+    """The correction must not swallow a real auth failure on the MATCHING protocol:
+    an anthropic_messages probe answered by Anthropic's own 401 is an invalid key,
+    not a protocol mismatch (the mirror of
+    test_gateway_openai_probe_own_auth_error_stays_invalid_key, for this channel)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={
+                "type": "error",
+                "error": {"type": "authentication_error", "message": "invalid x-api-key"},
+            },
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        "anthropic_messages",
+        "secret",
+        "https://api.anthropic.example",
+        "claude-x",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "invalid_key"

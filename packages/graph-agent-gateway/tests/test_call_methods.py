@@ -1,3 +1,4 @@
+import pytest
 from graph_agent_gateway.registry import (
     ProviderEndpoint,
     apply_call_method_base_url,
@@ -9,6 +10,7 @@ from graph_agent_gateway.registry import (
     provider_backend_for_endpoint,
     provider_backend_for_method,
     provider_backend_for_protocol,
+    wire_backend_for_method,
 )
 from pydantic import SecretStr
 
@@ -188,3 +190,39 @@ def test_ark_openai_compatible_endpoint_backend_uses_openai_protocol() -> None:
     )
 
     assert provider_backend_for_endpoint(endpoint) == "openai"
+
+
+def test_wire_backend_answers_the_wire_question_not_the_vendor_question() -> None:
+    # Ark and DeepSeek publish Anthropic's `/v1/messages` wire under their own
+    # names. Everything that classifies a RESPONSE by protocol must key off the
+    # wire; only menus and capability ladders care about the vendor.
+    for method_id in ("ark_anthropic_messages", "deepseek_anthropic_messages"):
+        assert wire_backend_for_method(method_id) == "claude"
+    assert provider_backend_for_method("ark_anthropic_messages") == "ark"
+    assert provider_backend_for_method("deepseek_anthropic_messages") == "deepseek"
+    # A method that publishes its own wire answers both questions the same way.
+    assert wire_backend_for_method("openai_chat_completions") == "openai"
+    assert wire_backend_for_method("gemini_generate_content") == "gemini"
+
+
+def test_every_call_method_resolves_to_a_wire_backend() -> None:
+    # `wire_backend_for_method` resolves a family in ONE hop by treating
+    # `wire_family` as the family's canonical method id, and raises when that name
+    # is not registered. The catalog load enforces the invariant; this pins it from
+    # the outside, so adding a method with a dangling family fails here too.
+    every_method = official_call_method_ids() | call_method_ids_for_client(
+        "anthropic_messages_client"
+    )
+    for method_id in every_method:
+        assert wire_backend_for_method(method_id) in {
+            "ark",
+            "claude",
+            "deepseek",
+            "gemini",
+            "openai",
+        }
+
+
+def test_an_unknown_call_method_has_no_wire_backend() -> None:
+    with pytest.raises(ValueError, match="no_such_method"):
+        wire_backend_for_method("no_such_method")

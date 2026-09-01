@@ -36,6 +36,7 @@ from graph_agent_gateway.registry import (
     provider_backend_for_endpoint,
     provider_backend_for_method,
     provider_backend_for_protocol,
+    wire_backend_for_method,
 )
 
 from .judge import (
@@ -233,11 +234,19 @@ async def probe_official_call_method(
         status = probe_status(
             answer,
             model_not_found_status="invalid_model",
-            # The wire this probe actually spoke, so `probe_status` can tell a
-            # misroute (an answer describing a DIFFERENT protocol's API) from a
-            # real failure on this one. Omitting it turns that correction off
-            # silently, and a misrouted 401 then reads as "your key is invalid".
-            probed_backend=_official_method_backend(method_id),
+            # The WIRE this probe spoke, so `probe_status` can tell a misroute (an
+            # answer describing a DIFFERENT protocol's API) from a real failure on
+            # this one. Omitting it turns that correction off silently, and a
+            # misrouted 401 then reads as "your key is invalid".
+            #
+            # The wire, not the vendor: `ark_anthropic_messages` and
+            # `deepseek_anthropic_messages` belong to Ark and DeepSeek but speak
+            # Anthropic's wire, and an OpenAI-shaped error IS native to Ark and
+            # DeepSeek — passing the vendor there would keep exactly the misroutes
+            # this argument exists to catch looking native. The sibling channels
+            # pass a wire-derived backend for the same reason
+            # (`provider_backend_for_protocol` deliberately consults no host).
+            probed_backend=_official_method_wire(method_id),
         )
         message = None if status == "ok" else provider_response_message(answer)
         latency_ms = probe_elapsed_ms(started)
@@ -671,6 +680,10 @@ def _google_thinking_config(reasoning: Mapping[str, Any]) -> dict[str, object] |
 
 def _official_method_backend(method_id: OfficialCallMethod) -> ProviderProbeBackend:
     return provider_backend_for_method(method_id)
+
+
+def _official_method_wire(method_id: OfficialCallMethod) -> ProviderProbeBackend:
+    return wire_backend_for_method(method_id)
 
 
 

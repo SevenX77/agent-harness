@@ -748,6 +748,54 @@ async def test_official_method_probe_misrouted_to_foreign_protocol_is_protocol_u
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    # NOT `base_url`: that name collides with pytest-base-url's session-scoped
+    # fixture and the parametrized cases error out with ScopeMismatch.
+    ("method_id", "probe_base_url", "model_id"),
+    [
+        ("ark_anthropic_messages", "https://ark.cn-beijing.volces.com", "doubao-x"),
+        ("deepseek_anthropic_messages", "https://api.deepseek.com/anthropic", "deepseek-x"),
+    ],
+)
+async def test_official_method_probe_uses_the_wire_not_the_vendor(
+    method_id: str, probe_base_url: str, model_id: str
+) -> None:
+    """The correction must key off the WIRE the method speaks, not the vendor that
+    publishes it.
+
+    Ark and DeepSeek both publish Anthropic's `/v1/messages` wire. Their
+    `provider_backend` is "ark" / "deepseek", and an OpenAI-shaped error is NATIVE
+    to those two backends (`_FOREIGN_API_ERROR_SIGNATURES`), so handing
+    `probe_status` the vendor leaves precisely these misroutes looking native — the
+    argument would be present and still do nothing. `wire_family` says
+    `anthropic_messages`, whose owner is `claude`, and an OpenAI error on Anthropic's
+    wire is foreign.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": 'OpenAI API error: 401 {"error":{"message":"invalid api key"}}',
+                    "type": "authentication_error",
+                }
+            },
+            request=request,
+        )
+
+    result = await provider_probe.probe_official_call_method(
+        method_id,
+        "secret",
+        probe_base_url,
+        model_id,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.status == "protocol_unsupported"
+
+
+@pytest.mark.anyio
 async def test_official_method_probe_own_auth_error_stays_invalid_key() -> None:
     """The correction must not swallow a real auth failure on the MATCHING protocol:
     an anthropic_messages probe answered by Anthropic's own 401 is an invalid key,

@@ -37,6 +37,7 @@ from graph_agent_gateway.registry.call_methods import (
     provider_backend_for_endpoint,
     provider_backend_for_method,
     provider_backend_for_protocol,
+    wire_backend_for_method,
 )
 from graph_agent_gateway.registry.capabilities import (
     build_runtime_setting_descriptors,
@@ -305,4 +306,5 @@ __all__ = [
     "strip_transport_prefix",
     "to_wire_evidence_type",
     "verified_profile_capabilities",
+    "wire_backend_for_method",
 ]

@@ -130,6 +130,29 @@ def provider_backend_for_method(method_id: str) -> ProviderProbeBackend:
     return definition.provider_backend
 
 
+def wire_backend_for_method(method_id: str) -> ProviderProbeBackend:
+    """Whose WIRE a call method speaks, as opposed to whose API it belongs to.
+
+    The two answers differ whenever a vendor publishes someone else's wire:
+    `deepseek_anthropic_messages` and `ark_anthropic_messages` belong to DeepSeek
+    and Ark, but what goes over the socket is Anthropic's `/v1/messages`. Asking
+    the vendor question where the wire question was meant is how a reply written
+    in a THIRD protocol's dialect gets read as native — `provider_backend` says
+    "deepseek", and an OpenAI-shaped error is native to DeepSeek, so a misroute
+    stops looking like one.
+
+    `wire_family` is the catalog's own name for the family, and its value is that
+    family's canonical method, so the wire's owner is that method's
+    `provider_backend`. The catalog load asserts every `wire_family` names a
+    registered method, which is what lets this resolve in one hop.
+    """
+
+    definition = call_method_definition(method_id)
+    if definition is None:
+        raise ValueError(f"Unknown call method: {method_id}")
+    return provider_backend_for_method(definition.wire_family)
+
+
 # The two protocols DeepSeek publishes a surface for. A url on that host saying
 # anything else is not a DeepSeek surface, whatever the host suggests.
 _DEEPSEEK_SURFACES = ("openai_compatible", "anthropic_compatible")
@@ -220,6 +243,17 @@ def _call_method_catalog() -> CallMethodCatalog:
         if definition.method_id in table:
             raise ValueError(f"Duplicate call method id: {definition.method_id}")
         table[definition.method_id] = definition
+    for definition in table.values():
+        # `wire_family` names the family's canonical method, so the family's wire
+        # owner is that method's provider_backend (see `wire_backend_for_method`).
+        # Checked once here rather than at every lookup: a dangling family name is
+        # a broken catalog, and the catalog is loaded at a boundary where failing
+        # is free.
+        if definition.wire_family not in table:
+            raise ValueError(
+                f"{definition.method_id}: wire_family names no registered call method: "
+                f"{definition.wire_family}"
+            )
     protocol_defaults, host_overrides = _endpoint_method_candidates_from_raw(raw, table)
     return CallMethodCatalog(
         methods=table,
@@ -409,4 +443,5 @@ __all__ = [
     "call_method_is_officially_probeable",
     "preferred_call_method_for_endpoint",
     "provider_backend_for_method",
+    "wire_backend_for_method",
 ]

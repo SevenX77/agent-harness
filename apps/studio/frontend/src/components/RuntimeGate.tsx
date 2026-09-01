@@ -79,14 +79,6 @@ function backendDownInitialMessage(): string {
   return i18n.t('banner.connectionLostReconnecting', { ns: 'runtimeGate' })
 }
 
-// Shown when the automatic restart declined to fire because the sidecar's port
-// still answered. The banner stays up because something IS wrong — the app could
-// not reach the backend — but the cause is not a dead process, so the remedy is
-// the person's own Retry rather than a restart we would be guessing at.
-function backendAnsweringButUnreachableMessage(): string {
-  return i18n.t('banner.unreachableButAnswering', { ns: 'runtimeGate' })
-}
-
 export function RuntimeGate({ children }: RuntimeGateProps) {
   const [status, setStatus] = useState<RuntimeStatus>('loading')
   const [message, setMessage] = useState('')
@@ -155,14 +147,27 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
           // sidecar instance that no longer exists, so it decides nothing.
           if (episode !== recoveryEpisodeRef.current) return undefined
           if (answers) {
-            // Something is serving on that port, so the process is not gone —
-            // whatever the weak signal saw, this is not ours to kill. The banner
-            // and its Retry are already on screen; stop here rather than
-            // rescheduling, so nothing turns into a restart poller.
-            setMessage(backendAnsweringButUnreachableMessage())
-            return undefined
+            // Something is serving on that port, so the process is not gone and
+            // this is not ours to kill. RECONNECT instead of restarting, rather
+            // than stopping here: leaving `status` on 'error' would disarm
+            // `useBackendDownSignal` below for good, so a branch meant to be
+            // gentler than a restart would end up costing the app its ability to
+            // notice the next outage at all. Re-reading the shell's config is
+            // the non-destructive half of what Retry does, and it also picks up
+            // a ROTATED TOKEN — one of the things that produces this signal in
+            // the first place.
+            return initializeRuntimeConfig().then(() => {
+              if (episode !== recoveryEpisodeRef.current) return
+              markReady()
+            })
           }
           return restartSidecarAutomatic().then(() => {
+            // Checked again: the restart itself takes time, and the person may
+            // have pressed Retry during it. We cannot recall a command already
+            // sent — that needs the check and the kill to happen together inside
+            // the supervisor that owns the process — but we can at least not
+            // report a stale episode's success as the current state.
+            if (episode !== recoveryEpisodeRef.current) return
             markReady()
           })
         })

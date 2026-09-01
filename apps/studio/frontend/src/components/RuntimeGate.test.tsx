@@ -268,9 +268,10 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
     expect(probeFetch).not.toHaveBeenCalled()
   })
 
-  it('does NOT restart when the port still answers, and says so in the banner', async () => {
+  it('does NOT restart when the port still answers: it reconnects instead', async () => {
     sidecarPortAnswersWith(200)
     await mountReady()
+    runtimeMocks.initializeRuntimeConfig.mockClear()
 
     await act(async () => {
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
@@ -279,8 +280,42 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
 
     expect(probeFetch).toHaveBeenCalledTimes(1)
     expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
-    expect(bannerText()).toContain('still answering')
-    expect(findButton()).not.toBeNull()
+    // The non-destructive half of what Retry does: re-read the shell's config,
+    // which is also how a rotated token gets picked up.
+    expect(runtimeMocks.initializeRuntimeConfig).toHaveBeenCalledTimes(1)
+    expect(bannerText().toLowerCase()).not.toContain('unavailable')
+  })
+
+  /**
+   * Declining to restart must not be a dead end. Detection is armed by
+   * `useBackendDownSignal(status === 'ready', …)`, so a branch that leaves
+   * `status` on 'error' also leaves the app unable to notice the NEXT outage —
+   * and the only way out would be the destructive Retry this whole change
+   * exists to avoid. Whatever the branch decides, it has to end somewhere the
+   * machine can leave.
+   */
+  it('re-arms detection after declining: a second outage is still noticed', async () => {
+    sidecarPortAnswersWith(200)
+    await mountReady()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+    expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
+    // Back to a working app: no banner, nothing killed.
+    expect(bannerText().toLowerCase()).not.toContain('unavailable')
+
+    // The sidecar dies for real this time.
+    nothingAnswersOnTheSidecarPort()
+    runtimeMocks.restartSidecarAutomatic.mockResolvedValue(READY_CONFIG)
+    await act(async () => {
+      window.dispatchEvent(new Event('studio-backend-http-unavailable'))
+    })
+    expect(bannerText().toLowerCase()).toContain('unavailable')
+    await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
+
+    expect(runtimeMocks.restartSidecarAutomatic).toHaveBeenCalledTimes(1)
   })
 
   it('treats a 503 as an answer: a process that replies is not a process to kill', async () => {
@@ -295,7 +330,7 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
     expect(runtimeMocks.restartSidecarAutomatic).not.toHaveBeenCalled()
   })
 
-  it('does not turn into a restart poller after declining once', async () => {
+  it('does not turn into a probe poller after reconnecting once', async () => {
     sidecarPortAnswersWith(200)
     await mountReady()
 
@@ -303,7 +338,9 @@ describe('RuntimeGate — confirm-before-you-kill (the restart asks the port fir
       window.dispatchEvent(new Event('studio-backend-http-unavailable'))
     })
     await advance(AUTO_RESTART_DELAYS_MS[0] + 1)
-    // Far past every remaining delay in the schedule.
+    // Far past every remaining delay in the schedule. The reconnect ends the
+    // episode, so nothing is left to fire: a new cycle needs a new outage, not
+    // the passage of time.
     await advance(120_000)
 
     expect(probeFetch).toHaveBeenCalledTimes(1)

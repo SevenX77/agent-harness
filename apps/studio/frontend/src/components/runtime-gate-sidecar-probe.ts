@@ -21,10 +21,14 @@ import { getApiBaseURL } from '@/api/client'
  * exactly as sensitive as it was, and only the destructive act asks for more
  * evidence.
  *
- * That split also settles what to do when the answer is unclear, because the
- * two directions stopped being symmetric. Skipping a restart we could have made
- * costs a delay, with the banner and Retry already on screen. Making a restart
- * we should have skipped destroys live work.
+ * What the two outcomes are. Not "restart" versus "give up": a caller that
+ * stopped on "the port answers" would leave RuntimeGate on 'error', which disarms
+ * detection, so being gentle once would cost the app its ability to notice
+ * anything afterwards. The outcomes are RESTART the sidecar or RECONNECT to it —
+ * both of which end somewhere the state machine can leave. That is also what
+ * makes the asymmetry usable: mistakenly reconnecting to a dead sidecar costs one
+ * failed attempt and another cycle, while mistakenly restarting a live one
+ * destroys in-flight work.
  *
  * How far that asymmetry can actually be pushed. Not all the way: `fetch`
  * collapses several outcomes into one `TypeError` — connection refused,
@@ -51,8 +55,13 @@ import { getApiBaseURL } from '@/api/client'
 /**
  * Bounds the wait, and nothing more: reaching it means "cannot tell", never
  * "dead". The dead case does not consume it — a closed port on loopback refuses
- * immediately — so this value only decides how long a restart is delayed while
- * something is holding the port open without answering.
+ * immediately — so this value only decides how long the decision waits while
+ * something holds the port open without answering.
+ *
+ * "Cannot tell" is grouped with "answering", which is not a claim that a hung
+ * process is healthy. It is the choice of which outcome to take when the probe
+ * has nothing: reconnecting to a hung sidecar fails and comes back around on the
+ * next attempt, and restarting a live one does not come back at all.
  */
 const PROBE_TIMEOUT_MS = 5_000
 
@@ -67,10 +76,11 @@ const PROBE_TIMEOUT_MS = 5_000
  * handed us, so the request reaches the sidecar directly. In a browser it is the
  * relative `/api`, and the Vite dev proxy (which forwards `/health` alongside
  * `/api`) sits in between — where a REFUSED upstream becomes Vite's own 502,
- * which this reads as "answering". That inversion is harmless exactly there and
- * nowhere else: outside Tauri `performShellRestart` has no shell to ask and falls
- * back to re-reading the config, so the verdict it distorts governs nothing
- * destructive.
+ * which this reads as "answering". Recorded rather than fixed, because outside
+ * Tauri BOTH outcomes of this verdict are non-destructive: `performShellRestart`
+ * has no shell to ask and falls back to re-reading the config, which is also what
+ * the answering branch does. The dev preview cannot demonstrate the desktop
+ * behaviour either way, and no amount of proxy configuration would change that.
  */
 function healthProbeUrl(): string {
   const base = getApiBaseURL().replace(/\/+$/, '')
@@ -82,8 +92,15 @@ function healthProbeUrl(): string {
  *
  * Any HTTP status counts as an answer, including 5xx: a process that replies
  * 503 has just proved it is running, which is the only claim the restart rests
- * on. This also keeps the verdict aligned with the supervisor's, and two
- * components disagreeing about liveness would be worse than either rule alone.
+ * on.
+ *
+ * That is deliberately NOT the supervisor's threshold —
+ * `sidecar.rs::wait_for_health` requires `status().is_success()`. The two ask
+ * different questions of the same endpoint. The supervisor asks "has the process
+ * I just launched come up ready to serve", where anything less than success
+ * means keep waiting; this asks "is there still a process here to destroy",
+ * where a 503 settles it. A single threshold would have to be wrong for one of
+ * them.
  *
  * A `fetch` that throws is read as no reply — see the module docstring for why
  * that class cannot be narrowed further, and what it therefore does and does not
@@ -106,7 +123,7 @@ export async function sidecarPortAnswers(): Promise<boolean> {
     return true
   } catch (error) {
     // Our own abort fired: no reply inside the budget, but nothing said the port
-    // is closed either. Ambiguous, so it declines to restart.
+    // is closed either. Ambiguous, so it takes the recoverable outcome.
     return error instanceof Error && error.name === 'AbortError'
   } finally {
     clearTimeout(timeout)

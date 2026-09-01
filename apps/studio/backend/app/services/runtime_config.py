@@ -13,6 +13,7 @@ from typing import Any
 import yaml
 
 from app.core.authored_text import open_authored_text, read_authored_text
+from app.core.exceptions import BoundaryValidationError
 
 _SCHEMA_VERSION = "studio.runtime_config.v2"
 _ARCHIVE_DIR_NAMES = {"history", ".history"}
@@ -280,7 +281,7 @@ def _parse_input_scope(scope: str) -> tuple[str, str]:
     prefix = "phase:"
     if scope.startswith(prefix) and _is_safe_phase_id(scope[len(prefix) :]):
         return "phase", scope[len(prefix) :]
-    raise ValueError(f"unsupported runtime input scope: {scope!r}")
+    raise BoundaryValidationError(f"unsupported runtime input scope: {scope!r}")
 
 
 _BINDING_DESCRIPTOR_KEYS = {

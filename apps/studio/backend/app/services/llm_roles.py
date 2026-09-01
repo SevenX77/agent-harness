@@ -10,21 +10,33 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from app.core.adapters.atomic_file import read_published_text, write_text_atomically
+from app.core.exceptions import BoundaryValidationError
 from app.models.llm_config import RoleEntry, RolesData
 from app.services.llm_paths import roles_path
 
 _WRITE_LOCK = threading.Lock()
 
 
-class InvalidRoleReference(ValueError):
-    """Raised when a role/profile references an unknown route."""
+class InvalidRoleReference(BoundaryValidationError):
+    """Raised when a role/profile references an unknown route.
+
+    A boundary rejection: the dangling id is one the caller just sent in a roles
+    write, or one left in the file the caller edits, and naming it is the only
+    way they can fix it. ``/api/llm/roles`` catches this and answers 400 in its
+    own words; every other caller reaches the handler and gets the 422.
+    """
 
 
 def load_roles_file(path: Path) -> RolesData:
-    """Load a roles YAML file; legacy short-code schemas are fatal."""
+    """Load a roles YAML file; legacy short-code schemas are fatal.
+
+    ``llm_roles.yaml`` is user-editable config, so a malformed one is bad INPUT
+    rather than a defect: the reader is told which file and which rule, and the
+    request is refused at 422.
+    """
     payload = _yaml().load(read_published_text(path)) or {}
     if not isinstance(payload, dict):
-        raise ValueError(f"llm_roles.yaml must contain a mapping: {path}")
+        raise BoundaryValidationError(f"llm_roles.yaml must contain a mapping: {path}")
     _reject_legacy_roles(payload, path)
     return RolesData.model_validate(_plain(payload))
 
@@ -133,7 +145,7 @@ def normalize_role_drafts(data: RolesData) -> None:
 
 def _reject_legacy_roles(payload: dict[str, Any], path: Path) -> None:
     if payload.get("schema_version") not in (2, 3):
-        raise ValueError(
+        raise BoundaryValidationError(
             f"llm_roles.yaml must use schema_version 2 or 3; legacy short-code schema "
             f"is rejected at the v2 cutover boundary: {path}"
         )
@@ -145,10 +157,10 @@ def _reject_legacy_roles(payload: dict[str, Any], path: Path) -> None:
         "circuit_breaker",
     }.intersection(payload)
     if legacy:
-        raise ValueError(f"legacy roles fields are not supported: {sorted(legacy)}")
+        raise BoundaryValidationError(f"legacy roles fields are not supported: {sorted(legacy)}")
     for role_name, role in (payload.get("roles") or {}).items():
         if isinstance(role, dict) and ("active_model" in role or "models" in role):
-            raise ValueError(f"legacy role schema is not supported for role: {role_name}")
+            raise BoundaryValidationError(f"legacy role schema is not supported for role: {role_name}")
 
 
 def _quote_lint_values(value: Any) -> Any:

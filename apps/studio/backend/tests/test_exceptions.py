@@ -3,10 +3,11 @@ from __future__ import annotations
 import pytest
 from app.core.exceptions import (
     STANDARD_ERROR_MAP,
+    BoundaryValidationError,
+    boundary_validation_error_handler,
     error_response,
     http_exception_handler,
     standard_http_exception,
-    value_error_handler,
 )
 from app.models.errors import ErrorResponse
 from fastapi import HTTPException
@@ -74,37 +75,73 @@ def test_a_caller_cannot_select_the_frameworks_internal_error_code() -> None:
         standard_http_exception("STUDIO_INTERNAL_ERROR", "a database path with a secret in it")
 
 
-@pytest.mark.anyio
-async def test_the_value_error_prefix_protocol_does_not_honour_internal_error() -> None:
-    """The other caller route: `raise ValueError("CODE: text")`.
+def test_a_boundary_rejection_cannot_name_the_frameworks_internal_error_code() -> None:
+    """The second caller route into the error map, refused the same way.
 
-    The reserved code is not recognized as a code, so it degrades to the same
-    MANIFEST_VALIDATION_FAILED any unregistered prefix produces.
+    `BoundaryValidationError` also lets a caller name a code AND supply the text,
+    so it needs the same refusal `standard_http_exception` gets above — otherwise
+    a raise site could put arbitrary internal text on screen under the one code
+    whose whole point is that its message says nothing.
 
-    The second assertion records a PRE-EXISTING DEFECT, not a desired property,
-    and is written down so the boundary of this change cannot be misread. The
-    global ValueError handler puts `str(exc)` into a 422 for every unclaimed
-    ValueError, so a programming bug anywhere that raises one — a parse failure
-    deep in a library, say — surfaces its internal text to the UI as though the
-    user had sent bad input, never reaching the 500 middleware or its log. Fixing
-    that means giving boundary validation its own exception type and letting
-    unknown ValueErrors propagate, which changes the response of many endpoints
-    and is a decision of its own, not a rider on this one.
-
-    What IS guaranteed here is exact and narrow: the reserved CODE cannot be
-    selected, so no caller text can be presented as a 500 STUDIO_INTERNAL_ERROR.
+    This replaced a string-prefix protocol: the global `ValueError` handler read
+    `str(exc)` for a `"CODE: text"` shape, which meant the reserved code was
+    refused only because it was not RECOGNIZED, and the text came out anyway
+    inside the MANIFEST_VALIDATION_FAILED it degraded to. Refusal at construction
+    has no such degraded path.
     """
-    response = await value_error_handler(
+    with pytest.raises(KeyError):
+        BoundaryValidationError(
+            "a database path with a secret in it",
+            error_code="STUDIO_INTERNAL_ERROR",
+        )
+
+
+def test_a_boundary_rejection_cannot_name_an_unregistered_code() -> None:
+    """An unregistered code has no HTTP projection, so it cannot be answered."""
+    with pytest.raises(KeyError):
+        BoundaryValidationError("message", error_code="DEFINITELY_NOT_REGISTERED")
+
+
+@pytest.mark.anyio
+async def test_a_boundary_rejection_answers_with_its_own_message() -> None:
+    """The message reaches the caller BY CONSTRUCTION, not by inspection.
+
+    The whole point of the type: a raise site that has something the caller needs
+    to read says so by choosing this class, and the handler does not parse,
+    filter or guess at the text. A bare `ValueError` gets none of this — it is
+    unclaimed, and answered as STUDIO_INTERNAL_ERROR by the middleware.
+    """
+    response = await boundary_validation_error_handler(
         None,  # type: ignore[arg-type]
-        ValueError("STUDIO_INTERNAL_ERROR: a database path with a secret in it"),
+        BoundaryValidationError("Invalid skill_id: ../evil"),
     )
 
     assert response.status_code == 422
     assert b'"error_code":"MANIFEST_VALIDATION_FAILED"' in response.body
-    # Nothing here asserts what happens to the caller's TEXT. Today it is echoed,
-    # and that is the leak described above — pinning it with an assertion would
-    # turn a defect into a promise, and would put this test in the way of the
-    # change that fixes it.
+    assert b"Invalid skill_id: ../evil" in response.body
+
+
+@pytest.mark.anyio
+async def test_a_boundary_rejection_projects_its_chosen_codes_status_and_details() -> None:
+    """A named code brings its whole HTTP projection, not just a label.
+
+    `http_status` and `retry_strategy` come from the one registry of code
+    projections, so a raise site cannot pair a code with a status that
+    contradicts it. `details` is the raiser's, which is how the credentials
+    loader hands the reader the document explaining the schema it just refused.
+    """
+    response = await boundary_validation_error_handler(
+        None,  # type: ignore[arg-type]
+        BoundaryValidationError(
+            "invalid v5 llm credentials schema",
+            error_code="LLM_CREDENTIALS_SCHEMA",
+            details={"docs_path": "docs/development/CREDENTIALS_V4_BOOTSTRAP.md"},
+        ),
+    )
+
+    assert response.status_code == STANDARD_ERROR_MAP["LLM_CREDENTIALS_SCHEMA"].http_status
+    assert b'"error_code":"LLM_CREDENTIALS_SCHEMA"' in response.body
+    assert b"CREDENTIALS_V4_BOOTSTRAP.md" in response.body
 
 
 def test_the_envelope_builder_refuses_the_frameworks_own_code() -> None:

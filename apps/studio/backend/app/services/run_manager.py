@@ -38,6 +38,7 @@ from app.core.adapters.engine import (
 )
 from app.core.adapters.run_layout import predicts_root, runs_root
 from app.core.adapters.transport_factory import build_engine_adapter
+from app.core.authored_text import read_authored_text
 from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
@@ -2324,7 +2325,7 @@ def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:
             f"Test input not found: {input_id}",
             {"skill_id": skill_id, "input_id": input_id},
         )
-    loaded = json.loads(input_path.read_text(encoding="utf-8"))
+    loaded = json.loads(read_authored_text(input_path))
     if isinstance(loaded, dict) and isinstance(loaded.get("input_data"), dict):
         return dict(loaded["input_data"])
     if isinstance(loaded, dict):

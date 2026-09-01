@@ -482,7 +482,7 @@ def _frontmatter_name_line(skill_dir: Path) -> int | None:
     """1-based line of the frontmatter ``name:`` key, so the editor can mark it."""
 
     try:
-        lines = (skill_dir / "GRAPH.md").read_text(encoding="utf-8").splitlines()
+        lines = read_authored_text(skill_dir / "GRAPH.md").splitlines()
     except OSError:
         return None
     for index, line in enumerate(lines, start=1):
@@ -1350,7 +1350,11 @@ async def fork_skill(
     source_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     await storage.copy_tree(str(source_dir), str(target_dir))
     try:
-        content = await storage.read_text(str(target_path))
+        # The copy is a file some outside editor may have signed. Reading it as
+        # plain UTF-8 turns that signature into a leading character, and the write
+        # below re-encodes it — handing the new skill a signature Studio itself
+        # produced, which is what `CROSS_PLATFORM.md` forbids us to write.
+        content = await storage.read_authored_text(str(target_path))
         await storage.write_text(
             str(target_path),
             _rewrite_forked_skill_content(content, old_id=skill_id, new_id=new_skill_id),
@@ -2044,11 +2048,11 @@ async def serialize_skill_graph_markdown(
     started = time.perf_counter()
     skill_dir = await _resolve_canvas_serialize_dir(user_id, skill_id, request.workspace_root, storage, metadata)
     graph_path = skill_dir / "GRAPH.md"
-    # Not `storage.read_text`: that port decodes plain UTF-8, and this value is
-    # hashed against a hash the CALLER computed from text read by a reader that
-    # drops the signature. The lock only works if both sides decode the file the
-    # same way, so this read has to be the authored-text one.
-    original_md = read_authored_text(graph_path)
+    # `read_authored_text`, not `read_text`: this value is hashed against a hash
+    # the CALLER computed from text read by a reader that drops the signature
+    # (`native_fs.rs`). The lock only holds if both sides decode the file the same
+    # way.
+    original_md = await storage.read_authored_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)
     try:
         if request.expected_hash is not None and request.expected_hash != current_hash:

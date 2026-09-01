@@ -23,8 +23,11 @@ import json
 from pathlib import Path
 
 import pytest
+from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.core.authored_text import read_authored_text
+from app.services import run_manager
 from app.services.golden_diff import workspace_text_hash
+from app.services.local_settings import read_local_settings
 from app.services.runtime_config import (
     _graph_phase_ids,
     _input_fields_from_markdown,
@@ -32,6 +35,7 @@ from app.services.runtime_config import (
     read_runtime_config,
 )
 from app.services.skills import _graph_content_hash, _read_current_graph_markdown
+from app.services.validator import _parse_input_file
 
 BOM = b"\xef\xbb\xbf"
 
@@ -167,6 +171,71 @@ def test_a_signed_runtime_config_reads_the_same_as_an_unsigned_one(tmp_path: Pat
     del from_signed["updated_at"], from_plain["updated_at"]
 
     assert from_signed == from_plain
+
+
+def test_a_signed_test_input_still_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A declared test input is workspace content, so the same rule governs it.
+
+    Sharper than the markdown cases rather than milder: ``json.loads`` does not
+    silently mis-read a signed file, it refuses it outright with ``Expecting
+    value: line 1 column 1``, which names neither the byte-order mark nor the
+    file. The user sees a run refuse to start over an input they can open and
+    read.
+    """
+    skill_dir = tmp_path / "signed-skill"
+    _signed(
+        skill_dir / ".workspace" / "import_files" / "smoke.json",
+        json.dumps({"input_data": {"topic": "signed"}}),
+    )
+    monkeypatch.setattr(run_manager, "resolve_skill_dir", lambda _skill_id: skill_dir)
+
+    assert run_manager._load_test_input("signed-skill", "smoke") == {"topic": "signed"}
+
+
+def test_a_signed_validation_input_still_validates(tmp_path: Path) -> None:
+    """``/validate_input`` reads a file the user picked out of their own workspace.
+
+    Its failure is the one that misdirects hardest: the endpoint catches the
+    decode error and answers 422 "invalid input file", which reads as a verdict
+    on the CONTENT the user wrote rather than on how we opened it.
+    """
+    signed = _signed(tmp_path / "case.json", json.dumps({"topic": "signed"}))
+
+    assert _parse_input_file(signed) == {"topic": "signed"}
+
+
+def test_signed_local_settings_still_load(tmp_path: Path) -> None:
+    """``.workspace/local_settings.json`` is named in the jurisdiction by path.
+
+    Studio writes this file itself, so it carries no signature of ours — but the
+    directory it lives in belongs to the user, who may copy, edit or regenerate
+    it with any editor. What decides the reader is where the file lives, not who
+    last wrote it.
+    """
+    skill_dir = tmp_path / "signed-skill"
+    _signed(
+        skill_dir / ".workspace" / "local_settings.json",
+        json.dumps({"selected_phase": "setup"}),
+    )
+
+    assert read_local_settings(skill_dir) == {"selected_phase": "setup"}
+
+
+@pytest.mark.anyio
+async def test_the_storage_port_reads_authored_text_without_the_signature(tmp_path: Path) -> None:
+    """The async transport has to answer the same as the sync one.
+
+    ``StorageBackend`` is how services reach the disk, so a service that needs a
+    signature-free read had only two options before this method existed: bypass
+    the port, or keep the mark. Both are defects — the first drops the boundary
+    and does blocking I/O on the event loop, the second is K7 again — so the port
+    itself carries the rule.
+    """
+    _signed(tmp_path / "GRAPH.md", GRAPH_MARKDOWN)
+    backend = LocalFilesystemBackend(tmp_path)
+
+    assert await backend.read_authored_text("GRAPH.md") == GRAPH_MARKDOWN
+    assert await backend.read_text("GRAPH.md") == "﻿" + GRAPH_MARKDOWN
 
 
 def test_a_signed_file_hashes_like_the_writer_reads_it(tmp_path: Path) -> None:

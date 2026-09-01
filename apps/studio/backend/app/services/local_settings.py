@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.core.authored_text import read_authored_text
 from app.services.skills import local_settings_path_for, workspace_dir_for
 
 
@@ -14,7 +15,7 @@ def read_local_settings(skill_dir: Path) -> dict[str, Any]:
     settings_path = local_settings_path_for(skill_dir)
     if not settings_path.exists():
         return {}
-    loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+    loaded = json.loads(read_authored_text(settings_path))
     return loaded if isinstance(loaded, dict) else {}
 
 

@@ -40,6 +40,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+#: The rule itself, named once so the async transport cannot drift from the sync
+#: one. `read_authored_text` below is the sync exit; `StorageBackend`'s
+#: `read_authored_text` is the same decision over aiofiles, and it reads this
+#: constant rather than repeating the codec name.
+AUTHORED_TEXT_ENCODING = "utf-8-sig"
+
 
 def read_authored_text(path: Path | str) -> str:
     """Decode a file from a user's skill workspace, without its signature.
@@ -50,4 +56,4 @@ def read_authored_text(path: Path | str) -> str:
     run records) — those have no signature to strip, and reading them with plain
     ``utf-8`` is how the code says which kind of file it is holding.
     """
-    return Path(path).read_text(encoding="utf-8-sig")
+    return Path(path).read_text(encoding=AUTHORED_TEXT_ENCODING)

@@ -496,6 +496,37 @@ def test_fork_skill_copies_directory_and_rewrites_identity(
     assert "name: text-segmentation-copy" in (target_dir / "GRAPH.md").read_text(encoding="utf-8")
 
 
+def test_forking_a_signed_skill_does_not_hand_the_copy_a_signature(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """Studio writes the forked GRAPH.md, so Studio owes it our own encoding rule.
+
+    A fork reads the source, rewrites the identity lines and writes the result.
+    Read the source as plain UTF-8 and a byte-order mark an outside editor left
+    there arrives as a ``\\ufeff`` CHARACTER, which the write then re-encodes into
+    a signature of our own making — so a file the user never signed comes out
+    signed, and the condition spreads one copy at a time.
+
+    ``docs/development/CROSS_PLATFORM.md`` is what makes this an outright defect
+    rather than a preference: what we WRITE is UTF-8 with no signature. See
+    ``app/core/authored_text.py`` for the read side of the same rule.
+    """
+    skills_dir, _ = studio_roots
+    graph = skills_dir / "text-segmentation" / "GRAPH.md"
+    graph.write_bytes(b"\xef\xbb\xbf" + graph.read_bytes())
+
+    response = client.post(
+        "/api/skills/text-segmentation/fork",
+        json={"new_skill_id": "text-segmentation-signed-copy"},
+    )
+
+    assert response.status_code == 201
+    forked = (skills_dir / "text-segmentation-signed-copy" / "GRAPH.md").read_bytes()
+    assert not forked.startswith(b"\xef\xbb\xbf")
+    assert b"name: text-segmentation-signed-copy" in forked
+
+
 def test_request_validation_errors_use_error_response(client: TestClient) -> None:
     response = client.post("/api/skills/demo/runs", json={"unexpected": "field"})
 

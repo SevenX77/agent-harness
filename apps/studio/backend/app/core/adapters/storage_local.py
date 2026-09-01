@@ -8,6 +8,8 @@ from pathlib import Path
 
 import aiofiles  # type: ignore[import-untyped]
 
+from app.core.authored_text import AUTHORED_TEXT_ENCODING
+
 
 class LocalFilesystemBackend:
     """Async wrapper around local filesystem operations."""
@@ -18,6 +20,15 @@ class LocalFilesystemBackend:
     async def read_text(self, path: str) -> str:
         """Read UTF-8 text from a local path."""
         async with aiofiles.open(self._resolve(path), encoding="utf-8") as file:
+            return str(await file.read())
+
+    async def read_authored_text(self, path: str) -> str:
+        """Read text from a user's skill workspace, without its signature.
+
+        The codec name comes from `app.core.authored_text` rather than being
+        spelled here, so the sync exit and this async one cannot drift apart.
+        """
+        async with aiofiles.open(self._resolve(path), encoding=AUTHORED_TEXT_ENCODING) as file:
             return str(await file.read())
 
     async def write_text(self, path: str, content: str) -> None:

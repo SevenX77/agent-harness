@@ -1,15 +1,17 @@
 """The containment primitive itself, at the boundaries the route tests cannot reach.
 
 The route tests are the ones that matter — they prove a request is refused. These
-cover the two edges a request cannot demonstrate on every platform: a symlink
-escape (creating one needs a privilege Windows accounts often lack, so the route
-test skips there) and the prefix-vs-component distinction, which no realistic
-request happens to exercise but which is the classic way this check is written
-wrong.
+cover the edges a request cannot demonstrate, or cannot demonstrate on every
+platform: a symlink escape (creating one needs a privilege Windows accounts often
+lack, so the route test skips there); the prefix-vs-component distinction, which
+no realistic request exercises but which is the classic way this check is written
+wrong; and the ORDER of the gates, where what matters is that a filesystem call
+did NOT happen — an absence no response body can show.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -109,3 +111,79 @@ def test_resolve_within_roots_accepts_a_path_inside_any_root(tmp_path: Path) -> 
     second.mkdir()
 
     assert resolve_within_roots(str(second), [first, second]) == second.resolve()
+
+
+@pytest.mark.parametrize(
+    "unc_path",
+    [
+        r"\\attacker\share\x",
+        "//attacker/share/x",
+        r"\\?\C:\Windows\win.ini",
+        r"\\.\NUL",
+        r"\\attacker\share",
+        "//?/UNC/attacker/share/x",
+    ],
+)
+def test_resolve_within_roots_refuses_a_unc_or_device_path(tmp_path: Path, unc_path: str) -> None:
+    """A UNC name is refused, and refused for being a UNC name."""
+    with pytest.raises(PathEscapesDirectory) as excinfo:
+        resolve_within_roots(unc_path, [tmp_path])
+
+    assert "UNC" in excinfo.value.reason
+
+
+def test_a_unc_path_is_refused_without_touching_the_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal has to happen BEFORE the resolve, not after it.
+
+    ``ntpath.realpath`` walks a UNC path component by component, and each
+    component is an SMB request to the host in the path — one that can carry an
+    NTLM handshake. A check that resolves first and rejects afterwards has
+    already reached out to the attacker's machine and leaked a credential
+    exchange by the time it says "no", which is why this asserts the ABSENCE of
+    the call rather than only the verdict.
+
+    Patching ``Path.resolve`` to raise is what makes the assertion real: a fix
+    that reorders the gate passes, and any fix that resolves first fails here
+    with the marker rather than with ``PathEscapesDirectory``.
+    """
+
+    def _forbidden_resolve(self: Path, strict: bool = False) -> Path:
+        raise AssertionError(f"resolve() was called before the UNC gate, on {self}")
+
+    monkeypatch.setattr(Path, "resolve", _forbidden_resolve)
+
+    with pytest.raises(PathEscapesDirectory):
+        resolve_within_roots(r"\\attacker\share\x", [tmp_path])
+
+
+def test_resolve_within_roots_refuses_an_empty_path(tmp_path: Path) -> None:
+    """``Path("")`` is ``.`` — the process working directory, which is not an answer."""
+    with pytest.raises(PathEscapesDirectory) as excinfo:
+        resolve_within_roots("   ", [tmp_path])
+
+    assert "empty" in excinfo.value.reason
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the anchor gate has only one possible answer on POSIX: every absolute path is /",
+)
+def test_resolve_within_roots_refuses_a_path_on_another_drive(tmp_path: Path) -> None:
+    """A path on a different drive is out before the link-following resolve.
+
+    This is the gate's whole purpose on Windows, where a drive letter can be a
+    mapped network share — resolving such a path reaches the network exactly the
+    way a UNC name does. The chosen drive need not exist: the gate is lexical, so
+    "does not exist" and "is not ours" reach the same verdict without a syscall,
+    which is what the second assertion pins down.
+    """
+    other_drive = "Z:" if tmp_path.drive.upper() != "Z:" else "Y:"
+
+    with pytest.raises(PathEscapesDirectory) as excinfo:
+        resolve_within_roots(rf"{other_drive}\stolen\GRAPH.md", [tmp_path])
+
+    assert "volume" in excinfo.value.reason
+    assert other_drive.lower() in str(excinfo.value).lower()

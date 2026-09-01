@@ -56,6 +56,12 @@ class RunRequest(BaseModel):
       a ``ValueError`` the mistake was answered by a process-wide ValueError
       handler as ``MANIFEST_VALIDATION_FAILED`` — the wrong thing named, and only
       when the run gate did not refuse the request first, which it usually did.
+
+    The fold is asserted by CONSTRUCTING the model
+    (``tests/models/test_a_pasted_input_is_decoded_at_the_boundary.py``) rather
+    than through a route, because a route stops at the run gate before anything
+    reads the inputs: a fold that silently produced nothing passed every
+    route-level test there was.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -64,17 +70,38 @@ class RunRequest(BaseModel):
     golden_id: str | None = None
     paste_json: str | None = None
 
-    @model_validator(mode="after")
-    def fold_pasted_json_into_input_data(self) -> RunRequest:
-        if not self.paste_json:
-            return self
+    @model_validator(mode="before")
+    @classmethod
+    def fold_pasted_json_into_input_data(cls, data: Any) -> Any:
+        """Rewrite the incoming mapping, before the fields are built from it.
+
+        ``mode="before"`` and not ``mode="after"``: an after-validator is
+        specified to return the CURRENT instance, and pydantic warns and then
+        DISCARDS the result of a ``model_copy`` on the ``RunRequest(...)``
+        construction path — so the fold silently did nothing for every caller
+        that builds the model in Python rather than through ``model_validate``,
+        and a paste would have reached the run as ``None``. Rewriting the raw
+        mapping is the one place this transformation is part of the contract
+        rather than fighting it.
+
+        Non-dict input is handed back untouched — that is validation from an
+        existing instance or from something that is about to be rejected as the
+        wrong type, and neither is this validator's business.
+        """
+        if not isinstance(data, dict):
+            return data
+        pasted_json = data.get("paste_json")
+        if not pasted_json:
+            return data
+        if not isinstance(pasted_json, str):
+            raise ValueError("paste_json must be a string containing JSON")
         try:
-            pasted = json.loads(self.paste_json)
+            pasted = json.loads(pasted_json)
         except json.JSONDecodeError as exc:
             raise ValueError(f"paste_json is not valid JSON: {exc}") from exc
         if not isinstance(pasted, dict):
             raise ValueError("paste_json must decode to a JSON object")
-        return self.model_copy(update={"input_data": pasted, "paste_json": None})
+        return {**data, "input_data": pasted, "paste_json": None}
 
 
 class NodeCompareRunRequest(BaseModel):

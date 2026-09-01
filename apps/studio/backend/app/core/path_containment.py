@@ -19,10 +19,13 @@ differently and neither answer covers the other:
   :func:`resolve_inside` then proves the join actually LANDS inside, because the
   name rule cannot see symlinks: ``escape.json`` is a well-formed name, and if
   it is a link it resolves outside with no ``..`` in the spelling anywhere.
-- **An ABSOLUTE path the caller supplies whole.** There is no spelling rule that
-  helps — every absolute path is well-formed. The only question is whether it
+- **An ABSOLUTE path the caller supplies whole.** No spelling rule can decide
+  this one — every absolute path is well-formed — so the question is whether it
   lands inside one of the roots Studio actually manages, which is what
-  :func:`resolve_within_roots` answers.
+  :func:`resolve_within_roots` answers. What CAN be decided lexically there, and
+  must be, is whether the path is a local one at all: resolving a UNC name makes
+  network requests, so "refuse it" has to be reached before the resolve rather
+  than after it. See that function's docstring for the ordering and why.
 
 *Borrowed*: the two-layer shape of Python's own ``zipfile`` extraction fix
 (CVE-2007-4559: ``_sanitize_windows_name`` for the spelling, plus a containment
@@ -85,17 +88,29 @@ def is_workspace_entry_name(value: str) -> bool:
 
 
 class PathEscapesDirectory(Exception):
-    """A resolved path landed outside the directory it was supposed to stay in.
+    """A caller-supplied path is not one this code may touch.
 
     Raised rather than returned so no caller can reach the file by forgetting to
     check: the only way past these functions is with a path they have vouched
     for.
+
+    ``reason`` exists because there are several distinct ways to fail the check
+    — empty, not absolute, a UNC or device name, on a volume we do not manage, or
+    simply outside every root — and one message covering all of them makes the
+    log entry say less than the code knew.
     """
 
-    def __init__(self, resolved: Path, roots: tuple[Path, ...]) -> None:
-        super().__init__(f"path escapes {[str(root) for root in roots]}: {resolved}")
+    def __init__(
+        self,
+        resolved: Path,
+        roots: tuple[Path, ...],
+        *,
+        reason: str = "path is outside every root",
+    ) -> None:
+        super().__init__(f"{reason}: {resolved} (roots: {[str(root) for root in roots]})")
         self.resolved = resolved
         self.roots = roots
+        self.reason = reason
 
 
 def resolve_inside(directory: Path, *segments: str) -> Path:
@@ -111,28 +126,89 @@ def resolve_inside(directory: Path, *segments: str) -> Path:
     resolved_directory = directory.resolve(strict=False)
     resolved = resolved_directory.joinpath(*segments).resolve(strict=False)
     if not resolved.is_relative_to(resolved_directory):
-        raise PathEscapesDirectory(resolved, (resolved_directory,))
+        raise PathEscapesDirectory(
+            resolved,
+            (resolved_directory,),
+            reason="name resolves outside the directory it belongs to",
+        )
     return resolved
 
 
 def resolve_within_roots(raw_path: str, roots: Iterable[Path]) -> Path:
     """An absolute path a caller supplied, proven to land inside one of ``roots``.
 
-    Refuses a relative path outright rather than resolving it against the
-    process working directory. The caller is naming a place on the user's disk,
-    and a relative name would mean "wherever this server happens to be running
-    from" — an answer that depends on how the app was launched is not an answer.
+    Three gates, in this order, and the order is the point: **resolving a path
+    is not a free operation**, so everything that can be decided by reading the
+    string is decided before anything touches the filesystem.
+
+    1. *Lexically*, before any filesystem call at all: a UNC or device-namespace
+       path is refused. ``ntpath.realpath`` walks ``\\\\attacker\\share\\x``
+       component by component, and each component is an SMB request that can
+       carry an NTLM handshake — so a "refusal" placed after the resolve has
+       already reached out to the attacker's host and leaked a credential
+       exchange. The verdict for these has to be reached without moving.
+    2. The path must be *absolute*. A relative name would mean "wherever this
+       server happens to be running from", and an answer that depends on how the
+       app was launched is not an answer.
+    3. The path's *anchor* must match one of the roots'. On Windows that is the
+       drive letter, so a path on some other (possibly mapped-network) drive is
+       out before the link-following resolve, not after. On POSIX every absolute
+       path anchors at ``/`` and the gate is a no-op — which is correct, not
+       vestigial: it is the same question, and there it has one answer.
+
+    Only then is the candidate resolved and its landing place compared against
+    the roots. The roots are ours, so resolving THEM is not attacker-reachable.
+
+    *Borrowed*: the "decide what you can lexically, before you touch the
+    network" ordering from Go's ``filepath.IsLocal`` and from Windows' own
+    guidance on ``\\\\?\\``-prefixed paths (both treat the UNC/device forms as a
+    separate kind of name rather than as a path with unusual characters).
     """
-    # Building and resolving the path IS the check: containment is a fact about
-    # the RESOLVED path, so there is no way to establish it without first making
-    # one. A taint scanner sees an untrusted value reaching a path expression and
-    # is right about the value and wrong about the expression — nothing is opened
-    # here, and this function's only exits are "inside one of `roots`" or a raise.
-    candidate = Path(raw_path.strip()).expanduser()  # codeql[py/path-injection]
+    stripped = raw_path.strip()
+    if not stripped:
+        raise PathEscapesDirectory(Path(), tuple(roots), reason="path is empty")
+    _reject_unc_or_device_namespace(stripped, roots)
+    # Building the path is not opening it; `expanduser` reads the user's own
+    # HOME, never the caller's string. The lexical gate is re-applied to the
+    # expanded form for the same reason it ran on the raw one: whichever string
+    # we are about to resolve is the one that has to have passed it.
+    candidate = Path(stripped).expanduser()  # codeql[py/path-injection]
+    _reject_unc_or_device_namespace(str(candidate), roots)
     if not candidate.is_absolute():
-        raise PathEscapesDirectory(candidate, tuple(roots))
-    resolved = candidate.resolve(strict=False)  # codeql[py/path-injection]
+        raise PathEscapesDirectory(candidate, tuple(roots), reason="path is not absolute")
+
     resolved_roots = tuple(root.resolve(strict=False) for root in roots)
+    if not any(candidate.anchor == root.anchor for root in resolved_roots):
+        raise PathEscapesDirectory(
+            candidate,
+            resolved_roots,
+            reason=f"path is not on a volume we manage (anchor {candidate.anchor!r})",
+        )
+
+    # Resolving IS the containment check: containment is a fact about the
+    # RESOLVED path, so there is no establishing it without first producing one.
+    # By this line the path is local and on one of our own volumes, so following
+    # its links reaches this machine's filesystem and nothing else.
+    resolved = candidate.resolve(strict=False)  # codeql[py/path-injection]
     if not any(resolved.is_relative_to(root) for root in resolved_roots):
-        raise PathEscapesDirectory(resolved, resolved_roots)
+        raise PathEscapesDirectory(resolved, resolved_roots, reason="path is outside every root")
     return resolved
+
+
+def _reject_unc_or_device_namespace(value: str, roots: Iterable[Path]) -> None:
+    """Refuse the two-leading-separator forms, on every platform.
+
+    ``\\\\server\\share`` (UNC), ``\\\\?\\`` (extended-length) and ``\\\\.\\``
+    (device namespace) all begin with two separators, and Windows accepts the
+    forward-slash spelling of each. Refused on POSIX too, where ``//x`` is a
+    legal absolute path: no workspace of ours is ever spelled that way, and a
+    rule that answers differently per platform is a rule that cannot be tested
+    on one runner and trusted on another.
+    """
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("//"):
+        raise PathEscapesDirectory(
+            Path(value),
+            tuple(roots),
+            reason="UNC and device-namespace paths are refused before any filesystem access",
+        )

@@ -190,6 +190,36 @@ def test_graph_serialize_refuses_a_workspace_root_outside_the_managed_roots(
     _assert_refused_without_leaking(response)
 
 
+@pytest.mark.parametrize(
+    "unc_root",
+    [r"\\attacker\share\skill", "//attacker/share/skill", r"\\?\C:\Windows"],
+)
+def test_graph_serialize_refuses_a_unc_workspace_root(
+    client: TestClient,
+    unc_root: str,
+) -> None:
+    """A UNC ``workspace_root`` is a 422, and the refusal costs no network trip.
+
+    Resolving one walks it component by component over SMB, which on Windows can
+    carry an NTLM handshake to the host named in the path — so a bound that
+    resolves first and rejects afterwards has already leaked a credential
+    exchange to the attacker before answering. The absence of that trip is
+    asserted at the unit level (``tests/core/test_path_containment.py``); what
+    this pins down is that the route reaches the gate at all.
+    """
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [],
+            "expected_hash": "not-the-current-hash",
+            "workspace_root": unc_root,
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["error_code"] == "SUBGRAPH_PATH_INVALID"
+
+
 def test_graph_serialize_still_serializes_the_skill_it_names(client: TestClient) -> None:
     """The boundary must refuse the outside, not the legitimate request.
 

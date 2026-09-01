@@ -21,7 +21,7 @@ from starlette.types import Receive, Scope, Send
 from app.core.backends import clear_backend_caches
 from app.core.config import DEFAULT_STUDIO_PORT
 from app.core.exceptions import register_exception_handlers
-from app.core.middleware import configure_cors
+from app.core.middleware import configure_cors, configure_unhandled_exception_envelope
 from app.routers import (
     audit,
     breakpoints,
@@ -171,6 +171,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     configure_api_auth(studio_app)
+    # Order is load-bearing: `add_middleware` prepends, so the LAST registration
+    # is the OUTERMOST layer. Registering the envelope before CORS puts CORS
+    # outside it, which is the only arrangement in which a 500 synthesized for an
+    # unhandled exception carries `Access-Control-Allow-Origin`.
+    configure_unhandled_exception_envelope(studio_app)
     configure_cors(studio_app)
     register_exception_handlers(studio_app)
 

@@ -232,6 +232,15 @@ export function lintErrorsFromError(error: unknown): LintError[] {
  * is about. An untranslated code falls back to the backend's own message — that is
  * the code's developer-facing text, which is the right thing to show when nobody
  * has written a reader-facing one yet.
+ *
+ * CAUTION — `codes.*` is a SHARED key space, and lookups are exact-match. The
+ * other reader is `llm-error-messages.ts`'s `translateErrorCode`, which resolves
+ * codes a remote LLM PROVIDER returned (`vendor_error_code` in the gateway hands
+ * back the vendor's own `code`/`type`/`status` verbatim). So a Studio code and a
+ * vendor code that spell the same string resolve to the same sentence, and one of
+ * the two readers is then told the wrong thing about who failed. Whoever adds a
+ * Studio code here owes it a name no vendor plausibly emits until the two key
+ * spaces are actually separated.
  */
 function translatedErrorCode(payload: Partial<ErrorResponse> | undefined): string | null {
   const code = payload?.error_code

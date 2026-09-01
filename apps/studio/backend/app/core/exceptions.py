@@ -60,7 +60,55 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "TEST_INPUT_VALIDATION_FAILED": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
     "SUBGRAPH_PATH_INVALID": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
     "SUBGRAPH_PATH_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
+    # The answer when NO other code applies: an exception no handler claimed.
+    #
+    # `not_retryable` rather than the `idempotent` the other 500s carry — those
+    # two name a specific, side-effect-free spawn failure that is safe to repeat,
+    # whereas an unclaimed exception is a defect at an unknown point in an
+    # unknown endpoint. We cannot promise the request had no partial effect, and
+    # repeating it re-runs the same defect, so the honest label is "do not retry".
+    #
+    # Alone in this map it carries a `STUDIO_` prefix, and the reason is that
+    # every other name here is already unmistakably ours. The frontend resolves a
+    # code's reader-facing sentence out of the `codes.*` table in
+    # `locales/*/errors.json`, and that table is shared with the translator for
+    # codes a remote LLM PROVIDER returned. A bare `INTERNAL_ERROR` is a string a
+    # vendor plausibly emits, and the shared table would then answer a provider
+    # outage with "the backend failed" — blaming the wrong machine. `SKILL_NOT_FOUND`
+    # and its neighbours name things only Studio has, so they cannot collide.
+    "STUDIO_INTERNAL_ERROR": ErrorDefinition(http_status=500, retry_strategy="not_retryable"),
 }
+
+# The one code a CALLER may not select. `STUDIO_INTERNAL_ERROR` is the framework's
+# answer for an exception nobody claimed, and its message is a fixed placeholder
+# precisely so that internal detail reaches the log and not the UI. A
+# caller-chosen message would defeat that: both routes below let a caller name a
+# code AND supply the text, so `raise ValueError("STUDIO_INTERNAL_ERROR: <a path
+# with a secret in it>")` would be recognized by the prefix protocol and echoed
+# verbatim. It stays registered in the map above because that is where a code's
+# HTTP projection is declared and where the exhaustive test over those
+# projections looks (the map is NOT the whole of Studio's error-code vocabulary:
+# `NOT_IMPLEMENTED` and `HTTP_ERROR` in this file, and `UNAUTHORIZED` /
+# `INVALID_TOKEN` in the auth middleware, are live codes that never enter it).
+# What must not contain it is the caller-facing VIEW of the map.
+_FRAMEWORK_RESERVED_ERROR_CODES = frozenset({"STUDIO_INTERNAL_ERROR"})
+
+# The only message STUDIO_INTERNAL_ERROR is ever allowed to carry, defined once
+# here because two places need it: the middleware that produces it, and the
+# projection below that enforces it.
+STUDIO_INTERNAL_ERROR_MESSAGE = "Internal server error"
+
+
+def _caller_selectable(error_code: str) -> ErrorDefinition | None:
+    """Look the code up as callers see it: reserved codes are simply absent.
+
+    Returning "absent" rather than a distinct refusal keeps both call sites on
+    the behaviour they already have for a code that is not registered at all —
+    there is no second failure mode to reason about.
+    """
+    if error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
+        return None
+    return STANDARD_ERROR_MAP.get(error_code)
 
 
 class StudioHTTPException(HTTPException):
@@ -73,7 +121,9 @@ class StudioHTTPException(HTTPException):
         message: str,
         details: dict[str, Any] | None = None,
     ) -> None:
-        definition = STANDARD_ERROR_MAP[error_code]
+        definition = _caller_selectable(error_code)
+        if definition is None:
+            raise KeyError(error_code)
         response = ErrorResponse(
             error_code=error_code,
             http_status=definition.http_status,
@@ -92,7 +142,38 @@ def error_response(
     retry_strategy: RetryStrategy,
     details: dict[str, Any] | None = None,
 ) -> ErrorResponse:
-    """Build a validated Studio error response."""
+    """Build a validated Studio error response.
+
+    Refuses a framework-reserved code outright rather than letting one be built
+    and normalized later. Projection-time normalization (`_json_response`) only
+    covers envelopes that leave through this module's handlers; a router is free
+    to `return error_response(...)` from an endpoint, and that response goes
+    straight out. Blocking construction is the only version of the rule that does
+    not depend on which exit the envelope happens to take.
+    """
+    if error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
+        raise ValueError(
+            f"{error_code} is the framework's own answer for an unclaimed exception "
+            "and cannot be constructed by a caller; let the exception propagate instead",
+        )
+    return _validated_error_response(
+        error_code=error_code,
+        http_status=http_status,
+        message=message,
+        retry_strategy=retry_strategy,
+        details=details,
+    )
+
+
+def _validated_error_response(
+    *,
+    error_code: str,
+    http_status: int,
+    message: str,
+    retry_strategy: RetryStrategy,
+    details: dict[str, Any] | None = None,
+) -> ErrorResponse:
+    """The unchecked builder, for the framework's own reserved-code envelope."""
     return ErrorResponse(
         error_code=error_code,
         http_status=http_status,
@@ -128,7 +209,48 @@ def raise_not_implemented(feature: str) -> NoReturn:
     raise HTTPException(status_code=501, detail=response.model_dump())
 
 
+def internal_error_response() -> ErrorResponse:
+    """The framework's answer for an exception no handler claimed.
+
+    The one producer of this envelope, and the reason `error_response` above
+    refuses the code: there is exactly one place it can come from, so there is
+    exactly one message and one status it can carry.
+    """
+    definition = STANDARD_ERROR_MAP["STUDIO_INTERNAL_ERROR"]
+    return _validated_error_response(
+        error_code="STUDIO_INTERNAL_ERROR",
+        http_status=definition.http_status,
+        message=STUDIO_INTERNAL_ERROR_MESSAGE,
+        details=None,
+        retry_strategy=definition.retry_strategy,
+    )
+
+
 def _json_response(response: ErrorResponse) -> JSONResponse:
+    """Project an envelope, replacing a reserved code's outright.
+
+    A backstop, not the boundary. The boundary is construction: the three ways to
+    NAME a code — `StudioHTTPException`, the ValueError prefix protocol, and
+    `error_response` — each refuse the reserved one, so a reserved envelope
+    cannot legitimately exist outside `internal_error_response`. What reaches
+    here with one anyway got there by hand-building an `ErrorResponse` or a raw
+    dict, i.e. by going around the module rather than through it.
+
+    Kept anyway, and the whole envelope is replaced rather than just `message`,
+    because every field decides something: `http_status=200` is read as SUCCESS
+    by axios, `details` is rendered verbatim by the frontend's diagnostic view,
+    and `retry_strategy` tells the caller whether repeating a possibly
+    half-applied write is safe. Normalizing one and not the others would be a
+    rule that looks enforced and is not.
+
+    What this cannot reach: the loopback branch of `http_exception_handler`
+    below, whose payload is a different shape carrying ENGINE error codes, and
+    any router that returns its own `JSONResponse`. Neither is a hole in the
+    reserved-code rule now that construction is blocked — both would require
+    hand-writing the payload.
+    """
+    if response.error_code in _FRAMEWORK_RESERVED_ERROR_CODES:
+        response = internal_error_response()
     return JSONResponse(status_code=response.http_status, content=response.model_dump())
 
 
@@ -173,10 +295,10 @@ def _standard_error_from_value_error(exc: ValueError) -> ErrorResponse | None:
     text = str(exc)
     raw_code, separator, raw_message = text.partition(":")
     error_code = raw_code.strip()
-    if error_code not in STANDARD_ERROR_MAP:
+    definition = _caller_selectable(error_code)
+    if definition is None:
         return None
 
-    definition = STANDARD_ERROR_MAP[error_code]
     return error_response(
         error_code=error_code,
         http_status=definition.http_status,

@@ -27,7 +27,8 @@
     "rate_limited": "已触发限流 (429)。",
     "quota_exceeded": "额度已耗尽 (402/403)。",
     "network_error": "网络错误。无法连接服务商。",
-    "http_error": "服务商返回了非预期 HTTP 状态。"
+    "http_error": "服务商返回了非预期 HTTP 状态。",
+    "STUDIO_INTERNAL_ERROR": "后端内部出错。这次请求有没有生效并不确定,重试前请先确认。"
   },
   "httpStatus": {
     "400": "请求参数无效。",

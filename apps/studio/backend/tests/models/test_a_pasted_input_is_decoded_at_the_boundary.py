@@ -1,4 +1,4 @@
-"""``RunRequest`` folds ``paste_json`` into ``input_data`` on each VALIDATED path.
+"""``RunRequest`` folds ``paste_json`` into ``input_data`` on the validated entry points below.
 
 Asserted by CONSTRUCTING the model, not by driving a route, and that is the whole
 point of this file. The route-level tests reach the run gate and stop there —
@@ -6,7 +6,9 @@ point of this file. The route-level tests reach the run gate and stop there —
 can only show that a bad paste is refused, never that a good one arrived. A fold
 that silently produced nothing passed every one of them.
 
-**Covered here** — the three ways this model gets built:
+**Covered here** — two validation entry points, the second with two input shapes
+(pydantic has further entry points, e.g. ``model_validate_json`` /
+``model_validate_strings``; the repo builds this model only through the two below):
 
 - ``RunRequest(**kwargs)``, pydantic's ``__init__``. This is the one that was
   broken: an ``mode="after"`` validator is specified to return the CURRENT

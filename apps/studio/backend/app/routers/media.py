@@ -47,6 +47,7 @@ async def put_media_credential(provider_id: str, request: CredentialUpdate) -> d
     _require_known_provider(provider_id)
     with media_generation.locked_state() as state:
         provider = state.providers[media_generation.MEDIA_PROVIDER_ID]
+        identity_before = (provider.api_key, provider.base_url)
         if request.api_key is not None:
             provider.api_key = request.api_key.strip()
         if request.base_url is not None:
@@ -54,6 +55,16 @@ async def put_media_credential(provider_id: str, request: CredentialUpdate) -> d
             if not base_url:
                 raise HTTPException(status_code=400, detail="base_url cannot be empty")
             provider.base_url = base_url
+        if (provider.api_key, provider.base_url) != identity_before:
+            # The stored probe is an observation of the account this key and URL
+            # reached. Change either and its subject is gone, so keeping it would
+            # present the previous account's status and balance as this one's —
+            # including the absurd pairing of "no key set" with a successful probe.
+            # Retiring it here, at the edit that invalidates it, is the same rule
+            # the LLM registry applies on key rotation (design §1.2 matrix point 3:
+            # "换密钥即作废旧观察"). Re-submitting the same values changes nothing
+            # and therefore retires nothing.
+            provider.last_probe = None
     return media_generation.registry_view(state)
 
 
@@ -80,16 +91,17 @@ async def probe_media_provider(provider_id: str) -> dict[str, Any]:
     with media_generation.locked_state() as state:
         current = state.providers[media_generation.MEDIA_PROVIDER_ID]
         # An observation belongs to the credential it was made with. If the key or
-        # the URL changed while the probe was on the wire, this result describes an
+        # the URL changed while this probe was on the wire, the result describes an
         # account nobody is configured to use any more, and recording it would show
         # the old credential's verdict — its success, its failure, its balance — as
-        # the new one's. The same rule the LLM registry follows when a key is
-        # rotated (design §1.2 matrix point 3: "换密钥即作废旧观察"): drop the
-        # stale observation rather than re-attribute it, and let the user re-probe.
+        # the new one's.
+        #
+        # A late probe therefore writes NOTHING; it does not clear the field
+        # either. Retiring the old observation is the job of whoever changed the
+        # credential (see `put_media_credential`), and a slow probe that clears on
+        # its way out would delete a newer probe's perfectly good result.
         if (current.api_key, current.base_url) == (provider.api_key, provider.base_url):
             current.last_probe = probe
-        else:
-            current.last_probe = None
     return media_generation.registry_view(state)
 
 

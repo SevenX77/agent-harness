@@ -299,7 +299,7 @@ def test_saving_works_while_a_reader_holds_the_file_open(
     assert model["settings"]["enabled"] is False
 
 
-def test_a_probe_is_discarded_when_the_credential_changed_under_it(
+def test_a_late_probe_neither_records_nor_clears_when_the_credential_moved(
     client: TestClient, media_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A probe result describes the credential it was made with, and nothing else.
@@ -307,22 +307,36 @@ def test_a_probe_is_discarded_when_the_credential_changed_under_it(
     Merging only `last_probe` into a freshly read state fixes the stale-snapshot
     overwrite, but on its own it would attribute the OLD key's verdict — success,
     failure, remaining balance — to whatever key is configured by the time the
-    probe lands. Dropping the observation instead is the same rule the LLM
-    registry applies on key rotation: an observation whose subject no longer
-    exists is not evidence about its replacement.
+    probe lands.
+
+    And a late probe must not "clean up" either: clearing on its way out would
+    delete a NEWER probe's perfectly good result, which is what the state here
+    stands in for. Writing nothing is the whole of the correct behaviour; retiring
+    the old observation belongs to the edit that invalidated it.
     """
     client.put("/api/media/providers/runninghub/credential", json={"api_key": "k" * 32})
+    newer = MediaProbeResult(
+        status="ok",
+        checked_at="2026-08-31T12:00:00+00:00",
+        latency_ms=42,
+        remain_coins="900",
+    )
 
     async def fake_probe(
         credential: MediaProviderCredential, **_kwargs: object
     ) -> MediaProbeResult:
         assert credential.api_key.get_secret_value() == "k" * 32
+        # While this probe is on the wire: the key is rotated AND a probe of the
+        # NEW key completes and records its result.
         with media_generation.locked_state() as rotated:
-            rotated.providers[media_generation.MEDIA_PROVIDER_ID].api_key = "j" * 32
+            provider = rotated.providers[media_generation.MEDIA_PROVIDER_ID]
+            provider.api_key = "j" * 32
+            provider.last_probe = newer
         return MediaProbeResult(
             status="ok",
             checked_at="2026-08-31T00:00:00+00:00",
             latency_ms=7,
+            remain_coins="100",
         )
 
     monkeypatch.setattr(
@@ -332,11 +346,62 @@ def test_a_probe_is_discarded_when_the_credential_changed_under_it(
     response = client.post("/api/media/providers/runninghub/probe")
 
     assert response.status_code == 200
-    provider = client.get("/api/media/registry").json()["providers"][0]
-    # The rotation stands, and the old key's verdict is not shown as the new one's.
-    assert provider["api_key_set"] is True
-    assert provider["last_probe"] is None
+    provider_view = client.get("/api/media/registry").json()["providers"][0]
+    # The newer key's observation survives untouched — not overwritten by the late
+    # probe's own result, and not wiped by it either.
+    assert provider_view["last_probe"]["remain_coins"] == "900"
+    assert provider_view["last_probe"]["latency_ms"] == 42
     assert (
         client.get("/api/media/providers/runninghub/credential/secret").json()["api_key"]
         == "j" * 32
     )
+
+
+def test_changing_the_credential_retires_the_probe_it_was_made_with(
+    client: TestClient, media_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The edit that invalidates an observation is the one that retires it.
+
+    Keeping the old `last_probe` across a key change shows the previous account's
+    status and balance as the new one's, and clearing the key while keeping it
+    produces the self-contradicting pair "no key set" + "probe succeeded".
+    """
+
+    async def fake_probe(
+        credential: MediaProviderCredential, **_kwargs: object
+    ) -> MediaProbeResult:
+        return MediaProbeResult(
+            status="ok",
+            checked_at="2026-08-31T00:00:00+00:00",
+            latency_ms=7,
+            remain_coins="500",
+        )
+
+    monkeypatch.setattr(
+        "app.services.media_generation.probe_runninghub_account", fake_probe
+    )
+    client.put("/api/media/providers/runninghub/credential", json={"api_key": "k" * 32})
+    assert client.post("/api/media/providers/runninghub/probe").status_code == 200
+    assert client.get("/api/media/registry").json()["providers"][0]["last_probe"]
+
+    # Re-submitting the SAME key changes nothing, so it retires nothing.
+    unchanged = client.put(
+        "/api/media/providers/runninghub/credential", json={"api_key": "k" * 32}
+    )
+    assert unchanged.json()["providers"][0]["last_probe"]["remain_coins"] == "500"
+
+    # A different key retires it, in the same response that made the change.
+    rotated = client.put(
+        "/api/media/providers/runninghub/credential", json={"api_key": "j" * 32}
+    )
+    assert rotated.json()["providers"][0]["last_probe"] is None
+    assert client.get("/api/media/registry").json()["providers"][0]["last_probe"] is None
+
+    # So does a different base URL.
+    assert client.post("/api/media/providers/runninghub/probe").status_code == 200
+    assert client.get("/api/media/registry").json()["providers"][0]["last_probe"]
+    moved = client.put(
+        "/api/media/providers/runninghub/credential",
+        json={"base_url": "https://elsewhere.example"},
+    )
+    assert moved.json()["providers"][0]["last_probe"] is None

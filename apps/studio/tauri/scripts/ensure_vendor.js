@@ -293,6 +293,20 @@ function summariseDrift(drift, limit = 8) {
   return shown.join('\n')
 }
 
+/**
+ * Whether the caller explicitly asked to run on a stale snapshot.
+ *
+ * Only an affirmative value counts, so anything unclear fails CLOSED — the
+ * direction a dangerous flag has to fail. Bare presence would make
+ * `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT=0` mean "allow", which is the opposite of
+ * what anyone typing it intends.
+ */
+function staleSnapshotAllowed(env = process.env) {
+  const value = env[ALLOW_STALE_SNAPSHOT_ENV]
+  if (typeof value !== 'string') return false
+  return ['1', 'true', 'yes'].includes(value.trim().toLowerCase())
+}
+
 function ensureVendor(options = {}) {
   const { env = process.env, warn = console.warn } = options
   const drift = snapshotDrift(options)
@@ -301,7 +315,7 @@ function ensureVendor(options = {}) {
     return { rebuilt: false, staleAllowed: false }
   }
 
-  if (env[ALLOW_STALE_SNAPSHOT_ENV]) {
+  if (staleSnapshotAllowed(env)) {
     warn(
       [
         `[vendor] ${ALLOW_STALE_SNAPSHOT_ENV} is set: starting on a STALE vendor snapshot.`,
@@ -354,6 +368,7 @@ module.exports = {
   readVendorStamp,
   rebuildVendor,
   sitePackages,
+  staleSnapshotAllowed,
   vendorStampDrift,
   withLocalVenvOnPath,
 }

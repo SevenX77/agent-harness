@@ -20,6 +20,7 @@ const {
   readVendorStamp,
   rebuildVendor,
   sitePackages,
+  staleSnapshotAllowed,
   vendorStampDrift,
   withLocalVenvOnPath,
 } = require('./ensure_vendor')
@@ -291,6 +292,18 @@ test(`${ALLOW_STALE_SNAPSHOT_ENV} boots a stale snapshot without rebuilding, lou
   const said = warnings.join('\n')
   assert.match(said, /table\.json/, 'the warning must name what is stale')
   assert.match(said, /build_vendor\.py/, 'the warning must name the command that fixes it')
+})
+
+// Bare presence would read `...=0` as "allow", the opposite of what anyone
+// typing that intends. A dangerous flag has to fail closed.
+test('the escape hatch only opens for an affirmative value', () => {
+  for (const value of ['1', 'true', 'TRUE', 'yes', ' 1 ']) {
+    assert.equal(staleSnapshotAllowed({ [ALLOW_STALE_SNAPSHOT_ENV]: value }), true, value)
+  }
+  for (const value of ['0', 'false', 'no', '', 'please']) {
+    assert.equal(staleSnapshotAllowed({ [ALLOW_STALE_SNAPSHOT_ENV]: value }), false, value)
+  }
+  assert.equal(staleSnapshotAllowed({}), false)
 })
 
 test('an unset escape hatch does not let a stale snapshot through', () => {

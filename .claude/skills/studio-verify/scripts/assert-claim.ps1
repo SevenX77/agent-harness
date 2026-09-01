@@ -5,8 +5,10 @@
 # lease-guard.mjs, which guards the scripts that DRIVE the window: prove the
 # claim or do not touch it.
 #
-# CONTRACT - this file is CALLED, never dot-sourced, and its exit code is the
-# whole answer:
+# CONTRACT - each launcher runs this file as a DEDICATED CHILD PROCESS
+# (`powershell -NoProfile -ExecutionPolicy Bypass -File assert-claim.ps1`) and
+# checks $LASTEXITCODE. Never dot-sourced, and never run in the launcher's own
+# process. Its exit code is the whole answer:
 #     0   this session holds cdp-9222; the caller may restart the app
 #     4   the board answered no (not claimed / expired / held by someone else)
 #     5   the guard could not ask the board at all (no Git Bash, no board script)
@@ -16,7 +18,7 @@
 # cdp-9222" at a session that did hold it sent people looking in the wrong
 # place. A refusal ALSO ends the process; see below.
 #
-# WHY A REFUSAL ENDS THE PROCESS INSTEAD OF ONLY RETURNING 4
+# WHY A CHILD PROCESS, AND WHY IT STILL ENDS THAT PROCESS HARD
 #   Until 2026-08-31 the launchers DOT-SOURCED this file and it refused with
 #   `exit 4`. Measured on Windows PowerShell 5.1.26100.9168: `exit` inside a
 #   dot-sourced file ends that file only - the caller runs on and the process
@@ -25,12 +27,25 @@
 #   typo at one call site. The launchers therefore printed the refusal and
 #   restarted the shared app anyway: the guard was decoration, and SKILL.md
 #   described an enforcement that did not exist.
-#   [Environment]::Exit(N) is the one form no calling convention can swallow -
-#   not dot-sourcing, not `&`, not try/catch, not trap - and it is the direct
-#   analogue of what already works in lease-guard.mjs: process.exit(4) ends the
-#   same process that would otherwise do the damage. The launchers' own
-#   $LASTEXITCODE check is kept as the readable contract and as the second net
-#   if this line is ever softened back into `exit`.
+#   The first repair over-corrected: it kept the guard in the launcher's own
+#   process and refused with [Environment]::Exit, on the theory that a verdict
+#   no calling convention can swallow is strictly safer. It is not. Whoever
+#   calls the launcher from an EXISTING PowerShell session (`& launch-studio-
+#   cdp.ps1` from a prompt or ISE) loses that whole session, and .NET documents
+#   that Environment.Exit skips active finally blocks, so the caller cannot even
+#   clean up. Measured: with the guard in-process the outer session dies; as a
+#   child process it prints its refusal, the launcher aborts with the code, and
+#   the session survives.
+#   So the boundary moved instead of the mechanism. [Environment]::Exit(N) here
+#   now ends ONLY this guard's own child process - which is exactly the
+#   invariant lease-guard.mjs has always had: process.exit(4) ends the process
+#   that was about to do the driving, and nothing above it. The launcher reads
+#   the exit code and stops itself. Nothing a refusal touches outlives the
+#   guard's own process.
+#   The worry that motivated the over-correction - a future launcher forgetting
+#   to check the code - is answered by a test rather than by blast radius:
+#   tests/guard-selftest.sh EXECUTES both real launchers, so a missing check
+#   shows up as a FAIL.
 #
 # ASCII ONLY, DELIBERATELY. .gitattributes stores .ps1 without a BOM (repo
 # policy: UTF-8 without signature), and Windows PowerShell 5.1 decodes a
@@ -54,12 +69,13 @@ $GuardLog = Join-Path $env:TEMP 'studio-verify-guard.log'
 function Deny {
   param([int]$Code, [string]$Reason, [string[]]$Detail = @())
   $lines = @("refusing to restart the app: $Reason") + $Detail
-  # Only on the refusal path, and only because this process is about to end:
-  # the board's own output carries non-ASCII (its check mark, a Chinese --note)
-  # and the inherited console codepage would replace it with question marks.
-  # Never done on the allow path - SetConsoleOutputCP is shared with children,
-  # and the app the launcher then starts must keep the console it expects.
-  try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
+  # Printed with whatever encoding the console already has. Setting
+  # [Console]::OutputEncoding would render the board's non-ASCII (its check
+  # mark, a Chinese --note) faithfully, but SetConsoleOutputCP applies to the
+  # whole CONSOLE - shared with the shell that called the launcher - and
+  # [Environment]::Exit below skips finally blocks, so it could not be put back.
+  # A guard does not get to leave the caller's terminal reconfigured; the log
+  # file below is the faithful UTF-8 copy.
   foreach ($line in $lines) { Write-Host $line }
   try {
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -142,11 +158,19 @@ if (-not (Test-Path -LiteralPath $BoardScript -PathType Leaf)) {
 # rev-parse`, and with a cwd outside the repo (a detached launcher inherits
 # whatever cwd it was spawned in) it dies with "not a git repository" - a
 # refusal for a reason that has nothing to do with the claim.
+#
+# The argument list is ONE string with the script path quoted BY HAND. Windows
+# PowerShell 5.1 joins an -ArgumentList array with spaces and adds no quoting of
+# its own, so a repo living under a path with a space (C:\Users\Jane Doe\...)
+# reached bash as two fragments: measured, bash reported
+# "...\scratchpad\probe\space: No such file or directory". Forward slashes
+# because a quoted Windows path ending in a backslash would escape the closing
+# quote under MSVC-style command-line parsing; MSYS bash takes D:/... happily.
+$boardArgument = '"' + $BoardScript.Replace('\', '/') + '"' + " holds $Resource"
 $stdout = [System.IO.Path]::GetTempFileName()
 $stderr = [System.IO.Path]::GetTempFileName()
 try {
-  $probe = Start-Process -FilePath $bash `
-    -ArgumentList @($BoardScript, 'holds', $Resource) `
+  $probe = Start-Process -FilePath $bash -ArgumentList $boardArgument `
     -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr
   $boardExit = $probe.ExitCode
@@ -161,6 +185,20 @@ try {
   }
 } finally {
   Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+}
+
+# 126/127 are the shell's own "could not execute / not found" codes, which
+# wt-board.sh itself never returns (it answers 0 or 1). Seeing one means bash
+# could not run the board script at all - an environment failure wearing the
+# board's exit code. Reporting that as 4 is what made a broken argument list
+# look like "you did not claim it", so the two are separated here.
+if ($boardExit -eq 126 -or $boardExit -eq 127) {
+  Deny 5 "cannot ask the runtime resource board - bash could not execute it (exit $boardExit)." (
+    @($boardSays | ForEach-Object { "  $_" }) + @(
+      '  the board script exists but bash could not run it; this is an',
+      '  environment problem, not a claim problem.'
+    )
+  )
 }
 
 # $null (the board never reported a code) counts as a refusal: an unanswerable

@@ -17,6 +17,13 @@
 # STUB studio-dev.ps1 that only prints a marker), points WT_BOARD_DIR and TEMP
 # at that temp dir, and runs the launchers there. Even a total fail-open starts
 # nothing: the only thing behind the guard is the stub.
+#
+# The replica deliberately lives under a directory whose name CONTAINS A SPACE.
+# Windows PowerShell 5.1 joins an -ArgumentList array with spaces and quotes
+# nothing, so the guard used to hand bash a truncated board path on any machine
+# whose repo sat under "C:\Users\Jane Doe\..." — and bash's failure was then
+# reported as "you did not claim it". A test on a space-free path cannot see
+# that, so this one refuses to run on one.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,9 +37,10 @@ fi
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf "$sandbox"' EXIT
-replica="$sandbox/repo"
+root="$sandbox/space in path"          # the space is the point; see the header
+replica="$root/repo"
 replica_scripts="$replica/.claude/skills/studio-verify/scripts"
-mkdir -p "$replica_scripts" "$replica/scripts" "$sandbox/temp" "$sandbox/board"
+mkdir -p "$replica_scripts" "$replica/scripts" "$root/temp" "$root/board"
 
 cp "$src_scripts/assert-claim.ps1" "$src_scripts/launch-studio-cdp.ps1" \
    "$src_scripts/launch-studio-clean.ps1" "$replica_scripts/"
@@ -45,9 +53,9 @@ git -C "$replica" init -q
 git -C "$replica" -c user.email=selftest@local -c user.name=selftest \
     commit -q --allow-empty -m "replica"
 
-export WT_BOARD_DIR="$sandbox/board"
+export WT_BOARD_DIR="$root/board"
 export TEMP TMP
-TEMP="$(cygpath -w "$sandbox/temp")"
+TEMP="$(cygpath -w "$root/temp")"
 TMP="$TEMP"
 
 win() { cygpath -w "$1"; }
@@ -56,12 +64,13 @@ board() { ( cd "$replica" && bash scripts/wt-board.sh "$@" ); }
 failures=0
 pass() { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; failures=$((failures + 1)); }
+show() { printf '%s\n' "$1" | sed 's/^/       | /'; }
 
 # launch <cdp|clean> <expected exit> <launched|refused> <description> [env...]
 launch() {
   local which="$1" want_rc="$2" want_state="$3" desc="$4"; shift 4
-  local log="$sandbox/temp/studio-dev-$which.log"
-  rm -f "$sandbox/temp/studio-dev-cdp.log" "$sandbox/temp/studio-dev-clean.log"
+  local log="$root/temp/studio-dev-$which.log"
+  rm -f "$root/temp/studio-dev-cdp.log" "$root/temp/studio-dev-clean.log"
   local out rc state
   out="$(env "$@" powershell -NoProfile -ExecutionPolicy Bypass \
          -File "$(win "$replica_scripts/launch-studio-$which.ps1")" 2>&1)"
@@ -71,11 +80,16 @@ launch() {
     pass "$desc  (exit $rc, app $state)"
   else
     fail "$desc  (wanted exit $want_rc + app $want_state, got exit $rc + app $state)"
-    printf '%s\n' "$out" | sed 's/^/       | /'
+    show "$out"
   fi
 }
 
-echo "studio-verify guard self-test  (replica: $replica)"
+echo "studio-verify guard self-test"
+echo "  replica: $replica"
+case "$replica" in
+  *" "*) pass "the replica path contains a space (P1-2 axis is actually covered)" ;;
+  *) fail "the replica path contains a space (P1-2 axis is NOT covered)" ;;
+esac
 
 echo "[0] the .ps1 files stay pure ASCII"
 # Windows PowerShell 5.1 decodes a BOM-less .ps1 with the system ANSI codepage
@@ -105,38 +119,82 @@ launch cdp 4 refused "cdp launcher refuses agent-beta" WT_BOARD_AGENT=agent-beta
 launch clean 4 refused "clean launcher refuses agent-beta" WT_BOARD_AGENT=agent-beta
 launch cdp 4 refused "cdp launcher refuses an anonymous caller" WT_BOARD_AGENT=
 
-echo "[4] the guard cannot ASK the board -> refuse with the OTHER code (5)"
-# The claim is still held here, so anything that refuses can only be refusing
-# because it could not ask — which must not be reported as "you did not claim".
-cat > "$sandbox/no-bash.ps1" <<EOF
+echo "[4] an empty PATH must not change any answer"
+# The original second-order defect: a detached `Start-Process powershell` need
+# not carry Git Bash on PATH, and a PATH-only lookup made the guard refuse with
+# "you do not hold cdp-9222" at a session that DID hold it. So the guarantee to
+# assert is the positive one — with PATH stripped to nothing, the guard still
+# resolves bash by absolute path, still reaches the board, and still says yes.
+# The launcher must not need PATH either, for its own interpreter.
+#
+# Note on what canNOT be tested here: "Git Bash is genuinely absent" is
+# unreachable by environment scrubbing. Measured 2026-08-31 — a child process
+# gets ProgramFiles back as C:\Program Files even when the parent sets it to
+# empty (PATH and LOCALAPPDATA do stay empty), so the absolute probe keeps
+# finding the real install. The exit-5 path is covered by the missing-board-
+# script case below instead, which reaches the same Deny.
+cat > "$root/empty-path.ps1" <<EOF
 \$env:PATH = ''
-\$env:ProgramFiles = ''
-\${env:ProgramFiles(x86)} = ''
-\$env:LOCALAPPDATA = ''
 & '$(win "$replica_scripts/launch-studio-cdp.ps1")'
 exit \$LASTEXITCODE
 EOF
+rm -f "$root/temp/studio-dev-cdp.log"
 out="$(WT_BOARD_AGENT=agent-alpha powershell -NoProfile -ExecutionPolicy Bypass \
-       -File "$(win "$sandbox/no-bash.ps1")" 2>&1)"; rc=$?
-if [ "$rc" = 5 ] && [ ! -f "$sandbox/temp/studio-dev-cdp.log" ]; then
-  pass "no Git Bash reachable -> exit 5, app not started"
+       -File "$(win "$root/empty-path.ps1")" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -f "$root/temp/studio-dev-cdp.log" ]; then
+  pass "empty PATH: bash still resolved absolutely, claim honoured, app started"
 else
-  fail "no Git Bash reachable -> exit 5, app not started (got exit $rc)"
-  printf '%s\n' "$out" | sed 's/^/       | /'
+  fail "empty PATH: bash still resolved absolutely, claim honoured (got exit $rc)"
+  show "$out"
 fi
 
+echo "[4b] the guard cannot ASK the board -> refuse with the OTHER code (5)"
+# The claim is still held here, so a refusal can only mean "could not ask" —
+# which must not be reported as "you did not claim it".
 mv "$replica/scripts/wt-board.sh" "$replica/scripts/wt-board.sh.away"
-launch cdp 5 refused "board script missing -> exit 5" WT_BOARD_AGENT=agent-alpha
+launch cdp 5 refused "board script missing -> exit 5, not 4" WT_BOARD_AGENT=agent-alpha
+launch clean 5 refused "board script missing, closing launcher -> exit 5" WT_BOARD_AGENT=agent-alpha
 mv "$replica/scripts/wt-board.sh.away" "$replica/scripts/wt-board.sh"
 
 echo "[5] the guard file itself is unreachable -> still no launch"
+# `powershell -File <missing>` exits 127, and the launcher forwards that.
 mv "$replica_scripts/assert-claim.ps1" "$replica_scripts/assert-claim.ps1.away"
-launch cdp 1 refused "missing guard aborts the launcher" WT_BOARD_AGENT=agent-alpha
+launch cdp 127 refused "missing guard aborts the launcher" WT_BOARD_AGENT=agent-alpha
 mv "$replica_scripts/assert-claim.ps1.away" "$replica_scripts/assert-claim.ps1"
 
-echo "[6] a refusal leaves a diagnosable trace on disk"
+echo "[6] a refusal must not take the calling shell down with it"
+# Calling a launcher from an EXISTING PowerShell session (`& launch-studio-
+# cdp.ps1` at a prompt, or ISE) must cost you the launch, not the session. The
+# first repair of this guard refused with [Environment]::Exit inside the
+# launcher's own process, which killed that session outright and skipped its
+# finally blocks (.NET documents Environment.Exit as not running them). The
+# guard refuses inside its own child process now, so the session lives to read
+# the exit code. The claim is held by agent-alpha, so agent-beta gets refused.
+cat > "$root/outer-session.ps1" <<EOF
+\$ErrorActionPreference = 'Continue'
+try {
+  & '$(win "$replica_scripts/launch-studio-cdp.ps1")'
+} finally {
+  Write-Host "OUTER-FINALLY-RAN"
+}
+Write-Host "OUTER-SESSION-ALIVE exit=\$LASTEXITCODE"
+EOF
+rm -f "$root/temp/studio-dev-cdp.log"
+out="$(WT_BOARD_AGENT=agent-beta powershell -NoProfile -ExecutionPolicy Bypass \
+       -File "$(win "$root/outer-session.ps1")" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] &&
+   printf '%s' "$out" | grep -q 'OUTER-SESSION-ALIVE exit=4' &&
+   printf '%s' "$out" | grep -q 'OUTER-FINALLY-RAN' &&
+   [ ! -f "$root/temp/studio-dev-cdp.log" ]; then
+  pass "the calling session survives the refusal, its finally ran, app not started"
+else
+  fail "the calling session survives the refusal (outer exit $rc)"
+  show "$out"
+fi
+
+echo "[7] a refusal leaves a diagnosable trace on disk"
 # The launchers run detached and hidden, so the console is nobody's screen.
-if [ -s "$sandbox/temp/studio-verify-guard.log" ]; then
+if [ -s "$root/temp/studio-verify-guard.log" ]; then
   pass "studio-verify-guard.log records the refusals"
 else
   fail "studio-verify-guard.log records the refusals"

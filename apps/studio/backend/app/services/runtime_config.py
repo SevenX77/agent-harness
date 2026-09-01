@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from app.core.authored_text import read_authored_text
+from app.core.authored_text import open_authored_text, read_authored_text
 
 _SCHEMA_VERSION = "studio.runtime_config.v2"
 _ARCHIVE_DIR_NAMES = {"history", ".history"}
@@ -655,7 +655,7 @@ def _jsonl_item_fields(path: Path) -> list[dict[str, Any]]:
 
 def _tabular_item_fields(path: Path, *, delimiter: str) -> list[dict[str, Any]]:
     try:
-        with path.open(encoding="utf-8-sig", newline="") as fh:
+        with open_authored_text(path, newline="") as fh:
             reader = csv.reader(fh, delimiter=delimiter)
             header = next(reader, [])
     except (OSError, UnicodeDecodeError, csv.Error):

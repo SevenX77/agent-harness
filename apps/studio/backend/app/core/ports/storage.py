@@ -17,11 +17,13 @@ class StorageBackend(Protocol):
 
         Two read methods rather than one because the two answer different
         questions, and the caller is the only one that knows which it is asking.
-        `read_text` is for files Studio itself writes and owns; this one is for
-        anything inside a user's skill workspace, where a leading byte-order mark
-        is encoding an editor added and not a character the author typed. The rule
-        it applies is `app.core.authored_text`'s — see that module for what the
-        mark costs when a reader keeps it.
+        What separates them is AUTHORSHIP, not location: `read_text` is for files
+        Studio itself produced (run records included, though they sit under the
+        workspace too), and this one is for files a person may have written or
+        edited elsewhere, where a leading byte-order mark is encoding an editor
+        added rather than a character the author typed. The rule it applies is
+        `app.core.authored_text`'s — see that module for what the mark costs when
+        a reader keeps it, and that module's own docstring for the scope in full.
         """
         ...
 

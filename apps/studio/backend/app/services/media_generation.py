@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.core import config
+from app.core.adapters.atomic_file import write_text_atomically
 from app.core.adapters.media_gateway import (
     MediaModelSettings,
     MediaProbeResult,
@@ -60,15 +64,58 @@ def load_state(path: Path | None = None) -> MediaFileState:
     return state
 
 
-def save_state(state: MediaFileState, path: Path | None = None) -> None:
+# One writer at a time for this file, mirroring `llm_credentials._WRITE_LOCK`.
+# It guards the whole read-modify-write, because that is the unit that has to be
+# atomic: every write here rewrites the WHOLE document, so two writers that each
+# read before the other wrote will each save a document in which the other's
+# change never happened.
+_WRITE_LOCK = threading.Lock()
+
+
+def _save_state_unlocked(state: MediaFileState, path: Path | None = None) -> None:
+    """Write the state without taking the lock; the caller must hold it."""
     state_path = path or media_generation_path()
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = state_path.with_suffix(".tmp")
-    temp_path.write_text(
+    # The directory holds a provider API key, so it is owner-only — the same
+    # treatment `llm_credentials` gives the credentials directory. On Windows this
+    # is close to a no-op; it is still done unconditionally so the two stores do
+    # not drift into having different rules for the same kind of secret.
+    state_path.parent.chmod(0o700)
+    write_text_atomically(
+        state_path,
         json.dumps(state.model_dump(mode="json"), ensure_ascii=False, indent=2),
-        encoding="utf-8",
     )
-    temp_path.replace(state_path)
+
+
+def save_state(state: MediaFileState, path: Path | None = None) -> None:
+    """Publish a state the caller assembled without reading the current file."""
+    with _WRITE_LOCK:
+        _save_state_unlocked(state, path)
+
+
+@contextmanager
+def locked_state(path: Path | None = None) -> Iterator[MediaFileState]:
+    """Read, let the caller change, and write back — as ONE critical section.
+
+    Every mutation of this file is a read-modify-write, and the three steps are
+    only safe together: the document is rewritten whole, so a reader that loads
+    before another writer's save will erase that save when it writes its own copy
+    back. Handing callers the state already inside the lock is what makes the
+    unsafe version unavailable rather than merely discouraged.
+
+    An exception from the body propagates and NOTHING is written, which is what a
+    rejected edit needs (validation refuses the change after the state object has
+    already been mutated in memory, and that in-memory edit must not reach disk).
+
+    The lock is not reentrant and is held across the whole body, so the body must
+    not perform slow or awaiting work — see `probe_media_provider` for the shape
+    that belongs here: do the outside call first, then take the lock only to merge
+    its result.
+    """
+    with _WRITE_LOCK:
+        state = load_state(path)
+        yield state
+        _save_state_unlocked(state, path)
 
 
 def gateway_credential(provider: MediaProviderFileState) -> MediaProviderCredential:

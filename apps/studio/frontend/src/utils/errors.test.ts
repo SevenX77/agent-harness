@@ -70,6 +70,23 @@ describe('errorMessage for a typed backend failure', () => {
       message: 'remote rejected: non-fast-forward',
     }))).toBe('remote rejected: non-fast-forward')
   })
+
+  // Studio codes and LLM-provider codes live in SEPARATE key spaces
+  // (`studioCodes.*` here, `providerCodes.*` in `lib/llm-error-messages.ts`)
+  // because only one of the two is ours to name: the gateway's
+  // `vendor_error_code` hands back the remote provider's own `code`/`type`/
+  // `status` string verbatim (`probing/judge.py:338`), so that space is
+  // open-ended and outside our control. While both readers shared one
+  // `codes.*` table, a Studio `error_code` that happened to spell a provider
+  // code got answered with the PROVIDER's sentence — the reader was told the
+  // wrong machine had failed.
+  it('never answers a Studio error_code with a provider sentence', () => {
+    expect(errorMessage(backendError({
+      error_code: 'invalid_api_key',
+      http_status: 500,
+      message: 'studio could not read the stored credential file',
+    }))).toBe('studio could not read the stored credential file')
+  })
 })
 
 describe('errorDiagnosticDetails', () => {

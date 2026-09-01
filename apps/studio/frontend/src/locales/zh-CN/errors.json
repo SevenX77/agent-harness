@@ -1,6 +1,9 @@
 {
-  "codes": {
+  "studioCodes": {
     "APP_SETTINGS_INCOMPLETE": "设置没填完:{{field}} 还没配。到 Settings 里填上。",
+    "STUDIO_INTERNAL_ERROR": "后端内部出错。这次请求有没有生效并不确定,重试前请先确认。"
+  },
+  "providerCodes": {
     "missing_api_key": "API key 为空。请先填写 key 再测试。",
     "timeout": "请求在 8 秒后超时。",
     "invalid_api_key": "API key 无效或被服务商拒绝。",
@@ -27,8 +30,7 @@
     "rate_limited": "已触发限流 (429)。",
     "quota_exceeded": "额度已耗尽 (402/403)。",
     "network_error": "网络错误。无法连接服务商。",
-    "http_error": "服务商返回了非预期 HTTP 状态。",
-    "STUDIO_INTERNAL_ERROR": "后端内部出错。这次请求有没有生效并不确定,重试前请先确认。"
+    "http_error": "服务商返回了非预期 HTTP 状态。"
   },
   "httpStatus": {
     "400": "请求参数无效。",

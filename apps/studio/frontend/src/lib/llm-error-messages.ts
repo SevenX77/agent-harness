@@ -14,13 +14,22 @@ function hasErrorText(key: string): boolean {
 }
 
 /**
- * Return a human-readable explanation for a vendor error code. Falls back to the
- * raw code string if the code is unknown (so the operator can still copy it
- * into a bug report).
+ * Return a human-readable explanation for an LLM-provider error code. Falls back
+ * to the raw code string if the code is unknown (so the operator can still copy
+ * it into a bug report) — and unknown is the NORMAL case here, not a gap:
+ * `vendor_error_code` in the gateway hands back the remote vendor's own
+ * `code`/`type`/`status` string verbatim, so this key space is open-ended and
+ * outside our control.
+ *
+ * That is why it reads `providerCodes.*` and not the `studioCodes.*` space
+ * `utils/errors.ts` resolves for the Studio backend's own `error_code`. Lookups
+ * are exact-match: one shared table meant a vendor code spelling a Studio code
+ * was answered with the Studio sentence, blaming the backend for a provider
+ * failure.
  */
 export function translateErrorCode(code: string | null | undefined): string {
   if (!code) return ""
-  const key = `codes.${code}`
+  const key = `providerCodes.${code}`
   return hasErrorText(key) ? errorText(key) : errorText("fallbacks.errorCode", { code })
 }
 

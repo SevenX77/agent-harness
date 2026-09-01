@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 import tomllib
 from collections.abc import Iterable
 from importlib.metadata import packages_distributions
@@ -152,10 +153,9 @@ def test_the_locked_closure_covers_every_gateway_lazy_import() -> None:
 
     The assertion is therefore about the CLOSURE, not about a manifest field: for
     every module the gateway can lazily import, the distribution providing it must
-    be reachable from `studio-backend` in `uv.lock`. Reading the lock rather than
-    `pyproject.toml` is what makes this causal — a declaration added without
-    re-running `uv lock` changes nothing about what gets exported, and would sail
-    through a manifest-only check while the packaged app stayed broken.
+    be reachable from `studio-backend` in `uv.lock` — the same graph
+    `uv export --package studio-backend` walks, rather than a declaration that has
+    not been resolved yet.
 
     Both ends are resolved rather than guessed: the module names come from the AST
     of the gateway's own `importlib.import_module("...")` calls, and module →
@@ -167,8 +167,22 @@ def test_the_locked_closure_covers_every_gateway_lazy_import() -> None:
     which is wider than "the protocols Studio exposes today": a provider path
     present in the shipped SDK that raises ImportError when a user picks it is a
     defect either way, and this version of the rule needs no hand-kept list of
-    which routes count. A dynamic import whose argument is not a literal cannot be
-    resolved statically and is out of reach.
+    which routes count.
+
+    What it does NOT catch, so nobody reads more into a green run than it earns:
+
+    * a stale COMMITTED lock. CI runs `uv sync` before pytest and `build_vendor`'s
+      export is not `--locked`, so both silently refresh an out-of-date lock in the
+      workspace. This reads whatever lock is on disk by then.
+    * a dependency edge whose environment marker excludes the target platform or
+      Python version — markers are not evaluated here.
+    * a top-level name shared by several distributions (namespace packages such as
+      `google.*`): finding ANY of its providers in the closure is accepted, which
+      does not prove the specific submodule ships. No lazy import in the gateway is
+      a namespace package today.
+    * a lock with two nodes of the same distribution name; the walk keys on name,
+      so it would follow one of them.
+    * a dynamic import whose argument is not a literal string.
     """
     gateway_root = BACKEND_ROOT.parents[2] / "packages" / "graph-agent-gateway"
     lazy_modules = _lazily_imported_modules(gateway_root / "src")
@@ -292,11 +306,17 @@ def _declared_distributions(manifest: Path) -> set[str]:
 
 
 def _lazily_imported_modules(source_root: Path) -> set[str]:
-    """Module names passed as literals to `importlib.import_module` in a package.
+    """Third-party module names passed as literals to `importlib.import_module`.
 
     A lazy import is how a package says "this path only works if something else
     is installed", so these are exactly the names whose absence turns a feature
     into an ImportError at run time.
+
+    Only `importlib.import_module(...)` counts — matching a bare `import_module`
+    attribute on anything at all would pick up an unrelated local helper that
+    happens to share the name. Standard-library targets and relative imports are
+    dropped because no distribution ships them, so demanding one would be a false
+    alarm rather than a finding.
     """
     modules: set[str] = set()
     for path in source_root.rglob("*.py"):
@@ -305,12 +325,19 @@ def _lazily_imported_modules(source_root: Path) -> set[str]:
             if not isinstance(node, ast.Call):
                 continue
             target = node.func
-            name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", None)
-            if name != "import_module" or not node.args:
+            if not isinstance(target, ast.Attribute) or target.attr != "import_module":
+                continue
+            if not isinstance(target.value, ast.Name) or target.value.id != "importlib":
+                continue
+            if not node.args:
                 continue
             first = node.args[0]
-            if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                modules.add(first.value)
+            if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+                continue
+            module = first.value
+            if module.startswith(".") or module.split(".", 1)[0] in sys.stdlib_module_names:
+                continue
+            modules.add(module)
     return modules
 
 

@@ -254,9 +254,10 @@ function sourceAdditions(packageName, sourceRoot, files, runGit = spawnSync) {
   )
   if (result.error || result.status !== 0) {
     const said = lastLines(result.stderr, 1)
+    const detail = said ? ` — ${said}` : ''
     return [
       `${packageName}: cannot ask git which files the sources hold, so the snapshot cannot be `
-      + `checked for additions: ${describeSpawnFailure(result, 'git')}${said ? ` — ${said}` : ''}`,
+      + `checked for additions: ${describeSpawnFailure(result, 'git')}${detail}`,
     ]
   }
   return (result.stdout ?? '')

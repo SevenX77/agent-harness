@@ -3,8 +3,18 @@
 The four asset layers (roles / operating manual / surface contexts / knowledge)
 plus the skill pool and the agent→skill map live in exactly one directory that
 ships with the backend. Both loading paths (SDK panel assembly here, ah-side
-materialization in the Tauri layer) read this same tree; nothing else may carry
-a second copy of any of these truths.
+materialization in the Tauri layer) read this same tree; nothing else inside
+this repository may carry a second copy of any of these truths.
+
+This tree is NOT the assets' owner. The single owner is the
+``graph-skill-runtime`` package's MoirAI bundle (决议
+``docs/design/gskill-restructure-decision-2026-08-31.md`` §4.6-2); this
+directory is the reader copy Studio still executes against until the engine
+cutover. ``agent_asset_owners`` verifies THIS tree against its pin and keeps a
+transcribed provenance record of the upstream bundle, which it cannot verify
+because it holds no copy of it. That asymmetry is why the fingerprint below is
+deliberately described as "the tree this backend reads" rather than "the assets'
+fingerprint".
 
 Fail-loud contract: a missing file is reported together with every other
 missing file in one diagnostic, so a broken package surfaces as a single
@@ -13,7 +23,6 @@ complete list instead of a peel-one-fix-one loop.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from functools import cache, lru_cache
 from pathlib import Path
@@ -153,22 +162,35 @@ def load_skill_map() -> dict[str, list[str]]:
 
 
 def fingerprint_of(root: Path) -> str:
-    """sha256 (8 hex) over every file under ``root`` — relpath + content — so a
-    change in ANY layer (roles/manual/contexts/knowledge/skills/map) shifts it."""
+    """8-hex short form of the tree digest owned by ``agent_asset_owners``, so a
+    change in ANY layer (roles/manual/contexts/knowledge/skills/map) shifts it.
 
-    digest = hashlib.sha256()
-    for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()[:8]
+    One digest algorithm, computed in one place (``agent_asset_owners``): the
+    long form is what the gate compares against the pin, and this is its first
+    eight characters. A second algorithm here would let the value echoed to the
+    user and the value the gate checks disagree about the very same tree.
+    """
+
+    from app.services.agent_asset_owners import tree_digest
+
+    digest, _file_count = tree_digest(root)
+    return digest[:8]
 
 
 @lru_cache(maxsize=1)
 def assets_fingerprint() -> str:
-    """Fingerprint of the shipped asset tree, echoed as ``assets@<8hex>`` in
-    ``context_resolved`` so users can verify which asset version a session ate."""
+    """Fingerprint of the tree THIS backend reads, echoed inside the
+    ``context_resolved`` provenance label.
+
+    It is deliberately not "the MoirAI assets' fingerprint": this tree is the
+    retiring reader copy, and the assets' single owner is the
+    ``graph-skill-runtime`` bundle. ``agent_asset_owners.provenance_label()``
+    is what states both, and it is what the event echoes.
+
+    Memoized because the echo is built once per turn but the bytes it describes
+    only change when the process is restarted against a different tree — one
+    hash of ~35 files per process, paid on the first turn.
+    """
 
     _ensure_complete()
     return fingerprint_of(_AGENTS_DIR)

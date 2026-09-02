@@ -87,7 +87,7 @@ from app.models.copilot import (
     CopilotImageAttachment,
     CopilotMention,
 )
-from app.services import agent_assets
+from app.services import agent_asset_owners, agent_assets
 from app.services.copilot_context import (
     mention_echo_lines,
     render_mentions_xml,
@@ -1038,7 +1038,7 @@ def _context_resolved_event(
             f"[image] {attachment.name or 'unnamed'} ({attachment.media_type})"
             for attachment in attachments
         )
-    parts.append(f"assets@{agent_assets.assets_fingerprint()}")
+    parts.append(agent_asset_owners.provenance_label())
     summary = "Injected this turn: " + " · ".join(parts)
     detail = "\n".join(detail_lines) if detail_lines else "(no request context)"
     return CopilotEventContextResolved(summary=summary, detail=detail)

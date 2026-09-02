@@ -15,7 +15,11 @@ updated: 2026-08-27
 > [tasks](../../.kiro/specs/studio-moirai-agent-system/tasks.md)、
 > [golden authoring decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-07-golden-case-authoring.md)、
 > [terminal output decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-07-run-terminal-output-contract-and-cli-read-tier.md)与
-> [runtime dispatch decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-15-per-runtime-dispatch-operating-rules.md)为准；活资产在 `apps/studio/backend/app/agents/`。独立 runtime 的未来集成目标见
+> [runtime dispatch decision](../../.kiro/specs/studio-moirai-agent-system/decision-2026-08-15-per-runtime-dispatch-operating-rules.md)为准；**资产的单一 owner 已按
+> [gskill 重整决议](../design/gskill-restructure-decision-2026-08-31.md) §4.6-2 定到 graph-skill-runtime 的
+> `src/graph_skill_runtime/integrations/assets/moirai/`**——`apps/studio/backend/app/agents/` 是
+> Studio 当前仍在执行的**退役读者副本**，两侧的登记身份与跨 owner 校验见
+> `apps/studio/backend/app/services/agent_asset_owners.py`。独立 runtime 的未来集成目标见
 > [Graph Skill Runtime v1 alignment](../engine/graph-skill-runtime/v1-alignment.md)，该目标仍是 `drafted`。
 > **和 Studio 设计源的关系**: 身份标、开合交互等 UI 硬约束在
 > `docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md` 的 **F1·R5-E** 约束条目。本文是叙事与研究档案；要查当前产品行为，应沿上述权威指针核验，不从叙事推断实现状态。

@@ -50,7 +50,7 @@
     "@shadcn/react": "^0.2.0",
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/api": "^2.11.0",
-    "@tiptap/core": "^3.30.2",
+    "@tiptap/core": "^3.30.4",
     "@tiptap/pm": "^3.30.2",
     "@tiptap/react": "^3.30.2",
     "@tiptap/suggestion": "^3.30.2",

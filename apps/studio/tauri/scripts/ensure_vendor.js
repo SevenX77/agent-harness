@@ -263,16 +263,22 @@ function packageSourceDrift({
  * this gate exists to end. `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT=1` remains the
  * named way through for anyone who needs to start anyway.
  */
+// `-z` because git quotes paths with non-ASCII bytes otherwise, and a quoted
+// path would not match the manifest key it is meant to be compared against.
+// `--cached --others` = tracked plus untracked; the exclude option then removes
+// what the tree's own `.gitignore` files remove, and nothing else. Every
+// `.gitignore` from the repository root down applies, which is where this repo
+// keeps `__pycache__/` and `*.py[cod]`.
+//
+// A named constant on one line, not an inline literal, so that
+// `test_the_git_command_is_the_gates_own` (Python, no Node) can read this exact
+// declaration back out of the file and fail when the two drift apart.
+const GIT_LS_FILES_ARGS = ['ls-files', '-z', '--cached', '--others', '--exclude-per-directory=.gitignore']
+
 function sourceAdditions(packageName, sourceRoot, files, runGit = spawnSync) {
   const result = runGit(
     'git',
-    // `-z` because git quotes paths with non-ASCII bytes otherwise, and a
-    // quoted path would not match the manifest key it is meant to be compared
-    // against. `--cached --others` = tracked plus untracked; the exclude option
-    // then removes what the tree's own `.gitignore` files remove, and nothing
-    // else. Every `.gitignore` from the repository root down applies, which is
-    // where this repo keeps `__pycache__/` and `*.py[cod]`.
-    ['ls-files', '-z', '--cached', '--others', '--exclude-per-directory=.gitignore'],
+    GIT_LS_FILES_ARGS,
     { cwd: sourceRoot, encoding: 'utf8' },
   )
   if (result.error || result.status !== 0) {

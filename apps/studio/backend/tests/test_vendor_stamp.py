@@ -38,8 +38,9 @@ ENSURE_VENDOR_PATH = REPO_ROOT / "apps" / "studio" / "tauri" / "scripts" / "ensu
 
 # The launcher gate's own argument list, repeated here because a Python test
 # cannot call into JavaScript. `test_the_git_command_is_the_gates_own` below
-# reads it back out of `ensure_vendor.js` and fails if the two ever diverge,
-# so this copy cannot quietly stop describing the command under test.
+# reads the `const GIT_LS_FILES_ARGS` declaration back out of
+# `ensure_vendor.js` and fails if the two ever diverge, so this copy cannot
+# quietly stop describing the command under test.
 GIT_LS_FILES_ARGS = ["ls-files", "-z", "--cached", "--others", "--exclude-per-directory=.gitignore"]
 
 
@@ -607,7 +608,22 @@ def test_the_wheel_ships_exactly_what_git_lists(
     )
 
 
-def test_the_git_command_is_the_gates_own(build_vendor: ModuleType) -> None:
+def js_without_comments(source: str) -> str:
+    """`ensure_vendor.js` with its comments removed.
+
+    Scanning the raw file for a `['ls-files', ...]` shape would let a comment
+    decide the result -- an example literal written in prose would read as a
+    second declaration and fail this test for no reason. Only two forms are
+    stripped, and both are unambiguous: `/* ... */` blocks, and `//` comments
+    that start their own line. A `//` inside a string literal is therefore never
+    touched, and a trailing comment cannot matter because the declaration below
+    is only recognised at the start of a line.
+    """
+    without_blocks = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"^[ \t]*//.*$", "", without_blocks, flags=re.MULTILINE)
+
+
+def test_the_git_command_is_the_gates_own() -> None:
     """The command this file measures must be the command the gate runs.
 
     `test_the_wheel_ships_exactly_what_git_lists` only proves anything about the
@@ -616,12 +632,18 @@ def test_the_git_command_is_the_gates_own(build_vendor: ModuleType) -> None:
     checks is exactly the seam that produced P11/#732 (a hand-maintained module
     tree in JS that the Python side outgrew).
 
-    Reading the literal back out of the source closes it without adding a Node
-    dependency to this suite: change the flags in `ensure_vendor.js` and this
-    fails until they are changed here too.
+    Two things are asserted, because either one alone can go stale: that the
+    gate declares exactly these arguments, and that the gate's `git` call still
+    USES that declaration. Inlining the array back into the call would leave the
+    constant sitting there, correct and unread.
     """
-    source = ENSURE_VENDOR_PATH.read_text(encoding="utf-8")
-    literals = re.findall(r"\[\s*'ls-files'[^\]]*\]", source)
+    code = js_without_comments(ENSURE_VENDOR_PATH.read_text(encoding="utf-8"))
 
-    assert len(literals) == 1, f"expected one git ls-files argument list, found {len(literals)}"
-    assert re.findall(r"'([^']*)'", literals[0]) == GIT_LS_FILES_ARGS
+    declarations = re.findall(r"^const GIT_LS_FILES_ARGS = (\[[^\]]*\])", code, flags=re.MULTILINE)
+    assert len(declarations) == 1, f"expected one declaration, found {len(declarations)}"
+    assert re.findall(r"'([^']*)'", declarations[0]) == GIT_LS_FILES_ARGS
+
+    assert re.search(r"runGit\(\s*'git',\s*GIT_LS_FILES_ARGS\b", code), (
+        "the gate no longer passes GIT_LS_FILES_ARGS to git, so this file is "
+        "measuring a command nothing runs"
+    )

@@ -405,6 +405,11 @@ one-page orientation, not the full design.
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).
+- **并发推进 SOP(协调方直驱多 agent 并行交付)**:
+  `docs/development/PARALLEL_ORCHESTRATION.md` — 一个交互式会话同时驱动多个实施
+  agent、并行推进一批工单时的规则源(席位编制、权威正文执笔分工、工单放行、隔离、
+  任务书、PR 审合管线、状态落盘)。**规则以该文为准**;程序性多工单交付(如 gskill
+  重整)按它派单,单人单任务日常开发不需要。
 - **ah 编程 SOP(多 agent 编排开发本仓)**: 仓根 `ah.toml` + `.ah/`(角色规则 +
   `VERIFY.md` 验证档案 + 启动指南)是
   [ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) dev-programming

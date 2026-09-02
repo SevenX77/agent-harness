@@ -1,6 +1,7 @@
 /* eslint-env node */
 
 const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -8,34 +9,82 @@ const test = require('node:test')
 
 const {
   ALLOW_STALE_SNAPSHOT_ENV,
-  LOCAL_PACKAGE_SOURCES,
-  REQUIRED_VENDOR_IMPORTS,
   VENDOR_STAMP_FILENAME,
-  canImportVendoredPackages,
+  VENDOR_STAMP_SCHEMA,
+  describeSpawnFailure,
   ensureVendor,
   localVenvBin,
-  localPackageSourcesAreVendored,
   packageSourceDrift,
   pythonExecutable,
   readVendorStamp,
   rebuildVendor,
   sitePackages,
+  snapshotDrift,
   staleSnapshotAllowed,
   vendorStampDrift,
+  vendoredImportDrift,
   withLocalVenvOnPath,
 } = require('./ensure_vendor')
 
-// A snapshot directory that would satisfy the gate: the stamp build_vendor.py
-// writes as its last step. Tests that are about some OTHER branch use this so
-// the stamp check is not the thing that decides their outcome.
-function stampedSnapshotDir(digest = 'a'.repeat(64)) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-stamped-'))
-  fs.writeFileSync(
-    path.join(dir, VENDOR_STAMP_FILENAME),
-    JSON.stringify({ schema: 1, source_digest: digest, built_at: '2026-09-01T00:00:00+00:00' }),
-    'utf8',
-  )
-  return dir
+const PACKAGE_NAME = 'example_pkg'
+const SOURCE_ROOT = 'packages/example/src/example_pkg'
+
+function sha256(content) {
+  return crypto.createHash('sha256').update(content).digest('hex')
+}
+
+function writeFile(root, relative, content) {
+  const file = path.join(root, ...relative.split('/'))
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, content, 'utf8')
+}
+
+/**
+ * A source tree, a snapshot and the stamp a build would have left behind.
+ *
+ * `shipped` is what the wheel carried — the stamp's manifest is built from it,
+ * exactly as `build_vendor.py` builds it from the wheel's own entries. The
+ * override maps say how reality differs from that record: a string replaces the
+ * file's content on that side, `null` deletes it. `unshipped` puts files in the
+ * source tree that the wheel never carried (gitignored build artefacts), which
+ * is the case a tree-walking gate got wrong.
+ */
+function snapshotFixture({ shipped, sources = {}, snapshot = {}, unshipped = {} } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-'))
+  const repoRoot = path.join(tmp, 'repo')
+  const target = path.join(tmp, 'site-packages')
+  const sourceRoot = path.join(repoRoot, ...SOURCE_ROOT.split('/'))
+  const vendorRoot = path.join(target, PACKAGE_NAME)
+  fs.mkdirSync(sourceRoot, { recursive: true })
+  fs.mkdirSync(vendorRoot, { recursive: true })
+
+  const files = {}
+  for (const [relative, content] of Object.entries(shipped)) {
+    files[relative] = sha256(content)
+    const inSources = relative in sources ? sources[relative] : content
+    const inSnapshot = relative in snapshot ? snapshot[relative] : content
+    if (inSources !== null) writeFile(sourceRoot, relative, inSources)
+    if (inSnapshot !== null) writeFile(vendorRoot, relative, inSnapshot)
+  }
+  for (const [relative, content] of Object.entries(unshipped)) {
+    writeFile(sourceRoot, relative, content)
+  }
+
+  const stamp = {
+    schema: VENDOR_STAMP_SCHEMA,
+    source_digest: 'a'.repeat(64),
+    built_at: '2026-09-01T00:00:00+00:00',
+    python_version: '3.12.13',
+    target_triple: 'x86_64-pc-windows-msvc',
+    packages: {
+      [PACKAGE_NAME]: { source_root: SOURCE_ROOT, digest: 'b'.repeat(64), files },
+    },
+  }
+  fs.writeFileSync(path.join(target, VENDOR_STAMP_FILENAME), JSON.stringify(stamp), 'utf8')
+  // `stampContent` and not `stamp`: fixtures are spread straight into option
+  // objects, and a `stamp` key there would inject the record and stop the gate
+  // from reading the file the test is about.
+  return { repoRoot, target, sourceRoot, vendorRoot, stampContent: stamp }
 }
 
 test('pythonExecutable resolves the host runtime path', () => {
@@ -51,48 +100,6 @@ test('sitePackages resolves the Tauri vendor target', () => {
   assert.match(sitePackages().split(path.sep).join('/'), /apps\/studio\/tauri\/vendor\/site-packages$/)
 })
 
-test('canImportVendoredPackages returns false when python is missing', () => {
-  assert.equal(canImportVendoredPackages({ python: '/missing/python' }), false)
-})
-
-// The gate names modules it will `import` inside the vendored interpreter. A
-// name that no longer exists makes the gate unsatisfiable: ensureVendor keeps
-// rebuilding and then throws, so the desktop app cannot start at all. That is
-// what happened when the gateway's six-domain refactor (#706) folded
-// `graph_agent_gateway.probe_catalog` into the registry domain and this list
-// kept naming the dead module.
-test('every required vendor import exists in the workspace package sources', () => {
-  for (const moduleName of REQUIRED_VENDOR_IMPORTS) {
-    const [packageName, ...submodules] = moduleName.split('.')
-    const source = LOCAL_PACKAGE_SOURCES.find((entry) => entry.packageName === packageName)
-    assert.ok(source, `${moduleName} names a package the vendor gate does not vendor`)
-
-    const modulePath = path.join(source.sourceRoot, ...submodules)
-    assert.ok(
-      fs.existsSync(`${modulePath}.py`) || fs.existsSync(path.join(modulePath, '__init__.py')),
-      `${moduleName} does not exist under ${source.sourceRoot}`,
-    )
-  }
-})
-
-test('localPackageSourcesAreVendored detects source files missing from vendor', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-source-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg')
-  fs.mkdirSync(sourceRoot, { recursive: true })
-  fs.mkdirSync(vendorRoot, { recursive: true })
-  fs.writeFileSync(path.join(sourceRoot, '__init__.py'), '', 'utf8')
-  fs.writeFileSync(path.join(sourceRoot, 'new_module.py'), 'VALUE = 1\n', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, '__init__.py'), '', 'utf8')
-
-  assert.equal(
-    localPackageSourcesAreVendored({
-      packages: [{ packageName: 'example_pkg', sourceRoot, vendorRoot }],
-    }),
-    false,
-  )
-})
-
 // The gate used to compare only files ending in `.py`. Both SDK packages ship
 // non-Python files INSIDE the package, installed into the snapshot by the wheel
 // and read at runtime: the gateway's provider call-method routing table
@@ -103,63 +110,152 @@ test('localPackageSourcesAreVendored detects source files missing from vendor', 
 // table — the whole failure this gate exists to prevent, one file extension
 // out of reach.
 test('packageSourceDrift detects a changed non-Python package data file', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-data-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg', 'registry')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg', 'registry')
-  fs.mkdirSync(sourceRoot, { recursive: true })
-  fs.mkdirSync(vendorRoot, { recursive: true })
-  fs.writeFileSync(path.join(sourceRoot, '__init__.py'), '', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, '__init__.py'), '', 'utf8')
-  fs.writeFileSync(path.join(sourceRoot, 'call_methods.json'), '{"transform": "new"}\n', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, 'call_methods.json'), '{"transform": "old"}\n', 'utf8')
-
-  const drift = packageSourceDrift({
-    packages: [{ packageName: 'example_pkg', sourceRoot, vendorRoot }],
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': '', 'registry/call_methods.json': '{"transform": "new"}\n' },
+    snapshot: { 'registry/call_methods.json': '{"transform": "old"}\n' },
   })
+
+  const drift = packageSourceDrift(fixture)
 
   assert.equal(drift.length, 1)
   assert.match(drift[0], /call_methods\.json/)
 })
 
-test('packageSourceDrift detects a package data file absent from the snapshot', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-data-missing-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg')
-  fs.mkdirSync(path.join(sourceRoot, 'skills', 'builtin', 'md-patch'), { recursive: true })
-  fs.mkdirSync(vendorRoot, { recursive: true })
-  fs.writeFileSync(path.join(sourceRoot, '__init__.py'), '', 'utf8')
-  fs.writeFileSync(path.join(sourceRoot, 'skills', 'builtin', 'md-patch', 'SKILL.md'), '# md-patch\n', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, '__init__.py'), '', 'utf8')
-
-  const drift = packageSourceDrift({
-    packages: [{ packageName: 'example_pkg', sourceRoot, vendorRoot }],
+// Widening the comparison from `.py` to "every file" was still a guess about
+// which files a package consists of, and it was wrong in both directions.
+// Hatchling ships dotfiles that sit INSIDE the package (verified against a real
+// wheel: a package holding `.runtime-data.json`, `CHANGELOG.md`, `_native.pyd`
+// and `__pycache__/` produced a wheel containing the first two only), while the
+// walk skipped every name starting with `.`. So the file was invisible to the
+// gate and could drift for good.
+test('packageSourceDrift compares a dotfile the wheel ships', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': '', '.runtime-data.json': '{"v": 2}\n' },
+    snapshot: { '.runtime-data.json': '{"v": 1}\n' },
   })
 
+  const drift = packageSourceDrift(fixture)
+
+  assert.equal(drift.length, 1, `hatchling ships package dotfiles; got ${JSON.stringify(drift)}`)
+  assert.match(drift[0], /\.runtime-data\.json/)
+})
+
+// The other direction, and the dangerous one. The root `.gitignore` excludes
+// `*.py[cod]`, which covers `.pyd`; hatchling honours VCS ignores, so a native
+// extension built in-tree is NEVER in the wheel. A gate that walks the source
+// tree therefore demands a file the snapshot can never hold: it reports drift,
+// rebuilds, finds the same drift, and refuses to start the app — the shape the
+// ledger records as P11/#732, a gate that no rebuild can satisfy.
+test('packageSourceDrift ignores a source file the wheel does not ship', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': 'V = 1\n' },
+    unshipped: { '_native.pyd': 'MZ binary', '__pycache__/__init__.cpython-312.pyc': 'compiled' },
+  })
+
+  assert.deepEqual(packageSourceDrift(fixture), [])
+})
+
+test('ensureVendor does not rebuild for a build artefact the wheel never ships', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': 'V = 1\n' },
+    unshipped: { '_native.pyd': 'MZ binary' },
+  })
+  const commands = []
+
+  const result = ensureVendor({
+    ...fixture,
+    python: __filename,
+    backend: __dirname,
+    buildScript: __filename,
+    workspaceRoot: __dirname,
+    spawn: (command, args) => {
+      commands.push(args)
+      return { status: 0 }
+    },
+  })
+
+  assert.deepEqual(result, { rebuilt: false, staleAllowed: false })
+  assert.equal(commands.length, 1, 'only the import check may run — no rebuild')
+})
+
+test('packageSourceDrift reports a source file that moved on since the build', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': '', 'skills/builtin/md-patch/SKILL.md': '# md-patch\n' },
+    sources: { 'skills/builtin/md-patch/SKILL.md': '# md-patch, edited\n' },
+  })
+
+  const drift = packageSourceDrift(fixture)
+
   assert.equal(drift.length, 1)
-  assert.match(drift[0], /SKILL\.md/)
+  assert.match(drift[0], /SKILL\.md: the sources have changed/)
+})
+
+test('packageSourceDrift reports a package data file absent from the snapshot', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': '', 'skills/builtin/md-patch/SKILL.md': '# md-patch\n' },
+    snapshot: { 'skills/builtin/md-patch/SKILL.md': null },
+  })
+
+  const drift = packageSourceDrift(fixture)
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /SKILL\.md: missing from the snapshot/)
+})
+
+test('packageSourceDrift reports a shipped file the sources no longer have', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': '', 'legacy.py': 'X = 1\n' },
+    sources: { 'legacy.py': null },
+  })
+
+  const drift = packageSourceDrift(fixture)
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /legacy\.py: shipped by the last build, gone from the sources/)
 })
 
 test('packageSourceDrift is silent when every file matches byte for byte', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-fresh-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg')
-  for (const root of [sourceRoot, vendorRoot]) {
-    fs.mkdirSync(path.join(root, 'registry'), { recursive: true })
-    fs.writeFileSync(path.join(root, '__init__.py'), 'VERSION = 1\n', 'utf8')
-    fs.writeFileSync(path.join(root, 'registry', 'call_methods.json'), '{"a": 1}\n', 'utf8')
-    fs.writeFileSync(path.join(root, 'py.typed'), '', 'utf8')
-  }
+  const fixture = snapshotFixture({
+    shipped: {
+      '__init__.py': 'VERSION = 1\n',
+      'registry/call_methods.json': '{"a": 1}\n',
+      'py.typed': '',
+    },
+  })
 
-  assert.deepEqual(
-    packageSourceDrift({ packages: [{ packageName: 'example_pkg', sourceRoot, vendorRoot }] }),
-    [],
-  )
+  assert.deepEqual(packageSourceDrift(fixture), [])
+})
+
+// The stamp is read from disk and turned into filesystem paths, so a corrupted
+// or hand-edited one must not be able to walk out of the tree it describes
+// (same rule #1090 applied to caller-supplied paths).
+test('packageSourceDrift refuses a stamp whose paths escape their root', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+  const escaped = JSON.parse(JSON.stringify(fixture.stampContent))
+  escaped.packages[PACKAGE_NAME].source_root = '../../../etc'
+
+  const drift = packageSourceDrift({ ...fixture, stamp: escaped })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /outside the workspace/)
+})
+
+test('packageSourceDrift refuses a manifest entry that escapes the package', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+  const escaped = JSON.parse(JSON.stringify(fixture.stampContent))
+  escaped.packages[PACKAGE_NAME].files = { '../../secrets.json': 'c'.repeat(64) }
+
+  const drift = packageSourceDrift({ ...fixture, stamp: escaped })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /outside the package/)
 })
 
 // A snapshot with no provenance is a snapshot nobody can place. On a user's
 // machine there is no source tree to compare against, so the stamp is the only
-// thing that can say which engine the installed app carries — and the gate is
-// what makes writing it non-optional.
+// thing that can say which engine the installed app carries — and it is also
+// the only record of which files each package consists of, so without it there
+// is nothing to compare at all.
 test('vendorStampDrift reports a snapshot carrying no provenance stamp', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-nostamp-'))
 
@@ -178,42 +274,156 @@ test('vendorStampDrift reports a stamp that does not parse', () => {
 
 test('vendorStampDrift reports a stamp with no source digest', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-emptystamp-'))
-  fs.writeFileSync(path.join(target, VENDOR_STAMP_FILENAME), JSON.stringify({ schema: 1 }), 'utf8')
+  fs.writeFileSync(
+    path.join(target, VENDOR_STAMP_FILENAME),
+    JSON.stringify({ schema: VENDOR_STAMP_SCHEMA }),
+    'utf8',
+  )
 
   assert.equal(vendorStampDrift({ target }).length, 1)
 })
 
-test('vendorStampDrift accepts a stamp naming a source digest', () => {
-  const target = stampedSnapshotDir()
+// A snapshot written by an older build script cannot be checked by this gate:
+// it has no per-file manifest to compare against. That is not a compatibility
+// problem to paper over, it is the definition of a stale snapshot.
+test('vendorStampDrift reports a stamp from an older build script', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-oldstamp-'))
+  fs.writeFileSync(
+    path.join(target, VENDOR_STAMP_FILENAME),
+    JSON.stringify({ schema: 1, source_digest: 'a'.repeat(64) }),
+    'utf8',
+  )
 
-  assert.deepEqual(vendorStampDrift({ target }), [])
-  assert.equal(readVendorStamp({ target }).source_digest, 'a'.repeat(64))
+  const drift = vendorStampDrift({ target })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /predates this launcher/)
+})
+
+test('vendorStampDrift reports a package entry that carries no file manifest', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-nomanifest-'))
+  fs.writeFileSync(
+    path.join(target, VENDOR_STAMP_FILENAME),
+    JSON.stringify({
+      schema: VENDOR_STAMP_SCHEMA,
+      source_digest: 'a'.repeat(64),
+      packages: { example_pkg: { source_root: SOURCE_ROOT } },
+    }),
+    'utf8',
+  )
+
+  const drift = vendorStampDrift({ target })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /file manifest/)
+})
+
+test('vendorStampDrift accepts the stamp a build writes', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+
+  assert.deepEqual(vendorStampDrift(fixture), [])
+  assert.equal(readVendorStamp(fixture).schema, VENDOR_STAMP_SCHEMA)
+})
+
+// `result.status` alone cannot tell a failed run from a run that never
+// happened: a missing or unexecutable vendored interpreter — the most likely
+// state on a fresh checkout — arrives as `status: null` with the reason in
+// `result.error`. Reading only the status printed "exit code null", which names
+// neither the file nor the problem.
+test('vendoredImportDrift names an interpreter that could not be run', () => {
+  const drift = vendoredImportDrift({
+    python: __filename,
+    target: __dirname,
+    modules: ['graph_agent'],
+    spawn: () => ({
+      status: null,
+      signal: null,
+      error: Object.assign(new Error('spawnSync python.exe ENOENT'), { code: 'ENOENT' }),
+    }),
+  })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /ENOENT/)
+  assert.match(drift[0], new RegExp(path.basename(__filename).replace('.', '\\.')))
+})
+
+test('vendoredImportDrift passes on what the interpreter said', () => {
+  const drift = vendoredImportDrift({
+    python: __filename,
+    target: __dirname,
+    modules: ['graph_agent'],
+    spawn: () => ({ status: 1, stderr: 'Traceback\nModuleNotFoundError: No module named graph_agent\n' }),
+  })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /ModuleNotFoundError/)
+})
+
+test('vendoredImportDrift reports a missing interpreter without spawning', () => {
+  let spawned = false
+  const drift = vendoredImportDrift({
+    python: path.join(__dirname, 'no-such-python'),
+    target: __dirname,
+    modules: ['graph_agent'],
+    spawn: () => {
+      spawned = true
+      return { status: 0 }
+    },
+  })
+
+  assert.equal(spawned, false)
+  assert.match(drift[0], /interpreter is missing/)
+})
+
+// The modules to import come from the stamp, i.e. from what the wheels shipped.
+// A hand-written list went stale in #706 (the gateway refactor removed the
+// module it named) and left a gate no rebuild could satisfy (#732).
+test('vendoredImportDrift imports the packages the stamp records', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+  const calls = []
+
+  vendoredImportDrift({
+    ...fixture,
+    python: __filename,
+    spawn: (command, args) => {
+      calls.push(args)
+      return { status: 0 }
+    },
+  })
+
+  assert.deepEqual(calls, [['-c', `import ${PACKAGE_NAME}`]])
+})
+
+test('describeSpawnFailure distinguishes a signal from an exit code', () => {
+  assert.match(describeSpawnFailure({ status: null, signal: 'SIGKILL' }, 'python'), /SIGKILL/)
+  assert.match(describeSpawnFailure({ status: 2, signal: null }, 'python'), /exit code 2/)
 })
 
 // The branch under test is ensureVendor's own: imports report fine, so no
 // rebuild. Running a real interpreter to establish that would tie this to a
 // provisioned Python — the vendored runtime is a downloaded artefact absent
 // from fresh checkouts, and the workspace venv only exists after `uv sync`.
-test('ensureVendor skips rebuild when imports already work', () => {
+test('ensureVendor skips rebuild when the snapshot is current', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+
   const result = ensureVendor({
+    ...fixture,
     python: __filename,
-    target: stampedSnapshotDir(),
     backend: __dirname,
-    modules: ['sys'],
-    packages: [],
     spawn: () => ({ status: 0 }),
   })
+
   assert.deepEqual(result, { rebuilt: false, staleAllowed: false })
 })
 
 test('ensureVendor rebuilds when the vendored interpreter cannot import', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
   const calls = []
+
   const result = ensureVendor({
+    ...fixture,
     python: __filename,
-    target: stampedSnapshotDir(),
     backend: __dirname,
-    modules: ['sys'],
-    packages: [],
     buildScript: __filename,
     workspaceRoot: __dirname,
     // Only the first check fails, so the rebuild between them is what changed
@@ -223,34 +433,32 @@ test('ensureVendor rebuilds when the vendored interpreter cannot import', () => 
       return { status: calls.length === 1 ? 1 : 0 }
     },
   })
+
   assert.deepEqual(result, { rebuilt: true, staleAllowed: false })
   assert.equal(calls.length, 3, 'check, rebuild, re-check')
 })
 
-test('ensureVendor rebuilds a snapshot whose sources drifted even though imports work', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-drift-rebuild-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg')
-  fs.mkdirSync(sourceRoot, { recursive: true })
-  fs.mkdirSync(vendorRoot, { recursive: true })
-  fs.writeFileSync(path.join(sourceRoot, 'table.json'), '{"a": 2}\n', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, 'table.json'), '{"a": 1}\n', 'utf8')
-
-  const packages = [{ packageName: 'example_pkg', sourceRoot, vendorRoot }]
+test('ensureVendor rebuilds a snapshot whose data files drifted even though imports work', () => {
+  const fixture = snapshotFixture({
+    shipped: { 'table.json': '{"a": 2}\n' },
+    snapshot: { 'table.json': '{"a": 1}\n' },
+  })
   let rebuilt = false
+
   const result = ensureVendor({
+    ...fixture,
     python: __filename,
-    target: stampedSnapshotDir(),
     backend: __dirname,
-    modules: ['sys'],
-    packages,
     buildScript: __filename,
     workspaceRoot: __dirname,
     // The build is what a real rebuild does: it makes the snapshot match.
     spawn: (command, args) => {
       if (args && args[0] === __filename) {
         rebuilt = true
-        fs.copyFileSync(path.join(sourceRoot, 'table.json'), path.join(vendorRoot, 'table.json'))
+        fs.copyFileSync(
+          path.join(fixture.sourceRoot, 'table.json'),
+          path.join(fixture.vendorRoot, 'table.json'),
+        )
       }
       return { status: 0 }
     },
@@ -260,27 +468,47 @@ test('ensureVendor rebuilds a snapshot whose sources drifted even though imports
   assert.deepEqual(result, { rebuilt: true, staleAllowed: false })
 })
 
-// Widening the comparison to every shipped file means editing a package's own
+test('ensureVendor rebuilds a snapshot that carries no stamp at all', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+  fs.rmSync(path.join(fixture.target, VENDOR_STAMP_FILENAME))
+  const seen = []
+
+  assert.throws(
+    () => ensureVendor({
+      ...fixture,
+      python: __filename,
+      backend: __dirname,
+      buildScript: __filename,
+      workspaceRoot: __dirname,
+      env: { PATH: 'base' },
+      // A rebuild that writes no stamp leaves the snapshot unplaceable, so the
+      // gate must refuse rather than start the app on it.
+      spawn: (command, args) => {
+        seen.push(args)
+        return { status: 0 }
+      },
+    }),
+    /still stale|provenance/,
+  )
+  assert.ok(seen.length > 0)
+})
+
+// Comparing every file the wheel ships means editing a package's own
 // CHANGELOG.md now costs a full clean rebuild. Booting the app against a
 // knowingly stale snapshot is a legitimate thing to want (reproducing a bug
 // against the snapshot that has it), so there is one way to say so — named
 // after what it permits, and never silent.
 test(`${ALLOW_STALE_SNAPSHOT_ENV} boots a stale snapshot without rebuilding, loudly`, () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-escape-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg')
-  fs.mkdirSync(sourceRoot, { recursive: true })
-  fs.mkdirSync(vendorRoot, { recursive: true })
-  fs.writeFileSync(path.join(sourceRoot, 'table.json'), '{"a": 2}\n', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, 'table.json'), '{"a": 1}\n', 'utf8')
-
+  const fixture = snapshotFixture({
+    shipped: { 'table.json': '{"a": 2}\n' },
+    snapshot: { 'table.json': '{"a": 1}\n' },
+  })
   const warnings = []
+
   const result = ensureVendor({
+    ...fixture,
     python: __filename,
-    target: stampedSnapshotDir(),
     backend: __dirname,
-    modules: ['sys'],
-    packages: [{ packageName: 'example_pkg', sourceRoot, vendorRoot }],
     buildScript: __filename,
     workspaceRoot: __dirname,
     env: { ...process.env, [ALLOW_STALE_SNAPSHOT_ENV]: '1' },
@@ -307,21 +535,16 @@ test('the escape hatch only opens for an affirmative value', () => {
 })
 
 test('an unset escape hatch does not let a stale snapshot through', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-noescape-'))
-  const sourceRoot = path.join(tmp, 'source', 'example_pkg')
-  const vendorRoot = path.join(tmp, 'vendor', 'example_pkg')
-  fs.mkdirSync(sourceRoot, { recursive: true })
-  fs.mkdirSync(vendorRoot, { recursive: true })
-  fs.writeFileSync(path.join(sourceRoot, 'table.json'), '{"a": 2}\n', 'utf8')
-  fs.writeFileSync(path.join(vendorRoot, 'table.json'), '{"a": 1}\n', 'utf8')
+  const fixture = snapshotFixture({
+    shipped: { 'table.json': '{"a": 2}\n' },
+    snapshot: { 'table.json': '{"a": 1}\n' },
+  })
 
   assert.throws(
     () => ensureVendor({
+      ...fixture,
       python: __filename,
-      target: stampedSnapshotDir(),
       backend: __dirname,
-      modules: ['sys'],
-      packages: [{ packageName: 'example_pkg', sourceRoot, vendorRoot }],
       buildScript: __filename,
       workspaceRoot: __dirname,
       env: { PATH: 'base' },
@@ -331,6 +554,16 @@ test('an unset escape hatch does not let a stale snapshot through', () => {
     }),
     /still stale|table\.json/,
   )
+})
+
+test('snapshotDrift stops at a missing stamp instead of guessing a file set', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+  fs.rmSync(path.join(fixture.target, VENDOR_STAMP_FILENAME))
+
+  const drift = snapshotDrift({ ...fixture, python: __filename, spawn: () => ({ status: 0 }) })
+
+  assert.equal(drift.length, 1)
+  assert.match(drift[0], /provenance/)
 })
 
 test('withLocalVenvOnPath prepends the workspace venv scripts directory', () => {
@@ -369,4 +602,21 @@ test('rebuildVendor runs the build script with the vendored python', () => {
   ])
   assert.equal(calls[0].options.cwd, tmp)
   assert.equal(calls[0].options.env.PATH, `${scriptsDir}${path.delimiter}base`)
+})
+
+test('rebuildVendor names why the interpreter could not be run', () => {
+  assert.throws(
+    () => rebuildVendor({
+      python: '/missing/python',
+      buildScript: __filename,
+      workspaceRoot: __dirname,
+      env: { PATH: 'base' },
+      spawn: () => ({
+        status: null,
+        signal: null,
+        error: Object.assign(new Error('spawnSync /missing/python ENOENT'), { code: 'ENOENT' }),
+      }),
+    }),
+    /ENOENT.*\/missing\/python/s,
+  )
 })

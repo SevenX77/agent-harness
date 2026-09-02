@@ -163,6 +163,40 @@ if ([string]::IsNullOrWhiteSpace($stamp.source_digest)) {
 Write-Host ("  OK   snapshot stamped: sources {0}, built {1}, python {2}" -f `
     $stamp.source_digest.Substring(0, 12), $stamp.built_at, $stamp.python_version)
 
+# The stamp carries the wheels' own file manifest, which turns "the app can say
+# which engine it holds" into a claim the installer is HELD TO: every file the
+# wheel shipped must have arrived, byte for byte.
+#
+# That is not the import probe above, restated. `bundle.resources` copies
+# `vendor/**/*` by glob, and a glob that quietly drops a package DATA file --
+# the gateway's `registry/call_methods.json` provider routing table, the
+# engine's builtin `skills/builtin/md-patch/SKILL.md` -- leaves an app that
+# imports perfectly and then fails at the moment it reads that file, on the
+# user's machine and nowhere else. The build machine cannot notice: it has the
+# source tree the file came from.
+#
+# `-ne` on strings is case-insensitive in PowerShell, which is what we want:
+# Get-FileHash returns upper-case hex and the stamp records lower-case.
+$sitePackages = $required['vendored site-packages']
+$checkedFiles = 0
+foreach ($packageName in $stamp.packages.PSObject.Properties.Name) {
+    foreach ($shipped in $stamp.packages.$packageName.files.PSObject.Properties) {
+        $relative = $packageName + '\' + ($shipped.Name -replace '/', '\')
+        $installed = Join-Path $sitePackages $relative
+        if (-not (Test-Path $installed)) {
+            Fail "the installer did not ship $relative, which the build's own wheel contained"
+        }
+        if ((Get-FileHash $installed -Algorithm SHA256).Hash -ne $shipped.Value) {
+            Fail "$relative differs from what the build installed; the shipped snapshot is not the one the stamp describes"
+        }
+        $checkedFiles++
+    }
+}
+if ($checkedFiles -eq 0) {
+    Fail "the stamp lists no package files, so it proves nothing about what shipped"
+}
+Write-Host ("  OK   {0} vendored SDK files match the stamp byte for byte" -f $checkedFiles)
+
 # Nothing a user downloads should be an archive the BUILD needed. `vendor/` is
 # shipped whole (`bundle.resources: vendor/**/*`), so anything left in it rides
 # along: the download cache used to sit at `vendor/downloads/` and put 48.9 MB

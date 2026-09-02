@@ -103,19 +103,28 @@ way and nothing drifts onto stray branches/worktrees.
    changing is exactly the case that needs a rebuild too).
 
    **一道门守着"忘了重建"这件事,不靠人记得。** `beforeDevCommand` 里的
-   `apps/studio/tauri/scripts/ensure_vendor.js` 在每次 dev 启动时把两个 SDK
-   包的**每一个文件**(不只 `.py`——网关的 `registry/call_methods.json`
-   路由表、引擎的 `skills/builtin/md-patch/SKILL.md` 都在里面)与 vendor 快照
-   逐字节 sha256 对比,不一致就自己跑 `build_vendor.py` 重建,重建后仍不一致
-   才**响亮失败**并在报错里给出重建命令。所以上面那串手动命令的用途只剩
-   **app 正在运行、你想立刻重建**(Windows 锁 `.pyd`),以及想省掉下次启动
-   那几分钟;正常路径是**关掉 app、重启 launcher**,门自己会补。
-   `build_vendor.py` 同时把 `vendor-stamp.json` 写进快照内部,记下两个包源码
-   的 content-hash、构建时间、解释器版本与目标 triple——用户机器上没有源码树
-   可比,这份戳是装出来的 app 唯一能自证"我带的是哪份引擎"的东西
-   (`verify_installed_sidecar.ps1` 断言它进了安装目录)。**逃生口**
+   `apps/studio/tauri/scripts/ensure_vendor.js` 在每次 dev 启动时逐字节 sha256
+   核对快照,不一致就自己跑 `build_vendor.py` 重建,重建后仍不一致才**响亮
+   失败**并在报错里给出重建命令。所以上面那串手动命令的用途只剩**app 正在
+   运行、你想立刻重建**(Windows 锁 `.pyd`),以及想省掉下次启动那几分钟;
+   正常路径是**关掉 app、重启 launcher**,门自己会补。**逃生口**
    `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT=1`:明知快照过期也要启动(拿旧快照复现
    缺陷),门改为打印过期文件清单 + 重建命令后放行,**不静默**。
+
+   **要核对哪些文件,由 wheel 说了算,门不自己判断。** `build_vendor.py` 构建
+   完两个本地 wheel 后,直接**枚举 wheel 里的条目**得到"这个包由哪些文件构成
+   加每个文件的 sha256",连同每个包的源码目录(仓库相对路径)一起写进快照内部
+   的 `vendor-stamp.json`;门只按这份清单逐个比对**源码树**与**快照**两侧。
+   这不是细节洁癖:任何一份自己写的筛选规则都会和 hatchling 打架,而且两个方向
+   都致命——hatchling **会**打包包内的点文件(改了照样放行),但**不会**打包被
+   `.gitignore` 排除的 `*.py[cod]`(含 `.pyd`),源码树里出现一个就被门当成
+   "快照缺文件",重建也补不出来,于是**app 再也起不来**(台账 P11/#732 的形状)。
+   代价是门看不见"源码树新增、上次构建时还不存在"的文件——那需要重新问一次
+   打包后端,只有重建能确定;换来的是**门永远可满足**。
+   这份戳同时是装出来的 app 唯一能自证"我带的是哪份引擎"的东西(用户机器上没有
+   源码树可比),`verify_installed_sidecar.ps1` 拿它**逐文件核对安装目录**:
+   `bundle.resources: vendor/**/*` 是个 glob,漏掉一个包内数据文件的话,app
+   照样 import 成功,直到用户那边读到它才炸。
 
 **Repo settings backing this** (already configured): `main` protected with
 `enforce_admins` on (no bypass), PR required with **0** approvals, the 7 checks

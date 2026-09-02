@@ -12,22 +12,6 @@ const TAURI_DIR = path.resolve(__dirname, '..')
 const STUDIO_DIR = path.resolve(TAURI_DIR, '..')
 const REPO_ROOT = path.resolve(TAURI_DIR, '../../..')
 const VENDOR_DIR = path.join(TAURI_DIR, 'vendor')
-const LOCAL_PACKAGE_SOURCES = [
-  {
-    packageName: 'graph_agent',
-    sourceRoot: path.join(REPO_ROOT, 'packages', 'graph-agent', 'src', 'graph_agent'),
-  },
-  {
-    packageName: 'graph_agent_gateway',
-    sourceRoot: path.join(REPO_ROOT, 'packages', 'graph-agent-gateway', 'src', 'graph_agent_gateway'),
-  },
-]
-// Package roots only, derived from the packages this gate vendors: naming an
-// inner module here would be a second, hand-maintained copy of the SDK module
-// tree, and `localPackageSourcesAreVendored` below already hash-compares every
-// source file against its vendored twin — a stronger check that cannot go
-// stale when a package is reorganised internally.
-const REQUIRED_VENDOR_IMPORTS = LOCAL_PACKAGE_SOURCES.map((entry) => entry.packageName)
 
 // Written by `apps/studio/backend/scripts/build_vendor.py` as the last step of
 // a build, INSIDE the snapshot it describes. Its lifetime is therefore exactly
@@ -35,6 +19,10 @@ const REQUIRED_VENDOR_IMPORTS = LOCAL_PACKAGE_SOURCES.map((entry) => entry.packa
 // which reads as "no provenance" rather than as a description of a snapshot that
 // no longer exists.
 const VENDOR_STAMP_FILENAME = 'vendor-stamp.json'
+// Bumped together with `build_vendor.py`'s STAMP_SCHEMA. A stamp this gate
+// cannot read is not a compatibility problem to solve here: it means the
+// snapshot predates the current build script, which is the definition of stale.
+const VENDOR_STAMP_SCHEMA = 2
 
 // Booting the app on a knowingly stale snapshot is a legitimate thing to want —
 // reproducing a defect against the snapshot that still has it. Named after what
@@ -83,108 +71,6 @@ function withLocalVenvOnPath(env = process.env, workspaceRoot = REPO_ROOT) {
   return next
 }
 
-/**
- * Every file the wheel ships for a package, relative to its root.
- *
- * EVERY file, not just `*.py`. Both SDK packages carry non-Python files inside
- * the package that hatchling installs into the snapshot and that the app reads
- * at runtime — the gateway's provider call-method routing table
- * `graph_agent_gateway/registry/call_methods.json` (loaded through
- * `importlib.resources`) and the engine's
- * `graph_agent/skills/builtin/md-patch/SKILL.md`. While this walk filtered on
- * `.py`, editing either one and launching the app printed "Python vendor
- * closure ok" and then served the OLD copy.
- *
- * There is deliberately no ignore list for "files that do not matter at
- * runtime". Deciding that per file is the judgement that already failed once
- * for `call_methods.json`, and an extension-based rule fails immediately:
- * `md-patch/SKILL.md` is load-bearing and `CHANGELOG.md` is not. The invariant
- * is the simple one — the snapshot is byte-identical to the sources it claims
- * to be built from — and its cost is that editing a package's own CHANGELOG
- * does mean the snapshot is stale, because it is.
- *
- * `__pycache__` and dotfiles stay out: bytecode is an output of importing the
- * tree rather than an input to it, and the wheel never carries either.
- * `build_vendor.py`'s `source_tree_digest` excludes the same two things.
- */
-function collectPackageFiles(root) {
-  if (!fs.existsSync(root)) return null
-  const files = []
-  const visit = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === '__pycache__' || entry.name.startsWith('.')) continue
-      const fullPath = path.join(dir, entry.name)
-      if (entry.isDirectory()) {
-        visit(fullPath)
-      } else if (entry.isFile()) {
-        // Posix-spelled so a drift line reads the same on every platform.
-        files.push(path.relative(root, fullPath).split(path.sep).join('/'))
-      }
-    }
-  }
-  visit(root)
-  return files.sort()
-}
-
-function fileHash(file) {
-  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
-}
-
-/**
- * What is stale about the vendored copies of the local workspace packages, one
- * human-readable line per finding, empty when the snapshot is current.
- *
- * The comparison is against the bytes actually on disk in both trees, not
- * against the digest recorded in the stamp. A stamp says what a build INTENDED
- * to install; the bytes say what is there — which is the question the sidecar
- * will answer when it imports them. It also needs no hashing algorithm shared
- * between this file and `build_vendor.py`: two implementations of one algorithm
- * drift, and the ledger already records that shape of defect (P11, #732 — a
- * hand-copied SDK module tree in JS that the Python side outgrew).
- */
-// One package's source tree against its vendored copy: what differs, and in
-// which direction. Three separable questions, kept separable.
-function comparePackageTree(packageName, sourceRoot, vendorRoot) {
-  const sourceFiles = collectPackageFiles(sourceRoot)
-  const vendorFiles = collectPackageFiles(vendorRoot)
-  if (sourceFiles === null) return [`${packageName}: no sources at ${sourceRoot}`]
-  if (vendorFiles === null) return [`${packageName}: not vendored at ${vendorRoot}`]
-
-  const vendored = new Set(vendorFiles)
-  const sourced = new Set(sourceFiles)
-  const resolve = (root, file) => path.join(root, ...file.split('/'))
-
-  const missing = sourceFiles
-    .filter((file) => !vendored.has(file))
-    .map((file) => `${packageName}/${file}: in the sources, missing from the snapshot`)
-  const differing = sourceFiles
-    .filter((file) => vendored.has(file))
-    .filter((file) => fileHash(resolve(sourceRoot, file)) !== fileHash(resolve(vendorRoot, file)))
-    .map((file) => `${packageName}/${file}: the snapshot holds a different version`)
-  const orphaned = vendorFiles
-    .filter((file) => !sourced.has(file))
-    .map((file) => `${packageName}/${file}: in the snapshot, gone from the sources`)
-
-  return [...missing, ...differing, ...orphaned]
-}
-
-function packageSourceDrift({
-  packages = LOCAL_PACKAGE_SOURCES,
-  target = sitePackages(),
-} = {}) {
-  return packages.flatMap((packageInfo) =>
-    comparePackageTree(
-      packageInfo.packageName,
-      packageInfo.sourceRoot,
-      packageInfo.vendorRoot ?? path.join(target, packageInfo.packageName),
-    ),
-  )
-}
-
-function localPackageSourcesAreVendored(options = {}) {
-  return packageSourceDrift(options).length === 0
-}
-
 function vendorStampPath({ target = sitePackages(), stampPath } = {}) {
   return stampPath ?? path.join(target, VENDOR_STAMP_FILENAME)
 }
@@ -204,46 +90,191 @@ function readVendorStamp(options = {}) {
   }
 }
 
+function isFileManifest(value) {
+  return (
+    value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.values(value).every((digest) => typeof digest === 'string' && digest.length > 0)
+  )
+}
+
 /**
  * Why the snapshot cannot say where it came from, empty when it can.
  *
- * A snapshot with no stamp is treated as stale even when its bytes match,
- * because a build that produced no provenance is a build this gate cannot
- * vouch for on the machine where it matters most: the installed app, which has
- * no source tree to compare against and nothing else to name.
+ * A snapshot with no readable stamp is stale by definition here, for two
+ * reasons at once. It cannot be placed: on a user's machine there IS no source
+ * tree, so the stamp is the only thing that can name the engine the installed
+ * app carries. And it cannot be checked: the stamp carries the per-file
+ * manifest the freshness comparison is made of, so without it there is nothing
+ * to compare against except a guess about which files a package consists of —
+ * which is exactly the guess this gate must not make.
  */
 function vendorStampDrift(options = {}) {
   const file = vendorStampPath(options)
-  const stamp = readVendorStamp(options)
-  if (stamp === null) {
+  const stamp = options.stamp ?? readVendorStamp(options)
+  if (stamp === null || typeof stamp !== 'object') {
     return [`${file}: the snapshot carries no readable ${VENDOR_STAMP_FILENAME} provenance stamp`]
+  }
+  if (stamp.schema !== VENDOR_STAMP_SCHEMA) {
+    return [`${file}: provenance stamp schema ${stamp.schema} predates this launcher (expected ${VENDOR_STAMP_SCHEMA})`]
   }
   if (typeof stamp.source_digest !== 'string' || stamp.source_digest.length === 0) {
     return [`${file}: the provenance stamp names no source_digest`]
   }
+  const packages = stamp.packages
+  if (packages === null || typeof packages !== 'object' || Object.keys(packages).length === 0) {
+    return [`${file}: the provenance stamp lists no vendored packages`]
+  }
+  for (const [name, info] of Object.entries(packages)) {
+    if (info === null || typeof info !== 'object' || typeof info.source_root !== 'string' || !isFileManifest(info.files)) {
+      return [`${file}: the provenance stamp's entry for ${name} is not a source root plus a file manifest`]
+    }
+  }
   return []
 }
 
-function describeSnapshot(options = {}) {
-  const stamp = readVendorStamp(options)
-  if (stamp === null) return 'no provenance stamp'
-  return `sources ${stamp.source_digest.slice(0, 12)}, built ${stamp.built_at ?? 'at an unrecorded time'}`
+function stampedPackages(stamp) {
+  return stamp === null || typeof stamp !== 'object' || typeof stamp.packages !== 'object' || stamp.packages === null
+    ? {}
+    : stamp.packages
 }
 
-function canImportVendoredPackages({
+function fileHash(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+}
+
+/**
+ * Resolve a stamp-supplied relative path, or null when it escapes its root.
+ *
+ * The stamp is a file this gate reads and turns into filesystem paths; a
+ * corrupted or hand-edited one must not be able to send the walk outside the
+ * tree it claims to describe (same rule as #1090 for caller-supplied paths).
+ */
+function resolveWithin(root, relative) {
+  if (typeof relative !== 'string' || relative.length === 0 || path.isAbsolute(relative)) return null
+  const resolved = path.resolve(root, relative)
+  const inside = path.relative(root, resolved)
+  if (inside.startsWith('..') || path.isAbsolute(inside)) return null
+  return resolved
+}
+
+/**
+ * What is stale about the vendored copies of the local workspace packages, one
+ * human-readable line per finding, empty when the snapshot is current.
+ *
+ * The set of files to check comes from the stamp, which records exactly what
+ * the wheels shipped (see `wheel_package_files` in `build_vendor.py`). Nothing
+ * here walks either tree, and that is the point: any walk needs a rule for
+ * which files "count", and this gate had one that disagreed with the build
+ * backend in BOTH directions — it skipped dotfiles hatchling ships, and it
+ * demanded gitignored build artefacts (`*.py[cod]` covers `.pyd`) that
+ * hatchling will never ship, a drift no rebuild could ever clear (P11/#732).
+ * The build backend decides what a package consists of; this gate only checks
+ * the answer it recorded.
+ *
+ * Both directions are checked against the recorded hash — the sources (did the
+ * working tree move on since the build?) and the snapshot (is the snapshot
+ * still what that build installed?) — so the comparison needs no hashing
+ * algorithm shared between this file and `build_vendor.py`, only the digests
+ * the build already wrote down.
+ *
+ * What it deliberately does NOT report: files in the source tree that the
+ * stamp does not mention. Telling "added since the build" apart from "the
+ * wheel never ships this" requires re-deriving hatchling's selection rules
+ * here, and that is the defect above. Adding a file to an SDK package is
+ * caught in practice through the edit that starts using it; a rebuild remains
+ * the only thing that can be sure.
+ */
+function packageSourceDrift({
+  target = sitePackages(),
+  repoRoot = REPO_ROOT,
+  stamp = null,
+  stampPath,
+} = {}) {
+  const resolvedStamp = stamp ?? readVendorStamp({ target, stampPath })
+  const drift = []
+  for (const [packageName, info] of Object.entries(stampedPackages(resolvedStamp))) {
+    const sourceRoot = resolveWithin(repoRoot, info.source_root)
+    if (sourceRoot === null) {
+      drift.push(`${packageName}: the stamp names a source root outside the workspace: ${info.source_root}`)
+      continue
+    }
+    const vendorRoot = path.join(target, packageName)
+    for (const relative of Object.keys(info.files).sort()) {
+      const digest = info.files[relative]
+      const source = resolveWithin(sourceRoot, relative)
+      const vendored = resolveWithin(vendorRoot, relative)
+      if (source === null || vendored === null) {
+        drift.push(`${packageName}: the stamp names a file outside the package: ${relative}`)
+        continue
+      }
+      if (!fs.existsSync(source)) {
+        drift.push(`${packageName}/${relative}: shipped by the last build, gone from the sources`)
+      } else if (fileHash(source) !== digest) {
+        drift.push(`${packageName}/${relative}: the sources have changed since the snapshot was built`)
+      }
+      if (!fs.existsSync(vendored)) {
+        drift.push(`${packageName}/${relative}: missing from the snapshot`)
+      } else if (fileHash(vendored) !== digest) {
+        drift.push(`${packageName}/${relative}: the snapshot holds a different version`)
+      }
+    }
+  }
+  return drift
+}
+
+/**
+ * Why a spawn produced no successful exit, in words a reader can act on.
+ *
+ * `result.status` alone cannot say: when the process never started — a missing
+ * or unexecutable vendored interpreter, the single most likely failure on a
+ * fresh checkout — Node reports `status: null` and puts the reason in
+ * `result.error`. Reading only the status turned that into "exit code null",
+ * which names neither the file nor the problem.
+ */
+function describeSpawnFailure(result, executable) {
+  if (result.error) {
+    const code = result.error.code ? `${result.error.code}: ` : ''
+    return `${code}could not run ${executable} (${result.error.message})`
+  }
+  if (result.signal) return `killed by signal ${result.signal}`
+  return `exit code ${result.status}`
+}
+
+function lastLines(text, limit = 3) {
+  if (typeof text !== 'string') return ''
+  const lines = text.trim().split(/\r?\n/).filter(Boolean)
+  return lines.slice(-limit).join(' | ')
+}
+
+/**
+ * Whether the vendored interpreter can actually import the vendored packages.
+ *
+ * The module names come from the stamp, i.e. from what the wheels shipped, so
+ * this list cannot go stale the way a hand-written one did in #706 — where the
+ * gate kept naming a module the gateway's refactor had removed and the app
+ * could not start at all (#732).
+ */
+function vendoredImportDrift({
   python = pythonExecutable(),
   target = sitePackages(),
   backend = path.join(VENDOR_DIR, 'backend'),
-  modules = REQUIRED_VENDOR_IMPORTS,
+  modules,
+  stamp = null,
+  stampPath,
   // Injectable for the same reason rebuildVendor's is: whether ensureVendor
   // rebuilds is a decision about its own branches, and a test of that decision
   // should not depend on a Python runtime being provisioned on the machine.
   spawn = spawnSync,
 } = {}) {
-  if (!fs.existsSync(python) || !fs.existsSync(target)) return false
+  const names = modules ?? Object.keys(stampedPackages(stamp ?? readVendorStamp({ target, stampPath })))
+  if (names.length === 0) return []
+  if (!fs.existsSync(python)) return [`the vendored interpreter is missing at ${python}`]
+  if (!fs.existsSync(target)) return [`there is no vendored site-packages at ${target}`]
   const result = spawn(
     python,
-    ['-c', `import ${modules.join(', ')}`],
+    ['-c', `import ${names.join(', ')}`],
     {
       cwd: REPO_ROOT,
       env: {
@@ -253,7 +284,12 @@ function canImportVendoredPackages({
       encoding: 'utf8',
     },
   )
-  return result.status === 0
+  if (result.status === 0) return []
+  const detail = lastLines(result.stderr)
+  return [
+    `the vendored interpreter cannot import ${names.join(', ')}: `
+    + `${describeSpawnFailure(result, python)}${detail ? ` — ${detail}` : ''}`,
+  ]
 }
 
 function rebuildVendor({
@@ -271,15 +307,21 @@ function rebuildVendor({
     stdio: 'inherit',
   })
   if (result.status !== 0) {
-    throw new Error(`build_vendor.py failed with exit code ${result.status}`)
+    throw new Error(`build_vendor.py did not finish: ${describeSpawnFailure(result, python)}`)
   }
 }
 
 function snapshotDrift(options = {}) {
-  const importFailure = canImportVendoredPackages(options)
-    ? []
-    : ['the vendored interpreter cannot import the SDK packages']
-  return [...importFailure, ...packageSourceDrift(options), ...vendorStampDrift(options)]
+  const { target = sitePackages(), stampPath } = options
+  const stamp = options.stamp ?? readVendorStamp({ target, stampPath })
+  // Without a readable stamp there is no manifest to compare against, so the
+  // missing provenance IS the whole finding: rebuilding is what produces one.
+  const stampProblems = vendorStampDrift({ ...options, stamp })
+  if (stampProblems.length > 0) return stampProblems
+  return [
+    ...vendoredImportDrift({ ...options, stamp }),
+    ...packageSourceDrift({ ...options, stamp }),
+  ]
 }
 
 // Only the first few, so a package-wide rename does not bury the fix under a
@@ -302,6 +344,12 @@ function staleSnapshotAllowed(env = process.env) {
   const value = env[ALLOW_STALE_SNAPSHOT_ENV]
   if (typeof value !== 'string') return false
   return ['1', 'true', 'yes'].includes(value.trim().toLowerCase())
+}
+
+function describeSnapshot(options = {}) {
+  const stamp = options.stamp ?? readVendorStamp(options)
+  if (stamp === null) return 'no provenance stamp'
+  return `sources ${String(stamp.source_digest).slice(0, 12)}, built ${stamp.built_at ?? 'at an unrecorded time'}`
 }
 
 function ensureVendor(options = {}) {
@@ -352,20 +400,20 @@ if (require.main === module) {
 
 module.exports = {
   ALLOW_STALE_SNAPSHOT_ENV,
-  LOCAL_PACKAGE_SOURCES,
   REBUILD_COMMAND,
-  REQUIRED_VENDOR_IMPORTS,
   VENDOR_STAMP_FILENAME,
-  canImportVendoredPackages,
+  VENDOR_STAMP_SCHEMA,
+  describeSpawnFailure,
   ensureVendor,
   localVenvBin,
-  localPackageSourcesAreVendored,
   packageSourceDrift,
   pythonExecutable,
   readVendorStamp,
   rebuildVendor,
   sitePackages,
+  snapshotDrift,
   staleSnapshotAllowed,
   vendorStampDrift,
+  vendoredImportDrift,
   withLocalVenvOnPath,
 }

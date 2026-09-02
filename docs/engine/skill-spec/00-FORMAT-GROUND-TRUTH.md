@@ -8,6 +8,18 @@ supersedes:
   - docs/engine/mvp1/_migration-src/
 ---
 
+## 适用范围边界（2026-09-01）
+
+本文的 `status: FROZEN` **只对已冻结的本仓 engine 代码有效**，即 `packages/graph-agent`。依据是 [`gskill-restructure-decision-2026-08-31.md`](../../design/gskill-restructure-decision-2026-08-31.md) §4.2「engine 的唯一 owner 立即收敛到 graph-skill-runtime」，原文：「`graph-skill-runtime` 即刻起是 engine 的**唯一 owner**。本仓 `packages/graph-agent` **冻结为只读镜像**，只接受『从新仓回灌』这一个方向的变更，不再作为 engine 变更的落点。」
+
+由此得出三条边界：
+
+- 本文仍是本仓 loader/compiler、contract maps、测试 fixture 与 Studio Properties 面板所消费格式的唯一真相源，在本仓内不得被绕过；
+- 本文**不**定义新 engine 的格式。**新格式的权威是新仓 `graph-skill-runtime` 的 `docs/skill-spec/01-PORTABLE-GSKILL-V1.md`**；该文档的当前状态与适用范围以它自身的 frontmatter 为准，本文不复制这些会变的取值。注意两个仓各有一份 `00-FORMAT-GROUND-TRUTH.md`，引用时必须指明是哪一个仓的，本文指的始终是**本仓**这一份；
+- 这里的 `FROZEN` 表示**本文正文不再随新格式演进**（新格式的演进落在新仓），不表示本文是跨仓的当前格式规范。
+
+跨仓指针的实况与本次修订的举证链见同目录 [`README.md`](./README.md) 的「修订记录」。
+
 ## 2026-06-30 Strict Compile Gate Addendum
 
 - `phase_config` is not a legal field or compatibility layer. Agent phase settings are declared directly in `phases/<id>/SKILL.md` frontmatter.

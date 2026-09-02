@@ -215,11 +215,20 @@ function packageSourceDrift({
  * Asking git rather than walking the directory ourselves, because the answer
  * has to be hatchling's answer and hatchling's is derived from the VCS: with
  * the default `ignore-vcs = false` it ships every file under the package
- * directory that the repo does not ignore. So the ignore rules consulted here
- * are literally the same rules, read from the same files, by the tool that
- * owns them — not a second implementation of them (borrowed the way
- * `git status` decides "clean": current bytes, current ignore files, no cached
- * declaration standing in for either).
+ * directory that the tree's `.gitignore` files do not exclude. So the rules
+ * consulted here are read from the same files, by the tool that owns them —
+ * not a second implementation of them (borrowed the way `git status` decides
+ * "clean": current bytes, current ignore files, no cached declaration standing
+ * in for either).
+ *
+ * Hence `--exclude-per-directory=.gitignore` and NOT `--exclude-standard`.
+ * "Standard" is a wider set than hatchling's: it also reads `.git/info/exclude`
+ * and the user's global `core.excludesFile`, both of which are private to one
+ * machine and invisible to a build backend. Measured on this repo: a new
+ * builtin skill named in `.git/info/exclude` was listed by neither
+ * `--exclude-standard` nor, therefore, this gate — while the wheel `uv build`
+ * produced carried it (125 files instead of 124). One developer's local
+ * ignore rule would have gone on hiding an addition from everyone.
  *
  * Where the two answers can differ, they differ SAFELY here. Hatchling also
  * applies its own fixed excludes on top of the VCS ones — verified against a
@@ -231,8 +240,11 @@ function packageSourceDrift({
  * subset can only ever under-report. The two ways that could stop being true —
  * un-ignoring a `*.py[cod]` path inside a package, or adding
  * `include`/`exclude`/`artifacts` to a package's Hatch config — are both pinned
- * by tests in `apps/studio/backend/tests/test_vendor_stamp.py`, so they fail in
- * CI at the change that introduces them rather than at someone's next launch.
+ * pinned by `test_the_wheel_ships_exactly_what_git_lists` in
+ * `apps/studio/backend/tests/test_vendor_stamp.py`: it builds both packages'
+ * wheels for real and asserts the wheel's file set EQUALS this command's, so
+ * any future divergence — in either direction — fails in CI at the change that
+ * introduces it rather than at someone's next launch.
  *
  * No git, no answer, and no answer means the snapshot cannot be vouched for:
  * this fails CLOSED. Every path into this gate is a git checkout driven by
@@ -247,9 +259,11 @@ function sourceAdditions(packageName, sourceRoot, files, runGit = spawnSync) {
     'git',
     // `-z` because git quotes paths with non-ASCII bytes otherwise, and a
     // quoted path would not match the manifest key it is meant to be compared
-    // against. `--cached --others --exclude-standard` = tracked plus untracked
-    // that the ignore files do not cover, i.e. hatchling's input set.
-    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    // against. `--cached --others` = tracked plus untracked; the exclude option
+    // then removes what the tree's own `.gitignore` files remove, and nothing
+    // else. Every `.gitignore` from the repository root down applies, which is
+    // where this repo keeps `__pycache__/` and `*.py[cod]`.
+    ['ls-files', '-z', '--cached', '--others', '--exclude-per-directory=.gitignore'],
     { cwd: sourceRoot, encoding: 'utf8' },
   )
   if (result.error || result.status !== 0) {

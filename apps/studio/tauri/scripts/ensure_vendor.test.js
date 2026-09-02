@@ -705,11 +705,12 @@ test('sourceAdditions asks git, so the repo ignore files are the rules that appl
   assert.doesNotMatch(listed, /__pycache__/)
 })
 
-// The precondition of the check above, asserted on THIS repo rather than on a
-// fixture: hatchling ships the git-listed set minus `__pycache__`/`*.py[cod]`,
-// so the git set may only be a SUBSET of what the wheel carries. It stops being
-// one the moment a package's sources hold a git-listed file hatchling drops —
-// which is what this fails on, in CI, at the change that introduces it.
+// A fast sentinel on THIS repo for the most likely way the gate's precondition
+// breaks: a git-listed file hatchling would drop. It is NOT the pin — it greps
+// for two patterns and would stay green on, say, a force-tracked `.DS_Store`.
+// The pin is `test_the_wheel_ships_exactly_what_git_lists` in
+// `apps/studio/backend/tests/test_vendor_stamp.py`, which builds both wheels
+// and asserts set equality.
 test('git lists nothing inside the SDK packages that a wheel would drop', () => {
   for (const [packageName, root] of [
     ['graph_agent', path.join(REPO, 'packages', 'graph-agent', 'src', 'graph_agent')],
@@ -730,4 +731,35 @@ test('the package data files the app reads at runtime are git-listed', () => {
 
   assert.ok(engine.some((line) => line.startsWith('graph_agent/skills/builtin/md-patch/SKILL.md:')), 'md-patch SKILL.md')
   assert.ok(gateway.some((line) => line.startsWith('graph_agent_gateway/registry/call_methods.json:')), 'call_methods.json')
+})
+
+// `--exclude-standard` would also honour `.git/info/exclude` and the user's
+// global `core.excludesFile`. Neither exists for hatchling, which reads the
+// tree's own `.gitignore` files and nothing else — so a rule in either one
+// hides a file from this gate while the wheel goes on shipping it. Measured on
+// the real repo before this was fixed: a new builtin skill named in
+// `.git/info/exclude` was invisible to the gate, and `uv build` put it in the
+// wheel all the same (125 files against the stamp's 124).
+test('sourceAdditions ignores machine-local exclude rules no wheel can see', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-localignore-'))
+  const sourceRoot = path.join(repo, 'src', 'example_pkg')
+  const skill = path.join(sourceRoot, 'skills', 'builtin', 'new-skill')
+  fs.mkdirSync(skill, { recursive: true })
+  fs.mkdirSync(path.join(sourceRoot, '__pycache__'), { recursive: true })
+  fs.writeFileSync(path.join(repo, '.gitignore'), '*.py[cod]\n__pycache__/\n', 'utf8')
+  fs.writeFileSync(path.join(sourceRoot, '__init__.py'), 'V = 1\n', 'utf8')
+  fs.writeFileSync(path.join(skill, 'SKILL.md'), '# new\n', 'utf8')
+  fs.writeFileSync(path.join(sourceRoot, '__pycache__', 'x.cpython-312.pyc'), 'x', 'utf8')
+  require('node:child_process').spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' })
+  fs.appendFileSync(
+    path.join(repo, '.git', 'info', 'exclude'),
+    '\nsrc/example_pkg/skills/builtin/new-skill/\n',
+    'utf8',
+  )
+
+  const listed = sourceAdditions('example_pkg', sourceRoot, {}).join('\n')
+
+  assert.match(listed, /new-skill\/SKILL\.md/, 'a local ignore rule must not hide what the wheel ships')
+  // The tree's own .gitignore still applies — that one hatchling reads too.
+  assert.doesNotMatch(listed, /__pycache__/)
 })

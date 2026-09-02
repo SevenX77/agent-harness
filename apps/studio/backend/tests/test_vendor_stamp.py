@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import zipfile
 from collections.abc import Iterator
@@ -498,7 +499,11 @@ def test_a_really_locked_snapshot_stops_the_build(
 
 
 def test_neither_sdk_package_narrows_what_hatchling_ships(build_vendor: ModuleType) -> None:
-    """The precondition the launcher gate's addition check rests on.
+    """A fast sentinel for one way the gate's precondition can break.
+
+    It does NOT pin that precondition — only
+    `test_the_wheel_ships_exactly_what_git_lists` does, by building the wheel.
+    This one just fails earlier and more legibly on the most likely change.
 
     That check asks git for the files under a package (`git ls-files --cached
     --others --exclude-standard`) and treats anything the stamp does not list as
@@ -525,3 +530,69 @@ def test_neither_sdk_package_narrows_what_hatchling_ships(build_vendor: ModuleTy
             scopes[f"[tool.hatch.build.targets.{target}]"] = settings
         for where, settings in scopes.items():
             assert not (narrowing & set(settings)), f"{project} {where} narrows the wheel"
+
+
+def git_listed_files(root: Path) -> set[str]:
+    """What the launcher gate's addition check sees under a package root.
+
+    The same command `sourceAdditions` runs in
+    `apps/studio/tauri/scripts/ensure_vendor.js`, kept identical on purpose:
+    the test below is what makes "git's answer is hatchling's answer" a checked
+    fact rather than a claim in a comment.
+    """
+    completed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-per-directory=.gitignore"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return {entry for entry in completed.stdout.split("\0") if entry}
+
+
+@pytest.mark.parametrize(
+    ("project", "module"),
+    [
+        ("packages/graph-agent", "graph_agent"),
+        ("packages/graph-agent-gateway", "graph_agent_gateway"),
+    ],
+)
+def test_the_wheel_ships_exactly_what_git_lists(
+    build_vendor: ModuleType, tmp_path: Path, project: str, module: str
+) -> None:
+    """Build the real wheel and compare its file set to git's, for equality.
+
+    The launcher gate reports every file git lists that the stamp does not, so
+    it is only correct while the wheel carries exactly what git lists. Not a
+    subset in either direction:
+
+    * a file git lists that the wheel drops is drift no rebuild can clear -- the
+      desktop app stops starting at all (P11/#732);
+    * a file the wheel carries that git hides is the blind spot this gate was
+      built to close: it ships stale and nothing says so.
+
+    Both were reachable while the only guards were "no `__pycache__` in git's
+    answer" and "no narrowing keys in the Hatch config". Force-adding a
+    `.DS_Store` satisfies both and still breaks the first; naming a new builtin
+    skill in `.git/info/exclude` satisfies both and still breaks the second.
+    Only building the wheel can tell, so this builds it -- about 5 seconds per
+    package, paid in the same job that already syncs the workspace.
+    """
+    output = tmp_path / module
+    completed = subprocess.run(
+        ["uv", "build", "--wheel", str(REPO_ROOT / project), "-o", str(output)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert completed.returncode == 0, f"uv build failed: {completed.stderr}"
+    wheels = sorted(output.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, got {wheels}"
+
+    shipped = set(build_vendor.wheel_package_files(wheels[0])[module])
+    listed = git_listed_files(REPO_ROOT / project / "src" / module)
+
+    assert shipped == listed, (
+        f"the wheel and the launcher gate disagree about what {module} consists of; "
+        f"only in the wheel: {sorted(shipped - listed)}; only in git: {sorted(listed - shipped)}"
+    )

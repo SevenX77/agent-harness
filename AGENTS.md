@@ -119,8 +119,23 @@ way and nothing drifts onto stray branches/worktrees.
    都致命——hatchling **会**打包包内的点文件(改了照样放行),但**不会**打包被
    `.gitignore` 排除的 `*.py[cod]`(含 `.pyd`),源码树里出现一个就被门当成
    "快照缺文件",重建也补不出来,于是**app 再也起不来**(台账 P11/#732 的形状)。
-   代价是门看不见"源码树新增、上次构建时还不存在"的文件——那需要重新问一次
-   打包后端,只有重建能确定;换来的是**门永远可满足**。
+
+   **"源码里多出来的文件"这一半,问 git,不问我们自己。** 清单只记得上次构建
+   打了什么,所以**纯新增**(新模块、新数据文件、新 builtin skill 目录,且没
+   改动任何既有文件)在清单里查无此物——本仓历史上这种提交真发生过五次。
+   门对每个包的源码目录跑一次
+   `git ls-files -z --cached --others --exclude-standard`,要求这个集合 ⊆ 清单,
+   多出来的报 `<path>: in the sources, not in the snapshot`。这不是又一份平行
+   规则:hatchling 默认 `ignore-vcs = false`,它的选择规则**就是**"包目录下所有
+   没被 VCS 忽略的文件",这里读的是同一批 `.gitignore`、由拥有它们的工具来读。
+   两边唯一的差别是 hatchling 另有一组固定排除(实测:不带任何 `.gitignore` 的
+   项目里,`.runtime-data.json` 与 `lib.so` 进了 wheel,`_native.pyd` 与
+   `__pycache__/*.pyc` 没进),而本仓恰好把这些也 gitignore 了,于是 git 的集合是
+   wheel 的**子集**——子集只会漏报、不会误报。让这个前提失效的两条路(在包内
+   un-ignore 一个 `*.py[cod]`、给包加 `include`/`exclude`/`artifacts`)都有测试钉住,
+   在引入它的那个 PR 上就红。**git 不答就 fail closed**:本仓的开发链路本来就
+   全是 git 原生工具,"git 跑不起来"是机器坏了而不是一种支持的模式,而另一头
+   ——悄悄跳过这项检查——正是这道门要终结的沉默。
    这份戳同时是装出来的 app 唯一能自证"我带的是哪份引擎"的东西(用户机器上没有
    源码树可比),`verify_installed_sidecar.ps1` 拿它**逐文件核对安装目录**:
    `bundle.resources: vendor/**/*` 是个 glob,漏掉一个包内数据文件的话,app

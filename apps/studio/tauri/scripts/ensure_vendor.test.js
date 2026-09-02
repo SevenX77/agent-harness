@@ -20,6 +20,7 @@ const {
   rebuildVendor,
   sitePackages,
   snapshotDrift,
+  sourceAdditions,
   staleSnapshotAllowed,
   vendorStampDrift,
   vendoredImportDrift,
@@ -28,6 +29,9 @@ const {
 
 const PACKAGE_NAME = 'example_pkg'
 const SOURCE_ROOT = 'packages/example/src/example_pkg'
+
+// git -z separates paths with a NUL byte.
+const NUL = String.fromCharCode(0)
 
 function sha256(content) {
   return crypto.createHash('sha256').update(content).digest('hex')
@@ -40,16 +44,21 @@ function writeFile(root, relative, content) {
 }
 
 /**
- * A source tree, a snapshot and the stamp a build would have left behind.
+ * A source tree, a snapshot, the stamp a build would have left behind, and the
+ * answer git would give about that source tree.
  *
  * `shipped` is what the wheel carried — the stamp's manifest is built from it,
  * exactly as `build_vendor.py` builds it from the wheel's own entries. The
  * override maps say how reality differs from that record: a string replaces the
- * file's content on that side, `null` deletes it. `unshipped` puts files in the
- * source tree that the wheel never carried (gitignored build artefacts), which
- * is the case a tree-walking gate got wrong.
+ * file's content on that side, `null` deletes it.
+ *
+ * The last two are the cases a tree-walking gate got wrong, in both
+ * directions. `added` files exist in the sources and git lists them, so no
+ * wheel has carried them yet. `ignored` files exist in the sources and git does
+ * NOT list them (gitignored build artefacts like `_native.pyd`), so demanding
+ * them from the snapshot would be a drift no rebuild could clear.
  */
-function snapshotFixture({ shipped, sources = {}, snapshot = {}, unshipped = {} } = {}) {
+function snapshotFixture({ shipped, sources = {}, snapshot = {}, added = {}, ignored = {} } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-'))
   const repoRoot = path.join(tmp, 'repo')
   const target = path.join(tmp, 'site-packages')
@@ -66,9 +75,13 @@ function snapshotFixture({ shipped, sources = {}, snapshot = {}, unshipped = {} 
     if (inSources !== null) writeFile(sourceRoot, relative, inSources)
     if (inSnapshot !== null) writeFile(vendorRoot, relative, inSnapshot)
   }
-  for (const [relative, content] of Object.entries(unshipped)) {
+  for (const [relative, content] of Object.entries({ ...added, ...ignored })) {
     writeFile(sourceRoot, relative, content)
   }
+  // What `git ls-files --cached --others --exclude-standard` would print for
+  // this source root: everything but the ignored artefacts.
+  const listed = [...Object.keys(shipped), ...Object.keys(added)].join(NUL)
+  const runGit = () => ({ status: 0, stdout: listed })
 
   const stamp = {
     schema: VENDOR_STAMP_SCHEMA,
@@ -84,7 +97,7 @@ function snapshotFixture({ shipped, sources = {}, snapshot = {}, unshipped = {} 
   // `stampContent` and not `stamp`: fixtures are spread straight into option
   // objects, and a `stamp` key there would inject the record and stop the gate
   // from reading the file the test is about.
-  return { repoRoot, target, sourceRoot, vendorRoot, stampContent: stamp }
+  return { repoRoot, target, sourceRoot, vendorRoot, runGit, stampContent: stamp }
 }
 
 test('pythonExecutable resolves the host runtime path', () => {
@@ -149,7 +162,7 @@ test('packageSourceDrift compares a dotfile the wheel ships', () => {
 test('packageSourceDrift ignores a source file the wheel does not ship', () => {
   const fixture = snapshotFixture({
     shipped: { '__init__.py': 'V = 1\n' },
-    unshipped: { '_native.pyd': 'MZ binary', '__pycache__/__init__.cpython-312.pyc': 'compiled' },
+    ignored: { '_native.pyd': 'MZ binary', '__pycache__/__init__.cpython-312.pyc': 'compiled' },
   })
 
   assert.deepEqual(packageSourceDrift(fixture), [])
@@ -158,7 +171,7 @@ test('packageSourceDrift ignores a source file the wheel does not ship', () => {
 test('ensureVendor does not rebuild for a build artefact the wheel never ships', () => {
   const fixture = snapshotFixture({
     shipped: { '__init__.py': 'V = 1\n' },
-    unshipped: { '_native.pyd': 'MZ binary' },
+    ignored: { '_native.pyd': 'MZ binary' },
   })
   const commands = []
 
@@ -247,8 +260,9 @@ test('packageSourceDrift refuses a manifest entry that escapes the package', () 
 
   const drift = packageSourceDrift({ ...fixture, stamp: escaped })
 
-  assert.equal(drift.length, 1)
-  assert.match(drift[0], /outside the package/)
+  // The real `__init__.py` also shows up, as an addition the doctored manifest
+  // no longer records; the assertion here is about the path guard.
+  assert.ok(drift.some((line) => /outside the package/.test(line)), JSON.stringify(drift))
 })
 
 // A snapshot with no provenance is a snapshot nobody can place. On a user's
@@ -619,4 +633,101 @@ test('rebuildVendor names why the interpreter could not be run', () => {
     }),
     /ENOENT.*\/missing\/python/s,
   )
+})
+
+// ── RED (new finding: pure additions are invisible) ─────────────────────────
+function gitStub(files) {
+  return () => ({ status: 0, stdout: files.join(NUL) })
+}
+
+test('RED A: a newly added module that no wheel has shipped yet is drift', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': 'V = 1\n' },
+    added: { 'probe.py': 'X = 1\n' },
+  })
+
+  const drift = packageSourceDrift({ ...fixture, runGit: gitStub(['__init__.py', 'probe.py']) })
+
+  assert.equal(drift.length, 1, `got ${JSON.stringify(drift)}`)
+  assert.match(drift[0], /probe\.py: in the sources, not in the snapshot/)
+})
+
+test('RED B: a newly added builtin skill directory is drift', () => {
+  const fixture = snapshotFixture({
+    shipped: { '__init__.py': '' },
+    added: { 'skills/builtin/new-skill/SKILL.md': '# new\n' },
+  })
+
+  const drift = packageSourceDrift({
+    ...fixture,
+    runGit: gitStub(['__init__.py', 'skills/builtin/new-skill/SKILL.md']),
+  })
+
+  assert.equal(drift.length, 1, `got ${JSON.stringify(drift)}`)
+  assert.match(drift[0], /new-skill\/SKILL\.md: in the sources, not in the snapshot/)
+})
+
+test('RED C: a snapshot cannot be vouched for when git will not answer', () => {
+  const fixture = snapshotFixture({ shipped: { '__init__.py': '' } })
+
+  const drift = packageSourceDrift({
+    ...fixture,
+    runGit: () => ({ status: 128, stderr: 'fatal: not a git repository\n' }),
+  })
+
+  assert.equal(drift.length, 1, `got ${JSON.stringify(drift)}`)
+  assert.match(drift[0], /not a git repository/)
+})
+
+// An empty manifest turns `sourceAdditions` into "print everything git lists",
+// which is what these two tests need: the real command, the real ignore rules.
+const REPO = path.resolve(__dirname, '../../../..')
+
+test('sourceAdditions asks git, so the repo ignore files are the rules that apply', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vendor-gitrepo-'))
+  const sourceRoot = path.join(repo, 'src', 'example_pkg')
+  fs.mkdirSync(path.join(sourceRoot, '__pycache__'), { recursive: true })
+  fs.writeFileSync(path.join(repo, '.gitignore'), '*.py[cod]\n__pycache__/\n', 'utf8')
+  fs.writeFileSync(path.join(sourceRoot, '__init__.py'), 'V = 1\n', 'utf8')
+  fs.writeFileSync(path.join(sourceRoot, '.runtime-data.json'), '{}\n', 'utf8')
+  fs.writeFileSync(path.join(sourceRoot, '_native.pyd'), 'MZ', 'utf8')
+  fs.writeFileSync(path.join(sourceRoot, '__pycache__', 'x.cpython-312.pyc'), 'x', 'utf8')
+  require('node:child_process').spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' })
+
+  const listed = sourceAdditions('example_pkg', sourceRoot, {}).join('\n')
+
+  // Shipped by hatchling and listed by git — including the dotfile.
+  assert.match(listed, /example_pkg\/__init__\.py/)
+  assert.match(listed, /example_pkg\/\.runtime-data\.json/)
+  // Ignored by the repo, therefore never in a wheel: demanding them would be a
+  // drift no rebuild could clear.
+  assert.doesNotMatch(listed, /_native\.pyd/)
+  assert.doesNotMatch(listed, /__pycache__/)
+})
+
+// The precondition of the check above, asserted on THIS repo rather than on a
+// fixture: hatchling ships the git-listed set minus `__pycache__`/`*.py[cod]`,
+// so the git set may only be a SUBSET of what the wheel carries. It stops being
+// one the moment a package's sources hold a git-listed file hatchling drops —
+// which is what this fails on, in CI, at the change that introduces it.
+test('git lists nothing inside the SDK packages that a wheel would drop', () => {
+  for (const [packageName, root] of [
+    ['graph_agent', path.join(REPO, 'packages', 'graph-agent', 'src', 'graph_agent')],
+    ['graph_agent_gateway', path.join(REPO, 'packages', 'graph-agent-gateway', 'src', 'graph_agent_gateway')],
+  ]) {
+    const listed = sourceAdditions(packageName, root, {})
+    assert.ok(listed.length > 50, `${packageName}: git listed ${listed.length} files`)
+    const dropped = listed.filter((line) => /__pycache__|\.py[cod]: /.test(line))
+    assert.deepEqual(dropped, [], `${packageName}: git lists files hatchling would not ship`)
+  }
+})
+
+// The two non-Python files this whole gate exists for have to be in that set,
+// or the addition check would not notice a sibling arriving next to them.
+test('the package data files the app reads at runtime are git-listed', () => {
+  const engine = sourceAdditions('graph_agent', path.join(REPO, 'packages', 'graph-agent', 'src', 'graph_agent'), {})
+  const gateway = sourceAdditions('graph_agent_gateway', path.join(REPO, 'packages', 'graph-agent-gateway', 'src', 'graph_agent_gateway'), {})
+
+  assert.ok(engine.some((line) => line.startsWith('graph_agent/skills/builtin/md-patch/SKILL.md:')), 'md-patch SKILL.md')
+  assert.ok(gateway.some((line) => line.startsWith('graph_agent_gateway/registry/call_methods.json:')), 'call_methods.json')
 })

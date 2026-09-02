@@ -71,7 +71,9 @@ Notes:
   `apps/studio/tauri/scripts/ensure_vendor.js`, which takes the file list the
   last build's wheels actually shipped (recorded in the snapshot's
   `vendor-stamp.json`) and checks every one of them against both your working
-  tree and the snapshot, byte for byte, re-vendoring when they differ. Running
+  tree and the snapshot, byte for byte; it also asks git what the package
+  directories hold now, so a file you ADDED since the last build counts as
+  stale too. Either way it re-vendors. Running
   `build_vendor.py` by hand is for when you want the rebuild
   NOW without restarting, or want to skip the wait at next launch. Either way
   re-warm `.pyc`. See `AGENTS.md` "Workflow Pipeline" step 7 for the exact

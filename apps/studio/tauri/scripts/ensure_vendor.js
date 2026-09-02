@@ -165,7 +165,7 @@ function resolveWithin(root, relative) {
  *
  * The set of files to check comes from the stamp, which records exactly what
  * the wheels shipped (see `wheel_package_files` in `build_vendor.py`). Nothing
- * here walks either tree, and that is the point: any walk needs a rule for
+ * here walks a tree to decide what counts, and that is the point: any walk needs a rule for
  * which files "count", and this gate had one that disagreed with the build
  * backend in BOTH directions — it skipped dotfiles hatchling ships, and it
  * demanded gitignored build artefacts (`*.py[cod]` covers `.pyd`) that
@@ -179,18 +179,19 @@ function resolveWithin(root, relative) {
  * algorithm shared between this file and `build_vendor.py`, only the digests
  * the build already wrote down.
  *
- * What it deliberately does NOT report: files in the source tree that the
- * stamp does not mention. Telling "added since the build" apart from "the
- * wheel never ships this" requires re-deriving hatchling's selection rules
- * here, and that is the defect above. Adding a file to an SDK package is
- * caught in practice through the edit that starts using it; a rebuild remains
- * the only thing that can be sure.
+ * The manifest alone cannot see a file ADDED since the build, though — it
+ * lists what the last wheel carried, and a brand-new module, data file or
+ * builtin skill directory is in neither tree's record. That blind spot is real
+ * and has occurred: five add-only commits in this repo's history would have
+ * left the app running the old snapshot in silence. `sourceAdditions` below
+ * closes it without re-deriving anything.
  */
 function packageSourceDrift({
   target = sitePackages(),
   repoRoot = REPO_ROOT,
   stamp = null,
   stampPath,
+  runGit = spawnSync,
 } = {}) {
   const resolvedStamp = stamp ?? readVendorStamp({ target, stampPath })
   const drift = []
@@ -200,9 +201,70 @@ function packageSourceDrift({
       drift.push(`${packageName}: the stamp names a source root outside the workspace: ${info.source_root}`)
       continue
     }
-    drift.push(...packageDrift(packageName, sourceRoot, path.join(target, packageName), info.files))
+    drift.push(
+      ...packageDrift(packageName, sourceRoot, path.join(target, packageName), info.files),
+      ...sourceAdditions(packageName, sourceRoot, info.files, runGit),
+    )
   }
   return drift
+}
+
+/**
+ * Files the sources hold that the last build's wheel did not carry.
+ *
+ * Asking git rather than walking the directory ourselves, because the answer
+ * has to be hatchling's answer and hatchling's is derived from the VCS: with
+ * the default `ignore-vcs = false` it ships every file under the package
+ * directory that the repo does not ignore. So the ignore rules consulted here
+ * are literally the same rules, read from the same files, by the tool that
+ * owns them — not a second implementation of them (borrowed the way
+ * `git status` decides "clean": current bytes, current ignore files, no cached
+ * declaration standing in for either).
+ *
+ * Where the two answers can differ, they differ SAFELY here. Hatchling also
+ * applies its own fixed excludes on top of the VCS ones — verified against a
+ * real wheel built from a project with no `.gitignore` at all, which shipped
+ * `.runtime-data.json` and `lib.so` but dropped `_native.pyd` and
+ * `__pycache__/*.pyc` — so its shipped set is the git set MINUS
+ * `__pycache__`/`*.py[cod]`. This repo already gitignores exactly those (plus
+ * `*.so`), which makes the git set a subset of what hatchling ships, and a
+ * subset can only ever under-report. The two ways that could stop being true —
+ * un-ignoring a `*.py[cod]` path inside a package, or adding
+ * `include`/`exclude`/`artifacts` to a package's Hatch config — are both pinned
+ * by tests in `apps/studio/backend/tests/test_vendor_stamp.py`, so they fail in
+ * CI at the change that introduces them rather than at someone's next launch.
+ *
+ * No git, no answer, and no answer means the snapshot cannot be vouched for:
+ * this fails CLOSED. Every path into this gate is a git checkout driven by
+ * git-native tooling (`scripts/wt-*.sh`, the PR pipeline), so "git will not
+ * run" is a broken machine rather than a supported mode; and the alternative —
+ * quietly dropping the check that catches added files — is the exact silence
+ * this gate exists to end. `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT=1` remains the
+ * named way through for anyone who needs to start anyway.
+ */
+function sourceAdditions(packageName, sourceRoot, files, runGit = spawnSync) {
+  const result = runGit(
+    'git',
+    // `-z` because git quotes paths with non-ASCII bytes otherwise, and a
+    // quoted path would not match the manifest key it is meant to be compared
+    // against. `--cached --others --exclude-standard` = tracked plus untracked
+    // that the ignore files do not cover, i.e. hatchling's input set.
+    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    { cwd: sourceRoot, encoding: 'utf8' },
+  )
+  if (result.error || result.status !== 0) {
+    const said = lastLines(result.stderr, 1)
+    return [
+      `${packageName}: cannot ask git which files the sources hold, so the snapshot cannot be `
+      + `checked for additions: ${describeSpawnFailure(result, 'git')}${said ? ` — ${said}` : ''}`,
+    ]
+  }
+  return (result.stdout ?? '')
+    .split('\0')
+    .filter(Boolean)
+    .filter((relative) => !Object.hasOwn(files, relative))
+    .sort(byCodeUnit)
+    .map((relative) => `${packageName}/${relative}: in the sources, not in the snapshot`)
 }
 
 // Code-unit order rather than `localeCompare`: the same snapshot has to produce
@@ -402,6 +464,7 @@ function ensureVendor(options = {}) {
         'engine/gateway code that is not in your working tree. Still wrong:',
         summariseDrift(remaining),
         `Rebuild by hand to see the failure: ${REBUILD_COMMAND}`,
+        `Or start on the snapshot as it is: ${ALLOW_STALE_SNAPSHOT_ENV}=1`,
       ].join('\n'),
     )
   }
@@ -432,6 +495,7 @@ module.exports = {
   rebuildVendor,
   sitePackages,
   snapshotDrift,
+  sourceAdditions,
   staleSnapshotAllowed,
   vendorStampDrift,
   vendoredImportDrift,

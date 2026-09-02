@@ -495,3 +495,33 @@ def test_a_really_locked_snapshot_stops_the_build(
     with locked.open("rb"):
         with pytest.raises(SystemExit, match="close it and run this again"):
             build_vendor.build_vendor(python=Path("python"), target=target)
+
+
+def test_neither_sdk_package_narrows_what_hatchling_ships(build_vendor: ModuleType) -> None:
+    """The precondition the launcher gate's addition check rests on.
+
+    That check asks git for the files under a package (`git ls-files --cached
+    --others --exclude-standard`) and treats anything the stamp does not list as
+    "added since the build". It is sound only while hatchling ships every
+    git-listed file: hatchling's defaults drop `__pycache__`/`*.py[cod]` (both
+    already gitignored here) and otherwise take the whole package directory
+    minus VCS-ignored files.
+
+    `include` / `exclude` / `only-include` / `artifacts` in a package's Hatch
+    config would break that: the wheel would stop carrying a file git still
+    lists, the gate would report an addition, a rebuild would not clear it, and
+    the desktop app would refuse to start (P11/#732). Failing here means the
+    change that introduces such a key is told, in CI, that the gate needs
+    updating with it.
+    """
+    narrowing = {"include", "exclude", "only-include", "artifacts"}
+    for project in ("packages/graph-agent", "packages/graph-agent-gateway"):
+        config = build_vendor.tomllib.loads(
+            (REPO_ROOT / project / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        build = config.get("tool", {}).get("hatch", {}).get("build", {})
+        scopes = {"[tool.hatch.build]": build}
+        for target, settings in build.get("targets", {}).items():
+            scopes[f"[tool.hatch.build.targets.{target}]"] = settings
+        for where, settings in scopes.items():
+            assert not (narrowing & set(settings)), f"{project} {where} narrows the wheel"

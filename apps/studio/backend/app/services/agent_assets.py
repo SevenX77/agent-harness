@@ -10,9 +10,11 @@ This tree is NOT the assets' owner. The single owner is the
 ``graph-skill-runtime`` package's MoirAI bundle (决议
 ``docs/design/gskill-restructure-decision-2026-08-31.md`` §4.6-2); this
 directory is the reader copy Studio still executes against until the engine
-cutover. ``agent_asset_owners`` records both owners' pinned identities and
-verifies them, which is why the fingerprint below is deliberately described as
-"the tree this backend reads" rather than "the assets' fingerprint".
+cutover. ``agent_asset_owners`` verifies THIS tree against its pin and keeps a
+transcribed provenance record of the upstream bundle, which it cannot verify
+because it holds no copy of it. That asymmetry is why the fingerprint below is
+deliberately described as "the tree this backend reads" rather than "the assets'
+fingerprint".
 
 Fail-loud contract: a missing file is reported together with every other
 missing file in one diagnostic, so a broken package surfaces as a single
@@ -163,9 +165,10 @@ def fingerprint_of(root: Path) -> str:
     """8-hex short form of the tree digest owned by ``agent_asset_owners``, so a
     change in ANY layer (roles/manual/contexts/knowledge/skills/map) shifts it.
 
-    One digest algorithm, one owner: the long form is what the cross-owner record
-    pins, and this is its first eight characters. Keeping a second algorithm here
-    would let the echoed value and the pinned value disagree about the same tree.
+    One digest algorithm, computed in one place (``agent_asset_owners``): the
+    long form is what the gate compares against the pin, and this is its first
+    eight characters. A second algorithm here would let the value echoed to the
+    user and the value the gate checks disagree about the very same tree.
     """
 
     from app.services.agent_asset_owners import tree_digest
@@ -180,9 +183,13 @@ def assets_fingerprint() -> str:
     ``context_resolved`` provenance label.
 
     It is deliberately not "the MoirAI assets' fingerprint": this tree is the
-    retiring reader copy, and the authoritative owner is the
+    retiring reader copy, and the assets' single owner is the
     ``graph-skill-runtime`` bundle. ``agent_asset_owners.provenance_label()``
     is what states both, and it is what the event echoes.
+
+    Memoized because the echo is built once per turn but the bytes it describes
+    only change when the process is restarted against a different tree — one
+    hash of ~35 files per process, paid on the first turn.
     """
 
     _ensure_complete()

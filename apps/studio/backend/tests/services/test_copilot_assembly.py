@@ -4,8 +4,10 @@ and the assets@ fingerprint echo. Replaces the copilot-rules chain."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
+import pytest
 from app.services import agent_asset_owners, agent_assets, copilot
 from claude_agent_sdk import PermissionResultAllow
 
@@ -174,17 +176,51 @@ def test_materialize_copies_agents_skills_into_workspace(tmp_path: Path) -> None
 def test_context_resolved_event_echoes_the_cross_owner_provenance() -> None:
     """批B′ 第 4 阶段:回显不能只说"我吃了一棵树的什么指纹"。
 
-    这棵树是**即将退役的读者副本**,权威 owner 是 graph-skill-runtime 的资产包。
-    只回显 `assets@<hex>` 会被读成"这就是 MoirAI 资产的身份",而那正是旧机制
-    给出的错误安心感。所以事件同时说出:实际读到的树,以及权威 owner 与其版本。
+    这棵树是**即将退役的读者副本**,资产的单一 owner 是 graph-skill-runtime 的
+    资产包。只回显 `assets@<hex>` 会被读成"这就是 MoirAI 资产的身份",而那正是
+    旧机制给出的错误安心感。所以事件同时说出:本次实际读到的树,以及登记在册的
+    上游 owner 与其版本锚。
     """
 
     event = copilot._context_resolved_event("skill-a")
 
     assert f"assets@{agent_assets.assets_fingerprint()}" in event.summary
     assert agent_asset_owners.provenance_label() in event.summary
-    assert agent_asset_owners.authoritative_owner().owner_id in event.summary
+    assert agent_asset_owners.UPSTREAM_RECORD.owner_id in event.summary
+    assert agent_asset_owners.UPSTREAM_RECORD.asset_version in event.summary
     assert event.detail == "(no request context)"
+
+
+def test_context_resolved_echo_follows_the_deployed_tree_not_the_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """部署树漂移后,事件回显必须报新指纹。
+
+    回显存在的全部理由是让人看见这一轮**实际**注入了什么。若它报的是登记常量,
+    那么装出去的那棵树被改过之后,服务读新字节、事件报旧指纹——唯一能暴露漂移的
+    那个面,恰好成了掩盖漂移的面。这条测试把"事件跟着字节走"钉在事件这一层,
+    而不是只钉在 `provenance_label()` 上。
+    """
+
+    clone = tmp_path / "agents"
+    shutil.copytree(agent_assets.agents_dir(), clone)
+    agent_assets.clear_caches()
+    monkeypatch.setattr(agent_assets, "_AGENTS_DIR", clone)
+    try:
+        before = copilot._context_resolved_event("skill-a").summary
+
+        target = clone / "contexts" / "panel.md"
+        target.write_bytes(target.read_bytes() + b"\ndrifted after deployment\n")
+        agent_assets.clear_caches()
+
+        after = copilot._context_resolved_event("skill-a").summary
+
+        assert after != before, "部署树变了而事件回显没变"
+        assert agent_asset_owners.LOCAL_TREE.tree_digest[:8] not in after
+        assert f"assets@{agent_assets.assets_fingerprint()}" in after
+    finally:
+        monkeypatch.undo()
+        agent_assets.clear_caches()
 
 
 def test_copilot_rules_chain_is_gone() -> None:

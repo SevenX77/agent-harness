@@ -74,8 +74,9 @@ Notes:
   tree and the snapshot, byte for byte; it also asks git (`ls-files
   --exclude-per-directory=.gitignore`, the same ignore files hatchling reads)
   what the package directories hold now, so a file you ADDED since the last
-  build counts as stale too — unless your own `.git/info/exclude` or global
-  ignore file hides it from git, which is deliberately NOT consulted. Either
+  build counts as stale too — even one your own `.git/info/exclude` or global
+  ignore file covers, because those are machine-private rules the wheel has
+  never heard of and this check deliberately does not read them. Either
   way it re-vendors. Running
   `build_vendor.py` by hand is for when you want the rebuild
   NOW without restarting, or want to skip the wait at next launch. Either way

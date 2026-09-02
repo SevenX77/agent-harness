@@ -78,8 +78,8 @@ function snapshotFixture({ shipped, sources = {}, snapshot = {}, added = {}, ign
   for (const [relative, content] of Object.entries({ ...added, ...ignored })) {
     writeFile(sourceRoot, relative, content)
   }
-  // What `git ls-files --cached --others --exclude-standard` would print for
-  // this source root: everything but the ignored artefacts.
+  // What `git ls-files --cached --others --exclude-per-directory=.gitignore`
+  // would print for this source root: everything but the ignored artefacts.
   const listed = [...Object.keys(shipped), ...Object.keys(added)].join(NUL)
   const runGit = () => ({ status: 0, stdout: listed })
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -33,6 +34,13 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 BUILD_VENDOR_PATH = REPO_ROOT / "apps" / "studio" / "backend" / "scripts" / "build_vendor.py"
+ENSURE_VENDOR_PATH = REPO_ROOT / "apps" / "studio" / "tauri" / "scripts" / "ensure_vendor.js"
+
+# The launcher gate's own argument list, repeated here because a Python test
+# cannot call into JavaScript. `test_the_git_command_is_the_gates_own` below
+# reads it back out of `ensure_vendor.js` and fails if the two ever diverge,
+# so this copy cannot quietly stop describing the command under test.
+GIT_LS_FILES_ARGS = ["ls-files", "-z", "--cached", "--others", "--exclude-per-directory=.gitignore"]
 
 
 def load_build_vendor() -> ModuleType:
@@ -506,8 +514,8 @@ def test_neither_sdk_package_narrows_what_hatchling_ships(build_vendor: ModuleTy
     This one just fails earlier and more legibly on the most likely change.
 
     That check asks git for the files under a package (`git ls-files --cached
-    --others --exclude-standard`) and treats anything the stamp does not list as
-    "added since the build". It is sound only while hatchling ships every
+    --others --exclude-per-directory=.gitignore`) and treats anything the stamp
+    does not list as "added since the build". It is sound only while hatchling ships every
     git-listed file: hatchling's defaults drop `__pycache__`/`*.py[cod]` (both
     already gitignored here) and otherwise take the whole package directory
     minus VCS-ignored files.
@@ -536,12 +544,13 @@ def git_listed_files(root: Path) -> set[str]:
     """What the launcher gate's addition check sees under a package root.
 
     The same command `sourceAdditions` runs in
-    `apps/studio/tauri/scripts/ensure_vendor.js`, kept identical on purpose:
-    the test below is what makes "git's answer is hatchling's answer" a checked
-    fact rather than a claim in a comment.
+    `apps/studio/tauri/scripts/ensure_vendor.js` -- not by convention but by
+    assertion, see `test_the_git_command_is_the_gates_own`. That is what makes
+    "git's answer is hatchling's answer" a checked fact rather than a claim in
+    a comment.
     """
     completed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-per-directory=.gitignore"],
+        ["git", *GIT_LS_FILES_ARGS],
         cwd=root,
         check=True,
         capture_output=True,
@@ -596,3 +605,23 @@ def test_the_wheel_ships_exactly_what_git_lists(
         f"the wheel and the launcher gate disagree about what {module} consists of; "
         f"only in the wheel: {sorted(shipped - listed)}; only in git: {sorted(listed - shipped)}"
     )
+
+
+def test_the_git_command_is_the_gates_own(build_vendor: ModuleType) -> None:
+    """The command this file measures must be the command the gate runs.
+
+    `test_the_wheel_ships_exactly_what_git_lists` only proves anything about the
+    launcher gate while both sides ask git the same question. Python cannot call
+    the gate's JavaScript, so the argument list is copied -- and a copy nobody
+    checks is exactly the seam that produced P11/#732 (a hand-maintained module
+    tree in JS that the Python side outgrew).
+
+    Reading the literal back out of the source closes it without adding a Node
+    dependency to this suite: change the flags in `ensure_vendor.js` and this
+    fails until they are changed here too.
+    """
+    source = ENSURE_VENDOR_PATH.read_text(encoding="utf-8")
+    literals = re.findall(r"\[\s*'ls-files'[^\]]*\]", source)
+
+    assert len(literals) == 1, f"expected one git ls-files argument list, found {len(literals)}"
+    assert re.findall(r"'([^']*)'", literals[0]) == GIT_LS_FILES_ARGS

@@ -246,6 +246,15 @@ function packageSourceDrift({
  * any future divergence — in either direction — fails in CI at the change that
  * introduces it rather than at someone's next launch.
  *
+ * That equality is a fact about THIS repo's files, not a proof that the two
+ * read every pattern the same way — they do not, in two measured shapes. A
+ * repo-root negation spelled as a full path (`!packages/…/reincluded.data`)
+ * re-includes for git while hatchling, reading that line relative to the
+ * package's own project root, still drops the file; a `.gitignore` nested
+ * inside a package hides a file from git while hatchling packs it anyway.
+ * Neither exists here, and the equality test is what stops one from arriving
+ * unnoticed.
+ *
  * No git, no answer, and no answer means the snapshot cannot be vouched for:
  * this fails CLOSED. Every path into this gate is a git checkout driven by
  * git-native tooling (`scripts/wt-*.sh`, the PR pipeline), so "git will not

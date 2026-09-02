@@ -200,28 +200,47 @@ function packageSourceDrift({
       drift.push(`${packageName}: the stamp names a source root outside the workspace: ${info.source_root}`)
       continue
     }
-    const vendorRoot = path.join(target, packageName)
-    for (const relative of Object.keys(info.files).sort()) {
-      const digest = info.files[relative]
-      const source = resolveWithin(sourceRoot, relative)
-      const vendored = resolveWithin(vendorRoot, relative)
-      if (source === null || vendored === null) {
-        drift.push(`${packageName}: the stamp names a file outside the package: ${relative}`)
-        continue
-      }
-      if (!fs.existsSync(source)) {
-        drift.push(`${packageName}/${relative}: shipped by the last build, gone from the sources`)
-      } else if (fileHash(source) !== digest) {
-        drift.push(`${packageName}/${relative}: the sources have changed since the snapshot was built`)
-      }
-      if (!fs.existsSync(vendored)) {
-        drift.push(`${packageName}/${relative}: missing from the snapshot`)
-      } else if (fileHash(vendored) !== digest) {
-        drift.push(`${packageName}/${relative}: the snapshot holds a different version`)
-      }
-    }
+    drift.push(...packageDrift(packageName, sourceRoot, path.join(target, packageName), info.files))
   }
   return drift
+}
+
+// Code-unit order rather than `localeCompare`: the same snapshot has to produce
+// the same lines in the same order on every machine, and locale collation is
+// the one thing here that would not.
+function byCodeUnit(left, right) {
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}
+
+// One package's recorded files, checked on both sides.
+function packageDrift(packageName, sourceRoot, vendorRoot, files) {
+  const drift = []
+  for (const relative of Object.keys(files).sort(byCodeUnit)) {
+    // Validated once, against one root: what makes a path safe is the relative
+    // half (no `..`, not absolute), and both roots take the same one.
+    if (resolveWithin(sourceRoot, relative) === null) {
+      drift.push(`${packageName}: the stamp names a file outside the package: ${relative}`)
+      continue
+    }
+    const named = `${packageName}/${relative}`
+    drift.push(
+      ...fileDrift(path.join(sourceRoot, relative), files[relative],
+        `${named}: shipped by the last build, gone from the sources`,
+        `${named}: the sources have changed since the snapshot was built`),
+      ...fileDrift(path.join(vendorRoot, relative), files[relative],
+        `${named}: missing from the snapshot`,
+        `${named}: the snapshot holds a different version`),
+    )
+  }
+  return drift
+}
+
+// How one file fails the digest the build recorded for it, on one side.
+function fileDrift(file, digest, missing, differs) {
+  if (!fs.existsSync(file)) return [missing]
+  if (fileHash(file) !== digest) return [differs]
+  return []
 }
 
 /**
@@ -285,10 +304,11 @@ function vendoredImportDrift({
     },
   )
   if (result.status === 0) return []
-  const detail = lastLines(result.stderr)
+  const said = lastLines(result.stderr)
+  const detail = said ? ` — ${said}` : ''
   return [
     `the vendored interpreter cannot import ${names.join(', ')}: `
-    + `${describeSpawnFailure(result, python)}${detail ? ` — ${detail}` : ''}`,
+    + `${describeSpawnFailure(result, python)}${detail}`,
   ]
 }
 

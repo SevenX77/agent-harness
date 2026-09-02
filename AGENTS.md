@@ -102,6 +102,55 @@ way and nothing drifts onto stray branches/worktrees.
    — local workspace packages are vendored as built wheels, so their source
    changing is exactly the case that needs a rebuild too).
 
+   **一道门守着"忘了重建"这件事,不靠人记得。** `beforeDevCommand` 里的
+   `apps/studio/tauri/scripts/ensure_vendor.js` 在每次 dev 启动时逐字节 sha256
+   核对快照,不一致就自己跑 `build_vendor.py` 重建,重建后仍不一致才**响亮
+   失败**并在报错里给出重建命令。所以上面那串手动命令的用途只剩**app 正在
+   运行、你想立刻重建**(Windows 锁 `.pyd`),以及想省掉下次启动那几分钟;
+   正常路径是**关掉 app、重启 launcher**,门自己会补。**逃生口**
+   `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT=1`:明知快照过期也要启动(拿旧快照复现
+   缺陷),门改为打印过期文件清单 + 重建命令后放行,**不静默**。
+
+   **要核对哪些文件,由 wheel 说了算,门不自己判断。** `build_vendor.py` 构建
+   完两个本地 wheel 后,直接**枚举 wheel 里的条目**得到"这个包由哪些文件构成
+   加每个文件的 sha256",连同每个包的源码目录(仓库相对路径)一起写进快照内部
+   的 `vendor-stamp.json`;门只按这份清单逐个比对**源码树**与**快照**两侧。
+   这不是细节洁癖:任何一份自己写的筛选规则都会和 hatchling 打架,而且两个方向
+   都致命——hatchling **会**打包包内的点文件(改了照样放行),但**不会**打包被
+   `.gitignore` 排除的 `*.py[cod]`(含 `.pyd`),源码树里出现一个就被门当成
+   "快照缺文件",重建也补不出来,于是**app 再也起不来**(台账 P11/#732 的形状)。
+
+   **"源码里多出来的文件"这一半,问 git,不问我们自己。** 清单只记得上次构建
+   打了什么,所以**纯新增**(新模块、新数据文件、新 builtin skill 目录,且没
+   改动任何既有文件)在清单里查无此物——本仓历史上这种提交真发生过五次。
+   门对每个包的源码目录跑一次
+   `git ls-files -z --cached --others --exclude-per-directory=.gitignore`,要求
+   这个集合 ⊆ 清单,多出来的报 `<path>: in the sources, not in the snapshot`。
+   这不是又一份平行规则:hatchling 默认 `ignore-vcs = false`,它的选择规则**就是**
+   "包目录下所有没被树内 `.gitignore` 排除的文件",这里读的是**同一批文件**、由
+   拥有它们的工具来读。
+
+   **刻意不用 `--exclude-standard`**:它的忽略域比 hatchling 大,还会读
+   `.git/info/exclude` 与全局 `core.excludesFile`——这两处是**本机私有规则**,
+   打包后端根本看不见。实测:把一个新 builtin skill 写进 `.git/info/exclude`,
+   `--exclude-standard` 就不列它、门也就看不见,而真 `uv build` 出来的 wheel
+   照装不误(125 个文件 vs 戳里的 124)。一个人的本地忽略规则会替所有人隐藏一次新增。
+
+   **这个前提由一条真构建的测试钉住**,不是靠注释:
+   `test_the_wheel_ships_exactly_what_git_lists` 对两个包各跑一次 `uv build --wheel`,
+   把 wheel 里的路径集合与上面那条 git 命令的集合断言**相等**(不是子集),
+   两包各约 5 秒,跑在已经必过的 studio backend 套件里。此前那两条(JS 侧 grep
+   `__pycache__`/`*.py[cod]`、Python 侧禁四个 Hatch 键)只是快速前哨:强制跟踪一个
+   `.DS_Store` 两条都绿,而 git 列出、wheel 排除,门会永久红。
+
+   **git 不答就 fail closed**:本仓的开发链路本来就全是 git 原生工具,
+   "git 跑不起来"是机器坏了而不是一种支持的模式,而另一头——悄悄跳过这项检查
+   ——正是这道门要终结的沉默。
+   这份戳同时是装出来的 app 唯一能自证"我带的是哪份引擎"的东西(用户机器上没有
+   源码树可比),`verify_installed_sidecar.ps1` 拿它**逐文件核对安装目录**:
+   `bundle.resources: vendor/**/*` 是个 glob,漏掉一个包内数据文件的话,app
+   照样 import 成功,直到用户那边读到它才炸。
+
 **Repo settings backing this** (already configured): `main` protected with
 `enforce_admins` on (no bypass), PR required with **0** approvals, the 7 checks
 above required; squash-only merges; auto-merge and delete-branch-on-merge on.

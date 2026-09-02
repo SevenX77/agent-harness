@@ -1,0 +1,649 @@
+"""The vendor snapshot must be able to say what it was built from.
+
+`apps/studio/tauri/vendor/site-packages` is a frozen copy of the two SDK
+packages that the desktop app's Python sidecar imports at runtime -- in dev
+builds too. On a developer's machine the launcher gate
+(`apps/studio/tauri/scripts/ensure_vendor.js`) has to answer "is this snapshot
+stale?"; on a user's machine there is no working tree at all, so the snapshot is
+anonymous: nothing in it, or in a bug report about it, can name the source state
+it came from.
+
+These tests cover the stamp `build_vendor.py` writes to close both gaps, and the
+two properties that make it worth writing:
+
+  * its file list comes from the wheels the build actually produced, so neither
+    the build nor the gate has to hold an opinion about which files a package
+    consists of -- an opinion that was wrong in both directions before;
+  * its digests are a function of file CONTENT only, so the same sources produce
+    the same value on any machine, in any directory, at any time.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import re
+import subprocess
+import sys
+import zipfile
+from collections.abc import Iterator
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+BUILD_VENDOR_PATH = REPO_ROOT / "apps" / "studio" / "backend" / "scripts" / "build_vendor.py"
+ENSURE_VENDOR_PATH = REPO_ROOT / "apps" / "studio" / "tauri" / "scripts" / "ensure_vendor.js"
+
+# The launcher gate's own argument list, repeated here because a Python test
+# cannot call into JavaScript. `test_the_git_command_is_the_gates_own` below
+# reads the `const GIT_LS_FILES_ARGS` declaration back out of
+# `ensure_vendor.js` and fails if the two ever diverge, so this copy cannot
+# quietly stop describing the command under test.
+GIT_LS_FILES_ARGS = ["ls-files", "-z", "--cached", "--others", "--exclude-per-directory=.gitignore"]
+
+
+def load_build_vendor() -> ModuleType:
+    """Import the vendoring script by path.
+
+    It lives under `scripts/`, which is deliberately not an importable package
+    (nothing in the app may depend on a build script), so there is no module
+    name to import it by.
+    """
+    spec = importlib.util.spec_from_file_location("studio_build_vendor", BUILD_VENDOR_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def build_vendor() -> ModuleType:
+    return load_build_vendor()
+
+
+def make_wheel(path: Path, entries: dict[str, bytes]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, payload in entries.items():
+            archive.writestr(name, payload)
+    return path
+
+
+def write_project(root: Path, packages: list[str]) -> Path:
+    """A minimal hatchling project declaring where its wheel packages come from."""
+    root.mkdir(parents=True, exist_ok=True)
+    declared = ", ".join(f'"{entry}"' for entry in packages)
+    (root / "pyproject.toml").write_text(
+        "[build-system]\n"
+        'requires = ["hatchling"]\n'
+        'build-backend = "hatchling.build"\n\n'
+        "[tool.hatch.build.targets.wheel]\n"
+        f"packages = [{declared}]\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+# ── the expected file set comes from the wheel, not from a walk of the tree ──
+
+
+def test_wheel_package_files_lists_what_the_wheel_ships(
+    build_vendor: ModuleType, tmp_path: Path
+) -> None:
+    """Including files a source-tree walk would have skipped.
+
+    Verified against a real hatchling wheel: a package holding
+    `.runtime-data.json`, `CHANGELOG.md`, `_native.pyd` and `__pycache__/`
+    produced a wheel carrying the first two only -- hatchling ships package
+    dotfiles and honours the repo's VCS ignores (`*.py[cod]` covers `.pyd`).
+    Both halves of that are the opposite of what the launcher gate used to
+    assume, which is why the file set is read off the wheel instead.
+    """
+    wheel = make_wheel(
+        tmp_path / "example-1.0-py3-none-any.whl",
+        {
+            "example_pkg/__init__.py": b"V = 1\n",
+            "example_pkg/.runtime-data.json": b'{"v": 1}\n',
+            "example_pkg/registry/call_methods.json": b'{"transform": "none"}\n',
+            "example_pkg-1.0.dist-info/METADATA": b"Name: example\n",
+            "example_pkg-1.0.dist-info/RECORD": b"example_pkg/__init__.py,,\n",
+        },
+    )
+
+    files = build_vendor.wheel_package_files(wheel)
+
+    assert set(files) == {"example_pkg"}
+    assert set(files["example_pkg"]) == {
+        "__init__.py",
+        ".runtime-data.json",
+        "registry/call_methods.json",
+    }
+    assert files["example_pkg"]["__init__.py"] == build_vendor.hashlib.sha256(b"V = 1\n").hexdigest()
+
+
+def test_wheel_package_files_groups_several_packages(
+    build_vendor: ModuleType, tmp_path: Path
+) -> None:
+    wheel = make_wheel(
+        tmp_path / "two-1.0-py3-none-any.whl",
+        {"one/__init__.py": b"", "two/__init__.py": b"", "two-1.0.dist-info/WHEEL": b""},
+    )
+
+    assert set(build_vendor.wheel_package_files(wheel)) == {"one", "two"}
+
+
+def test_wheel_package_files_refuses_a_bare_top_level_module(
+    build_vendor: ModuleType, tmp_path: Path
+) -> None:
+    """Fail at the boundary rather than guess.
+
+    A wheel shipping a top-level module file has no package directory to map
+    back to a source directory, and a guess would put a wrong `source_root` in
+    the stamp -- where the launcher gate would compare the snapshot against a
+    tree that is not its source.
+    """
+    wheel = make_wheel(tmp_path / "bare-1.0-py3-none-any.whl", {"bare.py": b"V = 1\n"})
+
+    with pytest.raises(SystemExit, match="bare.py"):
+        build_vendor.wheel_package_files(wheel)
+
+
+# ── the digest that makes a snapshot placeable across machines ──────────────
+
+
+def test_manifest_digest_is_content_addressed(build_vendor: ModuleType) -> None:
+    """Same files, built elsewhere at another time -> same digest.
+
+    Borrowed from Bazel/Nix input hashing: a build input is identified by what
+    it contains, never by where it sits or when it was touched. Without this the
+    stamp could not be compared across machines at all.
+    """
+    first = {"__init__.py": "a" * 64, "data/table.json": "b" * 64}
+    second = {"data/table.json": "b" * 64, "__init__.py": "a" * 64}
+
+    assert build_vendor.manifest_digest(first) == build_vendor.manifest_digest(second)
+
+
+def test_manifest_digest_moves_for_a_changed_data_file(build_vendor: ModuleType) -> None:
+    """A data file is part of the snapshot, not a decoration.
+
+    `graph_agent_gateway/registry/call_methods.json` is the provider
+    call-method routing table, read at runtime through `importlib.resources`. A
+    digest that ignored it would attest to a snapshot state it cannot see.
+    """
+    before = build_vendor.manifest_digest({"registry/call_methods.json": "a" * 64})
+    after = build_vendor.manifest_digest({"registry/call_methods.json": "c" * 64})
+
+    assert before != after
+
+
+def test_manifest_digest_notices_a_renamed_file(build_vendor: ModuleType) -> None:
+    """Paths are part of the digest, not just the bag of contents."""
+    before = build_vendor.manifest_digest({"resolver.py": "a" * 64})
+    after = build_vendor.manifest_digest({"resolve.py": "a" * 64})
+
+    assert before != after
+
+
+# ── where a wheel's package came from is read from the project's own config ──
+
+
+def test_hatch_package_dirs_reads_the_projects_own_mapping(
+    build_vendor: ModuleType, tmp_path: Path
+) -> None:
+    """Ask the authority instead of assuming `src/<module name>`.
+
+    `[tool.hatch.build.targets.wheel] packages` is the mapping hatchling itself
+    uses, and distribution name and module name are separate facts
+    (`graph-agent` -> `graph_agent`).
+    """
+    project = write_project(tmp_path / "graph-agent", ["src/graph_agent"])
+
+    assert build_vendor.hatch_package_dirs(project) == {"graph_agent": "src/graph_agent"}
+
+
+def test_hatch_package_dirs_refuses_a_project_that_declares_none(
+    build_vendor: ModuleType, tmp_path: Path
+) -> None:
+    project = tmp_path / "plain"
+    project.mkdir()
+    (project / "pyproject.toml").write_text('[project]\nname = "plain"\n', encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="tool.hatch.build.targets.wheel"):
+        build_vendor.hatch_package_dirs(project)
+
+
+def test_the_real_workspace_packages_declare_where_their_sources_live(
+    build_vendor: ModuleType,
+) -> None:
+    """The rule above must hold for THIS repo, not just a fixture.
+
+    A rule that only works on synthetic trees would leave the shipped stamp
+    pointing at directories that do not exist, and the launcher gate would then
+    report every file of every package as gone from the sources -- drift no
+    rebuild could clear.
+    """
+    for project, module in (
+        ("packages/graph-agent", "graph_agent"),
+        ("packages/graph-agent-gateway", "graph_agent_gateway"),
+    ):
+        dirs = build_vendor.hatch_package_dirs(REPO_ROOT / project)
+        assert module in dirs
+        assert (REPO_ROOT / project / dirs[module] / "__init__.py").is_file()
+
+
+def test_install_local_wheels_records_a_workspace_relative_source_root(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp entry the launcher gate resolves against the repo root.
+
+    `uv` is stubbed out: what is under test is the mapping from "this wheel came
+    from that project" to "this package's sources live there", not uv's ability
+    to build a wheel.
+    """
+    workspace = tmp_path / "workspace"
+    write_project(workspace / "packages" / "example", ["src/example_pkg"])
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        if command[1] != "build":
+            return
+        out = Path(command[command.index("-o") + 1])
+        make_wheel(out / "example-1.0-py3-none-any.whl", {"example_pkg/__init__.py": b"V = 1\n"})
+
+    monkeypatch.setattr(build_vendor.subprocess, "run", fake_run)
+
+    packages = build_vendor.install_local_wheels(
+        python=Path("python"),
+        local_paths=["./packages/example"],
+        target=tmp_path / "site-packages",
+        root=workspace,
+    )
+
+    assert packages["example_pkg"]["source_root"] == "packages/example/src/example_pkg"
+    assert packages["example_pkg"]["files"] == {
+        "__init__.py": build_vendor.hashlib.sha256(b"V = 1\n").hexdigest()
+    }
+
+
+# ── the stamp itself ────────────────────────────────────────────────────────
+
+
+def package_entry(build_vendor: ModuleType, name: str, files: dict[str, str]) -> dict[str, object]:
+    return {
+        "source_root": f"packages/{name}/src/{name}",
+        "digest": build_vendor.manifest_digest(files),
+        "files": files,
+    }
+
+
+def test_build_stamp_records_every_package_and_one_combined_digest(
+    build_vendor: ModuleType,
+) -> None:
+    engine = package_entry(build_vendor, "graph_agent", {"__init__.py": "a" * 64})
+    gateway = package_entry(build_vendor, "graph_agent_gateway", {"__init__.py": "b" * 64})
+
+    stamp = build_vendor.build_stamp(
+        packages={"graph_agent_gateway": gateway, "graph_agent": engine},
+        built_at="2026-09-01T00:00:00+00:00",
+        python_version="3.12.13",
+        target_triple="x86_64-pc-windows-msvc",
+    )
+
+    assert stamp["schema"] == build_vendor.STAMP_SCHEMA
+    assert list(stamp["packages"]) == ["graph_agent", "graph_agent_gateway"]
+    assert stamp["packages"]["graph_agent"]["files"] == {"__init__.py": "a" * 64}
+    assert len(stamp["source_digest"]) == 64
+    assert stamp["built_at"] == "2026-09-01T00:00:00+00:00"
+    assert stamp["python_version"] == "3.12.13"
+    assert stamp["target_triple"] == "x86_64-pc-windows-msvc"
+
+
+def test_the_combined_digest_moves_when_any_package_moves(build_vendor: ModuleType) -> None:
+    engine = package_entry(build_vendor, "graph_agent", {"__init__.py": "a" * 64})
+    gateway = package_entry(build_vendor, "graph_agent_gateway", {"__init__.py": "b" * 64})
+    kwargs = {"built_at": "t", "python_version": "3.12.13", "target_triple": "triple"}
+
+    before = build_vendor.build_stamp(
+        packages={"graph_agent": engine, "graph_agent_gateway": gateway}, **kwargs
+    )["source_digest"]
+    moved = package_entry(build_vendor, "graph_agent_gateway", {"__init__.py": "c" * 64})
+    after = build_vendor.build_stamp(
+        packages={"graph_agent": engine, "graph_agent_gateway": moved}, **kwargs
+    )["source_digest"]
+
+    assert before != after
+
+
+def iter_strings(value: object) -> Iterator[str]:
+    """Every string anywhere in a nested mapping/sequence, keys included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from iter_strings(key)
+            yield from iter_strings(item)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            yield from iter_strings(item)
+
+
+def test_the_stamp_does_not_carry_build_machine_paths(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp ships inside the installer (`bundle.resources: vendor/**/*`).
+
+    Baking the builder's absolute paths into a shipped file leaks the build
+    account's home directory and tells a user nothing. Source roots are recorded
+    relative to the workspace root, which is a fact about the repo rather than
+    about the machine.
+
+    Checked over the parsed values rather than over `json.dumps` output: on
+    Windows the dump escapes `\\` as `\\\\`, so a substring search for the path
+    would miss it and the test would pass while the leak was there.
+    """
+    workspace = tmp_path / "workspace"
+    write_project(workspace / "packages" / "example", ["src/example_pkg"])
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        if command[1] != "build":
+            return
+        out = Path(command[command.index("-o") + 1])
+        make_wheel(out / "example-1.0-py3-none-any.whl", {"example_pkg/__init__.py": b""})
+
+    monkeypatch.setattr(build_vendor.subprocess, "run", fake_run)
+    packages = build_vendor.install_local_wheels(
+        python=Path("python"),
+        local_paths=["./packages/example"],
+        target=tmp_path / "site-packages",
+        root=workspace,
+    )
+
+    stamp = build_vendor.build_stamp(
+        packages=packages,
+        built_at="2026-09-01T00:00:00+00:00",
+        python_version="3.12.13",
+        target_triple="x86_64-pc-windows-msvc",
+    )
+
+    needles = {str(tmp_path), tmp_path.as_posix(), str(workspace), workspace.as_posix()}
+    leaked = [text for text in iter_strings(stamp) if any(needle in text for needle in needles)]
+    assert leaked == []
+
+
+def test_write_stamp_lands_inside_the_snapshot_it_describes(
+    build_vendor: ModuleType, tmp_path: Path
+) -> None:
+    """Lifetime coupling: the stamp lives in `site-packages`, not beside it.
+
+    `build_vendor.build_vendor(clean=True)` removes the target directory before
+    installing. A stamp stored one level up in `vendor/` would survive a build
+    that then FAILED, and would go on describing a snapshot that no longer
+    exists. Inside the target, a wiped snapshot correctly reports "no
+    provenance" and the launcher gate rebuilds it.
+    """
+    target = tmp_path / "site-packages"
+    target.mkdir()
+
+    written = build_vendor.write_stamp(target, {"schema": 2, "source_digest": "d" * 64})
+
+    assert written == target / build_vendor.STAMP_FILENAME
+    assert json.loads(written.read_text(encoding="utf-8"))["source_digest"] == "d" * 64
+
+
+# ── a build that cannot finish must not leave provenance behind ─────────────
+
+
+def stub_uv(build_vendor: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(build_vendor.shutil, "which", lambda name: "uv")
+
+
+def fail_after_clean(build_vendor: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("uv export failed")
+
+    monkeypatch.setattr(build_vendor, "export_closure", explode)
+
+
+def test_a_clean_that_removed_nothing_fails_loudly(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ignore_errors=True` let a blocked clean pass for a successful one.
+
+    Windows holds the vendored `.pyd`/`.dll` files open while the desktop app
+    runs, so `shutil.rmtree(..., ignore_errors=True)` returned happily having
+    removed nothing and the build carried on installing over the snapshot it
+    believed it had wiped.
+    """
+    target = tmp_path / "site-packages"
+    target.mkdir()
+    stub_uv(build_vendor, monkeypatch)
+    monkeypatch.setattr(build_vendor.shutil, "rmtree", lambda *args, **kwargs: None)
+    fail_after_clean(build_vendor, monkeypatch)
+
+    with pytest.raises(SystemExit, match="survived its own removal"):
+        build_vendor.build_vendor(python=Path("python"), target=target)
+
+
+def test_a_clean_that_raises_names_the_usual_cause(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "site-packages"
+    target.mkdir()
+    stub_uv(build_vendor, monkeypatch)
+
+    def locked(*args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "The process cannot access the file")
+
+    monkeypatch.setattr(build_vendor.shutil, "rmtree", locked)
+    fail_after_clean(build_vendor, monkeypatch)
+
+    with pytest.raises(SystemExit, match="close it and run this again"):
+        build_vendor.build_vendor(python=Path("python"), target=target)
+
+
+def test_a_failed_build_leaves_no_stamp_behind(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stamp outliving the snapshot it describes is a lie the gate believes.
+
+    The stamp is dropped before anything else is touched, so every way the build
+    can fail after that point -- blocked clean, failed export, failed wheel --
+    leaves a snapshot that honestly reports "no provenance" and gets rebuilt.
+    """
+    target = tmp_path / "site-packages"
+    target.mkdir()
+    stamp = target / build_vendor.STAMP_FILENAME
+    stamp.write_text('{"schema": 2, "source_digest": "old"}', encoding="utf-8")
+    stub_uv(build_vendor, monkeypatch)
+    monkeypatch.setattr(build_vendor.shutil, "rmtree", lambda *args, **kwargs: None)
+    fail_after_clean(build_vendor, monkeypatch)
+
+    with pytest.raises(SystemExit):
+        build_vendor.build_vendor(python=Path("python"), target=target)
+
+    assert not stamp.exists()
+
+
+def test_a_no_clean_build_that_fails_also_drops_the_stamp(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--no-clean` installs over the snapshot, so its stamp expires too."""
+    target = tmp_path / "site-packages"
+    target.mkdir()
+    stamp = target / build_vendor.STAMP_FILENAME
+    stamp.write_text('{"schema": 2, "source_digest": "old"}', encoding="utf-8")
+    stub_uv(build_vendor, monkeypatch)
+    fail_after_clean(build_vendor, monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        build_vendor.build_vendor(python=Path("python"), target=target, clean=False)
+
+    assert not stamp.exists()
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="only Windows refuses to delete a file that is open"
+)
+def test_a_really_locked_snapshot_stops_the_build(
+    build_vendor: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real thing, on the platform where it happens.
+
+    This is the situation AGENTS.md (Workflow Pipeline step 7) warns about: the
+    running desktop app holds the vendored native extensions open, so the clean
+    cannot proceed. No `shutil` stub here -- the lock is genuine.
+    """
+    target = tmp_path / "site-packages"
+    (target / "graph_agent").mkdir(parents=True)
+    locked = target / "graph_agent" / "_native.pyd"
+    locked.write_bytes(b"MZ")
+    stub_uv(build_vendor, monkeypatch)
+
+    with locked.open("rb"):
+        with pytest.raises(SystemExit, match="close it and run this again"):
+            build_vendor.build_vendor(python=Path("python"), target=target)
+
+
+def test_neither_sdk_package_narrows_what_hatchling_ships(build_vendor: ModuleType) -> None:
+    """A fast sentinel for one way the gate's precondition can break.
+
+    It does NOT pin that precondition — only
+    `test_the_wheel_ships_exactly_what_git_lists` does, by building the wheel.
+    This one just fails earlier and more legibly on the most likely change.
+
+    That check asks git for the files under a package (`git ls-files --cached
+    --others --exclude-per-directory=.gitignore`) and treats anything the stamp
+    does not list as "added since the build". It is sound only while hatchling ships every
+    git-listed file: hatchling's defaults drop `__pycache__`/`*.py[cod]` (both
+    already gitignored here) and otherwise take the whole package directory
+    minus VCS-ignored files.
+
+    `include` / `exclude` / `only-include` / `artifacts` in a package's Hatch
+    config would break that: the wheel would stop carrying a file git still
+    lists, the gate would report an addition, a rebuild would not clear it, and
+    the desktop app would refuse to start (P11/#732). Failing here means the
+    change that introduces such a key is told, in CI, that the gate needs
+    updating with it.
+    """
+    narrowing = {"include", "exclude", "only-include", "artifacts"}
+    for project in ("packages/graph-agent", "packages/graph-agent-gateway"):
+        config = build_vendor.tomllib.loads(
+            (REPO_ROOT / project / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        build = config.get("tool", {}).get("hatch", {}).get("build", {})
+        scopes = {"[tool.hatch.build]": build}
+        for target, settings in build.get("targets", {}).items():
+            scopes[f"[tool.hatch.build.targets.{target}]"] = settings
+        for where, settings in scopes.items():
+            assert not (narrowing & set(settings)), f"{project} {where} narrows the wheel"
+
+
+def git_listed_files(root: Path) -> set[str]:
+    """What the launcher gate's addition check sees under a package root.
+
+    The same command `sourceAdditions` runs in
+    `apps/studio/tauri/scripts/ensure_vendor.js` -- not by convention but by
+    assertion, see `test_the_git_command_is_the_gates_own`. That is what makes
+    "git's answer is hatchling's answer" a checked fact rather than a claim in
+    a comment.
+    """
+    completed = subprocess.run(
+        ["git", *GIT_LS_FILES_ARGS],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return {entry for entry in completed.stdout.split("\0") if entry}
+
+
+@pytest.mark.parametrize(
+    ("project", "module"),
+    [
+        ("packages/graph-agent", "graph_agent"),
+        ("packages/graph-agent-gateway", "graph_agent_gateway"),
+    ],
+)
+def test_the_wheel_ships_exactly_what_git_lists(
+    build_vendor: ModuleType, tmp_path: Path, project: str, module: str
+) -> None:
+    """Build the real wheel and compare its file set to git's, for equality.
+
+    The launcher gate reports every file git lists that the stamp does not, so
+    it is only correct while the wheel carries exactly what git lists. Not a
+    subset in either direction:
+
+    * a file git lists that the wheel drops is drift no rebuild can clear -- the
+      desktop app stops starting at all (P11/#732);
+    * a file the wheel carries that git hides is the blind spot this gate was
+      built to close: it ships stale and nothing says so.
+
+    Both were reachable while the only guards were "no `__pycache__` in git's
+    answer" and "no narrowing keys in the Hatch config". Force-adding a
+    `.DS_Store` satisfies both and still breaks the first; naming a new builtin
+    skill in `.git/info/exclude` satisfies both and still breaks the second.
+    Only building the wheel can tell, so this builds it -- about 5 seconds per
+    package, paid in the same job that already syncs the workspace.
+    """
+    output = tmp_path / module
+    completed = subprocess.run(
+        ["uv", "build", "--wheel", str(REPO_ROOT / project), "-o", str(output)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert completed.returncode == 0, f"uv build failed: {completed.stderr}"
+    wheels = sorted(output.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, got {wheels}"
+
+    shipped = set(build_vendor.wheel_package_files(wheels[0])[module])
+    listed = git_listed_files(REPO_ROOT / project / "src" / module)
+
+    assert shipped == listed, (
+        f"the wheel and the launcher gate disagree about what {module} consists of; "
+        f"only in the wheel: {sorted(shipped - listed)}; only in git: {sorted(listed - shipped)}"
+    )
+
+
+def js_without_comments(source: str) -> str:
+    """`ensure_vendor.js` with its comments removed.
+
+    Scanning the raw file for a `['ls-files', ...]` shape would let a comment
+    decide the result -- an example literal written in prose would read as a
+    second declaration and fail this test for no reason. Only two forms are
+    stripped, and both are unambiguous: `/* ... */` blocks, and `//` comments
+    that start their own line. A `//` inside a string literal is therefore never
+    touched, and a trailing comment cannot matter because the declaration below
+    is only recognised at the start of a line.
+    """
+    without_blocks = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"^[ \t]*//.*$", "", without_blocks, flags=re.MULTILINE)
+
+
+def test_the_git_command_is_the_gates_own() -> None:
+    """The command this file measures must be the command the gate runs.
+
+    `test_the_wheel_ships_exactly_what_git_lists` only proves anything about the
+    launcher gate while both sides ask git the same question. Python cannot call
+    the gate's JavaScript, so the argument list is copied -- and a copy nobody
+    checks is exactly the seam that produced P11/#732 (a hand-maintained module
+    tree in JS that the Python side outgrew).
+
+    Two things are asserted, because either one alone can go stale: that the
+    gate declares exactly these arguments, and that the gate's `git` call still
+    USES that declaration. Inlining the array back into the call would leave the
+    constant sitting there, correct and unread.
+    """
+    code = js_without_comments(ENSURE_VENDOR_PATH.read_text(encoding="utf-8"))
+
+    declarations = re.findall(r"^const GIT_LS_FILES_ARGS = (\[[^\]]*\])", code, flags=re.MULTILINE)
+    assert len(declarations) == 1, f"expected one declaration, found {len(declarations)}"
+    assert re.findall(r"'([^']*)'", declarations[0]) == GIT_LS_FILES_ARGS
+
+    assert re.search(r"runGit\(\s*'git',\s*GIT_LS_FILES_ARGS\b", code), (
+        "the gate no longer passes GIT_LS_FILES_ARGS to git, so this file is "
+        "measuring a command nothing runs"
+    )

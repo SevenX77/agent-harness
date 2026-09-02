@@ -66,10 +66,23 @@ Notes:
   builds included), and those two are vendored as pre-built wheels from
   `packages/graph-agent` / `packages/graph-agent-gateway` — so any SOURCE
   change to those two packages, not just a dependency-manifest change, leaves
-  the running app on stale engine/gateway code until you re-run
-  `build_vendor.py` (+ re-warm `.pyc`) and restart. See `AGENTS.md`
-  "Workflow Pipeline" step 7 for the exact recipe and the close-app-first
-  Windows file-lock gotcha.
+  the RUNNING app on stale engine/gateway code. Restarting through the standard
+  launcher is enough to fix it: `beforeDevCommand` runs
+  `apps/studio/tauri/scripts/ensure_vendor.js`, which takes the file list the
+  last build's wheels actually shipped (recorded in the snapshot's
+  `vendor-stamp.json`) and checks every one of them against both your working
+  tree and the snapshot, byte for byte; it also asks git (`ls-files
+  --exclude-per-directory=.gitignore`, the same ignore files hatchling reads)
+  what the package directories hold now, so a file you ADDED since the last
+  build counts as stale too — even one your own `.git/info/exclude` or global
+  ignore file covers, because those are machine-private rules the wheel has
+  never heard of and this check deliberately does not read them. Either
+  way it re-vendors. Running
+  `build_vendor.py` by hand is for when you want the rebuild
+  NOW without restarting, or want to skip the wait at next launch. Either way
+  re-warm `.pyc`. See `AGENTS.md` "Workflow Pipeline" step 7 for the exact
+  recipe, the provenance stamp, the `STUDIO_ALLOW_STALE_VENDOR_SNAPSHOT`
+  escape hatch, and the close-app-first Windows file-lock gotcha.
 - Symptoms → cause: `No module named uvicorn` = step 2 never ran
   (`vendor/site-packages` missing). Banner stays red for ~30s+ then the sidecar
   dies = step 3 never ran (cold `.pyc` compile exceeded the health check).

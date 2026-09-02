@@ -406,14 +406,10 @@ one-page orientation, not the full design.
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).
 - **并发推进 SOP(协调方直驱多 agent 并行交付)**:
-  `docs/development/PARALLEL_ORCHESTRATION.md` — 席位编制(协调方裁决 /
-  实施席 Opus / 干净上下文执笔席 / codex 交叉审)、**权威正文由干净上下文
-  执笔席按自包含 brief 撰写**(协调方**直接落盘**的内容只限该文 §1.2 的三类;
-  准备 brief、机械核验、开逐条修订清单是协调方另外的职责,不在那三类里)、
-  工单 DAG 与放行铁律(放行门一开即拉满全部零冲突单)、隔离与
-  任务书标准、PR 押住-攒批送审-协调方终裁的审合管线(**免审边界是文件路径
-  闭集,决议文档一律送审**)、状态落盘纪律。程序性多工单交付(如 gskill
-  重整)按它派单;单人单任务日常开发不需要。
+  `docs/development/PARALLEL_ORCHESTRATION.md` — 一个交互式会话同时驱动多个实施
+  agent、并行推进一批工单时的规则源(席位编制、权威正文执笔分工、工单放行、隔离、
+  任务书、PR 审合管线、状态落盘)。**规则以该文为准**;程序性多工单交付(如 gskill
+  重整)按它派单,单人单任务日常开发不需要。
 - **ah 编程 SOP(多 agent 编排开发本仓)**: 仓根 `ah.toml` + `.ah/`(角色规则 +
   `VERIFY.md` 验证档案 + 启动指南)是
   [ah-scenario-pack](https://github.com/SevenX77/ah-scenario-pack) dev-programming

@@ -9,8 +9,8 @@
 # so each round could only find the next hole by reading harder. A script can be
 # run and has a self-test (scripts/tests/xreview-selftest.sh), which is this
 # repo's own rule: core logic must be verifiable offline against fakes
-# (AGENTS.md 通用工程原则 7 "离线可验证"). The document now points here and
-# states no steps of its own — one owner per fact (文档事实唯一所有权).
+# (AGENTS.md 通用工程原则 7 "离线可验证"). The document points here and states
+# no steps of its own — one owner per fact (文档事实唯一所有权).
 #
 # WHAT IT IS FOR. The status marker a coordinator writes into
 # docs/development/DELIVERY_LEDGER.md takes "the most recent cross-review
@@ -25,20 +25,29 @@
 # must outlive the conversation) belongs in the program's decision document,
 # never here. They are different objects; the SOP's glossary defines both.
 #
-# TEST BOUNDARY. The self-test drives this script against a fake `gh` and covers
-# everything below the API: pagination, author filtering, both fail-fast paths,
-# tie-breaking, header construction. What it cannot cover is the projection
-# string handed to gh's built-in jq — verify that against a real PR whenever you
-# change it (`scripts/xreview.sh latest <pr>` on a PR whose records you know).
+# WHY THE PROJECTION IS PYTHON AND NOT `gh --jq`.
+# Selecting the winning comment depends on ONE field choice: order by
+# `created_at`, never by `updated_at`, so that editing an old comment cannot
+# turn it into the newest record. While that choice lived inside a `--jq`
+# expression handed to gh, no test could reach it: the self-test's fake `gh`
+# replaced gh entirely, so mutating `.created_at` to `.updated_at` left the
+# suite green — a contract with no regression protection at all. The projection
+# now runs in this script, on the raw JSON gh returns, so the fake `gh` feeds
+# real GitHub payloads and the mutation turns the suite red.
 set -euo pipefail
 
 # The record's shape. Both regexes are anchored: a line either is a record or it
 # is not, with nothing in between for a reader to interpret.
 readonly FIRST_LINE_RE='^交叉审 r([0-9]+):(approve|rework)$'
 readonly VERDICT_LINE_RE='^裁决:(approve|rework)$'
-# One line per comment, projected by gh's built-in jq. Field order is fixed;
-# base64 keeps a multi-line body inside a single TSV field.
-readonly COMMENT_PROJECTION='.[] | [(.id|tostring), .created_at, .user.login, .html_url, (.body|@base64)] | @tsv'
+readonly VERDICT_LINE_PREFIX='裁决:'
+# GitHub login: alphanumerics, single hyphens inside, 39 characters at most.
+# Bash uses POSIX ERE, which has no lookahead, so the canonical
+# `[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}` is expressed as
+# "alnum runs joined by single hyphens" plus an explicit length check — the two
+# accept exactly the same strings.
+readonly LOGIN_RE='^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$'
+readonly LOGIN_MAX_LEN=39
 
 usage() {
   cat <<'EOF'
@@ -51,24 +60,30 @@ USAGE
 
 post
   Reads <verdict-file> — the cross-review seat's raw output, e.g. codex's
-  --output-last-message file. Its LAST non-blank line must be 裁决:approve or
-  裁决:rework, otherwise post refuses. Builds the comment as a header line
-  carrying THAT verdict, a blank line, then the file verbatim; posts it; then
-  reads it back to prove the record it just wrote is the one latest sees.
+  --output-last-message file. It must contain EXACTLY ONE line starting with
+  裁决: , that line must be the last non-blank line, and it must read
+  裁决:approve or 裁决:rework. Anything else is refused: a file carrying two
+  verdicts has no single answer to record. The comment is built as a header
+  line carrying THAT verdict, a blank line, then the file verbatim; posted; then
+  read back to prove the record just written is the one latest sees.
 
 latest
   Prints the most recent cross-review adjudication of <pr>: approve, rework, or
   尚未审 when the PR has no record yet. Exits non-zero, naming the offending
-  comment URL, when a comment looks like a record but is not a valid one — an
-  unreadable record is never silently skipped and never falls back to an older
-  one, because that hands the ledger a stale marker.
+  comment URL, when a comment looks like a record but is not a valid one, and
+  exits non-zero when the GitHub API call fails — an unreadable record and an
+  unreachable API are never reported as "no record", because either would hand
+  the ledger a marker that nothing supports.
   --with-url also prints the winning comment URL (tab-separated).
 
 COORDINATOR ACCOUNT
   Only comments authored by the coordinator account count; nobody else posting
-  the same shape may overwrite the record. The account is read from
-  XREVIEW_COORDINATOR, else from <repo-root>/.xreview-coordinator (one login,
-  checked in). Handing coordination to another account is a PR editing that file.
+  the same shape may overwrite the record. The account comes from
+  XREVIEW_COORDINATOR, else from <repo-root>/.xreview-coordinator. That file
+  must hold exactly one non-blank line holding exactly one GitHub login, and
+  this script enforces it — appending a second line during a handover is an
+  error, not a silent no-op. Handing coordination to another account is a PR
+  editing that file.
 
 SELF-TEST
   CI's pytest testpaths do not reach scripts/, so after changing this script run
@@ -78,33 +93,101 @@ EOF
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# --show-toplevel, not --git-common-dir: .xreview-coordinator is a CHECKED-IN
-# file, so it must come from the working tree being used (a worktree has its own
-# copy), not from wherever the shared .git lives.
 repo_root="$(git rev-parse --show-toplevel)"
 readonly repo_root
 
+# Resolved lazily: `latest` needs it, `help` does not.
+PYTHON_BIN=()
+resolve_python() {
+  [ "${#PYTHON_BIN[@]}" -gt 0 ] && return 0
+  if [ -n "${XREVIEW_PYTHON:-}" ]; then
+    read -r -a PYTHON_BIN <<<"$XREVIEW_PYTHON"
+    return 0
+  fi
+  local cand
+  for cand in python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys' >/dev/null 2>&1; then
+      PYTHON_BIN=("$cand")
+      return 0
+    fi
+  done
+  if command -v uv >/dev/null 2>&1 && uv run python -c 'import sys' >/dev/null 2>&1; then
+    PYTHON_BIN=(uv run python)
+    return 0
+  fi
+  die 'no usable Python interpreter (tried $XREVIEW_PYTHON, python3, python, uv run python)'
+}
+
+# Raw GitHub comment JSON on stdin -> one TSV row per comment on stdout:
+#   id <TAB> created_at <TAB> login <TAB> html_url <TAB> base64(body)
+# base64 keeps a multi-line body inside one field. `gh api --paginate` prints
+# one JSON array PER PAGE, back to back, so this decodes a stream of arrays
+# rather than a single document.
+project_comments() {
+  resolve_python
+  "${PYTHON_BIN[@]}" -c '
+import base64, json, sys
+
+text = sys.stdin.buffer.read().decode("utf-8")
+decoder = json.JSONDecoder()
+pos = 0
+out = []
+while True:
+    while pos < len(text) and text[pos] in " \t\r\n":
+        pos += 1
+    if pos >= len(text):
+        break
+    page, pos = decoder.raw_decode(text, pos)
+    for c in page:
+        body = c.get("body") or ""
+        out.append("\t".join([
+            str(c["id"]),
+            # created_at, never updated_at: editing an old comment must not make
+            # it the newest record.
+            c["created_at"],
+            c["user"]["login"],
+            c["html_url"],
+            base64.b64encode(body.encode("utf-8")).decode("ascii"),
+        ]))
+# Bytes, not text: on Windows the text layer translates every newline into
+# CRLF, and that stray CR would ride along inside the last TSV field and
+# break the base64 decode on the other side.
+sys.stdout.buffer.write("".join(line + chr(10) for line in out).encode("utf-8"))
+'
+}
+
+validate_login() {
+  local value="$1" source="$2"
+  [ -n "$value" ] || die "$source holds an empty GitHub login"
+  [ "${#value}" -le "$LOGIN_MAX_LEN" ] \
+    || die "$source: '${value}' is longer than ${LOGIN_MAX_LEN} characters, so it is not a GitHub login"
+  [[ $value =~ $LOGIN_RE ]] \
+    || die "$source: '${value}' is not a GitHub login (letters, digits and single inner hyphens only)"
+}
+
 coordinator_login() {
   if [ -n "${XREVIEW_COORDINATOR:-}" ]; then
+    validate_login "$XREVIEW_COORDINATOR" 'XREVIEW_COORDINATOR'
     printf '%s\n' "$XREVIEW_COORDINATOR"
     return 0
   fi
   local file="$repo_root/.xreview-coordinator"
   [ -f "$file" ] || die "no coordinator account: set XREVIEW_COORDINATOR, or create $file with one GitHub login"
-  local login
-  login="$(head -n 1 "$file" | tr -d '[:space:]')"
-  [ -n "$login" ] || die "$file is empty; it must hold exactly one GitHub login"
+  local raw login='' count=0
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    raw="${raw%$'\r'}"
+    if [ -n "${raw//[[:space:]]/}" ]; then
+      count=$((count + 1))
+      login="$raw"
+    fi
+  done <"$file"
+  # Exactly one line, checked rather than assumed: a handover that APPENDS the
+  # new account leaves two, and picking the first would silently keep ignoring
+  # the new coordinator's records.
+  [ "$count" -eq 1 ] \
+    || die "$file must hold exactly one non-blank line with one GitHub login, found ${count}"
+  validate_login "$login" "$file"
   printf '%s\n' "$login"
-}
-
-# --paginate is not optional: GitHub returns 30 comments per page, so without it
-# a PR with 31 comments hides its newest record, and an illegal record on a
-# later page never trips the fail-fast either.
-fetch_comments() {
-  local pr="$1"
-  env -u GITHUB_TOKEN gh api --paginate \
-    "repos/{owner}/{repo}/issues/${pr}/comments" \
-    --jq "$COMMENT_PROJECTION"
 }
 
 # Last non-blank line of stdin, stripped of a trailing CR.
@@ -115,6 +198,47 @@ last_nonblank_line() {
     if [ -n "${line//[[:space:]]/}" ]; then last="$line"; fi
   done
   printf '%s\n' "$last"
+}
+
+# Number of lines starting with the verdict prefix, CR-tolerant.
+count_verdict_lines() {
+  local line count=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in "${VERDICT_LINE_PREFIX}"*) count=$((count + 1)) ;; esac
+  done
+  printf '%s\n' "$count"
+}
+
+# TSV rows for <pr> into the file named by $2. Dies on API failure: an API that
+# did not answer is not a PR without records, and the difference decides whether
+# a stale marker goes into the ledger.
+fetch_comments_into() {
+  local pr="$1" dest="$2"
+  local raw err rc
+  raw="$(mktemp)"
+  err="$(mktemp)"
+  set +e
+  env -u GITHUB_TOKEN gh api --paginate "repos/{owner}/{repo}/issues/${pr}/comments" >"$raw" 2>"$err"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "error: gh api failed (exit ${rc}) listing comments of PR ${pr}; refusing to report '尚未审'" >&2
+    sed 's/^/  gh: /' "$err" >&2
+    rm -f "$raw" "$err"
+    exit 1
+  fi
+  set +e
+  project_comments <"$raw" >"$dest" 2>"$err"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "error: could not read the comment payload of PR ${pr} (exit ${rc})" >&2
+    sed 's/^/  /' "$err" >&2
+    rm -f "$raw" "$err"
+    exit 1
+  fi
+  rm -f "$raw" "$err"
 }
 
 cmd_latest() {
@@ -128,6 +252,13 @@ cmd_latest() {
   local coordinator
   coordinator="$(coordinator_login)"
 
+  # Into a file, not a process substitution: a pipeline's or substitution's exit
+  # status is invisible to the loop that consumes it, which is exactly how an
+  # API failure used to be laundered into "no record".
+  local rows
+  rows="$(mktemp)"
+  fetch_comments_into "$pr" "$rows"
+
   local best_created='' best_id=0 best_verdict='' best_url=''
   local id created login url body_b64 body first verdict body_verdict
   while IFS=$'\t' read -r id created login url body_b64; do
@@ -140,14 +271,20 @@ cmd_latest() {
       '交叉审 r'*) ;;
       *) continue ;;
     esac
-    [[ $first =~ $FIRST_LINE_RE ]] \
-      || die "illegal cross-review record — first line does not match ${FIRST_LINE_RE}: $url"
+    if ! [[ $first =~ $FIRST_LINE_RE ]]; then
+      rm -f "$rows"
+      die "illegal cross-review record — first line does not match ${FIRST_LINE_RE}: $url"
+    fi
     verdict="${BASH_REMATCH[2]}"
     body_verdict="$(printf '%s\n' "$body" | last_nonblank_line)"
-    [[ $body_verdict =~ $VERDICT_LINE_RE ]] \
-      || die "illegal cross-review record — last line is not the 裁决 line: $url"
-    [ "${BASH_REMATCH[1]}" = "$verdict" ] \
-      || die "cross-review record contradicts itself — header says ${verdict}, last line says ${BASH_REMATCH[1]}: $url"
+    if ! [[ $body_verdict =~ $VERDICT_LINE_RE ]]; then
+      rm -f "$rows"
+      die "illegal cross-review record — last line is not the 裁决 line: $url"
+    fi
+    if [ "${BASH_REMATCH[1]}" != "$verdict" ]; then
+      rm -f "$rows"
+      die "cross-review record contradicts itself — header says ${verdict}, last line says ${BASH_REMATCH[1]}: $url"
+    fi
     # created_at is ISO-8601 UTC accurate only to the second, so equal stamps are
     # ordinary; comment ids increase monotonically and break the tie the same way
     # for every reader.
@@ -157,7 +294,8 @@ cmd_latest() {
       best_verdict="$verdict"
       best_url="$url"
     fi
-  done < <(fetch_comments "$pr")
+  done <"$rows"
+  rm -f "$rows"
 
   if [ -z "$best_verdict" ]; then
     printf '尚未审\n'
@@ -177,7 +315,13 @@ cmd_post() {
   [[ $round =~ ^[0-9]+$ ]] || die "round must be a decimal number, got '$round'"
   [ -f "$file" ] || die "verdict file not found: $file"
 
-  local tail_line verdict
+  # Exactly one verdict line, and it must be the last non-blank one. A file that
+  # says rework and then says approve has no single answer to record, so it is
+  # refused at the boundary instead of being resolved by a rule nobody agreed on.
+  local verdict_count tail_line verdict
+  verdict_count="$(count_verdict_lines <"$file")"
+  [ "$verdict_count" -eq 1 ] \
+    || die "the verdict file must contain exactly one line starting with '${VERDICT_LINE_PREFIX}', found ${verdict_count}: $file"
   tail_line="$(last_nonblank_line <"$file")"
   [[ $tail_line =~ $VERDICT_LINE_RE ]] \
     || die "the verdict file's last non-blank line must match ${VERDICT_LINE_RE}, got '${tail_line}'"

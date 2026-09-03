@@ -116,6 +116,7 @@ M0 protocol_unsupported 永不删 route · M1 补 probed_backend · X0 媒体写
 ### 批B · 交接门(新仓)
 - D-T1 回灌 #1072 ★ · **X-T1a vendor 新鲜度门禁**(content-hash 戳,响亮报错;**不含**依赖重指——那是批E 的 X-T1b)
 - **原生 v1 测试语料**(决议 §4.6-3):255 测试中 89 个经 legacy 转换器、原生语料仅 2;补齐原生 corpus,转换器退出测试热路径。范围=覆盖 v1 全语法面(相位三型/子图/iterate/io/artifact),owner=engine,验收=原生语料可独立跑绿且转换器仅存于 migration 测试。与门⑤(转换器实战)互不替代:一个测引擎本体,一个测转换路径。
+  - **订正(2026-09-02,#1103)**:上句里的「255 测试中 89 个」是错数,**实测 44/252 ≈ 17%**(#5 之后 shim 引用恒为 44;工单口径 45 = 44 + 1 直接调用);证据链见 [`domain-reports/ac2a0cf93205b9ba4_v2.md`](domain-reports/ac2a0cf93205b9ba4_v2.md)。**原句保留不动**——它是盘点当刻的记录;工单本身(补齐原生语料、转换器退出测试热路径)不受影响。
 - F-T1 删不可达校验 · F-T2/F-T8 文档指针 · F-T3 哈希锁→FROZEN · D-T3 doc_link 重钉 · D-T12 聚合化 · D-T13 码词表归属 · import-linter 从零建 · 113 分支落 main。
 
 ### 批B′ · MoirAI 单 owner 迁移(搬迁前置;§4.6-2"立即行动")

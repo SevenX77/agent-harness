@@ -15,10 +15,10 @@
 
 - **状态**：决议已落盘（#1074，§5 执行模型修订 #1075）；全局盘点已完成（交付物 v5 + 七路域级对账证据 + codex 五轮对抗审裁定记录，见 `docs/design/gskill-restructure-inventory-2026-08-31/`）；**2026-08-31 第二轮裁决已落盘**（决议新增 §11）——**六项待裁全部裁定**：格式载体维持 `graph.yaml`（§11.1）、副作用轴含计费且治理从宽 + 改造期测试 provider 走 Jiekou→DeepSeek（§11.2）、媒体 `endpoint` 字段删（§11.3）、updater 不立项（§11.4）、命名——主仓名 = `graph-skill-runtime` 已定不改，`gskill` 为产品短名（console command / MCP namespace / 格式标识；gateway/studio 带 `gskill` 词缀短名；2026-09-01 用户订正协调方误读，占名复核证据归档 `name-clearance-2026-09-01.md`，§11.5）、随仓模板收敛为 `text-segmentation` + `story-deconstruction`（复杂版）（§11.6）；另裁**新仓不接 `agent-harness` git 历史、权威文档全部重写**（§11.7）。**域树 + 七批工单 DAG 按用户长期有效指令生效**（§11.8）。
 - **血止批（批A，用户既有裁决授权下的已确认缺陷小修补）**：✅ 7 个 PR 已全部合并——#1076（M0：protocol_unsupported 不销毁 route/角色引用）、#1077（T1：统一异常信封 + CORS 兜底）、#1078（T2：掉线判定钉在重启动作上）、#1079（BOM 十处容错）、#1080（M1：`wire_backend_for_method` 公共 API）、#1081（X0：媒体配置原子写 + 观察作废）、#1082（M2：`[google]` extra + AST 惰性导入闭包门禁）。vendor 已重建并预热。**真机点验已回**：6 项 verified、V7（M1）如实标注无真机观察面，报告 `docs/design/gskill-restructure-inventory-2026-08-31/verification-bloodstop.md`。点验附带发现 studio-verify launcher 占位守卫 fail-open（dot-source 的 `exit 4` 拦不住调用方），✅ 已修（#1088，见下「旁修批」）。
-- **旁修批（2026-09-01，用户指令「这个 session 还有 7 个 bug……你自己修一下」）**：✅ 七项全部收口，6 个 PR 合并——#1084（前端错误码 i18n 拆分 `studioCodes.*`/`providerCodes.*`，串台不可表示）、#1085（删 run_manager 死函数 `_read_optional_json`，git 考古证实为 ca479388 漏删）、#1087（`BoundaryValidationError` 关键字错误码替换 str(exc) 前缀协议，全局 ValueError handler 删除）、#1088（studio-verify launcher 守卫改 fail-closed：守卫独立子进程 + `$LASTEXITCODE`，拒因分层 4/5，`.ps1` 纯 ASCII，自测 16 项）、#1089（确认后杀移入 Rust `SidecarSupervisor` 锁内，declined 为成功应答，`/health` 回显 pid 绑定实例，`--workers 1` 钉死单进程前提）、#1090（路径包含家族：`WorkspaceEntryName` 约束 + `resolve_within_roots` 三道闸门 + 引擎 `run_layout.run_dir` 唯一铸造点 + `validate_input` 契约改提交 payload + paste_json 模型层折叠）；第七项（BOM 注释过时断言）按其任务书拆进 #1089/#1090 捎带。每单经 codex（GPT-5.6-sol xhigh）1–3 轮对抗审至 approve（累计发现 8 条,全部裁定并落实）。vendor 已重建预热（#1090 动引擎源码）。CodeQL 六条按裁定 dismiss（3 条 sanitizer 误报 false positive：containment 检查自身/run_dir 铸造点/已校验 id；3 条 won't fix：Tauri 原生文件选择器路径即功能本身）；emit.py 六条与 log-injection 一条待 main 新一轮分析自动关闭。
+- **旁修批（2026-09-01，用户指令「这个 session 还有 7 个 bug……你自己修一下」）**：✅ 七项全部收口，6 个 PR 合并——#1084（前端错误码 i18n 拆分 `studioCodes.*`/`providerCodes.*`，串台不可表示）、#1085（删 run_manager 死函数 `_read_optional_json`，git 考古证实为 ca479388 漏删）、#1087（`BoundaryValidationError` 关键字错误码替换 str(exc) 前缀协议，全局 ValueError handler 删除）、#1088（studio-verify launcher 守卫改 fail-closed：守卫独立子进程 + `$LASTEXITCODE`，拒因分层 4/5，`.ps1` 纯 ASCII，自测 16 项）、#1089（确认后杀移入 Rust `SidecarSupervisor` 锁内，declined 为成功应答，`/health` 回显 pid 绑定实例，`--workers 1` 钉死单进程前提）、#1090（路径包含家族：`WorkspaceEntryName` 约束 + `resolve_within_roots` 三道闸门 + 引擎 `run_layout.run_dir` 唯一铸造点 + `validate_input` 契约改提交 payload + paste_json 模型层折叠）。**#1090 的 R1 留下一条先例**：codex 提出用 UUID/slug 白名单修 `run_dir`，协调方否决——`run_layout` 的设计真相是「id 的形状由铸造它的人约定」，不设保留词表，白名单与之冲突（`packages/graph-agent/src/graph_agent/io/run_layout.py:107-111`：「That set is a completeness argument, NOT a character vocabulary. … Which characters an id may contain is a naming convention of whoever minted it」）；改为补齐不变量的最小拒绝集（控制字符 / 尾随点与空格 / Windows 设备名 / 七个非法标点 `" * : < > ? |`），并把 `CONSOLE`、`COM10`、名字中间的点断言为**允许**，使拒绝集不会漂成白名单。这是「交叉审建议与设计真相冲突时以设计为准、改判据不改设计」的先例。裁决原文在 PR 正文（`env -u GITHUB_TOKEN gh pr view 1090 --json body`）：「**P1-b — the mechanism accepted, codex's proposed fix declined.** A UUID/slug whitelist is not adopted: `run_layout` states that an id's shape is its minter's convention, and legislating a vocabulary contradicts the module's own design truth. But the facts codex raised are not aesthetics — each is a distinct way "one subdirectory per run" *fails*」。**这条交叉审没有留在 PR 评论区**：`xreview.sh` 的评论记录位随 #1096 才落地，#1090（2026-09-01 合并）的交叉审走的是命令行，`gh pr view 1090 --comments` 只有 SonarCloud 一条、`--json reviews` 四条全是 CodeQL，所以引它要引 PR 正文。第七项（BOM 注释过时断言）按其任务书拆进 #1089/#1090 捎带。每单经 codex（GPT-5.6-sol xhigh）1–3 轮对抗审至 approve（累计发现 8 条,全部裁定并落实）。vendor 已重建预热（#1090 动引擎源码）。CodeQL 六条按裁定 dismiss（3 条 sanitizer 误报 false positive：containment 检查自身/run_dir 铸造点/已校验 id；3 条 won't fix：Tauri 原生文件选择器路径即功能本身）；emit.py 六条与 log-injection 一条待 main 新一轮分析自动关闭。
 - **范围**：决议文档承载 2026-08-31 用户逐项批准的决定——北极星五条、四层权威链与裁决规则、八条行为原则、engine 唯一 owner 收敛到 `graph-skill-runtime` 并整体搬仓（含 Studio 切换五条门禁）、双场景统一执行模型（`AgentExecutor` 唯一分叉点，executor 闭集只有 `embedded` 与 `ah`；`host-native` 经用户裁决移除）、全局盘点方法、十一条规范验收清单、逐模块流水线与完成定义、资源与实施方案。
 - **边界**：本行只记状态；决定与盘点内容不在台账复制（裁决正文、用户原话与执行口径在决议 §11）。本活动已无待裁项；后续若再出现原则/目标级取舍，一律**不得代裁**。
-- **下一步**：**批B（交接门）与批B′（MoirAI 单 owner 迁移）已获准，可并行开工** → 批C 搬迁方案呈批（结构性变更，先呈完整方案；「包名裁决」选名与复核均已完成——§11.5 订正版，批C **不含仓库改名项**）。**批B 第 1 波（2026-09-01）**：新仓 ✅ #11（D-T13 错误码三层归属）、✅ #13（F-T8 format_ssot 指针）、✅ #14（D-T1 回灌：删默认 LLM 角色，缺失即编译期 `[F-v3-agent-llm-role-missing]`，99 码，缓存键纳入 `CACHE_SCHEMA_VERSION`）、✅ #15（F-T1+D-T12：删五段不可达校验 + 根 manifest 进聚合）；🔁 #12（import-linter 八合同，三轮返修中：注入验证改真执行）。主仓 ✅ #1094（命名订正落盘）、🔁 #1092（F-T2 指针实况化，codex approve，auto-merge 中）、🔁 #1093（X-T1a vendor 新鲜度门禁，首轮返修：应然集改取 wheel RECORD 清单）。**批B′ MoirAI 迁移**：映射完成（8 条上升项按既有裁决就地裁定，判定词表=三值+必填归属限定为终局，`agent-skill-map.json` 降格钉死、批E 删）；新仓 🔁 #16（资产迁移 + bundle 自指纹门禁，codex approve，auto-merge 中）、主仓 🔁 #1095（跨 owner 指纹，返修：权威侧常量降格为出处记录 + 回显现算）。**旁修**：🔁 新仓 #17（`test_process_runner` 挂钟同步 flake → socket rendezvous，返修：加 ACK 闭合握手）；🔁 主仓 #1096（并发推进 SOP `docs/development/PARALLEL_ORCHESTRATION.md`，干净执笔席二轮）。**批B 前置「113 落 main」**以封存分支 `sealed/113-unified-agent-kit` 收口（130 文件与已批裁决冲突，全部封存，新仓 main 未动）。**第 2 波已开工（2026-09-01）**：D-T3 doc_link 重钉 → F-T3 规范上冻（哈希锁），原生 v1 语料（棘轮至 0）。每 PR 经 codex（GPT-5.6-sol xhigh）攒批对抗审，approve 后按依赖序合并。
+- **下一步**：**批B（交接门）与批B′（MoirAI 单 owner 迁移）已全部合并，批C 搬迁方案已呈批**（结构性变更，先呈完整方案；「包名裁决」选名与复核均已完成——§11.5 订正版，批C **不含仓库改名项**）。**批B 第 1 波（2026-09-01）**：新仓 ✅ #11（D-T13 错误码三层归属）、✅ #13（F-T8 format_ssot 指针）、✅ #14（D-T1 回灌：删默认 LLM 角色，缺失即编译期 `[F-v3-agent-llm-role-missing]`，99 码，缓存键纳入 `CACHE_SCHEMA_VERSION`）、✅ #15（F-T1+D-T12：删五段不可达校验 + 根 manifest 进聚合）、✅ #12（import-linter 八合同，注入验证改真执行）。主仓 ✅ #1094（命名订正落盘）、✅ #1092（F-T2 指针实况化）、✅ #1093（X-T1a vendor 新鲜度门禁，应然集取 wheel 清单 + git 反向查新增）。**批B′ MoirAI 迁移**：映射完成（8 条上升项按既有裁决就地裁定，判定词表=三值+必填归属限定为终局，`agent-skill-map.json` 降格钉死、批E 删）；新仓 ✅ #16（资产迁移 + bundle 自指纹门禁）、主仓 ✅ #1095（跨 owner 指纹，权威侧常量降格为出处记录 + 回显现算）；**§8 末句要求的 asset 1.1.0 再验收已补**——新仓 ✅ #23（源候选 / 构建产物 / 真宿主三层，写在决议文档 §10）。**旁修**：✅ 新仓 #17（`test_process_runner` 挂钟同步 flake → socket rendezvous）；✅ 主仓 #1096（并发推进 SOP `docs/development/PARALLEL_ORCHESTRATION.md`，干净执笔席撰写，交叉审至 r12 approve）。**批B 前置「113 落 main」**以封存分支 `sealed/113-unified-agent-kit` 收口（130 文件与已批裁决冲突，全部封存，新仓 main 未动）。**第 2 波已收口（2026-09-02）**：新仓 ✅ #18（D-T3 doc_link 重钉到 catalog SSOT）→ ✅ #22（F-T3 格式契约上冻为 FROZEN + SHA-256 哈希锁）；原生 v1 语料 ✅ #19 / ✅ #20 / ✅ #21（棘轮 45→25→4→0，converter shim 删除）。每 PR 经 codex（GPT-5.6-sol xhigh）攒批对抗审，approve 后按依赖序合并。**收口带出三张后续工单，已进工单表**：`运行期契约成文`（归批D/E）、`清单生成器`（归批F T12-T15）、`F-T3-尾修`（#22 的 r3 附带三条 P2）。**下一步 = 批C 搬迁方案呈批**：drafted 决议文档已开出 🔁 主仓 #1102（`docs/migration-plan-c`，交叉审 r1 rework），待用户批。
 
 - **工单表(§二 放行程序的 DAG 输入)**:本活动的**工单全集**就是下面这张表的行,**一张工单占一行**;
   `前驱` 列写它依赖的工单编号(多个用半角逗号分隔,无前驱写 `—`),把工单当节点、`前驱` 连边,
@@ -26,31 +26,60 @@
 
 | 工单 | PR | 状态 | 前驱 |
 |---|---|---|---|
+| 决议落盘 | 主仓 #1074 | ✅ 已合并(#1074) | — |
+| 执行模型收敛 | 主仓 #1075 | ✅ 已合并(#1075) | 决议落盘 |
+| 第二轮裁决落盘 | 主仓 #1086 | ✅ 已合并(#1086) | 决议落盘 |
+| 命名裁决订正 | 主仓 #1094 | ✅ 已合并(#1094) | 第二轮裁决落盘 |
+| M0 | 主仓 #1076 | ✅ 已合并(#1076) | 决议落盘 |
+| T1 | 主仓 #1077 | ✅ 已合并(#1077) | 决议落盘 |
+| T2 | 主仓 #1078 | ✅ 已合并(#1078) | 决议落盘 |
+| A-8 | 主仓 #1079 | ✅ 已合并(#1079) | 决议落盘 |
+| M1 | 主仓 #1080 | ✅ 已合并(#1080) | 决议落盘 |
+| X0 | 主仓 #1081 | ✅ 已合并(#1081) | 决议落盘 |
+| M2 | 主仓 #1082 | ✅ 已合并(#1082) | 决议落盘 |
 | D-T13 | 新仓 #11 | ✅ 已合并(#11) | — |
 | F-T8 | 新仓 #13 | ✅ 已合并(#13) | — |
 | D-T1 | 新仓 #14 | ✅ 已合并(#14) | — |
 | F-T1+D-T12 | 新仓 #15 | ✅ 已合并(#15) | — |
 | import-linter | 新仓 #12 | ✅ 已合并(#12) | — |
 | 旁-1 | 新仓 #17 | ✅ 已合并(#17) | — |
+| 错误码 i18n 拆分 | 主仓 #1084 | ✅ 已合并(#1084) | — |
+| 删 run_manager 死函数 | 主仓 #1085 | ✅ 已合并(#1085) | — |
+| 边界校验异常类型 | 主仓 #1087 | ✅ 已合并(#1087) | — |
+| launcher 守卫 fail-closed | 主仓 #1088 | ✅ 已合并(#1088) | — |
+| 确认后杀入重启锁 | 主仓 #1089 | ✅ 已合并(#1089) | — |
+| 路径包含家族 | 主仓 #1090 | ✅ 已合并(#1090) | — |
 | F-T2 | 主仓 #1092 | ✅ 已合并(#1092) | — |
 | X-T1a | 主仓 #1093 | ✅ 已合并(#1093) | — |
-| SOP | 主仓 #1096 | 🔁 返修中(#1096) | — |
+| SOP | 主仓 #1096 | ✅ 已合并(#1096) | — |
 | 台账 | 主仓 #1098 | ✅ 已合并(#1098) | — |
 | B′-1 | 新仓 #16 | ✅ 已合并(#16) | — |
 | B′-2 | 主仓 #1095 | ✅ 已合并(#1095) | B′-1 |
 | D-T3 | 新仓 #18 | ✅ 已合并(#18) | — |
-| F-T3 | 新仓 #22 | 🚧 进行中(#22) | D-T3 |
+| F-T3 | 新仓 #22 | ✅ 已合并(#22) | D-T3 |
 | 语料-1 | 新仓 #19 | ✅ 已合并(#19) | F-T1+D-T12 |
 | 语料-2 | 新仓 #20 | ✅ 已合并(#20) | 语料-1 |
 | 语料-3 | 新仓 #21 | ✅ 已合并(#21) | 语料-2 |
-| 批C 搬迁方案 | — | 待开工 | D-T13,F-T8,D-T1,F-T1+D-T12,import-linter,旁-1,F-T2,X-T1a,SOP,台账,B′-1,B′-2,D-T3,F-T3,语料-1,语料-2,语料-3 |
+| 运行期契约成文 | — | 待开工 | F-T3 |
+| 清单生成器 | — | 待开工 | F-T3 |
+| F-T3-尾修 | 新仓 #24 | ✅ 已合并(#24) | F-T3 |
+| B′-3 | 新仓 #23 | ✅ 已合并(#23) | B′-2 |
+| 台账-2 | 主仓 #1103 | 🔁 返修中(#1103) | SOP |
+| 批C 搬迁方案 | 主仓 #1102 | 🔁 返修中(#1102) | 命名裁决订正,D-T13,F-T8,D-T1,F-T1+D-T12,import-linter,旁-1,F-T2,X-T1a,SOP,台账,B′-1,B′-2,D-T3,F-T3,语料-1,语料-2,语料-3 |
 
   **怎么读这张表**:`PR` 列的「新仓」= [`SevenX77/graph-skill-runtime`](https://github.com/SevenX77/graph-skill-runtime),
   「主仓」= 本仓;`状态` 括号里的号就是同一行 `PR` 列那一个,repo 由该列给出。状态取值与全序见本文件开头的状态词汇。
 
   **编号从哪来**:能对上盘点交付物编号的沿用盘点
   (`docs/design/gskill-restructure-inventory-2026-08-31/inventory-synthesis.md`);盘点没给编号的按用途命名——
-  `B′-1`/`B′-2`(批B′ 的两步)、`旁-1`(旁修)、`语料-1/2/3`、`SOP`、`台账`、`import-linter`。
+  **批A 七行沿用盘点编号**:`M0`/`T1`/`T2`/`A-8`/`M1`/`X0`/`M2`,出处
+  `inventory-synthesis.md:114`(「### 批A · 血止」那一行);其中 `[M0]`/`[M1]`/`[X0]`/`[M2]` 还
+  直接印在各自 PR 的标题里。**盘点没给编号的按用途命名**——
+  `B′-1`/`B′-2`/`B′-3`(批B′ 的三步)、`旁-1`(新仓那一件旁修)、`语料-1/2/3`、`SOP`、
+  `台账`/`台账-2`、`import-linter`、`决议落盘`、`执行模型收敛`、`第二轮裁决落盘`、
+  `命名裁决订正`、`运行期契约成文`、`清单生成器`、`F-T3-尾修`,以及主仓六件旁修的
+  `错误码 i18n 拆分`/`删 run_manager 死函数`/`边界校验异常类型`/`launcher 守卫 fail-closed`/
+  `确认后杀入重启锁`/`路径包含家族`(各取自己 PR 标题的关键词)。
   **`import-linter` 这一行特意不写作 `X-T1b`**:盘点里 `X-T1b` 是批E 的另一件事
   (`adjudication-record.md:8`「拆 X-T1a(新鲜度门禁,批B)/X-T1b(cutover 原子重指+打包点验+回滚,批E)」),
   借它当编号会和一张真实存在的工单撞号;而 import-linter 在盘点里只写作「import-linter 从零建」
@@ -58,6 +87,85 @@
 
   **本表与上面「下一步」段落的关系**:每张工单的状态**以本表为准**;「下一步」是叙事摘要,
   记的是当时的推进意图与批次编排,更新频率低于本表,两者冲突时看本表(摘要 vs 权威)。
+
+  **表首那批行补的是权威缺项,不是新开工作。** 规则:**本表是本活动块全部 PR 的唯一权威**
+  ——叙事段落里点了名而表里查不到同值,就是权威缺项,在「状态」段、「下一步」段、「血止批」段
+  还是「旁修批」段一律同等对待。不另开第二张表,因为放行程序读的 DAG 就是从本表推的
+  ([并发推进 SOP](PARALLEL_ORCHESTRATION.md) §二),两张表就是两份真相。**行数不是理由**:
+  放行程序只看未合并节点的前驱,已合并行不阻塞任何工单。
+
+  **决议文档那条链(四行)**,四张 PR 都动同一份文件
+  `docs/design/gskill-restructure-decision-2026-08-31.md`,前驱按实测的先后取**最紧的那条真边**:
+  - **`决议落盘`(主仓 #1074)**——「落盘 gskill 重整决议(北极星/搬仓/执行模型/盘点方法)」,
+    2026-08-31 合并;`git log --diff-filter=A` 实测该文档由它**新建**。无前驱。
+  - **`执行模型收敛`(主仓 #1075)**——「执行模型收敛——host-native 移除,Studio 门禁六改五」,
+    同日晚 17 分钟合并,改的就是 #1074 刚建的那份文档,故前驱 = `决议落盘`。**工单名取 PR 标题**;
+    本活动块开头的「状态」段落把它叙述为「§5 执行模型修订」,指的是同一张 PR。
+  - **`第二轮裁决落盘`(主仓 #1086)**——「2026-08-31 第二轮裁决落盘(载体/预算/命名/模板/
+    新仓历史/域树生效)」,2026-09-01 合并;`git log -S "### 11.5 命名"` 实测,**§11 整节(含
+    §11.5 命名裁决)是它补进这份文档的**,不是 #1074 带来的。前驱 = `决议落盘`。
+  - **`命名裁决订正`(主仓 #1094)**——「命名裁决订正落盘 + 占名复核归档 (§11.5)」,同日稍晚
+    合并:§11.5 按用户当日的订正口径重写(主仓名 = `graph-skill-runtime` 早已命名、不改;
+    `gskill` 是产品短名;批C **不含**仓库改名项),并把占名与商标复核证据归档为
+    `docs/design/gskill-restructure-inventory-2026-08-31/name-clearance-2026-09-01.md`。
+    **前驱 = `第二轮裁决落盘`**:它订正的那条裁决就在 #1086 补进来的 §11.5 里,这是最紧的真边。
+    事实链完整写出来是 **#1074 建文档 → #1086 补 §11 → #1094 订正 §11.5**。
+
+  **批A 七行(`M0` / `T1` / `T2` / `A-8` / `M1` / `X0` / `M2`)**:批A 是已批七批 DAG 的第一批,
+  本来就该在表里。**前驱一律 `决议落盘`**——这七件的授权来自那份决议(「用户既有裁决授权下的
+  已确认缺陷小修补」),不是彼此依赖。逐行内容与真机点验结论在上面的「血止批」段落,本表不复制。
+
+  **旁修批六行**(主仓 #1084 / #1085 / #1087 / #1088 / #1089 / #1090,连同已在表里的
+  `旁-1`(新仓 #17)与 `SOP`(主仓 #1096)):**前驱一律 `—`**,与表里原有的两行旁修写法一致
+  ——它们来自另一条用户指令(「这个 session 还有 7 个 bug……你自己修一下」),彼此之间、与
+  决议链之间都没有可核的依赖,判不出真依赖就不编一条。
+
+  **既有批B 行的 `前驱` 不回写成批A。** 批A → 批B 的批次先后写在已批的七批 DAG 文本里
+  (`inventory-synthesis.md`),不靠本表的边表达;而这些行**全部已合并**,已合并行的边不参与
+  放行——放行程序只算未合并节点的前驱。为了一条不改变任何放行结果的边去回写十几行历史,
+  只会让「这条边当时是这么判的」这件事失真。
+
+  **`批C 搬迁方案` 的前驱为什么只加 `命名裁决订正` 这一个**:批C 方案正文引用 §11.5 的命名裁决,
+  这是真依赖。其余不加,各有各的理由——`运行期契约成文` / `清单生成器` 已裁归批D/E/F,不是批C
+  的前置;`B′-3` / `F-T3-尾修` / `台账-2` 与批C 方案(#1102)**同期在飞**,而 #1102 是按已批 DAG
+  的「批B ∥ 批B′ 全部合并即放行批C」放行的,事后把并行工单写成它的前驱等于改写放行事实。
+  批C 的**实施**工单(`C-0a` 起)开行时,再按当时事实写它们自己的前驱。
+
+  **`运行期契约成文`(待开工,归批D/E 排期——协调方 2026-09-02 裁决)**:D-T3(新仓 #18)把
+  **11 个没有 owning 小节的错误码**登记在新仓 `docs/skill-spec/11-error-code-spec.md` §10 作
+  **规范缺口**——`golden-stale-fields`、`reference-reader-failed`、`resource-reference-not-found`、
+  `resource-example-not-found`、`tool-argument-invalid`、`runtime-state-mapping-failed`、
+  `runtime-phase-failed`、`agent-exit-control-failed`、`skill-id-ambiguous`、
+  `resolver-interface-invalid`、`resolver-missing`。这 11 个码守着的是**运行期**的失败判定
+  (builtin tool 的查表语义、framework state 所有权、迭代与 nudge 预算耗尽后的退出判定等),
+  而新仓当前只有**格式契约**成文,运行期契约尚未写出,所以它们指不到任何一份
+  `living`/`FROZEN` 文档的具体小节。**补法**:在 `docs/skill-spec/` 写出运行期契约规范,让每个码
+  落到声明其失败规则的小节上;写完之后 §10 的双向测试(异或必须恰好覆盖 registry 全部 99 个码)
+  会红,**逼迫把已补齐的条目从 §10 删掉**——这是登记而非豁免的机制保证。
+
+  **`清单生成器`(待开工,归批F 契约基建 T12-T15「codegen + 漂移门禁」排期——协调方 2026-09-02
+  裁决)**:新仓 `docs/feature-compliance-checklist.md` 的 frontmatter 是 `status: FROZEN`,frontmatter 之后的
+  第一行是一条 DO-NOT-EDIT 注释,自称「Generated from spec/features.yaml; change the manifest and
+  regenerate this view」,**但仓内没有这个生成器**(`scripts/` 下无);既有测试 `tests/test_feature_traceability_matrix.py:41` 只断言
+  小节 id 序列 `checklist_ids == manifest_ids`,**不断言这份视图的正文由 manifest 生成**。
+  F-T3(新仓 #22)的仓库范围双射把这条没有钉值的自称照了出来,当场以 seal 记录
+  `EX-0016-feature-compliance-checklist` 封印(`tests/contract-seals.yaml:134`,原文:「had never been
+  pinned. The repository-wide bijection added in this PR is what surfaced the unbacked claim」)。
+  **封印的代价**:这份清单由 `spec/features.yaml` 派生,所以此后**每次新增 feature 都要在同一个 PR 里
+  追加/重钉一条 seal 记录**。**补法**:写出生成器并断言 `generate(spec/features.yaml) == checklist`,
+  届时解除封印、改由等式门禁守。
+
+  **`F-T3-尾修`(✅ 已合并,新仓 #24)**:F-T3(新仓 #22)交叉审 r3 给出 approve 时附带
+  三条 P2,不改变该 PR 的裁决,另开小 PR 收:`docs/mvp1/INDEX.md:16` 仍把 portable 01 称作
+  `audited-ready`(该文件 `:5` 已是 `FROZEN`)、`tests/test_contract_hash_lock.py:331` 的 seal fixture
+  仍叫旧名 `contract-exemptions.yaml`(生产 loader `:42` 已指向 `contract-seals.yaml`)、
+  `tests/test_doc_pointer_liveness.py:1044` 的注释仍称 `audited-ready` 有单文件例外(该例外常量已删)。
+  新仓 #24「docs: finish the FROZEN cutover in the three places that still said otherwise」
+  (head `b61b0d86`)只改这三个文件,codex 交叉审 r1 approve,2026-09-02 合并为 `96019595`。
+
+  **`B′-3`(新仓 #23,已合并)**:批B′ 决议文档(新仓 `docs/design/moirai-asset-single-owner-2026-09-01.md`)
+  §8 末句要求的 **asset 1.1.0 再验收**——源候选 / 构建产物 / 真宿主**三层**各自独立取证,
+  写在该文档 §10。
 
 ## 当前活动：Graph Skill Runtime 独立化设计（2026-08-27）
 

@@ -26,6 +26,7 @@
 
 | 工单 | PR | 状态 | 前驱 |
 |---|---|---|---|
+| 命名裁决订正 | 主仓 #1094 | ✅ 已合并(#1094) | — |
 | D-T13 | 新仓 #11 | ✅ 已合并(#11) | — |
 | F-T8 | 新仓 #13 | ✅ 已合并(#13) | — |
 | D-T1 | 新仓 #14 | ✅ 已合并(#14) | — |
@@ -45,17 +46,18 @@
 | 语料-3 | 新仓 #21 | ✅ 已合并(#21) | 语料-2 |
 | 运行期契约成文 | — | 待开工 | F-T3 |
 | 清单生成器 | — | 待开工 | F-T3 |
-| F-T3-尾修 | 新仓 #24 | 🚧 进行中(#24) | F-T3 |
+| F-T3-尾修 | 新仓 #24 | ✅ 已合并(#24) | F-T3 |
 | B′-3 | 新仓 #23 | ✅ 已合并(#23) | B′-2 |
-| 台账-2 | 主仓 #1103 | 🚧 进行中(#1103) | SOP |
-| 批C 搬迁方案 | — | 🚧 进行中(#1102) | D-T13,F-T8,D-T1,F-T1+D-T12,import-linter,旁-1,F-T2,X-T1a,SOP,台账,B′-1,B′-2,D-T3,F-T3,语料-1,语料-2,语料-3 |
+| 台账-2 | 主仓 #1103 | 🔁 返修中(#1103) | SOP |
+| 批C 搬迁方案 | 主仓 #1102 | 🚧 进行中(#1102) | D-T13,F-T8,D-T1,F-T1+D-T12,import-linter,旁-1,F-T2,X-T1a,SOP,台账,B′-1,B′-2,D-T3,F-T3,语料-1,语料-2,语料-3 |
 
   **怎么读这张表**:`PR` 列的「新仓」= [`SevenX77/graph-skill-runtime`](https://github.com/SevenX77/graph-skill-runtime),
   「主仓」= 本仓;`状态` 括号里的号就是同一行 `PR` 列那一个,repo 由该列给出。状态取值与全序见本文件开头的状态词汇。
 
   **编号从哪来**:能对上盘点交付物编号的沿用盘点
   (`docs/design/gskill-restructure-inventory-2026-08-31/inventory-synthesis.md`);盘点没给编号的按用途命名——
-  `B′-1`/`B′-2`(批B′ 的两步)、`旁-1`(旁修)、`语料-1/2/3`、`SOP`、`台账`、`import-linter`。
+  `B′-1`/`B′-2`/`B′-3`(批B′ 的三步)、`旁-1`(旁修)、`语料-1/2/3`、`SOP`、`台账`/`台账-2`、
+  `import-linter`、`命名裁决订正`、`运行期契约成文`、`清单生成器`、`F-T3-尾修`。
   **`import-linter` 这一行特意不写作 `X-T1b`**:盘点里 `X-T1b` 是批E 的另一件事
   (`adjudication-record.md:8`「拆 X-T1a(新鲜度门禁,批B)/X-T1b(cutover 原子重指+打包点验+回滚,批E)」),
   借它当编号会和一张真实存在的工单撞号;而 import-linter 在盘点里只写作「import-linter 从零建」
@@ -63,6 +65,16 @@
 
   **本表与上面「下一步」段落的关系**:每张工单的状态**以本表为准**;「下一步」是叙事摘要,
   记的是当时的推进意图与批次编排,更新频率低于本表,两者冲突时看本表(摘要 vs 权威)。
+
+  **`命名裁决订正`(主仓 #1094,已合并)**:2026-09-01 落盘的**命名裁决订正**——决议文档
+  (`docs/design/gskill-restructure-decision-2026-08-31.md`)§11.5 按用户 2026-09-01 的订正口径
+  重写(主仓名 = `graph-skill-runtime` 早已命名、不改;`gskill` 是产品短名;批C **不含**仓库
+  改名项),并把占名与商标复核证据归档为
+  `docs/design/gskill-restructure-inventory-2026-08-31/name-clearance-2026-09-01.md`。
+  **`前驱` 填 `—` 是推出来的,不是没查**:它订正的那条裁决在决议文档 §11.5,而承载该文档的
+  **#1074(§5 修订 #1075)在本表里没有行**——那两张 PR 早于本表建立,状态记在本活动块开头的
+  「状态」段落里。按本表表头「无前驱写 `—`」,这一格只能是 `—`。
+  本行补的是**权威缺项**:「下一步」段落一直写着 ✅ #1094,而表里查不到同值——补表,不是新开工作。
 
   **`运行期契约成文`(待开工,归批D/E 排期——协调方 2026-09-02 裁决)**:D-T3(新仓 #18)把
   **11 个没有 owning 小节的错误码**登记在新仓 `docs/skill-spec/11-error-code-spec.md` §10 作
@@ -79,7 +91,7 @@
   **`清单生成器`(待开工,归批F 契约基建 T12-T15「codegen + 漂移门禁」排期——协调方 2026-09-02
   裁决)**:新仓 `docs/feature-compliance-checklist.md` 的 frontmatter 是 `status: FROZEN`,frontmatter 之后的
   第一行是一条 DO-NOT-EDIT 注释,自称「Generated from spec/features.yaml; change the manifest and
-  regenerate this view」,**但仓内没有这个生成器**(`scripts/` 下无);既有测试 `tests/test_feature_traceability_matrix.py:38` 只断言
+  regenerate this view」,**但仓内没有这个生成器**(`scripts/` 下无);既有测试 `tests/test_feature_traceability_matrix.py:41` 只断言
   小节 id 序列 `checklist_ids == manifest_ids`,**不断言这份视图的正文由 manifest 生成**。
   F-T3(新仓 #22)的仓库范围双射把这条没有钉值的自称照了出来,当场以 seal 记录
   `EX-0016-feature-compliance-checklist` 封印(`tests/contract-seals.yaml:134`,原文:「had never been
@@ -88,12 +100,13 @@
   追加/重钉一条 seal 记录**。**补法**:写出生成器并断言 `generate(spec/features.yaml) == checklist`,
   届时解除封印、改由等式门禁守。
 
-  **`F-T3-尾修`(🚧 进行中,新仓 #24)**:F-T3(新仓 #22)交叉审 r3 给出 approve 时附带
+  **`F-T3-尾修`(✅ 已合并,新仓 #24)**:F-T3(新仓 #22)交叉审 r3 给出 approve 时附带
   三条 P2,不改变该 PR 的裁决,另开小 PR 收:`docs/mvp1/INDEX.md:16` 仍把 portable 01 称作
   `audited-ready`(该文件 `:5` 已是 `FROZEN`)、`tests/test_contract_hash_lock.py:331` 的 seal fixture
   仍叫旧名 `contract-exemptions.yaml`(生产 loader `:42` 已指向 `contract-seals.yaml`)、
-  `tests/test_doc_pointer_liveness.py:1044` 的注释仍称 `audited-ready` 有单文件例外(该例外常量已删)。写作当刻(2026-09-02)新仓只有该分支、**还没有 PR**,按状态词汇
-  「PR 开出前填分支名」记 `进行中(docs/f-t3-tail)`。
+  `tests/test_doc_pointer_liveness.py:1044` 的注释仍称 `audited-ready` 有单文件例外(该例外常量已删)。
+  新仓 #24「docs: finish the FROZEN cutover in the three places that still said otherwise」
+  (head `b61b0d86`)只改这三个文件,codex 交叉审 r1 approve,2026-09-02 合并为 `96019595`。
 
   **`B′-3`(新仓 #23,已合并)**:批B′ 决议文档(新仓 `docs/design/moirai-asset-single-owner-2026-09-01.md`)
   §8 末句要求的 **asset 1.1.0 再验收**——源候选 / 构建产物 / 真宿主**三层**各自独立取证,

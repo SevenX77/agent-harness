@@ -2,11 +2,16 @@
 
 > 本文件是**用户指出的产品问题的唯一销账台账**:每条问题翻译成"哪个模块的问题",标注它牵动的层
 > (事实源 / 中间层 / UI),修一条勾一条,勾销的唯一判据是**最终真机效果**,不是 PR 合并。
+> **这一句描述的是本台账的主体那一类,不是它的全部范围**——实际登记的三类见下「只登记三类」那一句。
 > 与 [DELIVERY_LEDGER.md](DELIVERY_LEDGER.md) 分工:交付台账管"正在做什么/到哪一步",本台账管
 > "问题全集与销账状态"。全仓已实现功能的全景对照另见 2026-08-19 MVP1 功能对账
 > (claude.ai Artifact:https://claude.ai/code/artifact/129408d8-1ffd-4b8c-a2b0-d155074b3ffb,
-> 代码级核验);本台账不复制那份全景,只登记**用户点名的问题**,以及自 2026-08-23 起的
-> **旅程点验发现**(编号 `J-<模块号>.<序号>`,单列一节;规则见 [JOURNEY_TEST_RULES.md](JOURNEY_TEST_RULES.md))。
+> 代码级核验);本台账不复制那份全景,只登记三类:**用户点名的问题**;自 2026-08-23 起的
+> **旅程点验发现**(编号 `J-<模块号>.<序号>`,单列一节;规则见 [JOURNEY_TEST_RULES.md](JOURNEY_TEST_RULES.md));
+> 以及自 2026-09-02 起的**工程过程记录**(编号 `PROC-<序号>`,单列一节)——**工程过程本身**产生的
+> 事故与经裁决接受的技术债,它们既不是用户点名的产品问题,也不是旅程点验发现。第三类的**状态取
+> 该节自己声明的三词闭集**(`待处置` / `已处置` / `已接受`),不取下面那套;它们也不适用「勾销的
+> 唯一判据是最终真机效果」——那条判据是给产品缺陷的,过程记录身上没有真机面。
 >
 > **建账方法(用户裁决 2026-08-19)**:①问题按模块树归属,一个模块一个包逐个解决,不做大杂烩包;
 > ②台账把用户原话翻译成模块问题,原话仅作出处;③每个模块从底层(事实源)修到 UI 一次修完,
@@ -244,25 +249,25 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 
 ## 工程过程记录(2026-09-02 起,编号 PROC-序号)
 
-> 这一节登记**工程过程本身产生、需要被记住的事实**:一次已还原的事故,和一条被裁定接受的
-> 技术债。它与上面各节的区别不是严重程度,而是**归属**——上面每一节的坐标系是「模块树」
-> (`1 运行时观测` … `7 skill 工作区与 golden`),销账判据是**最终真机效果**,状态取本文件开头
-> 那六个词。本节的两条都落不进那套坐标:它们不属于任何产品模块,也没有可以点验的真机效果。
-> 强行塞进某一节,会让那一节的销账判据对它失效,而失效的判据比没有判据更坏。
+> 这一节登记**工程过程本身产生、需要被记住的事实**:事故,以及经裁决接受的技术债。
 >
-> **放在本台账而不是[交付台账](DELIVERY_LEDGER.md),是因为两账的分工是「正在做什么」对
-> 「还欠什么」。** 一条已接受的技术债、一条只靠提示词约定挡住的事故,欠的都不是某个进行中的
-> 动作,而是一份必须一直被记得的事实——这正是本台账的那一半。
+> **另立一节的理由是对象类型不同,不是严重程度。** 上面各节的对象是**用户点名的产品缺陷**
+> 与**旅程点验发现**,它们的状态语义讲的是同一件事——「修到哪一步、真机上验过没有」。本节的
+> 对象两样都不是:一次已还原的越界写入、一条被接受的测试脆弱性,身上没有可修复的产品行为,
+> 也没有可点验的真机面。塞进上面任何一节,那一节的「修复 / 验证」语义对它空转。
 >
-> **销账条件写在行内,而且只写「靠什么维持」的反面。** 本节两条的处置眼下都靠人记得
-> (一句提示词、一条注释);当同一件事改由机器维持时,该行销账。
+> **状态取本节自己的三词闭集,不借用上面各节的词**:
+> - `待处置` —— 已记录,尚未采取措施。
+> - `已处置` —— 措施已落实。括号里写清这条处置**没有**覆盖到什么。
+> - `已接受` —— 经裁决接受不修。括号里写被接受的那条约定。
+>
+> **事实与推断必须分开写。** 本节的记录常常只有一部分坐实得了(PROC-1 就是),所以 `记录`
+> 一栏内部按**事实 / 推断 / 未坐实**分段;标为推断的东西不得在别处被当成结论引用。
 
-| # | 记录 | 类别 | 处置(已裁) | 出处 | 销账条件 |
-|---|---|---|---|---|---|
-| PROC-1 | **一个 agent 的工具改到了另一个 agent 的工作树里**。2026-09-01 22:43:31,语料 worktree(在 Claude Code scratchpad 下)里的 `spec/round28-manifest-schema.yaml` 出现 `feature_id` → `feature_weakened_id` 的未经授权改动,mtime 与任何 agent 自己的操作都对不上;**已由执笔 agent 还原,未进入任何提交**。**归因(协调方 2026-09-02)**:`codex exec` 的沙箱写权限是 `workspace-write [workdir, /tmp, $TMPDIR]`,Windows 上 `$TMPDIR` = `%LOCALAPPDATA%\Temp`,而 Claude Code 的 scratchpad 与其下**全部** agent worktree 都在这个目录里——于是 codex 跑变异测试时,写权限覆盖到了别的 agent 的树。 | 事故(已还原,无提交) | **每份 codex 提示固定加一句**:「不得改 scratchpad 下任何已有 worktree;变异在自建临时检出里做并删除」。**自建临时检出只能落在两处**:仓内 `git worktree add --detach`,或系统临时目录——因为可写域**只有** `workspace-write` 列出的那三处,此外一律只读,这一点有两次实测(见出处),仓外的 `D:/coding/_trash` 两次都被沙箱拒绝写入。**「系统临时目录可写」与本事故并不矛盾**:被禁的是**改那里已经存在的别人的 worktree**,不是在那里**自建**一个用完即删的检出。 | 事实与归因:协调方 2026-09-02。只读实证:[#1096 r12](https://github.com/SevenX77/agent-harness/pull/1096#issuecomment-5508235550)「`D:/coding/_trash` 被沙箱拒绝写入,改用独占系统临时目录运行同一测试:`181 passed`」;[#1093 r5](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5507800124)「沙箱拒绝在 `D:/coding/_trash/` 创建临时检出,因此变异通过测试读取边界进行内存注入」。 | 这条约定不再靠每份提示里的一句话维持——即 codex 的沙箱写权限被收窄到本任务自己的 worktree 时。 |
-| PROC-2 | **一条测试辅助断言在特定书写形状下会误红**。`apps/studio/backend/tests/test_vendor_stamp.py:626` 的 `test_the_git_command_is_the_gates_own` 从 `apps/studio/tauri/scripts/ensure_vendor.js` 里抠出 `const GIT_LS_FILES_ARGS` 声明做文本比对(`:642` 的正则 `^const GIT_LS_FILES_ARGS = (\[[^\]]*\])`)。**触发形状**:把该数组拆成多行、并在某个元素后写一个同形的行尾注释。`js_without_comments`(`:611-623`)只移除**独占一行**的 `//` 注释,而声明正则允许跨行,于是行尾注释进入捕获、并被注释里的第一个 `]` 截断——codex 实跑得到 `['ls-files', 'ls-files', '-z']`。**生产参数一个没变,测试却红。**该函数 docstring 里「行尾注释不可能有影响,因为声明只在行首被识别」这句假设,只在数组写成一行时成立。 | 已接受技术债(P2) | **约定该声明独占一行,不改测试。** 约定与理由已写在 `apps/studio/tauri/scripts/ensure_vendor.js:273-276` 的注释里(原文:「A named constant on one line, not an inline literal, so that `test_the_git_command_is_the_gates_own` (Python, no Node) can read this exact declaration back out of the file」)。**接受而不修的理由(协调方裁决原文)**:「r6 唯一发现是测试辅助断言在"多行数组 + 行尾同形注释"下的误红(响亮失败,非静默漏报),且 `ensure_vendor.js` 注释已规定该声明独占一行。四轮已对实现 approve;r5/r6 只动测试文本解析。按「只剩不改变决定的 P2 即可合并」合并」。 | 发现:[#1093 r6](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5508064592)(codex,GPT-5.6-sol xhigh)。裁决:[协调方 2026-09-02](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5508065203)。 | 「该声明独占一行」不再靠一条注释维持——即两侧改由机器保证参数一致时。 |
-
----
+| # | 记录 | 类别 | 状态 | 处置 | 出处 | 销账条件 |
+|---|---|---|---|---|---|---|
+| PROC-1 | **一次没有主体的越界写入**。 **事实**:2026-09-01 22:43:31,语料 worktree(在 Claude Code scratchpad 下)里的 `spec/round28-manifest-schema.yaml` 出现 `feature_id` → `feature_weakened_id` 的改动;该改动对不上任何 agent 自己的操作;**已由执笔 agent 还原,未进入任何提交**。 **推断**:`codex exec` 的沙箱写域是 `workspace-write [workdir, /tmp, $TMPDIR]`,Windows 上 `$TMPDIR` = `%LOCALAPPDATA%\Temp`,而 Claude Code 的 scratchpad 与其下**全部** agent worktree 都在这个目录里——所以 codex **有能力**改到别的 agent 的树。 **未坐实**:上面这条只证明能力,**不证明这次写入是它做的**。没有进程轨迹、没有变异命令的输出、没有改前改后的对照,能把 22:43:31 那次写入连到 codex 的任何一次执行;「mtime 与任何 agent 的操作都对不上」是**排除性**证据,单独确定不了行为主体。**行为主体至今未坐实**,本行不得被引用为「codex 改的」。 | 事故(已还原,无提交) | 已处置(归因未坐实) | **两条措施都封能力,与行为主体是谁无关**——这正是归因未坐实时还能做的那一类处置。①**每份 codex 提示固定加一句**:「不得改 scratchpad 下任何已有 worktree;变异在自建临时检出里做并删除」。②**会话临时区自 2026-09-02 起迁到 `D:/coding/_scratch/<session>`**,脱离 `$TMPDIR`——沙箱写域里因此不再有别人的 worktree。自建临时检出仍只能落在仓内 `git worktree add --detach` 或系统临时目录:可写域**只有** `workspace-write` 列出的那三处,此外一律只读(仓外的 `D:/coding/_trash` 两次被沙箱拒绝写入,见出处)。 | 事实与时间戳:协调方 2026-09-02。沙箱只读实证:[#1096 r12](https://github.com/SevenX77/agent-harness/pull/1096#issuecomment-5508235550)、[#1093 r5](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5507800124)。**「归因未坐实」这一判定**:[#1103 交叉审 r1](https://github.com/SevenX77/agent-harness/pull/1103#issuecomment-5521356421)(codex)提出、协调方 2026-09-02 采纳。 | **—。不写销账条件**:行为主体没坐实,就说不出什么算「这件事不会再发生」。两条处置封的是能力,不是这次事件;能力封住之后,本行仍作为事实留存。 |
+| PROC-2 | **一条测试辅助断言在特定书写形状下会误红**。`apps/studio/backend/tests/test_vendor_stamp.py:626` 的 `test_the_git_command_is_the_gates_own` 从 `apps/studio/tauri/scripts/ensure_vendor.js` 里抠出 `const GIT_LS_FILES_ARGS` 声明做文本比对(`:642` 的正则 `^const GIT_LS_FILES_ARGS = (\[[^\]]*\])`)。**触发形状**:把该数组拆成多行、并在某个元素后写一个同形的行尾注释。`js_without_comments`(`:611-623`)只移除**独占一行**的 `//` 注释,而声明正则允许跨行,于是行尾注释进入捕获、并被注释里的第一个 `]` 截断——codex 实跑得到 `['ls-files', 'ls-files', '-z']`。**生产参数一个没变,测试却红。**该函数 docstring 里「行尾注释不可能有影响,因为声明只在行首被识别」这句假设,只在数组写成一行时成立。 | 已接受技术债(P2) | 已接受(该声明独占一行) | **约定该声明独占一行,不改测试。** 约定与理由已写在 `apps/studio/tauri/scripts/ensure_vendor.js:273-276` 的注释里(原文:「A named constant on one line, not an inline literal, so that `test_the_git_command_is_the_gates_own` (Python, no Node) can read this exact declaration back out of the file」)。**接受而不修的理由(协调方裁决原文)**:「r6 唯一发现是测试辅助断言在"多行数组 + 行尾同形注释"下的误红(响亮失败,非静默漏报),且 `ensure_vendor.js` 注释已规定该声明独占一行。四轮已对实现 approve;r5/r6 只动测试文本解析。按「只剩不改变决定的 P2 即可合并」合并」。 | 发现:[#1093 r6](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5508064592)(codex,GPT-5.6-sol xhigh)。裁决:[协调方 2026-09-02](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5508065203)。 | 「该声明独占一行」不再靠一条注释维持——即两侧改由机器保证参数一致时。 |
 
 ## 附:方法纪律(不入销账,指向规则文件)
 

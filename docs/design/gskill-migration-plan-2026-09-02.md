@@ -140,17 +140,76 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 ### 3.4 D4 · 冻结旧 engine 的随迁形状：源码 + 测试 + 契约清单 + 门禁数据一起搬，`graph-agent-tests` 保留为必过门
 
-**决定**：`packages/graph-agent` 除下面「不搬的三处」外**整包随迁**——`pyproject.toml`、`README.md`、`src/**`（124）、`tests/**`（340）、`spec/**`（4）、`scripts/**`（1）合计 471 个文件，再减去孤儿测试 `tests/tools/test_dual_run_shadow.py`，**实搬 470 个**；版本号 `0.3.1` 不动；主仓 CI 的 `graph-agent-tests` job **原样移植到新仓并保持必过**，直到批E 删除整包时与包一起删；同时用一道**冻结封印**把「冻结」做成门禁，封印的覆盖范围**包含 `tests/**` 与随迁的 `docs/engine/**`**（105 份，见 §4.1.1(b)）。
+**决定**：`packages/graph-agent` 除下面「不搬的三处」外**整包随迁**——`pyproject.toml`、`README.md`、`src/**`（124）、`tests/**`（340）、`spec/**`（4）、`scripts/**`（1）合计 471 个文件，再减去孤儿测试 `tests/tools/test_dual_run_shadow.py`，**实搬 470 个**；版本号 `0.3.1` 不动；主仓 CI 的 `graph-agent-tests` job **原样移植到新仓并保持必过**，直到批E 删除整包时与包一起删；同时用一道**冻结封印**把「冻结」做成门禁，封印钉住**四棵子树**的 git tree id——`packages/graph-agent`（含 `tests/**`）、`docs/engine`（105 份，见 §4.1.1(b)）、以及两个 `.kiro` spec 轮次目录（见下面的连带项表），载体与断言见本节「冻结封印的载体」。
 
 **依据（协调方 2026-09-02 依据「因果验证」原则裁定）**：**源码不变不等于行为不变。** 冻结包与其余三个成员共用同一把 `uv.lock`，批D 的任何依赖变更、任何一次安全升级，都会换掉它脚下的 langchain / langgraph / pydantic；封印只锁住这个包自己的字节，锁不住它的依赖闭包。要证明「行为没变」，唯一可观察的因果证据是**它自己的测试在新的依赖闭包下仍然全绿**——间接覆盖（studio 测试经 adapter 打到它）、构建成功（`build_vendor.py` 打出 wheel）、导入成功（`verify_installed_sidecar.ps1:136` 的 `import graph_agent` 探针）都只证明「装得上、进得去」，不证明「算得对」。
 
-**冻结封印的形状（协调方 2026-09-03 依据「显式状态与唯一 owner」裁定：钉 git tree id，不列逐文件 sha256 清单）**：新仓新增 `tests/test_frozen_engine_seal.py`，钉的值是**两个 git tree id**——`git rev-parse HEAD:packages/graph-agent` 与 `git rev-parse HEAD:docs/engine`，各是一个 40 位十六进制串；测试把当前值与 seal 记录比对，不等即红，失败信息自带重钉命令。seal 记录沿用新仓 `tests/contract-seals.yaml` 的同款机制——该机制由工单 F-T3（新仓 PR #22，合并提交 `a4f43d83`）**已经落地**，本方案直接复用，不新造一套。**重钉 = 改一个十六进制串 + 写一条带 `pm_approval` 的 seal 记录**，一次显式动作，而不是一条可以随手跑的刷新命令。**封印必须覆盖 `tests/**`**：否则「改测试」就成了让门变绿的合法路径，冻结形同虚设。**放宽这道封印的唯一合法路径是删除整包**，即批E 的 X-T1b。
+**冻结封印的载体：新建 `tests/frozen-subtrees.yaml` + `tests/test_frozen_subtree_lock.py`，不复用 `contract-seals.yaml`（协调方 2026-09-03 依据「钉值即治理记录」与 git 内容寻址推导裁定）。**
 
-**为什么钉 tree id 而不是逐文件 sha256 清单**：git 的 tree 对象**本身就是一份内容寻址清单**——它逐条记录子项的模式、名字与子对象 id，任何一个字节变动都会沿路径向上改变 tree id。另写一份逐文件 sha256 清单，等于在同一份事实上立第二个真相源（违反「文档事实唯一所有权」），而且它必须自己处理行尾归一化、路径排序、可执行位这些 git 已经处理好的问题——初稿要求「行尾按 LF 归一化后再算 sha256」，正是在手工重做 git 的 clean filter。**同一条理由也决定了 §8.1-① 用 git blob 哈希做逐字节核验**：那一步问的是「哪一个文件不一致」，用的是同一个对象库里的同一套 id。
+**为什么必须另建载体，而不是往 `contract-seals.yaml` 里塞**：本文上一稿写「直接复用，不新造一套」，那句话是错的——复用装不下。新仓 `a4f43d83` 的 `tests/test_contract_hash_lock.py` 对该文件强制三条约束，本封印每一条都不满足：①记录必须带 `sha256` 且为 **64 位**十六进制（`:146-147`），而子树 id 是 **40 位**；②`file` 必须指向一个**普通文件**（`:197-198` 断言 `(repo_root / candidate).is_file()`），而本封印的对象是**目录**；③该测试维护 **`status: FROZEN` 文档 ⇔ seal 记录的双向一一对应**（`:271` 起），塞进四条谁也不对应 FROZEN 文档的记录，会直接打破那条不变量。**三者都不是可以「顺手放宽」的细节**：放宽①②等于让那个文件同时承载两种语义不同的钉值，放宽③等于拆掉它自己的核心断言。**生命周期也不同**：`contract-seals.yaml` 服务的是「单份文档解冻要走 exemption」，而本封印的唯一合法终局是**批E 整包删除**，中间不存在逐份解冻。**一个概念、一个文件、一个 owner** ——这正是 F-T3 把 exemption 与 byte seal 拆成两个文件时给出的理由，本方案照它办，而不是反着来。**本方案的冻结封印用 `tests/frozen-subtrees.yaml` 的 tree id，不用它。**
 
-**钉值在 C-1 合并之后取，不从源仓预言（协调方 2026-09-03 裁定）**：seal 记录的两个值是 **C-1 合并提交上的目标子树 tree id**——`git rev-parse <C-1 合并提交>:packages/graph-agent` 与 `git rev-parse <C-1 合并提交>:docs/engine`，由 C-1 实施方在合并后读出、随即写进 seal 记录并贴进 PR 正文。**不采用「从源仓预言目标值」的做法**：两棵子树在搬迁中都不是逐字节整树平移——`packages/graph-agent` 剔除了 11 个文件（9 个裸文件 + `tools/dual_run_shadow.py` + 它的测试），`docs/engine` 剔除了 `graph-skill-runtime/` 三件（§4.1.1(b)），源侧 tree id 与目标侧必然不等；写一个「应该等于」的预言值只会让第一次实跑无谓地红。源侧值仅作**核对参考**：2026-09-03 实测 `377e82e0` 与 `6547029e` 两个提交上，`packages/graph-agent` 同为 `8df36101424727297fd0489cd753c0e83c2fb9aa`、`docs/engine` 同为 `7da0335d1ec0eb727afa88dad012c634d5be4966`——**两值在这段时间内没漂移**，说明冻结前这两棵树本来就是静止的，这是「冻结」这个动作有意义的前提。真正证明「搬对了」的是 §8.1-① 的逐文件 blob 核验（差异数 = 0），tree id 只负责证明「搬完之后没人再动过」。
+**借什么**：`contract-seals.yaml` 的**治理字段形状与 fail-closed 读法**——记录带 id / 对象 / 钉值 / `reason` / `pr` / `pm_approval`，同一对象的**最后一条记录即现值**，早先记录留作审计轨迹、永不原地改写；loader 严格 fail-closed（未知顶层键、缺 `version`、版本不认识、缺字段、多字段、id 重复、路径为绝对或含 `..` 一律抛错，绝不 `continue` 跳过）。**拒什么**：它的 `sha256` 字段、`file` 必须是文件的断言，以及 FROZEN 文档双射。**为什么**：借的是「钉值必须是一条有人签字的治理记录」这条机制，拒的是「对象是单份文档」这个与本封印不符的前提。**本方案的冻结封印用 `tests/frozen-subtrees.yaml` 的 tree id，不用它。**
 
-**SHA-1 碰撞不在威胁模型内**：两仓的对象格式实测均为 `sha1`（`git rev-parse --show-object-format` → `sha1`）。这道封印防的是**误改与漂移**——有人无意改了冻结包的一个字节，或依赖升级顺手动了它——不防一个能构造 SHA-1 碰撞的攻击者。真要防后者，该换的是整个仓库的对象格式，不是在 git 之上叠一层自制哈希。
+**记录形状（`tests/frozen-subtrees.yaml`，C-1 的交付物之一）**：
+
+```yaml
+version: "1"
+subtrees:
+  - subtree_id: FS-0001-frozen-engine-package
+    path: "packages/graph-agent"
+    tree_id: "<40 位十六进制，C-1 PR head 上 git rev-parse HEAD:packages/graph-agent 的输出>"
+    reason: "批C C-1 导入冻结引擎整包（源码 + 测试 + 契约清单）。冻结的唯一合法终局是批E X-T1b 整包删除，期间任何字节变动都必须先有一条新记录。"
+    pr: "<新仓 C-1 的 PR 编号>"
+    pm_approval: "<用户对批C 搬迁方案的批准记录；重钉时写批准这次重钉的裁决>"
+  - subtree_id: FS-0002-frozen-engine-gate-docs
+    path: "docs/engine"
+    tree_id: "<40 位十六进制>"
+    reason: "冻结引擎门禁数据：validate_round28_manifest.py 与 graph-agent-tests 按路径读取它（方案 §4.1.1(b)）。不含 graph-skill-runtime/ 三件，见同节例外。"
+    pr: "<新仓 C-1 的 PR 编号>"
+    pm_approval: "<同上>"
+  - subtree_id: FS-0003-frozen-engine-spec-round-10
+    path: ".kiro/specs/engine-mvp0-rebuild-v030/round-10-PR-gamma0-contract-patch"
+    tree_id: "<40 位十六进制>"
+    reason: "冻结引擎门禁数据：test_gamma0_contract_tdd.py:212,228 按路径读取（方案 §3.4 连带项表）。"
+    pr: "<新仓 C-1 的 PR 编号>"
+    pm_approval: "<同上>"
+  - subtree_id: FS-0004-frozen-engine-spec-round-28
+    path: ".kiro/specs/engine-mvp0-rebuild-v030/round-28-feature-checklist-redesign"
+    tree_id: "<40 位十六进制>"
+    reason: "冻结引擎门禁数据：test_round28_contract_manifests.py 的 test_cutover_discipline_quantifies_overlap 按路径读取（方案 §3.4 连带项表）。"
+    pr: "<新仓 C-1 的 PR 编号>"
+    pm_approval: "<同上>"
+```
+
+**字段闭集**：`subtree_id`（`FS-NNNN-<小写 slug>`，全文件唯一）、`path`（仓库相对路径，指向一个**目录**）、`tree_id`（40 位小写十六进制）、`reason`、`pr`、`pm_approval`——**六个键，缺一个或多一个都是硬失败**。顶层键闭集为 `version` 与 `subtrees`。`version` 当前为 `"1"`；loader 只读它认得的版本。
+
+**`tests/test_frozen_subtree_lock.py` 的断言清单（C-1 必须逐条落地）**：
+
+| # | 断言 | 失败即红的理由 |
+|---|---|---|
+| 1 | `frozen-subtrees.yaml` 存在且是一个 mapping；顶层键 ⊆ {`version`,`subtrees`}；`version == "1"` | 一份 loader 读不懂的治理文件，读下去就是在猜它的含义 |
+| 2 | 每条记录的键集**恰好等于**上面那六个 | 少一个是治理记录不完整；多一个多半是拼错了某个必填键 |
+| 3 | `subtree_id` 匹配 `^FS-[0-9]{4}-[a-z0-9-]+$` 且全文件唯一 | 重复 id 会让「最后一条即现值」失去唯一解 |
+| 4 | `path` 是仓库相对路径、不含 `..`、且 `(REPO_ROOT / path).is_dir()` | 钉一个不存在的目录等于一条永远不会红的假记录 |
+| 5 | `tree_id` 匹配 `^[0-9a-f]{40}$` | 40 位是 git 对象 id 的形状；写成 64 位说明有人把文件级封印那套摘要塞了进来（`contract-seals.yaml`，见本节开头） |
+| 6 | 对每个 `path` 取**最后一条**记录，断言 `git rev-parse HEAD:<path>` 的输出 == 该记录的 `tree_id` | 这是封印本身：子树漂了一个字节，tree id 就变 |
+| 7 | 记录里出现的 `path` 集合**恰好等于**四条：`packages/graph-agent`、`docs/engine`、`.kiro/specs/engine-mvp0-rebuild-v030/round-10-PR-gamma0-contract-patch`、`.kiro/specs/engine-mvp0-rebuild-v030/round-28-feature-checklist-redesign` | 少一条 = 有一棵冻结子树没上锁；多一条 = 有人把不属于冻结包的东西也钉死了。这个集合与 §3.4 的冻结范围是同一份事实，两处必须一致 |
+| 8 | 失败信息里打印重钉命令（`git rev-parse HEAD:<path>`）与「必须同 PR 追加一条带 `pm_approval` 的记录」这句话 | 否则下一个人会去改测试而不是走治理 |
+
+**重钉 = 在同一张 PR 里追加一条新记录**（不是改旧记录的十六进制串），新记录带自己的 `reason` / `pr` / `pm_approval`；旧记录原样留下当审计轨迹。**封印覆盖 `tests/**`**——`packages/graph-agent` 的子树 id 天然包含它——否则「改测试」就成了让门变绿的合法路径，冻结形同虚设。**放宽这道封印的唯一合法路径是删除整包**，即批E 的 X-T1b：那时四条记录与这个测试文件一起删掉。
+
+**为什么钉 tree id 而不是另列一份逐文件摘要清单**：git 的 tree 对象**本身就是一份内容寻址清单**——它逐条记录子项的模式、名字与子对象 id，任何一个字节变动都会沿路径向上改变 tree id。另写一份逐文件摘要清单，等于在同一份事实上立第二个真相源（违反「文档事实唯一所有权」），而且它必须自己处理行尾归一化、路径排序、可执行位这些 git 已经处理好的问题——本文初稿要求「行尾按 LF 归一化后再算摘要」，正是在手工重做 git 的 clean filter，该要求已作废。**同一条理由也决定了 §8.1-① 用 git blob 哈希做逐字节核验**：那一步问的是「哪一个文件不一致」，用的是同一个对象库里的同一套 id。
+
+**钉值取自 C-1 的 PR head：合并前就能算，合并后再证（协调方 2026-09-03 裁定）。** 上一稿写「合并之后取值」，那形成一个死环——分支保护要求检查先绿再合并，而「合并提交」只有合并之后才存在，同一张 PR 不可能既先绿又后写值。正确的时序是：
+
+1. **C-1 的 PR head 上算值**：`git rev-parse HEAD:<四条 path>`，写进 `tests/frozen-subtrees.yaml`，与封印测试同在这张 PR 里；PR 的 CI 在 PR head 上跑，封印测试**在合并前就是绿的**。
+2. **合并后 `main` 的 CI 再跑一次，即「合并后复核」**：值不对就红在 `main` 上，立刻可见。
+
+**这个时序成立，靠的是两条可核验的事实，不是乐观假设**：①**新仓 `main` 在 C-1 之前没有这四棵子树**——2026-09-03 实测新仓 `main`（`96019595`）上 `git ls-files packages | wc -l`、`docs/engine`、`.kiro` 三者**均为 0**，顶层只有 `docs/ examples/ scripts/ spec/ src/ tests/ tools/` 等；②**新仓只允许 squash 合并**——实测 `gh api repos/SevenX77/graph-skill-runtime` 返回 `allow_squash_merge=true`、`allow_merge_commit=false`、`allow_rebase_merge=false`。两条合起来意味着：这四个路径上**不存在 main 侧的并发改动可以混进结果树**，squash 合并提交在这四棵子树上的内容与 PR head **逐字节相同**，因此 tree id 也相同。**C-1 若因 main 前移而需要 rebase，这四个 tree id 同样不变**——rebase 改的是父提交与其他路径，这四个路径没有 main 侧改动可与之合并。
+
+**这条推理有一个前提，必须在 C-1 里当场复核**：如果在 C-1 待合并期间，有另一张 PR 先一步往这四个路径里写了东西，前提就不成立。C-1 的合并后复核（上面第 2 步）正是它的捕捉网——`main` 的 CI 一红就说明前提被破坏，处理方式是重算并追加一条新记录，而不是放宽测试。
+
+**SHA-1 碰撞不在威胁模型内**：两仓的对象格式实测均为 `sha1`（`git rev-parse --show-object-format` → `sha1`），所以 tree id 与 blob id 都是 40 位。这道封印防的是**误改与漂移**——有人无意改了冻结包的一个字节，或依赖升级顺手动了它——不防一个能构造 SHA-1 碰撞的攻击者。真要防后者，该换的是整个仓库的对象格式，不是在 git 之上再叠一层自制摘要。
 
 **成熟工程参照**：**参照对象** = Go modules 的 `go.sum` 与 `go mod verify`。Go Modules Reference（<https://go.dev/ref/mod#go-sum-files>）原文——
 
@@ -166,7 +225,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **这两者比对的不是同一份记录，必须写明**：`go.sum` 是**下载时**自动比对的哈希清单；`go mod verify` 比对的是模块缓存里**首次下载时记录的**哈希。它们是同一条原理的两个落点——**先把内容哈希记下来，再让任何偏离以非零状态退出**——而不是「清单 + 读清单的命令」这种配对。**本文初稿把 `vendor/modules.txt` 与 `go mod verify` 说成后一种配对，该说法作废**：按同一份文档，`modules.txt` 只被检查与 `go.mod` 的**版本一致性**，`go mod verify` 不读它；初稿自己引的 `local downloaded source cache` 一句已经证伪了那个映射。
 
-**借**：上面那条共有的原理——内容哈希一旦记录，任何偏离都必须让命令以非零状态退出，而不是靠口头约定「大家别改」。本文的 seal 记录承担「记录」，`test_frozen_engine_seal.py` 承担「非零退出」。**拒绝**两件事：①Go 那套「清单可由工具自动重新生成」的宽松语义（`go mod tidy` 会自动增删 `go.sum` 行）；②「逐文件列哈希」的清单形式。**为什么**：依赖升级是 Go 的正常工作流，而本仓的冻结包**不允许**正常演进——它只有「不变」和「整包删除」两种合法终局，所以重钉必须是一次带 `pm_approval` 记录的显式动作；逐文件清单则如上一段所说，是在 git 的 tree 对象之外另立第二个真相源。
+**借**：上面那条共有的原理——内容哈希一旦记录，任何偏离都必须让命令以非零状态退出，而不是靠口头约定「大家别改」。本文的 `tests/frozen-subtrees.yaml` 承担「记录」，`tests/test_frozen_subtree_lock.py` 承担「非零退出」。**拒绝**两件事：①Go 那套「清单可由工具自动重新生成」的宽松语义（`go mod tidy` 会自动增删 `go.sum` 行）；②「逐文件列摘要」的清单形式。**为什么**：依赖升级是 Go 的正常工作流，而本仓的冻结包**不允许**正常演进——它只有「不变」和「整包删除」两种合法终局，所以重钉必须是一次带 `pm_approval` 记录的显式动作；逐文件清单则如上一段所说，是在 git 的 tree 对象之外另立第二个真相源。
 
 **不搬的三处**：①9 个误提交裸文件——`e1.txt`、`e2.txt`、`e3.txt`、`err.txt`、`err2.txt`、`hb`、`owner`、`owner2`、`lk/owner`（2026-09-02 实测 `git ls-files packages/graph-agent | grep -v -E '/(src|tests|spec|tools|scripts)/'`，除去 `README.md` 与 `pyproject.toml` 后即这 9 个）；②`tools/dual_run_shadow.py`——2026-09-02 实测 `git grep -n 'graph-agent/tools'` 在 `.github`、`apps`、`packages`、`scripts` 下 0 处引用；③**它的测试** `packages/graph-agent/tests/tools/test_dual_run_shadow.py`，在 C-1 里一并删除。前两条同一条判据：**没有任何消费者**；第三条是前一条的机械后果——被测对象不随迁，这个测试在新仓里必然红，**实证见 §4.1.1 的孤儿测试一行**。
 
@@ -255,7 +314,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **唯一的例外：`docs/engine/graph-skill-runtime/` 三件不搬（协调方 2026-09-03 依据「文档事实唯一所有权」裁定）。** `README.md`、`baseline.md`、`v1-alignment.md` 三件是新仓 `docs/design/` 下**同名三件的被取代前身**（2026-09-03 实测：新仓 `docs/design/v1-alignment.md` 102575 字节，主仓 `docs/engine/graph-skill-runtime/v1-alignment.md` 40479 字节，两者不同）。搬进去就是同仓并存两份同名不同内容的文档，也就是两份真相；靠在 `AGENTS.md` 里写一句「以 `docs/design/` 那份为准」压住它，是补丁不是修根——**根在于它根本不该同仓存在**。三件因此落入「留在归档仓」桶（§4.3），需要引用时走归档坐标 `agent-harness@377e82e0:docs/engine/graph-skill-runtime/<file>`。
 
-**排除它们不损坏任何门禁，这是查过的**：2026-09-03 实测 `git grep -n 'graph-skill-runtime/' packages/graph-agent/tests packages/graph-agent/scripts packages/graph-agent/spec` **零命中**（退出码 1）；放宽到整个包 `git grep -n 'graph-skill-runtime' packages/graph-agent` 只有 4 处，全部不是路径读取——`README.md:5,140,141` 是 markdown 相对链接，`tests/test_contract_hash_lock.py:29` 是一句注释；全仓 `git grep -n 'docs/engine/graph-skill-runtime' -- ':!*.md'` 同样零命中。并以模拟树复核：把三件从目标树删掉后重跑四套,红名单逐条相同(数字与那 1 个消失的参数化用例见下面「表是全的」一节的对照组二)。**顺带的后果**：`packages/graph-agent/README.md` 里那两条相对链接在新仓会指向不存在的文件；它随包在批E 整体删除，且本方案不改任何随迁文件的内容（§4.1「逐字节搬」），故不在 C-1 里修——如果批D/批E 之前需要修，那是一次独立的内容改动，走独立工单。
+**排除它们不损坏任何门禁，这是查过的**：2026-09-03 实测 `git grep -n 'graph-skill-runtime/' packages/graph-agent/tests packages/graph-agent/scripts packages/graph-agent/spec` **零命中**（退出码 1）；放宽到整个包 `git grep -n -F -e 'graph-skill-runtime' 377e82e0 -- packages/graph-agent` 共 **5 处**，全部不是路径读取——`README.md:5,140,141` 是 markdown 相对链接，`README.md:23` 是一句讲未来 PyPI 发行名的散文（`not yet published under the future graph-skill-runtime PyPI name`），`tests/test_contract_hash_lock.py:29` 是一句注释；全仓 `git grep -n 'docs/engine/graph-skill-runtime' -- ':!*.md'` 同样零命中。并以模拟树复核：把三件从目标树删掉后重跑四套,红名单逐条相同(数字与那 1 个消失的参数化用例见下面「表是全的」一节的对照组二)。**顺带的后果**：`packages/graph-agent/README.md` 里那两条相对链接在新仓会指向不存在的文件；它随包在批E 整体删除，且本方案不改任何随迁文件的内容（§4.1「逐字节搬」），故不在 C-1 里修——如果批D/批E 之前需要修，那是一次独立的内容改动，走独立工单。
 
 **(c) 权威文档——不搬（210 个文件；其中 207 份在批D 重写，3 份是上面刚排除的 `graph-skill-runtime/` 前身、不重写）。** 清单、执笔席与证据来源见 §7。它们在新仓落地之前，新仓正文引用这些设计源时**一律写归档坐标**（`agent-harness@<Source-Commit>:<路径>:<行号>`），这正是决议 `:607` 括号里要求的引用形式。
 
@@ -273,32 +332,34 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **入表判据（协调方 2026-09-03 裁定）：只有在模拟 C-1 目标树上实跑变红的用例才进表，每行必须带「实证」一栏给出命令与失败断言。** 「读它就得删」是推想，推想会连坐无辜的用例——初稿据此删掉了 `test_summary_role_names_an_authority_file_that_exists` 与 `test_at_least_one_real_summary_role_exists` 两条**通用**治理断言，而实跑显示两条**都通过**（它们不依赖那两棵树的存在）；删掉它们等于让批D 重写剩余文档期间，「`role: summary` 必须指向真实存在的权威文件」「仓内至少有一份真 summary」这两条保护凭空消失。**两条已从表中移除，不删。**
 
-**模拟树怎么造的（可复现）**：`git clone --local --no-checkout` 主仓 → `checkout --detach 377e82e0` → `git rm --pathspec-from-file=<附录 A 脚本产出的 stay.txt>`，得到 **2137** 个文件的 C-1 目标树（= 2868 − 731 留档；`docs/engine` 105 份在、`docs/engine/graph-skill-runtime` 0 份、`docs/studio/mvp1` 0 份、`.kiro` 只剩随迁的 9 份）。**量红时再把下表那 6 个待删文件放回去**（2143 个文件），否则它们不在场就无红可量。**必须用 `git clone` + `git rm` 而不是 `git archive` + `tar`**：本次实测到 `git archive` 解出来的树不是 git 仓，`test_round30_pr4_scorecard_sbom_config.py` 的 `_is_executable()` 在 Windows 上是 shell 出 `git ls-files -s` 读文件模式位的（`:33-40`），非仓目录下必然返回 False，于是凭空多出 2 条与搬迁无关的红。**用错脚手架就会把脚手架的毛病记进方案。**
+**模拟树怎么造的（可复现）**：`git clone --local --no-checkout` 主仓 → `checkout --detach 377e82e0` → `git rm --pathspec-from-file=<附录 A 脚本产出的 stay.txt>`，得到 **2137** 个文件的 C-1 目标树（= 2868 − 731 留档；`docs/engine` 105 份在、`docs/engine/graph-skill-runtime` 0 份、`docs/studio/mvp1` 0 份、`.kiro` 只剩随迁的 9 份）。**量红时再把下表那 6 个待删文件放回去**（2137 + 6 = **2143** 个文件），否则它们不在场就无红可量。**必须用 `git clone` + `git rm` 而不是 `git archive` + `tar`**：本次实测到 `git archive` 解出来的树不是 git 仓，`test_round30_pr4_scorecard_sbom_config.py` 的 `_is_executable()` 在 Windows 上是 shell 出 `git ls-files -s` 读文件模式位的（`:33-40`），非仓目录下必然返回 False，于是凭空多出 2 条与搬迁无关的红。**用错脚手架就会把脚手架的毛病记进方案。**
 
-需要动的是下面 **7 个文件**：**6 个整文件删除**（第 1、3、4、5、6 行属门禁暂缺、等批D 复位；第 7 行是孤儿测试、无复位工单）与 **1 个就地修改**（第 2 行，即 §4.4 的「特殊处置」桶那一个文件）：
+需要动的是下面 **7 个文件**：**6 个整文件删除**（第 1、3、4、5、6 行属门禁暂缺、等批D 复位；第 7 行是孤儿测试、无复位工单）与 **1 个就地修改**（第 2 行，即 §4.4 的「特殊处置」桶那一个文件——只删那一个红掉的用例，文件里其余 12 个用例与 `ROLE_REQUIRED_ROOTS` 全部原样保留）：
+
+**这条判据也约束「顺手多改一点」（协调方 2026-09-03 裁定）**：本文上一稿还要求 C-1 把 `ROLE_REQUIRED_ROOTS` 里的 `docs/studio/mvp1` 一项删掉，理由是「它不报红，只是静默缩小语料」——那是一条**推断出来的额外改动，没有失败断言支撑**，与本节刚立的入表判据自相矛盾。**该要求已撤销**：C-1 不动 `ROLE_REQUIRED_ROOTS`，一个指向暂时不存在的目录的根**不产生任何红**（`_priority_docs()` 对缺失的根返回空，语料因此变小，而「变小」正由 `test_priority_roots_are_non_empty` 这条断言守着）；批D 重写 `docs/studio/mvp1` 时那个根会重新有内容，届时无需任何改动就自动恢复。**保留它反而更安全**：万一批D 之前有人往 `docs/studio/mvp1` 下重新放文档，这个根还在，治理扫描就还会覆盖它。
 
 | C-1 里删除或修改的用例 | 它守的是什么 | 实证（2026-09-03，模拟 C-1 目标树） | 批D 复位工单 |
 |---|---|---|---|
 | `apps/studio/backend/tests/docs/test_doc_code_references_exist.py`（整文件） | 权威设计文档里的代码路径引用必须解析得到 | `uv run pytest apps/studio/backend/tests/docs/test_doc_code_references_exist.py` → `test_stale_reference_backlog_entries_are_governed_docs` 红：`AssertionError: backlog entries without a governed doc: docs/architecture/…/baseline.md, docs/graph-agent-gateway/mvp1/…, docs/studio/mvp1/…`（共 23 条） | 批D-studio-1：新设计体落地后重建该门 |
-| `apps/studio/backend/tests/docs/test_design_doc_standards_governance.py` 的**两处**：`ROLE_REQUIRED_ROOTS` 里 `docs/studio/mvp1` 一项（`:102`）与 `test_priority_roots_are_non_empty`（`:256-258`）。**该文件其余 12 个用例全部保留**（含两条 `summary` 断言），仍守 `design-doc-standards/**` 与全仓 `status:` 闭集 | 受治理语料规模不塌、`status:`/`role:` 落在闭集 | `uv run pytest apps/studio/backend/tests/docs/test_design_doc_standards_governance.py` → **1 failed, 12 passed**，唯一红项 `test_priority_roots_are_non_empty`：`AssertionError: assert 5 > 50`（语料从 181 份缩到 5 份）；`ROLE_REQUIRED_ROOTS` 那一项不报红而是**静默缩小语料**，正是上面这条断言存在的理由，故按「修改」处置而非坐等它变红 | 批D-studio-2 |
+| `apps/studio/backend/tests/docs/test_design_doc_standards_governance.py` 的**一处**：`test_priority_roots_are_non_empty`（`:256-258`）。**该文件其余 12 个用例全部保留**（含两条 `summary` 断言），`ROLE_REQUIRED_ROOTS`（`:102`）里的 `docs/studio/mvp1` 一项**原样不动** | 受治理语料规模不塌、`status:`/`role:` 落在闭集 | `uv run pytest apps/studio/backend/tests/docs/test_design_doc_standards_governance.py` → **1 failed, 12 passed**，唯一红项 `test_priority_roots_are_non_empty`：`AssertionError: assert 5 > 50`（语料从 181 份缩到 5 份） | 批D-studio-2 |
 | `apps/studio/backend/tests/test_doc_hash_lock.py`（整文件） | `audited-ready` 文档的哈希锁 | 同一次运行 → `test_studio_audited_ready_doc_hashes_match_baseline_or_exemption` 红：`FileNotFoundError: … docs\studio\mvp1\_audited-ready-hashes.json` | 批D-studio-3 |
 | `apps/studio/backend/tests/test_design_unit_lock_snapshot.py`（整文件） | 设计单元索引与锁快照一致 | 同上 → `test_studio_design_unit_lock_snapshot_matches_current_index` 红：`AssertionError: Missing Studio design unit lock snapshot: docs/studio/mvp1/_design-unit-lock-snapshot.json` | 批D-studio-4 |
 | `packages/graph-agent-gateway/tests/test_gateway_doc_locks.py`（整文件） | gateway 设计体的哈希锁与单元快照 | 同上 → 两条红：`AssertionError: Missing gateway doc hash lock: docs/graph-agent-gateway/mvp1/_audited-ready-hashes.json`、`AssertionError: Missing gateway design-unit lock snapshot: docs/graph-agent-gateway/mvp1/_design-unit-lock-snapshot.json` | 批D-gateway-1 |
 | `packages/graph-agent-gateway/tests/test_gateway_design_units_bind_real_code.py`（整文件） | 每个 gateway 设计单元绑定真实代码 | 同上 → `test_every_design_unit_binds_code_that_exists` 红：`AssertionError: no binds_code coordinates found — did the frontmatter format change?` | 批D-gateway-2 |
 | **孤儿测试** `packages/graph-agent/tests/tools/test_dual_run_shadow.py`（整文件） | 一个**不随迁**的工具 `packages/graph-agent/tools/dual_run_shadow.py` 的行为 | `uv run pytest packages/graph-agent/tests` → `test_dual_run_shadow_passes_explicit_resolver_to_compile_and_assemble` 红：`FileNotFoundError: … packages\graph-agent	ools\dual_run_shadow.py` | **无**——被测对象 0 消费者、随主仓归档（§3.4「不搬的三处」），门不需要复位 |
 
-**表是全的，不是抽查出来的**：在**候选文件全部在场**的 C-1 目标树上跑完四套，红项与本表逐条对齐、没有第七个：
+**表是全的，不是抽查出来的**：在**最终形状的 C-1 目标树**上（**2143** 个文件，构造见上一段）跑完四套，红项与本表逐条对齐、没有第七个：
 
 | 套件 | 命令 | 结果 | 红项 |
 |---|---|---|---|
-| studio backend 全套 | `uv run pytest apps/studio/backend/tests -q` | **4 failed, 2173 passed, 7 skipped**（665.83s） | 本表第 1、2、3、4 行各一条 |
+| studio backend 全套 | `uv run pytest apps/studio/backend/tests -q` | **4 failed, 2172 passed, 7 skipped**（609.01s） | 本表第 1、2、3、4 行各一条 |
 | gateway 全套 | `uv run pytest packages/graph-agent-gateway/tests -q` | **3 failed, 648 passed, 1 xfailed** | 本表第 5、6 行（`test_gateway_doc_locks.py` 一个文件贡献 2 条） |
 | engine 全套 | `uv run pytest packages/graph-agent/tests -q` | **1 failed, 1720 passed, 2 skipped, 4 xfailed, 2 xpassed** | 只有第 7 行的孤儿测试 |
 | 契约清单校验 | `uv run python packages/graph-agent/scripts/validate_round28_manifest.py …` | **EXIT=0** | 无 |
 
-对照组一，说明为什么 `docs/engine/**` 与两个 `.kiro` 目录必须随迁：**不搬它们**时 engine 全套是 **4 failed, 1717 passed**（多出的三条见 §3.4 连带项表），契约校验 **EXIT=1**（`docs/engine/skill-spec/11-error-code-spec.md` 缺失）。
+**对照组一，说明为什么 `docs/engine/**` 与两个 `.kiro` 目录必须随迁**：**不搬它们**时 engine 全套是 **4 failed, 1717 passed**（多出的三条见 §3.4 连带项表），契约校验 **EXIT=1**（`docs/engine/skill-spec/11-error-code-spec.md` 缺失）。
 
-**对照组二，说明排除 `docs/engine/graph-skill-runtime/` 三件不损坏任何门禁**：把那三件从同一棵树上删掉（2143 → 2140 个文件）重跑四套——backend **4 failed, 2172 passed, 7 skipped**、gateway **3 failed, 648 passed, 1 xfailed**、engine **1 failed, 1720 passed, 2 skipped, 4 xfailed, 2 xpassed**、契约校验 **EXIT=0**。**红名单逐条相同**（四条 backend 红、三条 gateway 红、一条 engine 红，测试名一字不差）。**唯一的差别是 backend 少了 1 个通过用例**（2173 → 2172），已定位到具体是哪一个：`pytest --collect-only` 在两棵树上分别收 2184 与 2183 个用例，差的那一个是 `tests/docs/test_doc_code_references_exist.py::test_code_references_in_authority_and_baseline_docs_exist[docs/engine/graph-skill-runtime/baseline.md]`——一个**按受治理载体逐份参数化**的用例。**它不构成门禁损失**：`test_doc_code_references_exist.py` 整文件本来就在上表第 1 行、C-1 里删除，那条参数化用例在真正的 C-1 目标树上根本不存在。
+**对照组二，说明排除 `docs/engine/graph-skill-runtime/` 三件不损坏任何门禁**：在同一棵树上**保留**那三件（2146 个文件）跑同样四套——backend **4 failed, 2173 passed, 7 skipped**、gateway **3 failed, 648 passed, 1 xfailed**、engine **1 failed, 1720 passed, 2 skipped, 4 xfailed, 2 xpassed**、契约校验 **EXIT=0**。与上表相比**红名单逐条相同**（四条 backend 红、三条 gateway 红、一条 engine 红，测试名一字不差），**唯一差别是 backend 多 1 个通过用例**（2173 vs 2172），已定位到具体是哪一个：`pytest --collect-only` 在两棵树上分别收 2184 与 2183 个用例，差的那一个是 `tests/docs/test_doc_code_references_exist.py::test_code_references_in_authority_and_baseline_docs_exist[docs/engine/graph-skill-runtime/baseline.md]`——一个**按受治理载体逐份参数化**的用例。**它不构成门禁损失**：`test_doc_code_references_exist.py` 整文件本来就在上表第 1 行、C-1 里删除，那条参数化用例在真正的 C-1 目标树上根本不存在。
 
 **这一组对照是必要的，不能用 grep 代替**：`baseline.md` 是本仓治理体系里的**受治理载体名**，凡按载体名扫全仓的断言都会因为少一份语料而改变行为；「没人按路径读它」证明不了「没有断言会因它消失而变红」。上面这次实跑才是证据。
 
@@ -317,7 +378,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `.sonarcloud.properties` | **取主仓版** | 主仓版含 Python + TypeScript 双语规则；搬入前端后新仓必须能扫 TS |
 | `.github/workflows/ci.yml` | 扩 job，见 §6 | C-1 自身要过门就必须先有跑 studio/gateway/engine 的 job |
 | `.github/workflows/package.yml` | 从主仓移植（按路径触发，非必过） | 「打包链可跑」是盘点给批C 的验收项之一 |
-| `tests/test_frozen_engine_seal.py` + seal 记录 | 新建 | §3.4 |
+| `tests/frozen-subtrees.yaml` + `tests/test_frozen_subtree_lock.py` | 新建 | §3.4：四棵冻结子树的 tree id 治理记录与它的门；**不复用 `tests/contract-seals.yaml`**，理由（64 位摘要 / 对象必须是文件 / FROZEN 双射三条约束都不满足）见 §3.4 |
 | `LICENSE` | **不动**：两仓的 `LICENSE` 是同一个 git blob（2026-09-02 实测两侧 blob sha 均为 `c7ed1e4abe5749619a5a11534f10fbbb32de75df`，Apache-2.0） | 同一份文件无所谓搬不搬 |
 
 ### 4.3 留在归档仓（不搬，731 个文件）
@@ -344,9 +405,9 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 - **11 个根级文件**：`uv.lock`、`AGENTS.md`、`pyproject.toml`、`.gitignore`、`.gitattributes`、`.importlinter`、`codecov.yml`、`.sonarcloud.properties`、`.editorconfig`、`README.md`、`LICENSE`。（另外 4 个根级单文件 `CLAUDE.md`、`skills-lock.json`、`ah.toml`、`.pre-commit-config.yaml` 已计入「逐字节搬」，`Makefile`、`CHANGELOG.md` 已计入「留」。）
 - **6 个 `.github` 文件**：`ci.yml` 扩 job、`package.yml` 移植（均见 §6）；`CODEOWNERS` 由 C-3 追加条目（§7）；`dependabot.yml`、`codeql.yml`、`scorecard.yml` 新仓已有同等配置——2026-09-02 实测两仓 `dependabot.yml` 语义相同，均只覆盖 pip 与 github-actions 两个生态——主仓副本不搬。
-- **零重叠、零遗漏由脚本断言**：附录 A 的脚本对四个桶做 `uniq -d` 重叠检查并比对全集，任一文件落入两桶即非零退出。**两处误差互相抵消是本方案明确要防的失败形态**，所以判据不是「总数对上」，而是「四桶并集 == 全集 且 两两不交」。
+- **零重叠、零遗漏由脚本断言**：附录 A 的脚本对**五个**桶做 `uniq -d` 重叠检查并比对全集，任一文件落入两桶即非零退出。**两处误差互相抵消是本方案明确要防的失败形态**，所以判据不是「总数对上」，而是「五桶并集 == 全集 且 两两不交」。
 
-> 上述文件数是 2026-09-02 在主仓提交 `377e82e0` 上的实测快照。主仓 `main` 此后仍在推进（本文落盘时已到 `1a0d1203`，2873 个文件），因此 §8.1-① 的哈希核验以 **C-1 开工当时主仓 main 的实际哈希**为 `Source-Commit`，不以 `377e82e0` 为准。处置表按目录与身份给规则，快照之后新增的文件按同一套规则归类——例如 `docs/development/PARALLEL_ORCHESTRATION.md`（主仓 #1096 合入，晚于快照）是开发 SOP，落入 (c) 类由 C-3 重写。**C-1 实施方必须在开工当时的 `Source-Commit` 上重跑附录 A 的脚本，把四桶计数贴进 PR 正文。**
+> 上述文件数是 2026-09-02 在主仓提交 `377e82e0` 上的实测快照。主仓 `main` 此后仍在推进（本文落盘时已到 `1a0d1203`，2873 个文件），因此 §8.1-① 的哈希核验以 **C-1 开工当时主仓 main 的实际哈希**为 `Source-Commit`，不以 `377e82e0` 为准。处置表按目录与身份给规则，快照之后新增的文件按同一套规则归类——例如 `docs/development/PARALLEL_ORCHESTRATION.md`（主仓 #1096 合入，晚于快照）是开发 SOP，落入 (c) 类由 C-3 重写。**C-1 实施方必须在开工当时的 `Source-Commit` 上重跑附录 A 的脚本，把五桶计数贴进 PR 正文。**
 
 ## 5. D10 · PR 序列
 
@@ -356,7 +417,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 |---|---|---|---|---|---|
 | **C-0a** | 主仓 | gateway `pyproject.toml:9` 把 `langchain-openai` 钉到 `>=1.3.5,<1.4.0` | 台账 17 个前驱全绿 + 用户批准本方案 | 主仓 7 道必过检查 | 单行 diff + §9.1 探针结论 |
 | **C-0b** | 主仓 | 按合锁解析结果重解主仓 `uv.lock`；跑通 backend、gateway、graph-agent 全套门禁，红则在主仓修到绿 | **C-0a**（不可并行，见表注） | 主仓 7 道必过检查 | 锁文件版本跳变清单 + 为修红所做的每一处改动 |
-| **C-1** | 新仓 | 一张 squash PR：文件导入（§4.1，含随冻结包搬入的 `docs/engine/**` 105 份与两个 `.kiro` spec 轮次目录 9 份）+ workspace（§3.1）+ 合锁 + CI 扩展（§6）+ 冻结封印测试（§3.4）+ 三份忽略/属性文件合并（§4.2）+ §4.1.1 所列 6 个用例的删除 | C-0a、C-0b 均已合并 | 新仓必过检查（扩展后 11 项，见 §6）+ §8.1-① 哈希核验 0 差异 + §8.1-② 四桶计数复现 | **①** 附录 A 脚本与哈希脚本的输出；**②** §4.2 那张表的每一行 diff；**③** §4.1.1 删除清单逐行核对（删的是不是只有读取用例与那一个孤儿测试）；**④** 冻结封印的两个 tree id 是否取自本次合并提交、并已写进 seal 记录（§3.4） |
+| **C-1** | 新仓 | 一张 squash PR：文件导入（§4.1，含随冻结包搬入的 `docs/engine/**` 105 份与两个 `.kiro` spec 轮次目录 9 份）+ workspace（§3.1）+ 合锁 + CI 扩展（§6）+ 冻结封印（`tests/frozen-subtrees.yaml` 四条记录 + `tests/test_frozen_subtree_lock.py`，§3.4）+ 三份忽略/属性文件合并（§4.2）+ §4.1.1 所列 6 个用例的删除 | C-0a、C-0b 均已合并 | 新仓必过检查（扩展后 11 项，见 §6）+ §8.1-① 哈希核验 0 差异 + §8.1-② 五桶计数复现 | **①** 附录 A 脚本与哈希脚本的输出；**②** §4.2 那张表的每一行 diff；**③** §4.1.1 删除清单逐行核对（删的是不是只有读取用例与那一个孤儿测试）；**④** `frozen-subtrees.yaml` 的四条 `tree_id` 是否等于本 PR head 上 `git rev-parse HEAD:<path>` 的输出，且 `path` 集合恰好是 §3.4 那四条（§3.4） |
 | **C-2** | 新仓 | 机械改名：`packages/graph-agent-gateway` → `packages/gskill-gateway`、import `graph_agent_gateway` → `gskill_gateway`、`apps/studio` → `apps/gskill-studio`、发行名与 `productName`（§3.3） | C-1 已合并 | 新仓必过检查全绿 | 改名是否**穷尽**：源码 import 155 行、`pyproject.toml` 三处、vendor 构建与校验脚本里的路径字面量、`ensure_vendor.test.js` 的硬编码路径、CI 的 working-directory |
 | **C-3** | 新仓 | 权威文档改写（§7.1）+ `CLAUDE.md` 改指向 + `.ah/` 路径引用校正 | **C-2**（C-3 写的是改名后的路径，见表注） | 新仓必过检查全绿 | 改写后的正文是否自包含、是否与新仓实际路径与 11 项必过检查集一致 |
 | **分支保护扩必过集** | 新仓 | 把 `studio-gates`、`frontend-gates` 与 `graph-agent-tests` 的三个 matrix context 加入必过检查（共 5 个名字） | **在 C-1 合并前**执行 | 仓库设置变更，非 PR | — |
@@ -464,10 +525,10 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 ### 8.1 机械核验项
 
-1. **C-1 逐字节核验（协调方 2026-09-03 依据「文档事实唯一所有权」裁定：全文统一用 git blob 哈希，不另算 SHA-256）**：对 §4.1 处置表的每一个文件，比对**同一套 git 对象 id**——源侧由 `git -C <归档 clone> ls-tree -r <Source-Commit>` 一次读出的 blob id，目标侧由新仓工作树里 `git hash-object --stdin-paths` 一次算出的 blob id，两者相等。核验由附录 A 的脚本给出，输出「核验文件总数」与「差异数」，**判据是差异数 = 0 且总数等于附录 A 脚本给出的逐字节桶计数**。**不再要求任何形式的文件字节 SHA-256**：初稿同时写了「sha256 相等」与「用 git blob 哈希而非 sha256sum」，是两份互相冲突的验收契约，实施方无法同时满足——现统一到 git 这一套（理由与 §3.4 钉 tree id 相同：git 的对象 id 本身就是内容寻址的，再引入第二套哈希就是第二个真相源，还要自己重做行尾归一化与可执行位处理）。**对象格式实测为 `sha1`**（`git rev-parse --show-object-format` → `sha1`），**SHA-1 碰撞不在本方案的威胁模型内**：这一步防的是搬运过程中的漏搬、串行、误改，不是一个能构造碰撞的攻击者；真要防后者，该换的是整个仓库的对象格式，而不是在 git 之上叠一层自制哈希。
-2. **四桶计数复现**：在 `Source-Commit` 上跑附录 A 的脚本，输出四桶计数、`uniq -d` 无重叠、并集等于全集；结果贴进 C-1 的 PR 正文。
+1. **C-1 逐字节核验（协调方 2026-09-03 依据「文档事实唯一所有权」裁定：全文统一用 git blob 哈希，不另算第二套摘要）**：对 §4.1 处置表的每一个文件，比对**同一套 git 对象 id**——源侧由 `git -C <归档 clone> ls-tree -r <Source-Commit>` 一次读出的 blob id，目标侧由新仓工作树里 `git hash-object --stdin-paths` 一次算出的 blob id，两者相等。核验由附录 A 的脚本给出，输出「核验文件总数」与「差异数」，**判据是差异数 = 0 且总数等于附录 A 脚本给出的逐字节桶计数**。**不再要求任何形式的第二套文件摘要**：初稿同时写了「按文件算摘要后相等」与「用 git blob 哈希」，是两份互相冲突的验收契约，实施方无法同时满足——现统一到 git 这一套（理由与 §3.4 钉 tree id 相同：git 的对象 id 本身就是内容寻址的，再引入第二套哈希就是第二个真相源，还要自己重做行尾归一化与可执行位处理）。**对象格式实测为 `sha1`**（`git rev-parse --show-object-format` → `sha1`），**SHA-1 碰撞不在本方案的威胁模型内**：这一步防的是搬运过程中的漏搬、串行、误改，不是一个能构造碰撞的攻击者；真要防后者，该换的是整个仓库的对象格式，而不是在 git 之上叠一层自制哈希。
+2. **五桶计数复现**：在 `Source-Commit` 上跑附录 A 的脚本，输出五桶计数（逐字节搬 / 留在归档仓 / 根级 / `.github` / 特殊处置）、`uniq -d` 无重叠、并集等于全集；结果贴进 C-1 的 PR 正文。
 3. **新仓全部必过检查绿**，含新增的 `studio-gates`、`frontend-gates`、`graph-agent-tests`（§6）。
-4. **冻结封印的取值与有效性**：①**取值**——C-1 合并后在合并提交上读 `git rev-parse <C-1 合并提交>:packages/graph-agent` 与 `:docs/engine`，两个值写进 seal 记录并贴进 C-1 的 PR 正文（§3.4：钉值取自合并提交，不从源仓预言）。②**有效性实跑**——改 `packages/graph-agent` 下任意一个字节（含 `tests/` 下的字节）→ `test_frozen_engine_seal.py` 变红；改 `docs/engine/**` 下任意一个字节 → 同一个测试变红；两处各改回 → 变绿。
+4. **冻结封印的取值、复核与有效性**：①**取值**——在 **C-1 的 PR head** 上读 `git rev-parse HEAD:<path>`（四条 path 见 §3.4），四个值写进 `tests/frozen-subtrees.yaml` 并贴进 C-1 的 PR 正文；PR 的 CI 在同一个 head 上跑绿 `tests/test_frozen_subtree_lock.py`，**合并前即绿**。②**合并后复核**——合并后 `main` 的 CI 再跑一次同一个测试，绿即证明「PR head 上算的值 == 合并提交上的值」；红即说明 §3.4 那条前提（这四个路径上无 main 侧并发改动）被破坏，处理方式是重算并**追加**一条新记录，不是放宽测试。③**有效性实跑**——四棵子树各改一个字节 → `test_frozen_subtree_lock.py` 变红；各改回 → 变绿；再把 `frozen-subtrees.yaml` 里删掉任意一条记录 → 断言 7（`path` 集合恰好四条）变红。
 5. **全新克隆可装**：在一个全新的 `git clone` 里 `uv sync --all-packages --all-extras --group dev` 成功。
 6. **主仓已归档**：C-4 之后 `env -u GITHUB_TOKEN gh repo view SevenX77/agent-harness --json isArchived` 返回 `true`。
 7. **门禁暂缺表零遗漏**：在新仓跑 `git grep -l 'docs/studio/mvp1\|docs/graph-agent-gateway/mvp1' -- apps packages ':!*.md'`，命中的每一个文件都必须只在 docstring/注释里出现该路径；有任何一处构成路径读取即判失败。
@@ -629,10 +690,10 @@ Resolved 154 packages in 9.57s
 | 「逐字节搬」桶的每个文件在目标树里存在 | 1 |
 | 该桶每个文件的内容哈希与源一致 | 1 |
 
-**内容哈希用 git 的 blob 哈希，不是逐文件 `sha256sum`**：源侧从一次 `git ls-tree -r <REV>` 直接读出
+**内容哈希用 git 的 blob 哈希，不另算第二套逐文件摘要**：源侧从一次 `git ls-tree -r <REV>` 直接读出
 （blob 哈希就在输出里，零额外进程），目标侧一次 `git hash-object --stdin-paths` 批量算完。
 两侧同法计算，相等当且仅当字节相同；代价是 2 次进程调用而不是 4000 次——在 Windows 上这是分钟与秒的差别。
-**这与 §8.1-① 是同一条契约，不是两条**：全文只承认这一套哈希，不再另要求文件字节的 SHA-256（见 §8.1-① 与 §3.4）。
+**这与 §8.1-① 是同一条契约，不是两条**：全文只承认 git 对象 id 这一套（文件用 blob id、目录用 tree id），不再另要求任何第二套文件摘要（见 §8.1-① 与 §3.4）。
 
 **2026-09-02 / 09-03 的实跑证据（含负例）**：
 
@@ -713,7 +774,8 @@ echo 'apps/studio/backend/tests/docs/test_design_doc_standards_governance.py' > 
   # (r4 裁决:它们是新仓 docs/design/ 同名三件的被取代前身,同仓并存即两份真相)
   ls_ docs/engine | grep -v '^docs/engine/graph-skill-runtime/'
   # 同族的另两处:随迁的 engine 测试按路径读取这两个 spec 轮次目录(方案 §4.1.1(b))
-  ls_ .kiro/specs/engine-mvp0-rebuild-v030/round-10-PR-gamma0-contract-patch \n      .kiro/specs/engine-mvp0-rebuild-v030/round-28-feature-checklist-redesign
+  ls_ .kiro/specs/engine-mvp0-rebuild-v030/round-10-PR-gamma0-contract-patch
+  ls_ .kiro/specs/engine-mvp0-rebuild-v030/round-28-feature-checklist-redesign
   ls_ docs/development/llm_provider_notes docs/development/design-doc-standards \
       docs/development/STUDIO_REQUEST_AUDIT.md docs/graph-agent-gateway/USAGE.md
   ls_ scripts .claude skills-lock.json .ah ah.toml .pre-commit-config.yaml CLAUDE.md
@@ -905,15 +967,16 @@ git ls-tree -r --name-only <Source-Commit> -- docs/studio/mvp1 docs/graph-agent-
 123. `docs/studio/mvp1/_migrated-coverage-drift.md`
 124. `docs/studio/mvp1/_proposal-skill-repo-git-model.md`
 
-**这 124 份与 §4 账目的关系**：它们全在「留在归档仓」桶里，是 (c) 类 210 份中的 124 份；
-另外 188 份 (c) 类文档的分组见 §7.2 与 §7.3。
+**这 124 份与 §4 账目的关系**：它们全在「留在归档仓」桶里，是 (c) 类 **210** 份中的 **124** 份；
+**余下 86 份**（210 − 124）的分组见 §7.2 与 §7.3。
 
 ## 修订记录
 
 | 日期 | 变更 | 说明 |
 |---|---|---|
+| 2026-09-03 | 交叉审 r4（codex，五条 P1 + 四条 P2）经协调方逐条裁定后返修 | ①**冻结封印改用独立载体**（协调方依据「钉值即治理记录」与 git 内容寻址裁定）：新建 `tests/frozen-subtrees.yaml` + `tests/test_frozen_subtree_lock.py`，**不复用 `tests/contract-seals.yaml`**——实测新仓 `a4f43d83` 的 `test_contract_hash_lock.py` 强制「64 位摘要」（`:146-147`）、「对象必须是文件」（`:197-198`）与「FROZEN 文档 ⇔ seal 记录双射」（`:271` 起），本封印三条都不满足；生命周期也不同（批E 整包删除 vs 逐份解冻）。记录借它的治理字段与 fail-closed 读法（`subtree_id`/`path`/`tree_id`/`reason`/`pr`/`pm_approval`，同一 `path` 最后一条即现值），正文给出 yaml 样例与 8 条断言清单，**封印范围由两棵扩为四棵子树**（补两个 `.kiro` 目录）。②**钉值时序改为「取自 C-1 的 PR head」**：上一稿的「合并后取值」与「合并前必须绿」是死环。依据两条实测事实——新仓 `main`（`96019595`）上 `packages`/`docs/engine`/`.kiro` 三者跟踪文件数**均为 0**，且仓库设置 `allow_squash_merge=true`、`allow_merge_commit=false`、`allow_rebase_merge=false`——这四个路径上不存在 main 侧并发改动，squash 结果树在这些路径上与 PR head 逐字节相同，故 PR head 上算的 tree id 就是合并提交上的值；合并后 `main` 的 CI 再跑一次即复核。rebase 亦不改变这四个值。§3.4 / §5 C-1 行 / §8.1-④ 三处同步改写。③**`sha256` 字样按裁决收敛**：全文 `grep -n -i sha256` 现只剩 4 处——两处在**描述 `contract-seals.yaml`**（新仓 #22 的文件级封印）的句子里，每处紧跟「本方案的冻结封印用 `tests/frozen-subtrees.yaml` 的 tree id，不用它」；另两处在修订历史里并已标注**已废弃**。其余（§8.1-①、附录 A 两处、断言表一处）改为「第二套摘要」等中性表述。④**撤销对 `ROLE_REQUIRED_ROOTS` 的改动要求**：它在模拟树上不报红，属于没有失败断言支撑的推断改动，与本方案自己的入表判据冲突；C-1 不动它，归批D，表里那半句删除。⑤**「四桶」四处统一为「五桶」**（§4.4 判据、§4 快照注、§5 C-1 门、§8.1-②）。⑥四条 P2：`packages/graph-agent` 下 `graph-skill-runtime` 命中数订正为 **5 处**（补 `README.md:23`）；全量表改以**最终形状目标树**（2143 文件）为准、backend 记 `4 failed, 2172 passed, 7 skipped`，保留三件的那次（2146 文件）降为对照组二；附录 A 脚本里 `.kiro` 那行的字面量换行符修好（此前 bash 会把它当成一个名为 `n` 的多余 pathspec，恰因仓里没有该路径才没出错），重嵌后与磁盘版逐字节相同并重跑全部正负例；附录 B 余数订正为 **210 − 124 = 86**。 |
 | 2026-09-03 | 交叉审 r3 之后协调方补两条裁决（`.kiro` 确认 + `graph-skill-runtime` 三件排除）后返修 | ①**`.kiro` 那 9 份的随迁经协调方确认，并在正文改写为「同一条判据的第二次应用」而不是新决定**：判据仍是「随迁的冻结包测试按路径读取的门禁数据」，它与 `code-diagnostics/**`、`config/**`、`docs/engine/**` 同列在 §3.4 的连带项表里，不分主次；`.kiro/**` 其余 475 份留档。②**`docs/engine/graph-skill-runtime/{README,baseline,v1-alignment}.md` 三件改为不搬**（协调方依据「文档事实唯一所有权」裁定）：它们是新仓 `docs/design/` 同名三件的被取代前身，同仓并存两份同名不同内容的文档就是两份真相，靠 `AGENTS.md` 一句话压住是补丁不是修根；三件进「留在归档仓」桶，引用走归档坐标 `agent-harness@377e82e0:docs/engine/graph-skill-runtime/<file>`。**排除前先取证**：`git grep -n 'graph-skill-runtime/' packages/graph-agent/{tests,scripts,spec}` 零命中（退出 1），整包放宽后 4 处全是 markdown 链接与注释，全仓 `-- ':!*.md'` 零命中；再以模拟树复核，删掉三件后四套结果与保留时逐条相同（backend `4 failed, 2172 passed`、gateway `3 failed, 648 passed`、engine `1 failed, 1720 passed`、契约校验 `EXIT=0`）。③**封印钉值改为「C-1 合并后取值」**：删掉「可预言值 `7da0335d…`」的写法（两棵子树都不是整树平移，源侧值与目标必然不等，写预言只会让首跑无谓地红），改为在 C-1 合并提交上读 `git rev-parse <合并提交>:packages/graph-agent` 与 `:docs/engine` 写进 seal；源侧 tree id 降为核对参考，其「两个提交间未漂移」仍作为「冻结有意义」的前提证据。§5 交叉审对象④、§8.1-④ 同步改写。④**§7.3 重写为两种「不重写」并列**：情况一（105 份，搬而不重写，门禁数据）、情况二（3 份，不搬也不重写，已被取代的前身），并写明判据始终是「在新仓里它是什么身份」。⑤账目重算：(a) 107 + (b) 122 = **229** 份 docs 随迁，(c) **210**（= 批D 重写 207 + 不重写 3）；五桶 **2119 + 731 + 11 + 6 + 1 = 2868**（`377e82e0`）、**2122 + 733 + 11 + 6 + 1 = 2873**（当前 `1a0d1203`）；§7.2 三档对账 210 = 5 + 202 + 3。 |
-| 2026-09-03 | 交叉审 r3（codex，五条 P1）经协调方逐条裁定后返修 | ①**`docs/engine/**` 108 份整树随冻结包搬入**（协调方裁定）：它是冻结引擎的门禁数据、不是格式权威，随迁后进冻结封印、批E 同删；连带把 §7.3 由「不搬」改写为「随迁但永不重写」、(c) 类由 312 收敛为 207、`.github/CODEOWNERS` 三条不再删。**同族排查另发现两处**：随迁的 engine 测试还按路径读 `.kiro/specs/engine-mvp0-rebuild-v030/{round-10-PR-gamma0-contract-patch,round-28-feature-checklist-redesign}/**` 共 9 份，按同一判据一并随迁（实证：不搬时 engine 全套 4 failed，放回后同三个文件 1 failed）。②**引文核验补上外部引文这一路**：此前 8 条外部引文标记为 `external` 后被核验器整段跳过，正是 uv 原文大小写走样却无人发现的原因；现把 8 份上游原始文件抓到本地（uv workspaces.md、Go `mod.md`、PEP 1、publishing-bot README、`git-subtree.adoc`），逐条与正文比对。uv 引文订正为大写 `In a workspace` 开头的完整句；§12 表里的「主仓迁完即归档」改为逐字的决议 `:180`「归档为只读」。三路核验结果：仓内 32 条 OK / 0 FAIL，外部 8 条 OK / 0 FAIL，反向 90 个「」串、未登记 0、白名单陈旧 0。③**门禁暂缺表改为「只收实跑变红者」**：撤销对 `test_summary_role_names_an_authority_file_that_exists` 与 `test_at_least_one_real_summary_role_exists` 的删除（实跑两条都通过，删了等于凭空丢掉两条通用治理保护），每行补「实证：命令 → 失败断言」；并在候选全部在场的模拟树上跑完四套证明表是全的：backend `4 failed, 2173 passed`、gateway `3 failed, 648 passed`、engine `1 failed, 1720 passed`、契约校验 `EXIT=0`。**模拟树改用 `git clone` + `git rm` 造**——`git archive` + `tar` 出来的不是 git 仓，会让 `_is_executable()` 凭空多报两条假红。④**验收契约统一到 git blob 哈希**：删掉 §8.1-① 的「sha256 相等」与 §3.4 的「逐文件算 sha256」，全文只认 `git ls-tree` / `git hash-object` 这一套，并写明对象格式实测为 `sha1`、SHA-1 碰撞不在威胁模型内。⑤**D4 参照改为 `go.sum` ↔ `go mod verify`**：初稿把 `vendor/modules.txt` 与 `go mod verify` 说成一对清单/校验，按 Go 官方文档二者并不互校（`modules.txt` 只查与 `go.mod` 的版本一致性，`go mod verify` 读的是模块缓存），该说法已在正文声明作废；封印的钉值同时由「逐文件哈希清单」改为**两个 git tree id**，重钉 = 改一个十六进制串 + 一条带 `pm_approval` 的 seal 记录。⑥账目随 ①③ 重算：**2122 + 728 + 11 + 6 + 1 = 2868**（`377e82e0`）、**2125 + 730 + 11 + 6 + 1 = 2873**（当前 `1a0d1203`）。 |
-| 2026-09-03 | 交叉审 r2（codex，七条 P1 + 两条 P2）经协调方逐条裁定后返修 | ①**引文核验改成双向**：正向核对每条登记引文逐字命中源文件，**反向**扫描正文里每一个「」串——它要么是登记引文的子串，要么在一份写明理由的白名单（本文自造的术语/节名/对自身草稿与工具输出的回指）里；当前 75 个串：登记引文覆盖 22、白名单 53、未登记 0。五条 MISS 按此处理：`AGENTS.md:233`、决议 `:172`、决议 `:176` 改为逐字引用，决议 `:180` 改为「意为」，「把旧的设计权威正文原样搬过去继续当权威」是本文的理解、去引号。②**门禁暂缺表的 6 个文件出「逐字节搬」桶**：5 个 C-1 删除的进「留在归档仓」桶、1 个 C-1 修改的进新增的「特殊处置」桶，附录 A 的脚本用**同一份暂缺表文件列**把它们显式排除——此前它们同时被要求「删/改」与「sha256 与源全等」，方案自相矛盾。账目重算 **2009 + 841 + 11 + 6 + 1 = 2868**（`377e82e0` 快照）、**2011 + 843 + 11 + 6 + 1 = 2872**（当前 `6547029e`）。③门禁暂缺表补 `test_priority_roots_are_non_empty`（`:256-258` 断言 `len(_priority_docs()) > 50`，两棵树不搬后语料只剩 5 份必红）；同族排查已覆盖 `tests/docs/**` 与两个 package 的全部文档类断言。④附录 A 改成**可执行契约**：源提交由参数给入、`set -euo pipefail`、五类断言各有退出码，并附三个负例与两个正例的实跑输出。⑤附录 B **逐行列出 124 份**不随迁的 MVP1 文档，表头给目标路径/执笔席/证据坐标的继承规则。⑥必过集 **9 → 11**（`graph-agent-tests` 是三个 matrix context），五处统一。⑦D1 参照**撤销 langchain**（其公开文档写明每个 `libs/` 包各有自己的 `uv.lock`，与初稿描述相反），改引 uv 官方 workspace 文档两句原文 + `pydantic/pydantic-ai` 的实测坐标，并写明后者不能证明的那一半。⑧grep 计数订正为 20 个文件 = 6 读取 + 14 docstring。⑨§7.2 分组按实跑订正为 studio `85+26+10+1=122`、gateway `39+5+1=45`。 |
+| 2026-09-03 | 交叉审 r3（codex，五条 P1）经协调方逐条裁定后返修 | ①**`docs/engine/**` 108 份整树随冻结包搬入**（协调方裁定）：它是冻结引擎的门禁数据、不是格式权威，随迁后进冻结封印、批E 同删；连带把 §7.3 由「不搬」改写为「随迁但永不重写」、(c) 类由 312 收敛为 207、`.github/CODEOWNERS` 三条不再删。**同族排查另发现两处**：随迁的 engine 测试还按路径读 `.kiro/specs/engine-mvp0-rebuild-v030/{round-10-PR-gamma0-contract-patch,round-28-feature-checklist-redesign}/**` 共 9 份，按同一判据一并随迁（实证：不搬时 engine 全套 4 failed，放回后同三个文件 1 failed）。②**引文核验补上外部引文这一路**：此前 8 条外部引文标记为 `external` 后被核验器整段跳过，正是 uv 原文大小写走样却无人发现的原因；现把 8 份上游原始文件抓到本地（uv workspaces.md、Go `mod.md`、PEP 1、publishing-bot README、`git-subtree.adoc`），逐条与正文比对。uv 引文订正为大写 `In a workspace` 开头的完整句；§12 表里的「主仓迁完即归档」改为逐字的决议 `:180`「归档为只读」。三路核验结果：仓内 32 条 OK / 0 FAIL，外部 8 条 OK / 0 FAIL，反向 90 个「」串、未登记 0、白名单陈旧 0。③**门禁暂缺表改为「只收实跑变红者」**：撤销对 `test_summary_role_names_an_authority_file_that_exists` 与 `test_at_least_one_real_summary_role_exists` 的删除（实跑两条都通过，删了等于凭空丢掉两条通用治理保护），每行补「实证：命令 → 失败断言」；并在候选全部在场的模拟树上跑完四套证明表是全的：backend `4 failed, 2173 passed`、gateway `3 failed, 648 passed`、engine `1 failed, 1720 passed`、契约校验 `EXIT=0`。**模拟树改用 `git clone` + `git rm` 造**——`git archive` + `tar` 出来的不是 git 仓，会让 `_is_executable()` 凭空多报两条假红。④**验收契约统一到 git blob 哈希**：删掉 §8.1-① 的「sha256 相等」与 §3.4 的「逐文件算 sha256」（**这两处措辞已废弃**，r4 起全文只认 git 对象 id），全文只认 `git ls-tree` / `git hash-object` 这一套，并写明对象格式实测为 `sha1`、SHA-1 碰撞不在威胁模型内。⑤**D4 参照改为 `go.sum` ↔ `go mod verify`**：初稿把 `vendor/modules.txt` 与 `go mod verify` 说成一对清单/校验，按 Go 官方文档二者并不互校（`modules.txt` 只查与 `go.mod` 的版本一致性，`go mod verify` 读的是模块缓存），该说法已在正文声明作废；封印的钉值同时由「逐文件哈希清单」改为**两个 git tree id**，重钉 = 改一个十六进制串 + 一条带 `pm_approval` 的 seal 记录。⑥账目随 ①③ 重算：**2122 + 728 + 11 + 6 + 1 = 2868**（`377e82e0`）、**2125 + 730 + 11 + 6 + 1 = 2873**（当前 `1a0d1203`）。 |
+| 2026-09-03 | 交叉审 r2（codex，七条 P1 + 两条 P2）经协调方逐条裁定后返修 | ①**引文核验改成双向**：正向核对每条登记引文逐字命中源文件，**反向**扫描正文里每一个「」串——它要么是登记引文的子串，要么在一份写明理由的白名单（本文自造的术语/节名/对自身草稿与工具输出的回指）里；当前 75 个串：登记引文覆盖 22、白名单 53、未登记 0。五条 MISS 按此处理：`AGENTS.md:233`、决议 `:172`、决议 `:176` 改为逐字引用，决议 `:180` 改为「意为」，「把旧的设计权威正文原样搬过去继续当权威」是本文的理解、去引号。②**门禁暂缺表的 6 个文件出「逐字节搬」桶**：5 个 C-1 删除的进「留在归档仓」桶、1 个 C-1 修改的进新增的「特殊处置」桶，附录 A 的脚本用**同一份暂缺表文件列**把它们显式排除——此前它们同时被要求「删/改」与「sha256 与源全等」（**该措辞已废弃**，r4 起统一为 git blob id），方案自相矛盾。账目重算 **2009 + 841 + 11 + 6 + 1 = 2868**（`377e82e0` 快照）、**2011 + 843 + 11 + 6 + 1 = 2872**（当前 `6547029e`）。③门禁暂缺表补 `test_priority_roots_are_non_empty`（`:256-258` 断言 `len(_priority_docs()) > 50`，两棵树不搬后语料只剩 5 份必红）；同族排查已覆盖 `tests/docs/**` 与两个 package 的全部文档类断言。④附录 A 改成**可执行契约**：源提交由参数给入、`set -euo pipefail`、五类断言各有退出码，并附三个负例与两个正例的实跑输出。⑤附录 B **逐行列出 124 份**不随迁的 MVP1 文档，表头给目标路径/执笔席/证据坐标的继承规则。⑥必过集 **9 → 11**（`graph-agent-tests` 是三个 matrix context），五处统一。⑦D1 参照**撤销 langchain**（其公开文档写明每个 `libs/` 包各有自己的 `uv.lock`，与初稿描述相反），改引 uv 官方 workspace 文档两句原文 + `pydantic/pydantic-ai` 的实测坐标，并写明后者不能证明的那一半。⑧grep 计数订正为 20 个文件 = 6 读取 + 14 docstring。⑨§7.2 分组按实跑订正为 studio `85+26+10+1=122`、gateway `39+5+1=45`。 |
 | 2026-09-02 | 交叉审 r1（codex，十条 P1 + 一条 P2）经协调方逐条裁定后返修 | ①**全部引文改为逐字**，源自本仓文件的引文由脚本从源文件抽取后插入，并以 `grep -F` 逐条回核（核对输出贴在 PR）。②**`docs/studio/mvp1/**` 与 `docs/graph-agent-gateway/mvp1/**` 改判为不搬**（协调方依据决议 `:607` 与 `AGENTS.md:366` 裁定）：它们是目标设计真相载体，归 (c) 类由批D 重写；连带新增**门禁暂缺表**（6 个读取用例在 C-1 删除 + 批D 复位工单），(b) 类收窄为 17 份真正被代码按路径读取的数据文件。③§7 按 `:610` 补齐**目标路径 / 执笔席 / 证据来源**三项，逐文件清单移入附录 B 的生成命令。④账目按脚本重算 **2015 + 836 + 11 + 6 = 2868**，并把判据从「总数相等」改为「并集等于全集且两两不交」。⑤§9.1 改写为**可复现配方**，按真实 workspace 形状重跑得 154 包，并补「不加 C-0a 则无解」的退出码与错误原文；版本表两列均为实测。⑥C-0b 前驱改为 C-0a。⑦C-3 前驱改为 C-2，新增**终态打包门**并作为 C-4 前驱。⑧**冻结 engine 改为源码 + 测试 + 契约清单一起搬，`graph-agent-tests` 保留为必过门**（协调方依据「因果验证」裁定：共享锁会换掉它脚下的依赖，源码不变不等于行为不变），树哈希锁覆盖 `tests/**`，连带随迁 `code-diagnostics/**` 与 `config/**`。⑨§8 拆为**机械核验项**与**人证项**两段，合并桶补人证判据。⑩补 D8 编号与 §12 参照汇总（D1/D2/D4/D6 各写「参照—借—拒—为什么」，KEP 候选因证不成而不引）。⑪数字按实跑订正：import 132 行/34 文件（真 import 131）、gateway import 155 行/39 文件、受治理载体 151、backend 443 文件/2281 个测试，每个数字旁给生成命令。 |
 | 2026-09-02 | 初稿落盘 | 按已批决议 §4.3 / §4.4 / §11.5 / §11.7 与盘点 `inventory-synthesis.md:124,174`，把批C 搬迁写成可执行方案。状态 `drafted`，**待用户批准**。 |

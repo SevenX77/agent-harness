@@ -242,6 +242,28 @@ L1(模型组身份漂移)与 E6(token 汇总)是数据正确性问题,不排在 
 
 ---
 
+## 工程过程记录(2026-09-02 起,编号 PROC-序号)
+
+> 这一节登记**工程过程本身产生、需要被记住的事实**:一次已还原的事故,和一条被裁定接受的
+> 技术债。它与上面各节的区别不是严重程度,而是**归属**——上面每一节的坐标系是「模块树」
+> (`1 运行时观测` … `7 skill 工作区与 golden`),销账判据是**最终真机效果**,状态取本文件开头
+> 那六个词。本节的两条都落不进那套坐标:它们不属于任何产品模块,也没有可以点验的真机效果。
+> 强行塞进某一节,会让那一节的销账判据对它失效,而失效的判据比没有判据更坏。
+>
+> **放在本台账而不是[交付台账](DELIVERY_LEDGER.md),是因为两账的分工是「正在做什么」对
+> 「还欠什么」。** 一条已接受的技术债、一条只靠提示词约定挡住的事故,欠的都不是某个进行中的
+> 动作,而是一份必须一直被记得的事实——这正是本台账的那一半。
+>
+> **销账条件写在行内,而且只写「靠什么维持」的反面。** 本节两条的处置眼下都靠人记得
+> (一句提示词、一条注释);当同一件事改由机器维持时,该行销账。
+
+| # | 记录 | 类别 | 处置(已裁) | 出处 | 销账条件 |
+|---|---|---|---|---|---|
+| PROC-1 | **一个 agent 的工具改到了另一个 agent 的工作树里**。2026-09-01 22:43:31,语料 worktree(在 Claude Code scratchpad 下)里的 `spec/round28-manifest-schema.yaml` 出现 `feature_id` → `feature_weakened_id` 的未经授权改动,mtime 与任何 agent 自己的操作都对不上;**已由执笔 agent 还原,未进入任何提交**。**归因(协调方 2026-09-02)**:`codex exec` 的沙箱写权限是 `workspace-write [workdir, /tmp, $TMPDIR]`,Windows 上 `$TMPDIR` = `%LOCALAPPDATA%\Temp`,而 Claude Code 的 scratchpad 与其下**全部** agent worktree 都在这个目录里——于是 codex 跑变异测试时,写权限覆盖到了别的 agent 的树。 | 事故(已还原,无提交) | **每份 codex 提示固定加一句**:「不得改 scratchpad 下任何已有 worktree;变异在自建临时检出里做并删除」。**自建临时检出只能落在两处**:仓内 `git worktree add --detach`,或系统临时目录——因为可写域**只有** `workspace-write` 列出的那三处,此外一律只读,这一点有两次实测(见出处),仓外的 `D:/coding/_trash` 两次都被沙箱拒绝写入。**「系统临时目录可写」与本事故并不矛盾**:被禁的是**改那里已经存在的别人的 worktree**,不是在那里**自建**一个用完即删的检出。 | 事实与归因:协调方 2026-09-02。只读实证:[#1096 r12](https://github.com/SevenX77/agent-harness/pull/1096#issuecomment-5508235550)「`D:/coding/_trash` 被沙箱拒绝写入,改用独占系统临时目录运行同一测试:`181 passed`」;[#1093 r5](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5507800124)「沙箱拒绝在 `D:/coding/_trash/` 创建临时检出,因此变异通过测试读取边界进行内存注入」。 | 这条约定不再靠每份提示里的一句话维持——即 codex 的沙箱写权限被收窄到本任务自己的 worktree 时。 |
+| PROC-2 | **一条测试辅助断言在特定书写形状下会误红**。`apps/studio/backend/tests/test_vendor_stamp.py:626` 的 `test_the_git_command_is_the_gates_own` 从 `apps/studio/tauri/scripts/ensure_vendor.js` 里抠出 `const GIT_LS_FILES_ARGS` 声明做文本比对(`:642` 的正则 `^const GIT_LS_FILES_ARGS = (\[[^\]]*\])`)。**触发形状**:把该数组拆成多行、并在某个元素后写一个同形的行尾注释。`js_without_comments`(`:611-623`)只移除**独占一行**的 `//` 注释,而声明正则允许跨行,于是行尾注释进入捕获、并被注释里的第一个 `]` 截断——codex 实跑得到 `['ls-files', 'ls-files', '-z']`。**生产参数一个没变,测试却红。**该函数 docstring 里「行尾注释不可能有影响,因为声明只在行首被识别」这句假设,只在数组写成一行时成立。 | 已接受技术债(P2) | **约定该声明独占一行,不改测试。** 约定与理由已写在 `apps/studio/tauri/scripts/ensure_vendor.js:273-276` 的注释里(原文:「A named constant on one line, not an inline literal, so that `test_the_git_command_is_the_gates_own` (Python, no Node) can read this exact declaration back out of the file」)。**接受而不修的理由(协调方裁决原文)**:「r6 唯一发现是测试辅助断言在"多行数组 + 行尾同形注释"下的误红(响亮失败,非静默漏报),且 `ensure_vendor.js` 注释已规定该声明独占一行。四轮已对实现 approve;r5/r6 只动测试文本解析。按「只剩不改变决定的 P2 即可合并」合并」。 | 发现:[#1093 r6](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5508064592)(codex,GPT-5.6-sol xhigh)。裁决:[协调方 2026-09-02](https://github.com/SevenX77/agent-harness/pull/1093#issuecomment-5508065203)。 | 「该声明独占一行」不再靠一条注释维持——即两侧改由机器保证参数一致时。 |
+
+---
+
 ## 附:方法纪律(不入销账,指向规则文件)
 
 用户反复重申的工作纪律已固化于:AGENTS.md(Development Principles/Coding Standards/铁律)、

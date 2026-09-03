@@ -36,7 +36,7 @@ role: workflow-record
 | 决议 §11.5-3 | 「gateway 与 studio 带 `gskill` 词缀短名……**精确拼法**（前缀还是后缀、连字符还是下划线、各 registry 上的具体标识符）**由批C 定**」 | §3.3 命名（D3） |
 | 决议 §11.5-5 | 「『包名裁决』的选名与复核**均已完成**；批C 的该项前置**已满足**」 | §2 前置条件核对第 2 条 |
 | 决议 §11.7-1 | 「**不移植历史**：一律不 graft、不 `subtree --with-history`、不 filter-repo 回灌；搬入即为**新提交**」 | §3.2 历史处置（D2） |
-| 决议 §11.7-2 / §11.7-5 | 「权威文档全部重写：**不搬运旧文正文**；旧文**只作证据引用**」「批C 方案必须按本条写，并在呈批时附**权威文档重写清单**」 | §7 权威文档改写清单 |
+| 决议 §11.7-2 / §11.7-5 | 「权威文档全部重写：**不搬运旧文正文**；旧文**只作证据引用**（引用时给路径与行号）」「批C 方案必须按本条写，并在呈批时附**权威文档重写清单**」 | §4.1.1 `docs/**` 三类处置 + §7 权威文档改写清单 |
 | 盘点 `inventory-synthesis.md:124` | 「批C · 搬迁（§4.4 顺序固定）……**旧 engine 冻结随迁**……→ 主仓归档只读。**搬迁不改行为**；验收 = 迁后全门禁绿 + 打包链可跑」 | §8 验收判据 |
 | 主仓 `AGENTS.md`「Development Principles」 | 不做向后兼容；第一性原理修复而非打补丁；「先看成熟工程怎么解」并写明借了什么、拒绝了什么 | §3 各条的成熟参照段 |
 
@@ -116,7 +116,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **决定**：只带 `packages/graph-agent/` 下的 `pyproject.toml`、`README.md`、`src/**`（124 个文件），**不带** `tests/`（340）、`spec/`（4）、`tools/`（1）、`scripts/`（1），也不带 9 个误提交的裸文件；版本号 `0.3.1` 不动；并用一条**树哈希锁**把「冻结」做成门禁。
 
-**树哈希锁的形状**：新仓新增 `tests/test_frozen_engine_hash_lock.py`，对 `packages/graph-agent` 下全部跟踪文件按路径排序、逐文件算 sha256（行尾统一按 LF 归一化后再算，避免 Windows 检出把 CRLF 混进哈希），与一份 seal（钉值）记录比对；任何漂移即红，失败信息里自带重钉命令。seal 记录沿用新仓 `tests/contract-seals.yaml` 的同款机制（由工单 F-T3 落地，见交付台账 gskill 工单表）——即「钉值即治理记录」：钉的不是一个数字，而是「这份内容在此刻被谁、以什么理由锁住」。**放宽这把锁的唯一合法路径是删除整包**，那属于批E 的 X-T1b。
+**树哈希锁的形状**：新仓新增 `tests/test_frozen_engine_hash_lock.py`，对 `packages/graph-agent` 下全部跟踪文件按路径排序、逐文件算 sha256（行尾统一按 LF 归一化后再算，避免 Windows 检出把 CRLF 混进哈希），与一份 seal（钉值）记录比对；任何漂移即红，失败信息里自带重钉命令。seal 记录沿用新仓 `tests/contract-seals.yaml` 的同款机制——该机制由工单 F-T3（新仓 PR #22，合并提交 `a4f43d83`）**已经落地**，本方案直接复用既有形状，不新造一套——即「钉值即治理记录」：钉的不是一个数字，而是「这份内容在此刻被谁、以什么理由锁住」。**放宽这把锁的唯一合法路径是删除整包**，那属于批E 的 X-T1b。
 
 **依据**：
 - 决议 §4.3 定的是「冻结……五门禁全过后整包删除」。**冻结的可核验定义就是字节不变**；口头承诺「大家别改它」在一个多 agent 并发推进的仓里不成立，门禁才成立。
@@ -140,7 +140,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 - **「留」**= 不搬，留在归档后的主仓；归档仓只读可查，需要时按决议 §11.7-2「旧文只作证据引用」的方式引用。
 - **一条贯穿规则**：凡内容需要改写但改写本身不是 C-1 过门的必要条件的文件（如 `CLAUDE.md` 的指向、`.ah/` 里的路径引用），**C-1 先逐字节搬入、改写归 C-3**。这样 C-1 的哈希核验保持无例外。
 
-### 4.1 逐字节搬（C-1，共 1973 个文件）
+### 4.1 逐字节搬（C-1，共 1791 个文件）
 
 | 源路径（主仓） | 目标路径（新仓，C-1 时） | 文件数 | 说明 |
 |---|---|---|---|
@@ -150,7 +150,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `apps/studio/tests-e2e/**` | 同路径 | 9 | Playwright 端到端测试 |
 | `packages/graph-agent-gateway/**` | 同路径 | 140 | gateway 包全量（src 61 + tests 77 + 2） |
 | `packages/graph-agent/{pyproject.toml,README.md,src/**}` | 同路径 | 126 | 冻结 engine 子集，见 §3.4 |
-| `docs/**` | 同路径 | 439 | 见下方「为什么整搬 docs」 |
+| `docs/**` 的 (a)(b) 两类 | 同路径 | 257 | **不整搬**；三类分法见 §4.1.1 |
 | `scripts/**` | 同路径 | 18 | worktree/PR 流水线脚本、并行黑板、交叉审脚本 |
 | `.claude/skills/**` | 同路径 | 26 | shadcn（15）+ studio-verify（11）；后者是真机验证的唯一方法 |
 | `skills-lock.json` | 同路径 | 1 | 上一行的版本锁 |
@@ -158,9 +158,43 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `.pre-commit-config.yaml` | 同路径 | 1 | 提交前钩子 |
 | `CLAUDE.md` | 同路径 | 1 | **改指向新仓 `AGENTS.md` 归 C-3** |
 
-**为什么 `docs/**` 整搬（439 个文件、156 KB）**：逐文件筛选的错误代价高于整搬的代价。文档引用门禁（`apps/studio/backend/tests/docs/`）与生产代码读 docs 的路径散布在多处——例如 `apps/studio/backend/app/services/llm_notable_models.py:13` 按 `parents[5]` 上溯读 `docs/development/llm_provider_notes`——漏搬一份就是一个红门禁或一次运行时缺文件，而多搬一份的代价只是仓里多一个待收敛的文件。旧 engine 的文档随包在批E 删，整体文档收敛是批F 的事。
+#### 4.1.1 `docs/**` 分三类处置：**不整搬**
 
-**这不与决议 §11.7-2「权威文档全部重写、不搬运旧文正文」冲突的边界在哪**：§11.7-2 约束的是**权威文档**这一类载体（新仓的 `AGENTS.md` / `README.md` / 台账头部 / 契约文档），本文 §7 给出它们的重写清单；`docs/**` 里的设计正文在新仓的角色是**证据**（§11.7-2 原文「旧文只作证据引用」），载体本身必须在场才引用得到。**这条边界的精确划法待协调方补证**：`docs/studio/mvp1/**`（61 个文件）与 `docs/engine/mvp1/**` 按主仓 `AGENTS.md` 是「MVP1 design = source of truth」，它们究竟算「随迁的证据」还是「必须重写的权威文档」，本文按前者处理（整搬 + 批F 收敛），但该判定不在已批决议的字面里。
+决议 §11.7-2 原文：「**权威文档全部重写**：**不搬运旧文正文**；旧文**只作证据引用**（引用时给路径与行号）」；§11.7-5 要求本方案附**权威文档重写清单**（本文 §7）。因此 `docs/**` 439 个文件按**在新仓里的身份**分三类，而不是按目录整体搬运：
+
+**(a) 记录类——逐字节搬（110 个文件）。** 它们记录的是「某时某人裁了什么、发现了什么」，是**事实记录而非设计权威**；重写记录等于伪造历史（与本仓 2026-08-12「git 历史本身就是归档」的既有裁决同向）。
+
+| 路径 | 文件数 |
+|---|---|
+| `docs/design/**`（决议、盘点、审计与决策记录） | 88 |
+| `docs/studio-mvp1-execution/**` | 9 |
+| `docs/handoffs/**` | 4 |
+| `docs/engine/graph-skill-runtime/**`（`README.md` / `baseline.md` / `v1-alignment.md`） | 3 |
+| `docs/pr-reports/**` | 2 |
+| `docs/development/DELIVERY_LEDGER.md`、`docs/development/PROBLEM_LEDGER.md` | 2 |
+| `docs/references/**` | 1 |
+| `docs/deferred-items.md` | 1 |
+
+**(b) 门禁 / 运行数据类——逐字节搬（147 个文件）。** 判据是**被搬入的代码、测试、脚本或工作流在运行时或 CI 时读取它**。这一类不按内容判、按引用判，清单**机械产出**：在 §4.1「搬」列的代码/测试/脚本/工作流里跑
+`git grep -n -E '(DOCS_ROOT|/ *"docs|docs/)' -- <搬列路径> ':!*.md'`，取其中构成**路径读取**（而非注释里的出处标注）的每一条，展开成文件清单。2026-09-02 在 `377e82e0` 上按此法得到的读取点与其覆盖范围：
+
+| 读取点（搬入的代码/测试） | 它读取的 docs 范围 |
+|---|---|
+| `apps/studio/backend/app/services/llm_notable_models.py:13`（**生产代码**，按 `parents[5]` 上溯） | `docs/development/llm_provider_notes/**` |
+| `apps/studio/backend/tests/docs/test_design_doc_standards_governance.py:100-102`（`ROLE_REQUIRED_ROOTS`）与 `:311` （`test_at_least_one_real_summary_role_exists` 断言 `docs/studio/mvp1/01_workflows/00_settings.md` 存在） | `docs/development/design-doc-standards/**`、`docs/studio/mvp1/**` |
+| `apps/studio/backend/tests/docs/test_doc_code_references_exist.py:104`（rglob 全部 `baseline.md`/`mvp1-alignment.md`，且 `_governed_docs()` 断言非空）与 `STALE_REFERENCE_BACKLOG_2026_08_29`（24 条棘轮，逐条必须存在） | 那 24 份 backlog 文档（散落在 `docs/architecture/**`、`docs/engine/graph-agent-gateway/`、`docs/graph-agent-gateway/**`、`docs/studio/mvp0/**`、`docs/studio/mvp1/**`） |
+| `apps/studio/backend/tests/docs/test_ledger_tables_hold_their_shape.py:100` 与 `test_studio_request_audit_ledger.py:150` | `docs/development/STUDIO_REQUEST_AUDIT.md`（另两个台账已在 (a)） |
+| `apps/studio/backend/tests/test_doc_hash_lock.py:11-12,106` 与 `test_design_unit_lock_snapshot.py:12-14` | `docs/studio/mvp1/**`（全树 rglob + `_audited-ready-hashes.json` + `_design-unit-lock-snapshot.json`） |
+| `packages/graph-agent-gateway/tests/test_gateway_doc_locks.py:10-12,178` | `docs/graph-agent-gateway/mvp1/**`（全树 + 两个锁文件） |
+| `packages/graph-agent-gateway/tests/test_gateway_docs_name_real_files.py:29` | `docs/graph-agent-gateway/USAGE.md` |
+
+把上表的读取范围展开成文件，就是 (b) 的 147 个：`docs/studio/mvp1/**` 85 + `docs/graph-agent-gateway/mvp1/**` 39 + `docs/development/llm_provider_notes/**` 10 + `docs/development/design-doc-standards/**` 5 + `docs/development/STUDIO_REQUEST_AUDIT.md` 1 + `docs/graph-agent-gateway/USAGE.md` 1 + 落在上述范围之外的 6 份 backlog 文档（`docs/architecture/**` 2、`docs/engine/graph-agent-gateway/baseline.md` 1、`docs/graph-agent-gateway/mvp0/baseline.md` 1、`docs/studio/mvp0/**` 2）。
+
+**(a) 与 (b) 冲突时的优先级规则**：**一份文档既是权威文档又被门禁读取时，先按 (b) 逐字节搬以保 C-1 绿，同时进 (c) 的重写清单；重写落地时删除搬来的旧文。** 这样 C-1 不必改动任何门禁接线（「搬迁不改行为」），旧文在新仓的身份是**待重写的证据副本**——新仓 `AGENTS.md` 由 C-3 写明这一点，避免它被后来者误当作新仓的设计权威。`docs/studio/mvp1/**` 与 `docs/graph-agent-gateway/mvp1/**` 正是这一类：它们既是模块设计体，又被四个哈希锁/门禁测试逐树读取。
+
+**(c) 权威文档——不搬、重写（182 个文件）。** 清单与执笔分工见 §7。它们在新仓落地之前，新仓正文引用这些设计源时**一律写归档坐标**（`agent-harness@<Source-Commit>:<路径>:<行号>`），这正是 §11.7-2「旧文只作证据引用（引用时给路径与行号）」要求的形式。
+
+**这三类的边界为什么是这样**：§11.7-2 禁止的是「把旧的**设计权威正文**原样搬过去继续当权威」；它没有、也不能禁止搬运**事实记录**（(a)：重写记录即伪造）与**被门禁读取的数据**（(b)：不搬则 C-1 自己就是红的，而「搬迁不改行为」要求 C-1 不去改门禁接线）。三类都以「在新仓里它是什么身份」为唯一判据，不以目录形状为判据。
 
 ### 4.2 C-1 里合并 / 新建的文件
 
@@ -182,6 +216,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 | 路径 | 文件数 | 不搬的依据（2026-09-02 实测，扫描范围 `apps packages scripts .github .claude .ah pyproject.toml`，排除 `*.md`） |
 |---|---|---|
+| `docs/**` 的 (c) 权威文档类 | 182 | §4.1.1；它们在新仓**重写**而不是搬运（决议 §11.7-2），重写落地前以归档坐标引用。逐目录清单与执笔分工见 §7 |
 | `.kiro/**` | 484 | 27 处引用**全部**在 docstring/注释里做出处标注，**无任何路径读取** |
 | `graph-agent-explainer/**` | 14 | 0 处引用（1.8 MB 截图） |
 | `code-diagnostics/**` | 6 | 5 处引用全在 `packages/graph-agent/tests/core/test_code_health_metrics.py`，而该测试属于冻结 engine 的 tests，本身不搬 |
@@ -194,9 +229,9 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `packages/graph-agent/{tests,spec,tools,scripts}` + 9 个裸文件 | 355 | §3.4 |
 | `.github/workflows/ci.yml` 的 `graph-agent-tests` job | — | 冻结 engine 的 tests 不搬，无测试可跑 |
 
-**账目闭合**：1973（逐字节搬）+ 877（留）+ 12（根级单文件按 §4.2 合并/改写/新建处置，或如 `LICENSE` 两侧同一 blob）+ 6（`.github/**`：`ci.yml` 扩 job、`package.yml` 移植，均见 §6；`CODEOWNERS` 由 C-3 追加条目，见 §7；`dependabot.yml`、`codeql.yml`、`scorecard.yml` 新仓已有同等配置——2026-09-02 实测两仓 `dependabot.yml` 语义相同，均只覆盖 pip 与 github-actions 两个生态——主仓副本不搬）= **2868**，等于主仓 `377e82e0` 的 `git ls-tree -r --name-only | wc -l` 实测值。**处置表无遗漏文件**。
+**账目闭合**：1791（逐字节搬；含 `docs/**` 的 (a)(b) 两类 257）+ 1059（留；含 `docs/**` 的 (c) 类 182）+ 12（根级单文件按 §4.2 合并/改写/新建处置，或如 `LICENSE` 两侧同一 blob）+ 6（`.github/**`：`ci.yml` 扩 job、`package.yml` 移植，均见 §6；`CODEOWNERS` 由 C-3 追加条目，见 §7；`dependabot.yml`、`codeql.yml`、`scorecard.yml` 新仓已有同等配置——2026-09-02 实测两仓 `dependabot.yml` 语义相同，均只覆盖 pip 与 github-actions 两个生态——主仓副本不搬）= **2868**，等于主仓 `377e82e0` 的 `git ls-tree -r --name-only | wc -l` 实测值。**处置表无遗漏文件**。
 
-> 上述文件数是 2026-09-02 在主仓提交 `377e82e0` 上的实测快照。主仓 `main` 此后仍在推进（本文落盘时已到 `6547029e`，2872 个文件），因此 §8-① 的哈希核验以 **C-1 开工当时主仓 main 的实际哈希**为 `Source-Commit`，不以 `377e82e0` 为准；处置表按目录给规则，新增文件自动落入对应目录的规则里。
+> 上述文件数是 2026-09-02 在主仓提交 `377e82e0` 上的实测快照。主仓 `main` 此后仍在推进（本文落盘时已到 `6547029e`，2872 个文件），因此 §8-① 的哈希核验以 **C-1 开工当时主仓 main 的实际哈希**为 `Source-Commit`，不以 `377e82e0` 为准；处置表按目录与身份给规则，快照之后新增的文件按同一套规则自动归类——例如 `docs/development/PARALLEL_ORCHESTRATION.md`（主仓 #1096 合入，晚于快照）是并发推进 SOP，按 §4.1.1 落入 (c) 类，由 C-3 重写。**C-1 实施方必须在开工当时的 `Source-Commit` 上重跑一次 §4.1.1(b) 的 `git grep` 与本节的计数，并把结果贴进 PR**；本文给的是规则与快照值，不是可以直接照抄的最终清单。
 
 ## 5. PR 序列（D10）
 
@@ -225,10 +260,13 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **扩展 job**：
 
-- **`cross-platform-smoke`**（windows-latest / macos-latest）：在现有 runtime 测试之外，加 studio backend、gateway、e2e 三套 pytest + 前端 build + stub vendor 文件 + `cargo test`（tauri lib）。
-  > **待协调方补证**：主仓的 `cross-platform-smoke` 实际跑的三套 pytest 是 backend / gateway / graph-agent（`.github/workflows/ci.yml:257-263`），**不含 e2e**；主仓的 `e2e-tests` 是独立 job 且 `if: github.event_name == 'workflow_dispatch'`（`ci.yml:184-188`），原因写在它自己的注释里：「E2E suite needs the frontend dev server (Vite) plus Playwright Chromium, which requires a dedicated runner setup」。把 e2e 放进必过的 `cross-platform-smoke`，等于把一个主仓从未在 PR 上跑过的套件变成必过门——这既是行为改动（与「搬迁不改行为」相抵），又要为两个平台的 runner 装 Playwright。本文按上位指令照写「三套 pytest 含 e2e」，但该项的取舍需协调方确认后再落到 C-1 的工作流文件里。
+- **`cross-platform-smoke`**（windows-latest / macos-latest）：在现有 runtime 测试之外，加 **studio backend 与 gateway 两套 pytest**（主仓那第三套 `pytest graph-agent` **不加**——冻结 engine 的 tests 按 D4 不随迁，没有测试可跑）+ 前端 `npm ci` 与 build + stub vendor 文件 + `cargo test`（tauri lib）。这是对主仓形状的**镜像**：主仓该 job 跑的正是 backend / gateway / graph-agent 三套（`.github/workflows/ci.yml:257-263`），**不含 e2e**。
 
-**移植 job**：`package.yml`（Windows 上跑完整 `cargo tauri build`、装包并断言 sidecar 三件套落在安装目录内）按主仓形状移植，保持**按路径触发、非必过**——理由与主仓相同：一次冷跑要编译整个 Rust release 栈并下载可移植 CPython，数十分钟起，绝大多数 PR 碰不到打包链。
+**原样移植、不进必过集的 job**：
+
+- **`e2e-tests`**：按主仓形状移植为**独立 job 且只在手动触发时运行**（主仓 `ci.yml:184-188`：`if: ${{ github.event_name == 'workflow_dispatch' }}`）。理由写在主仓该 job 自己的注释里——「E2E suite needs the frontend dev server (Vite) plus Playwright Chromium, which requires a dedicated runner setup」。把它塞进必过的 `cross-platform-smoke` 会同时犯两个错：**改行为**（主仓从未在 PR 上跑过这套），以及给两个平台的 runner 平添一套 Playwright 依赖。
+
+- **`package.yml`**（Windows 上跑完整 `cargo tauri build`、装包并断言 sidecar 三件套落在安装目录内）：按主仓形状移植，保持**按路径触发、非必过**——理由与主仓相同：一次冷跑要编译整个 Rust release 栈并下载可移植 CPython，数十分钟起，绝大多数 PR 碰不到打包链。它的绿是 §8-③ 的验收判据，靠人手动触发一次，不靠每张 PR 等它。
 
 **不动的 job**：`quality-gates` 与 `runtime-tests`（3.11/3.12/3.13）原样保留。
 
@@ -238,18 +276,50 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **分支保护是仓库设置、不是 PR**：该变更由协调方在 C-1 合并前执行；用户批准本方案即一并授权该动作（§11 授权点一）。
 
-## 7. 权威文档改写清单（C-3；决议 §11.7-5 要求本方案必附）
+## 7. 权威文档改写清单（决议 §11.7-5 要求本方案必附）
 
-改写而非搬运，依据决议 §11.7-2：「不搬运旧文正文；旧文只作证据引用」。执笔席为干净上下文的独立 agent（用户全局规范「干净上下文独立执笔」），brief 自包含。
+改写而非搬运，依据决议 §11.7-2：「不搬运旧文正文；旧文只作证据引用」。执笔席一律是**干净上下文的独立 agent**（用户全局规范「干净上下文独立执笔」），brief 自包含。清单分三档，判据是**谁重写、什么时候重写**。
+
+### 7.1 第一档 · C-3 重写（本批次内完成）
+
+仓级权威与开发 SOP：搬迁一旦落地，它们描述的对象就变了，不能等。
 
 | 文档（新仓，除非注明） | 改写内容 | 以哪些旧文为证据 |
 |---|---|---|
-| `AGENTS.md` | **删**第 18 行段落中的那一句「Gateway and Studio plugins are not deliverables in this release line; the design retains only their future external Port/Adapter ownership boundaries.」——搬入后该句为假；**删的是这一句，不是整行**（该行是一整段，其余部分讲 `docs/design/v1-alignment.md` 的 `drafted` 状态与各 Phase 验收，与本次搬迁无关）。**并入并以新仓路径与 8 项必过检查集重写**：CI 门禁清单、三模块架构与边界、Workflow Pipeline（branch → PR → auto-merge → cleanup）、Studio Tauri Dev、并行任务黑板、vendor 重建规则。**是重写，不是拼贴** | 主仓 `AGENTS.md`、主仓 `CLAUDE.md` |
+| `AGENTS.md` | **删**第 18 行段落中的那一句「Gateway and Studio plugins are not deliverables in this release line; the design retains only their future external Port/Adapter ownership boundaries.」——搬入后该句为假；**删的是这一句，不是整行**（该行是一整段，其余部分讲 `docs/design/v1-alignment.md` 的 `drafted` 状态与各 Phase 验收，与本次搬迁无关）。**并入并以新仓路径与 8 项必过检查集重写**：CI 门禁清单、三模块架构与边界、Workflow Pipeline（branch → PR → auto-merge → cleanup）、Studio Tauri Dev、并行任务黑板、vendor 重建规则。**另须写明 §4.1.1(b) 那批搬来的旧文在新仓的身份是「待重写的证据副本」，不是新仓的设计权威**，避免后来者误读。**是重写，不是拼贴** | 主仓 `AGENTS.md`、主仓 `CLAUDE.md` |
 | `README.md` | 改写为 monorepo 分工说明：runtime（可独立发布的精瘦包）/ gateway（独立包）/ studio（应用）/ 冻结 engine（带退出条件的过渡包） | 主仓 `README.md`、决议 §4.3 |
 | `docs/design/v1-alignment.md` §2.1 工作名表 | 加 gateway、studio 两行（发行名、目录、import 名、Display name），与本文 §3.3 一致 | 决议 §11.5 |
 | `.github/CODEOWNERS` | 加 studio 与 gateway 的契约文件条目 | 主仓同名文件 |
-| `docs/development/DELIVERY_LEDGER.md` | 台账头部加「仓库 = 新仓」声明（搬迁后台账随代码在新仓维护） | 主仓台账 |
-| **主仓** `README.md` / `AGENTS.md` | 顶部加归档横幅：指向新仓 + C-1 的导入提交哈希（属 C-4） | — |
+| `docs/development/DELIVERY_LEDGER.md` | 台账正文按 §4.1.1(a) 逐字节搬入，C-3 只在**头部加「仓库 = 新仓」声明**（搬迁后台账随代码在新仓维护） | 主仓台账 |
+| `docs/development/` 下的 SOP 与规范：`PARALLEL_ORCHESTRATION.md`、`FRONTEND_UI_SPEC.md`、`JOURNEY_TEST_RULES.md`、`CROSS_PLATFORM.md`、`RUN_AND_SCREENSHOT.md`、`FRONTEND_HANDOFF_PROMPT.md`、`design-doc-standards/**` | 以新仓路径、新仓必过检查集、新仓 worktree/PR 流水线重写 | 归档仓同名文件 |
+| `CLAUDE.md` | 改指向新仓 `AGENTS.md`（正文已按 §4.1 逐字节搬入，此处只改指向） | 主仓同名文件 |
+| `.ah/**` + `ah.toml` | 路径引用随迁校正 | 主仓同名文件 |
+| **主仓** `README.md` / `AGENTS.md` | 顶部加归档横幅：指向新仓 + C-1 的导入提交哈希（属 **C-4**，不在 C-3） | — |
+
+> `design-doc-standards/**` 同时出现在 §4.1.1(b)（被 `test_design_doc_standards_governance.py` 逐树读取，必须先逐字节搬以保 C-1 绿）与本表——这正是那条优先级规则的形状：**先搬后重写，重写落地时删除搬来的旧文**。
+
+### 7.2 第二档 · 批D 各模块就地重整时重写（不在批C 内）
+
+依据决议 §4.3「**搬家在模块化重整之前**……先搬后整，只需在最终的目录形状上重整一次」。这些是模块设计体，随各自模块在批D 被重整，执笔席**按模块派**，证据一律写归档坐标 `agent-harness@<Source-Commit>:<路径>:<行号>`。
+
+| 待重写范围 | 文件数 |
+|---|---|
+| `docs/studio/**` 中未被 §4.1.1(b) 搬走的部分（`mvp0` 24、`_reorg` 10、`INDEX.md` 1）。注意 `docs/studio/mvp1/**` 85 份与两份 mvp0 backlog 文档已作**证据副本**搬入，它们的重写同属本档，重写落地时删除搬来的旧文 | 35 |
+| `docs/development/` 下其余非 SOP 文档（`CONTRIBUTING.md`、`STUDIO_DESKTOP_BOUNDARY_SPEC.md`、`LLM_MODEL_CONFIGURATION_FLOW.md` 等 11 份 + `examples/` 2） | 13 |
+| `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/**` | 6 |
+| `docs/superpowers/**`（`plans` 3 + `specs` 3） | 6 |
+| `docs/graph-agent-gateway/**` 中未被 (b) 搬走的部分（`mvp0` 4 + `README.md` 1）；`mvp1/**` 39 份同 studio，作证据副本先搬、重写时删 | 5 |
+| `docs/strategy/**` | 4 |
+| `docs/architecture/**` 中未被 (b) 搬走的部分 | 2 |
+| `docs/public/**` | 1 |
+| `docs/DESIGN-PROCESS.md` | 1 |
+| **小计** | **73** |
+
+### 7.3 第三档 · 不重写
+
+`docs/engine/**` 是**旧 engine 的文档**（不搬的 104 份：`mvp1` 61、`mvp0` 22、`skill-spec` 14、`graph-agent-gateway` 4、`error-handling` 1、`feature-compliance-checklist.md` 1、`public-api-contract.md` 1），它随冻结包在批E 一起死亡——重写一份即将被删除的包的设计文档没有收益。它**只留在归档仓当档案**，需要时按归档坐标引用。**两处例外**：①`docs/engine/graph-skill-runtime/**` 三件记录的是新仓本身，按 §4.1.1(a) 归记录类逐字节搬；②`docs/engine/graph-agent-gateway/baseline.md` 是 24 条 backlog 棘轮之一，按 (b) 逐字节搬（其余 3 份同目录文档不搬）。
+
+**三档账目闭合**：182（不搬的 (c) 类）= 104（第三档 `docs/engine/**`）+ 73（第二档）+ 5（第一档里不搬的那 5 份 SOP：`CROSS_PLATFORM.md`、`FRONTEND_HANDOFF_PROMPT.md`、`FRONTEND_UI_SPEC.md`、`JOURNEY_TEST_RULES.md`、`RUN_AND_SCREENSHOT.md`；`design-doc-standards/**` 与 `CLAUDE.md`、`.ah/**` 已在搬入侧，`PARALLEL_ORCHESTRATION.md` 晚于快照）。
 
 ## 8. 验收判据（D9，每条可机械核验）
 
@@ -313,6 +383,14 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **风险四：冻结 engine 的 `graph-agent-tests` 不随迁，冻结包在新仓没有自己的测试。** 这是 §3.4 的自觉取舍：它的行为由 studio 测试套件经 adapter 间接覆盖、由 `build_vendor.py` 真实构建、由安装后 import 探针断言，加上一把树哈希锁保证它一个字节都不会变——**不变的代码不需要回归测试，需要的是防止它被改动的锁**。
 
+**风险五（C-1 的已知阻塞，机械可复核）：一份搬入的受门禁治理文档，其代码引用指向不随迁的冻结 engine 测试。** 用 `test_doc_code_references_exist.py` 自己的判据（反引号包裹、以 `apps/`/`packages/`/`scripts/` 开头、带扩展名的路径必须存在）扫描全部 155 份 `baseline.md`/`mvp1-alignment.md`，只有一份**既随迁、引用又会失效**：
+
+- `docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md`（`status: FROZEN`，且在 `docs/studio/mvp1/_audited-ready-hashes.json` 哈希锁内），引用三条冻结 engine 测试路径：`packages/graph-agent/tests/callbacks/test_a_run_has_one_clock.py`、`packages/graph-agent/tests/callbacks/test_a_run_has_one_trace.py`、`packages/graph-agent/tests/core/test_a_graph_stops_before_the_phases_you_named.py`。按 D4 这三个文件不随迁，该门禁在新仓即红。
+
+另两处命中不构成阻塞：`docs/engine/graph-skill-runtime/baseline.md` 引用 `packages/graph-agent/README.md`（该文件按 D4 随迁，仍能解析）；`docs/engine/mvp1/02-mechanism/05-run-inner/05-exit-control/baseline.md` 属 (c) 类不随迁。
+
+**这条不能靠把该文档加进新仓的 `STALE_REFERENCE_BACKLOG_2026_08_29` 解决**——该名单是**只减不增的棘轮**，其源码注释原话：「never add to this list — fix the doc instead」。**待协调方补证**：该文档的引用在 C-0 阶段（主仓，需同 PR 重钉 `_audited-ready-hashes.json`）改写为归档坐标，还是另有处置。C-1 实施方须在开工当时的 `Source-Commit` 上重跑一次上述扫描——主仓仍在推进，这类引用可能新增。
+
 ### 9.2 本方案与「搬迁不改行为」的边界（诚实记账）
 
 严格说，有三处不可能保持逐字节不变，本方案把它们逐一显式化而不是掩盖：
@@ -333,6 +411,8 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 6. **不复刻主仓的 `graph-agent-tests` job**（冻结 engine 的 tests 不随迁）。
 7. **不重命名仓库**（决议 §11.5-1：主仓名 `graph-skill-runtime` 早已定，批C 不含改名项）。
 8. **不移植 git 历史**（决议 §11.7-1）。
+9. **不在批C 里重写模块设计体**：`docs/studio/**`、`docs/graph-agent-gateway/**` 等按 §7.2 归**批D**各模块就地重整时重写（决议 §4.3「先搬后整，就地重整一次到位」）；批C 只重写 §7.1 那批仓级权威与开发 SOP。
+10. **不搬旧 engine 文档**（`docs/engine/**` 104 份，§7.3），也不为它们写新版——它们随冻结包在批E 死亡。
 
 ## 11. 待用户批准项
 
@@ -342,10 +422,11 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 2. **授权点一——新仓分支保护的必过检查集扩为 8 项**（§6）。这是仓库设置变更，不经 PR，由协调方在 C-1 合并前执行。
 3. **授权点二——把主仓 `SevenX77/agent-harness` 设为 archived**（§5 的 C-4）。这是对外可见、影响他人可见性的设置变更，需用户在批准本方案时明确授权。
 
-另有一项**待协调方补证**（不是待用户裁决，不阻塞本方案呈批）：§6 中 `cross-platform-smoke` 是否纳入 e2e 套件——实测显示主仓从未在 PR 上跑过 e2e，纳入会改变行为并需要为两个平台准备 Playwright runner。
+另有一项**待协调方补证**（不是待用户裁决，不阻塞本方案呈批，但阻塞 C-1 开工）：§9.1 风险五——`docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md` 引用三条不随迁的冻结 engine 测试路径，该文档又必须随迁（门禁逐树读取）且在哈希锁内，需定处置方式。
 
 ## 修订记录
 
 | 日期 | 变更 | 说明 |
 |---|---|---|
+| 2026-09-02 | 按协调方对初稿七条质疑的逐条裁决修订（同 PR #1102） | ①「逐字节搬 / C-1 合并新建」两桶分法与「改写不是 C-1 过门必要条件的归 C-3」贯穿规则获采纳，保留；②**`cross-platform-smoke` 改为只扩 backend + gateway 两套 pytest**（不加 `graph-agent`——其 tests 按 D4 不随迁），`e2e-tests` 原样移植为独立的 `workflow_dispatch` job、不进必过集，删原「待协调方补证」；③**`docs/**` 改判为不整搬**，按「在新仓里是什么身份」分 (a) 记录类 110 / (b) 门禁运行数据类 147 / (c) 权威文档类 182 三类（新增 §4.1.1），并加优先级规则「既是权威又被门禁读取的先按 (b) 搬、同时进重写清单、重写落地时删旧文」；§7 权威文档重写清单据此扩为三档（C-3 / 批D / 不重写）；④F-T3（新仓 #22，`a4f43d83`）已合并，冻结锁的 seal 机制改写为既成事实；⑤⑥⑦快照处理、账目闭合、`git subtree` 参照的区分获采纳。账目按新分类重算：**1791 + 1059 + 12 + 6 = 2868**，仍与实测跟踪文件数相等。新增 §9.1 风险五（一份随迁的受治理文档引用了不随迁的冻结 engine 测试，机械扫描得出，标待协调方补证）。 |
 | 2026-09-02 | 初稿落盘 | 按已批决议 §4.3 / §4.4 / §11.5 / §11.7 与盘点 `inventory-synthesis.md:124,174`，把批C 搬迁写成可执行方案。全文事实以 2026-09-02 在主仓 `377e82e0`、新仓 `dc6f32af` 上的实测为准。状态 `drafted`，**待用户批准**。 |

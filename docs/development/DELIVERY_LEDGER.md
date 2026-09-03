@@ -45,7 +45,7 @@
 | 语料-3 | 新仓 #21 | ✅ 已合并(#21) | 语料-2 |
 | 运行期契约成文 | — | 待开工 | F-T3 |
 | 清单生成器 | — | 待开工 | F-T3 |
-| F-T3-尾修 | — | 进行中(docs/f-t3-tail) | F-T3 |
+| F-T3-尾修 | 新仓 #24 | 🚧 进行中(#24) | F-T3 |
 | B′-3 | 新仓 #23 | ✅ 已合并(#23) | B′-2 |
 | 台账-2 | 主仓 #1103 | 🚧 进行中(#1103) | SOP |
 | 批C 搬迁方案 | — | 🚧 进行中(#1102) | D-T13,F-T8,D-T1,F-T1+D-T12,import-linter,旁-1,F-T2,X-T1a,SOP,台账,B′-1,B′-2,D-T3,F-T3,语料-1,语料-2,语料-3 |
@@ -88,7 +88,7 @@
   追加/重钉一条 seal 记录**。**补法**:写出生成器并断言 `generate(spec/features.yaml) == checklist`,
   届时解除封印、改由等式门禁守。
 
-  **`F-T3-尾修`(进行中,分支 `docs/f-t3-tail`)**:F-T3(新仓 #22)交叉审 r3 给出 approve 时附带
+  **`F-T3-尾修`(🚧 进行中,新仓 #24)**:F-T3(新仓 #22)交叉审 r3 给出 approve 时附带
   三条 P2,不改变该 PR 的裁决,另开小 PR 收:`docs/mvp1/INDEX.md:16` 仍把 portable 01 称作
   `audited-ready`(该文件 `:5` 已是 `FROZEN`)、`tests/test_contract_hash_lock.py:331` 的 seal fixture
   仍叫旧名 `contract-exemptions.yaml`(生产 loader `:42` 已指向 `contract-seals.yaml`)、

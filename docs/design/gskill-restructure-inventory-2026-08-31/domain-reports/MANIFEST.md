@@ -19,7 +19,7 @@
 - a9e121a183f25964a_v1.md — Python 侧结构快扫
 - a4be2040da0c50074_v1.md — 前端 + Rust 结构快扫
 - a1f013b6b5c68c243_v1.md — zeroth/gas 方法论借鉴调研
-- ac2a0cf93205b9ba4_v1.md — 主仓 vs graph-skill-runtime 两仓对比;_v2.md(订正测试语料计数 89→44/252)
+- ac2a0cf93205b9ba4_v1.md — 主仓 vs graph-skill-runtime 两仓对比;_v2.md(订正测试语料计数 89→44/252,含同族排查:v1 另两处 + 汇总稿 + 决议正文)
 
 ## 执笔记录
 

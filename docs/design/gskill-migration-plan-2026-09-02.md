@@ -140,7 +140,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 - **「留」**= 不搬，留在归档后的主仓；归档仓只读可查，需要时按决议 §11.7-2「旧文只作证据引用」的方式引用。
 - **一条贯穿规则**：凡内容需要改写但改写本身不是 C-1 过门的必要条件的文件（如 `CLAUDE.md` 的指向、`.ah/` 里的路径引用），**C-1 先逐字节搬入、改写归 C-3**。这样 C-1 的哈希核验保持无例外。
 
-### 4.1 逐字节搬（C-1，共 1791 个文件）
+### 4.1 逐字节搬（C-1，共 1789 个文件）
 
 | 源路径（主仓） | 目标路径（新仓，C-1 时） | 文件数 | 说明 |
 |---|---|---|---|
@@ -150,7 +150,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `apps/studio/tests-e2e/**` | 同路径 | 9 | Playwright 端到端测试 |
 | `packages/graph-agent-gateway/**` | 同路径 | 140 | gateway 包全量（src 61 + tests 77 + 2） |
 | `packages/graph-agent/{pyproject.toml,README.md,src/**}` | 同路径 | 126 | 冻结 engine 子集，见 §3.4 |
-| `docs/**` 的 (a)(b) 两类 | 同路径 | 257 | **不整搬**；三类分法见 §4.1.1 |
+| `docs/**` 的 (a)(b) 两类 | 同路径 | 255 | **不整搬**；三类分法见 §4.1.1。另有 2 份属 (b) 但必须在 C-1 里改写，归 §4.2 |
 | `scripts/**` | 同路径 | 18 | worktree/PR 流水线脚本、并行黑板、交叉审脚本 |
 | `.claude/skills/**` | 同路径 | 26 | shadcn（15）+ studio-verify（11）；后者是真机验证的唯一方法 |
 | `skills-lock.json` | 同路径 | 1 | 上一行的版本锁 |
@@ -175,7 +175,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `docs/references/**` | 1 |
 | `docs/deferred-items.md` | 1 |
 
-**(b) 门禁 / 运行数据类——逐字节搬（147 个文件）。** 判据是**被搬入的代码、测试、脚本或工作流在运行时或 CI 时读取它**。这一类不按内容判、按引用判，清单**机械产出**：在 §4.1「搬」列的代码/测试/脚本/工作流里跑
+**(b) 门禁 / 运行数据类——逐字节搬（147 个文件，其中 145 份逐字节、2 份在 C-1 里改写，见本节末与 §4.2）。** 判据是**被搬入的代码、测试、脚本或工作流在运行时或 CI 时读取它**。这一类不按内容判、按引用判，清单**机械产出**：在 §4.1「搬」列的代码/测试/脚本/工作流里跑
 `git grep -n -E '(DOCS_ROOT|/ *"docs|docs/)' -- <搬列路径> ':!*.md'`，取其中构成**路径读取**（而非注释里的出处标注）的每一条，展开成文件清单。2026-09-02 在 `377e82e0` 上按此法得到的读取点与其覆盖范围：
 
 | 读取点（搬入的代码/测试） | 它读取的 docs 范围 |
@@ -188,9 +188,11 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `packages/graph-agent-gateway/tests/test_gateway_doc_locks.py:10-12,178` | `docs/graph-agent-gateway/mvp1/**`（全树 + 两个锁文件） |
 | `packages/graph-agent-gateway/tests/test_gateway_docs_name_real_files.py:29` | `docs/graph-agent-gateway/USAGE.md` |
 
-把上表的读取范围展开成文件，就是 (b) 的 147 个：`docs/studio/mvp1/**` 85 + `docs/graph-agent-gateway/mvp1/**` 39 + `docs/development/llm_provider_notes/**` 10 + `docs/development/design-doc-standards/**` 5 + `docs/development/STUDIO_REQUEST_AUDIT.md` 1 + `docs/graph-agent-gateway/USAGE.md` 1 + 落在上述范围之外的 6 份 backlog 文档（`docs/architecture/**` 2、`docs/engine/graph-agent-gateway/baseline.md` 1、`docs/graph-agent-gateway/mvp0/baseline.md` 1、`docs/studio/mvp0/**` 2）。
+把上表的读取范围展开成文件，就是 (b) 的 147 个：`docs/studio/mvp1/**` 85（其中 2 份按下段裁决在 C-1 里改写，归 §4.2；其余 83 份逐字节）+ `docs/graph-agent-gateway/mvp1/**` 39 + `docs/development/llm_provider_notes/**` 10 + `docs/development/design-doc-standards/**` 5 + `docs/development/STUDIO_REQUEST_AUDIT.md` 1 + `docs/graph-agent-gateway/USAGE.md` 1 + 落在上述范围之外的 6 份 backlog 文档（`docs/architecture/**` 2、`docs/engine/graph-agent-gateway/baseline.md` 1、`docs/graph-agent-gateway/mvp0/baseline.md` 1、`docs/studio/mvp0/**` 2）。
 
 **(a) 与 (b) 冲突时的优先级规则**：**一份文档既是权威文档又被门禁读取时，先按 (b) 逐字节搬以保 C-1 绿，同时进 (c) 的重写清单；重写落地时删除搬来的旧文。** 这样 C-1 不必改动任何门禁接线（「搬迁不改行为」），旧文在新仓的身份是**待重写的证据副本**——新仓 `AGENTS.md` 由 C-3 写明这一点，避免它被后来者误当作新仓的设计权威。`docs/studio/mvp1/**` 与 `docs/graph-agent-gateway/mvp1/**` 正是这一类：它们既是模块设计体，又被四个哈希锁/门禁测试逐树读取。
+
+**(b) 里唯一需要在 C-1 改写的两份文件（2026-09-02 协调方裁决）**：`docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md` 与它所在的哈希锁 `docs/studio/mvp1/_audited-ready-hashes.json`。原因与处置见 §9.1 风险五；它们从逐字节桶移入 §4.2 的合并桶，`docs/**` 的逐字节搬因此是 255 份、C-1 合并桶多这 2 份，总数不变。
 
 **(c) 权威文档——不搬、重写（182 个文件）。** 清单与执笔分工见 §7。它们在新仓落地之前，新仓正文引用这些设计源时**一律写归档坐标**（`agent-harness@<Source-Commit>:<路径>:<行号>`），这正是 §11.7-2「旧文只作证据引用（引用时给路径与行号）」要求的形式。
 
@@ -210,6 +212,8 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `.github/workflows/ci.yml` | 扩 job，见 §6 | C-1 自身要过门就必须先有跑 studio/gateway 的 job |
 | `.github/workflows/package.yml` | 从主仓移植（按路径触发，非必过） | 「打包链可跑」是盘点给批C 的验收项之一 |
 | `tests/test_frozen_engine_hash_lock.py` + seal 记录 | 新建 | §3.4 |
+| `docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md` | 三处指向冻结 engine 测试的引用改写为新仓路径（`tests/callbacks/test_a_run_has_one_clock.py`、`tests/callbacks/test_a_run_has_one_trace.py`、`tests/core/test_a_graph_stops_before_the_phases_you_named.py`） | §9.1 风险五；其余正文一字不动 |
+| `docs/studio/mvp1/_audited-ready-hashes.json` | 重钉上一行那份文档的哈希，修订理由记为「引用目标随冻结包退役，改指承接同一不变量的 runtime 同名测试」 | 该锁在主仓状态机下允许带记录的修订；不重钉则 `test_doc_hash_lock` 红 |
 | `LICENSE` | **不动**：两仓的 `LICENSE` 是同一个 git blob（2026-09-02 实测两侧 blob sha 均为 `c7ed1e4abe5749619a5a11534f10fbbb32de75df`，Apache-2.0），新仓已有 | 同一份文件无所谓搬不搬 |
 
 ### 4.3 留在归档仓（不搬）
@@ -229,7 +233,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `packages/graph-agent/{tests,spec,tools,scripts}` + 9 个裸文件 | 355 | §3.4 |
 | `.github/workflows/ci.yml` 的 `graph-agent-tests` job | — | 冻结 engine 的 tests 不搬，无测试可跑 |
 
-**账目闭合**：1791（逐字节搬；含 `docs/**` 的 (a)(b) 两类 257）+ 1059（留；含 `docs/**` 的 (c) 类 182）+ 12（根级单文件按 §4.2 合并/改写/新建处置，或如 `LICENSE` 两侧同一 blob）+ 6（`.github/**`：`ci.yml` 扩 job、`package.yml` 移植，均见 §6；`CODEOWNERS` 由 C-3 追加条目，见 §7；`dependabot.yml`、`codeql.yml`、`scorecard.yml` 新仓已有同等配置——2026-09-02 实测两仓 `dependabot.yml` 语义相同，均只覆盖 pip 与 github-actions 两个生态——主仓副本不搬）= **2868**，等于主仓 `377e82e0` 的 `git ls-tree -r --name-only | wc -l` 实测值。**处置表无遗漏文件**。
+**账目闭合**：1789（逐字节搬；含 `docs/**` 的 (a)(b) 两类 255）+ 2（`docs/**` 里在 C-1 改写的那两份，见 §4.2）+ 1059（留；含 `docs/**` 的 (c) 类 182）+ 12（根级单文件按 §4.2 合并/改写/新建处置，或如 `LICENSE` 两侧同一 blob）+ 6（`.github/**`：`ci.yml` 扩 job、`package.yml` 移植，均见 §6；`CODEOWNERS` 由 C-3 追加条目，见 §7；`dependabot.yml`、`codeql.yml`、`scorecard.yml` 新仓已有同等配置——2026-09-02 实测两仓 `dependabot.yml` 语义相同，均只覆盖 pip 与 github-actions 两个生态——主仓副本不搬）= **2868**，等于主仓 `377e82e0` 的 `git ls-tree -r --name-only | wc -l` 实测值。**处置表无遗漏文件**。
 
 > 上述文件数是 2026-09-02 在主仓提交 `377e82e0` 上的实测快照。主仓 `main` 此后仍在推进（本文落盘时已到 `6547029e`，2872 个文件），因此 §8-① 的哈希核验以 **C-1 开工当时主仓 main 的实际哈希**为 `Source-Commit`，不以 `377e82e0` 为准；处置表按目录与身份给规则，快照之后新增的文件按同一套规则自动归类——例如 `docs/development/PARALLEL_ORCHESTRATION.md`（主仓 #1096 合入，晚于快照）是并发推进 SOP，按 §4.1.1 落入 (c) 类，由 C-3 重写。**C-1 实施方必须在开工当时的 `Source-Commit` 上重跑一次 §4.1.1(b) 的 `git grep` 与本节的计数，并把结果贴进 PR**；本文给的是规则与快照值，不是可以直接照抄的最终清单。
 
@@ -241,7 +245,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 |---|---|---|---|---|---|
 | **C-0a** | 主仓 | gateway `pyproject.toml` 把 `langchain-openai` 钉到 `>=1.3.5,<1.4.0` | 台账 17 个前驱全绿 + 用户批准本方案 | 主仓 7 道必过检查 | 单行 diff + 探针结论（§9.1） |
 | **C-0b** | 主仓 | 按合锁解析结果重解主仓 `uv.lock`；跑通 backend + gateway 全套门禁，红则在主仓修到绿 | 与 C-0a 可并行 | 主仓 7 道必过检查 | 锁文件版本跳变清单 + 为修红所做的每一处改动 |
-| **C-1** | 新仓 | 一张 squash PR：文件导入（§4.1）+ workspace（§3.1）+ 合锁 + CI 扩展（§6）+ 冻结锁测试（§3.4）+ 三份忽略/属性文件合并（§4.2） | C-0a、C-0b 均已合并 | 新仓必过检查（扩展后 8 项，见 §6）+ §8-① 哈希核验 0 差异 | **①** §8-① 脚本的输出（总数与 0 差异）；**②** 非搬运部分的 diff（§4.2 那张表的每一行） |
+| **C-1** | 新仓 | 一张 squash PR：文件导入（§4.1）+ workspace（§3.1）+ 合锁 + CI 扩展（§6）+ 冻结锁测试（§3.4）+ 三份忽略/属性文件合并（§4.2） | C-0a、C-0b 均已合并 | 新仓必过检查（扩展后 8 项，见 §6）+ §8-① 哈希核验 0 差异 | **①** §8-① 脚本的输出（总数与 0 差异）；**②** 非搬运部分的 diff（§4.2 那张表的每一行，含 `run-execution/mvp1-alignment.md` 的三行引用改写与 `_audited-ready-hashes.json` 的一行重钉） |
 | **C-2** | 新仓 | 机械改名：`packages/graph-agent-gateway` → `packages/gskill-gateway`、import `graph_agent_gateway` → `gskill_gateway`、`apps/studio` → `apps/gskill-studio`、发行名与 `productName`（§3.3） | C-1 已合并 | 新仓必过检查全绿 | 改名是否**穷尽**：源码 import、`pyproject.toml` 三处、vendor 构建与校验脚本里的路径字面量、`ensure_vendor.js` 的硬编码路径、CI 的 working-directory |
 | **C-3** | 新仓 | 权威文档改写（§7）+ `CLAUDE.md` 改指向 + `.ah/` 路径引用校正 | C-1 已合并（与 C-2 可并行） | 新仓必过检查全绿 | 改写后的正文是否自包含、是否与新仓实际路径/必过检查集一致 |
 | **分支保护扩必过集** | 新仓 | 把 `studio-gates`、`frontend-gates` 加入必过检查 | **在 C-1 合并前**执行 | 仓库设置变更，非 PR | — |
@@ -383,13 +387,19 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **风险四：冻结 engine 的 `graph-agent-tests` 不随迁，冻结包在新仓没有自己的测试。** 这是 §3.4 的自觉取舍：它的行为由 studio 测试套件经 adapter 间接覆盖、由 `build_vendor.py` 真实构建、由安装后 import 探针断言，加上一把树哈希锁保证它一个字节都不会变——**不变的代码不需要回归测试，需要的是防止它被改动的锁**。
 
-**风险五（C-1 的已知阻塞，机械可复核）：一份搬入的受门禁治理文档，其代码引用指向不随迁的冻结 engine 测试。** 用 `test_doc_code_references_exist.py` 自己的判据（反引号包裹、以 `apps/`/`packages/`/`scripts/` 开头、带扩展名的路径必须存在）扫描全部 155 份 `baseline.md`/`mvp1-alignment.md`，只有一份**既随迁、引用又会失效**：
+**风险五（已裁，2026-09-02 协调方裁决）：一份随迁的受门禁治理文档，其代码引用指向不随迁的冻结 engine 测试。**
 
-- `docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md`（`status: FROZEN`，且在 `docs/studio/mvp1/_audited-ready-hashes.json` 哈希锁内），引用三条冻结 engine 测试路径：`packages/graph-agent/tests/callbacks/test_a_run_has_one_clock.py`、`packages/graph-agent/tests/callbacks/test_a_run_has_one_trace.py`、`packages/graph-agent/tests/core/test_a_graph_stops_before_the_phases_you_named.py`。按 D4 这三个文件不随迁，该门禁在新仓即红。
+**事实。** 用 `test_doc_code_references_exist.py` 自己的判据（反引号包裹、以 `apps/`/`packages/`/`scripts/` 开头、带扩展名的路径必须存在）扫描全部 155 份 `baseline.md`/`mvp1-alignment.md`，只有一份**既随迁、引用又会失效**：`docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md`（`status: FROZEN`，且在 `docs/studio/mvp1/_audited-ready-hashes.json` 哈希锁内），引用三条冻结 engine 测试路径——`packages/graph-agent/tests/callbacks/test_a_run_has_one_clock.py`、`packages/graph-agent/tests/callbacks/test_a_run_has_one_trace.py`、`packages/graph-agent/tests/core/test_a_graph_stops_before_the_phases_you_named.py`。按 D4 这三个文件不随迁。
 
-另两处命中不构成阻塞：`docs/engine/graph-skill-runtime/baseline.md` 引用 `packages/graph-agent/README.md`（该文件按 D4 随迁，仍能解析）；`docs/engine/mvp1/02-mechanism/05-run-inner/05-exit-control/baseline.md` 属 (c) 类不随迁。
+**第二个事实（裁决所依据的）。** 新仓**已经有同名的三个测试**：`tests/callbacks/test_a_run_has_one_clock.py`、`tests/callbacks/test_a_run_has_one_trace.py`、`tests/core/test_a_graph_stops_before_the_phases_you_named.py`（2026-09-02 实测新仓 `main` 三者均在，blob 前缀分别 `27f08690`、`d4b1e90b`、`81bbc1f7`）。这不是巧合：新仓本身就是主仓 `packages/graph-agent` 经 `git filter-repo` 抽取而来（决议 §4.1），这三个测试承载的正是该设计文档引用它们时要指的三条不变量——**一次 run 一个时钟、一条 trace、图在你点名的相位前停**。
 
-**这条不能靠把该文档加进新仓的 `STALE_REFERENCE_BACKLOG_2026_08_29` 解决**——该名单是**只减不增的棘轮**，其源码注释原话：「never add to this list — fix the doc instead」。**待协调方补证**：该文档的引用在 C-0 阶段（主仓，需同 PR 重钉 `_audited-ready-hashes.json`）改写为归档坐标，还是另有处置。C-1 实施方须在开工当时的 `Source-Commit` 上重跑一次上述扫描——主仓仍在推进，这类引用可能新增。
+**裁决。** 该文档从「逐字节搬」桶移入 **C-1 合并/新建**桶（§4.2）：C-1 把这三处引用改写为新仓路径（`tests/callbacks/…`、`tests/core/…`），并**同一张 PR 重钉** `docs/studio/mvp1/_audited-ready-hashes.json` 里该文档的哈希，修订理由记为「引用目标随冻结包退役，改指承接同一不变量的 runtime 同名测试」。改写后该门禁必绿，且是双重必绿：新路径以 `tests/` 开头，落在门禁 `apps|packages|scripts` 前缀集之外因而不再被它检查；即便被检查，目标文件也**真实存在**——引用不是靠躲开门禁变绿的，它本身就是真的。
+
+**为什么不是别的做法。** ①**不动棘轮名单**：`STALE_REFERENCE_BACKLOG_2026_08_29` 只减不增，其源码注释原话「never add to this list — fix the doc instead」——本裁决做的正是它说的 fix the doc。②**不在 C-0 阶段动主仓**：主仓里 `tests/callbacks/…` 这些新路径并不存在，在主仓改写会让主仓自己的门禁变红。③改写只碰这三行，正文其余一字不动，审查对象因此是**三行 diff + 一行重钉**，仍然可机械核验。
+
+**另两处扫描命中不构成阻塞**：`docs/engine/graph-skill-runtime/baseline.md` 引用 `packages/graph-agent/README.md`（该文件按 D4 随迁，仍能解析）；`docs/engine/mvp1/02-mechanism/05-run-inner/05-exit-control/baseline.md` 属 (c) 类不随迁。
+
+**仍需在开工时复跑**：主仓 `main` 仍在推进，C-1 实施方须在开工当时的 `Source-Commit` 上重跑一次上述扫描——这类引用可能新增。
 
 ### 9.2 本方案与「搬迁不改行为」的边界（诚实记账）
 
@@ -422,11 +432,12 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 2. **授权点一——新仓分支保护的必过检查集扩为 8 项**（§6）。这是仓库设置变更，不经 PR，由协调方在 C-1 合并前执行。
 3. **授权点二——把主仓 `SevenX77/agent-harness` 设为 archived**（§5 的 C-4）。这是对外可见、影响他人可见性的设置变更，需用户在批准本方案时明确授权。
 
-另有一项**待协调方补证**（不是待用户裁决，不阻塞本方案呈批，但阻塞 C-1 开工）：§9.1 风险五——`docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md` 引用三条不随迁的冻结 engine 测试路径，该文档又必须随迁（门禁逐树读取）且在哈希锁内，需定处置方式。
+**本文没有其他待裁项**：初稿呈报时挂起的两项（`cross-platform-smoke` 是否含 e2e、`docs/**` 与决议 §11.7-2 的边界）与写作中新发现的一项（§9.1 风险五）均已由协调方于 2026-09-02 裁定并写入正文。
 
 ## 修订记录
 
 | 日期 | 变更 | 说明 |
 |---|---|---|
+| 2026-09-02 | §9.1 风险五按协调方裁决收口（同 PR #1102） | `docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md` 从「逐字节搬」桶移入 **C-1 合并/新建**桶：C-1 把三处指向冻结 engine 测试的引用改写为新仓已有的同名测试路径（`tests/callbacks/…`、`tests/core/…`，2026-09-02 实测新仓 `main` 三者均在），并同 PR 重钉 `docs/studio/mvp1/_audited-ready-hashes.json`，理由记为「引用目标随冻结包退役，改指承接同一不变量的 runtime 同名测试」。不动只减不增的棘轮名单，也不在 C-0 阶段动主仓（主仓里新路径不存在，会让主仓门禁红）。账目随之微调：`docs/**` 逐字节搬 257 → **255**，另 2 份进合并桶，**1789 + 2 + 1059 + 12 + 6 = 2868**，仍与实测跟踪文件数相等。§11 的待裁指针撤除，本文**已无待协调方补证项**。 |
 | 2026-09-02 | 按协调方对初稿七条质疑的逐条裁决修订（同 PR #1102） | ①「逐字节搬 / C-1 合并新建」两桶分法与「改写不是 C-1 过门必要条件的归 C-3」贯穿规则获采纳，保留；②**`cross-platform-smoke` 改为只扩 backend + gateway 两套 pytest**（不加 `graph-agent`——其 tests 按 D4 不随迁），`e2e-tests` 原样移植为独立的 `workflow_dispatch` job、不进必过集，删原「待协调方补证」；③**`docs/**` 改判为不整搬**，按「在新仓里是什么身份」分 (a) 记录类 110 / (b) 门禁运行数据类 147 / (c) 权威文档类 182 三类（新增 §4.1.1），并加优先级规则「既是权威又被门禁读取的先按 (b) 搬、同时进重写清单、重写落地时删旧文」；§7 权威文档重写清单据此扩为三档（C-3 / 批D / 不重写）；④F-T3（新仓 #22，`a4f43d83`）已合并，冻结锁的 seal 机制改写为既成事实；⑤⑥⑦快照处理、账目闭合、`git subtree` 参照的区分获采纳。账目按新分类重算：**1791 + 1059 + 12 + 6 = 2868**，仍与实测跟踪文件数相等。新增 §9.1 风险五（一份随迁的受治理文档引用了不随迁的冻结 engine 测试，机械扫描得出，标待协调方补证）。 |
 | 2026-09-02 | 初稿落盘 | 按已批决议 §4.3 / §4.4 / §11.5 / §11.7 与盘点 `inventory-synthesis.md:124,174`，把批C 搬迁写成可执行方案。全文事实以 2026-09-02 在主仓 `377e82e0`、新仓 `dc6f32af` 上的实测为准。状态 `drafted`，**待用户批准**。 |

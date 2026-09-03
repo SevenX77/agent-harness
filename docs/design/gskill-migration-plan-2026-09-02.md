@@ -43,7 +43,7 @@ role: workflow-record
 | 盘点 `inventory-synthesis.md:124` | ### 批C · 搬迁(§4.4 顺序固定):113 落 main → 命名裁决(§8-5)→ 目标仓 CI/分支保护/必过检查生效 → gateway+studio 整体迁入,**旧 engine 冻结随迁**(§4.3:显式迁移带退出条件;五门禁全过后整包删除)→ 主仓归档只读。搬迁不改行为;验收=迁后全门禁绿+打包链可跑。 | §8 验收判据 |
 | 主仓 `AGENTS.md:366` | - **MVP1 design = source of truth — align to the design, NOT the code.** When the | §4.1.1 的 (c) 类判据 |
 
-主仓 `AGENTS.md`「Development Principles」另定三条贯穿要求，本文逐条遵守：不做向后兼容、第一性原理修复而非打补丁、以及「先看成熟工程怎么解，再决定自己怎么写」——后者要求写明**参照对象、借了什么、拒绝了什么、为什么**，本文每一个引入新机制的决定（D1/D2/D4/D6）都按这四段写，见 §12 的参照汇总。
+主仓 `AGENTS.md`「Development Principles」另定三条贯穿要求，本文逐条遵守：不做向后兼容、第一性原理修复而非打补丁、以及 `AGENTS.md:233` 的「先看成熟工程怎么解,再决定自己怎么写。」——它要求写明**参照对象、借了什么、拒绝了什么、为什么**，本文每一个引入新机制的决定（D1/D2/D4/D6）都按这四段写，见 §12 的参照汇总。
 
 ## 2. 前置条件核对（决议 §4.4，逐条给证据）
 
@@ -77,7 +77,23 @@ C-2 改名后，后两个键随发行名变为 `gskill-gateway` 与 `gskill-stud
 
 **依据**：决议 §4.3 要求 runtime 包保持精瘦、可独立发布的身份。这条身份由**发布产物**定义，而发布产物的内容由 hatchling 的 `packages` 白名单决定，与仓里有几个 workspace 成员无关——因此把 runtime 留在仓根、同时让它当 workspace 根包，既满足 monorepo 要求，又让新仓现有的 `release.yml`（release published → build → 三平台 verify → publish-to-pypi）**零改动**。
 
-**成熟工程参照**：**参照对象** = uv 官方 workspace 模型（允许根 project 同时是成员）与 langchain monorepo（`libs/*` 为成员、单一锁文件）。**借**其「一仓一锁、成员各自持有自己的 `pyproject.toml`」——主仓已经在跑这个形状（`AGENTS.md:22`），搬迁因此不引入新的依赖管理范式。**拒绝**其「根包是虚包（只有 workspace 声明、没有源码）」这一半。**为什么**：采用虚包就必须把 runtime 从仓根搬进子目录，连带改 `release.yml` 的构建路径、`[project.urls]` 与 README 安装说明，而收益为零。
+**成熟工程参照**：
+
+**参照对象一 = uv 官方 workspace 文档**（<https://docs.astral.sh/uv/concepts/projects/workspaces/>）。原文：
+
+> in a workspace, each package defines its own `pyproject.toml`, but the workspace shares a single lockfile
+
+> Every workspace needs a root, which is _also_ a workspace member.
+
+**参照对象二 = `pydantic/pydantic-ai`**——一个真实在跑「根包 + 成员 + 单锁」的仓库。2026-09-03 实测（`gh api repos/pydantic/pydantic-ai/contents/...`，根 `pyproject.toml` blob `0418b5a383be3c96c9c7020b9475eba2c8f4cda8`）：根 `pyproject.toml` 同时声明 `[build-system]` （`build-backend = "hatchling.build"`）与 `[project] name = "pydantic-ai"`，即**根自身就是一个可发布包**；同一份文件里有 `[tool.uv.workspace] members = ["pydantic_ai_slim", "pydantic_evals", "pydantic_graph", "clai", "examples"]`；仓根有且只有一个 `uv.lock`，那五个成员目录里**只有 `pyproject.toml`、没有各自的锁**。
+
+**借**：**一仓一锁、成员各自持有 `pyproject.toml`、而根 project 本身也是成员且照样可发布**——这正是 D1 要的三件事，主仓也已经在跑其中前两件（`AGENTS.md:22`），搬迁因此不引入新的依赖管理范式。另借 pydantic-ai 根包用 `[tool.hatch.build.targets.wheel]` 自管 wheel 内容这一点：**发布产物由构建后端的配置决定，与仓里有几个 workspace 成员无关**，这是 D1「`release.yml` 零改动」的依据。
+
+**拒绝**：把根做成**虚包**（只有 workspace 声明、没有自己的可发布身份）。**为什么**：那样就得把 runtime 从仓根搬进子目录，连带改 `release.yml` 的构建路径、`[project.urls]` 与 README 安装说明，收益为零。
+
+**参照对象二不能证明的那一半，必须写明**：pydantic-ai 根包的**源码**在成员 `pydantic_ai_slim` 里，仓根没有 `src/`；而本方案的 runtime 是**源码就在仓根 `src/graph_skill_runtime`**。所以它证明的是「根即成员 + 单锁 + 根可发布」，**不证明**「根持有源码树时也成立」——后半段由 uv 官方文档的 `Every workspace needs a root, which is _also_ a workspace member.` 与本仓 §9.1 的实跑（四成员真实 workspace 解出 154 包、退出 0）承担。
+
+**撤销的参照**：本文初稿写「langchain monorepo（`libs/*` 为成员、单一锁文件）」。该描述与其公开事实相反——LangChain 自己的开发文档写明每个 `libs/` 包各有自己的 `pyproject.toml` **和自己的 `uv.lock`**（<https://github.com/langchain-ai/langchain/blob/master/CLAUDE.md>）。初稿凭印象写下未经核对的参照，**该条作废**。
 
 **为什么必须和搬迁在同一张 PR 里**：新仓当前 `pyproject.toml` 没有 `[tool.uv.workspace]`（2026-09-02 实测）。没有它，搬进来的三个 `pyproject.toml` 不被任何锁文件覆盖，`uv sync` 装不出 studio 的依赖，CI 的任何一个 Python job 都跑不起来——即 C-1 自己过不了门。
 
@@ -101,7 +117,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 > Instead of merging the entire history from the subtree project, produce only a single commit that contains all the differences you want to merge, and then merge that new commit into your project.
 
-**借**：两者共有的那一半——**把跨仓搬运压成单个提交，同时在提交信息里留一个机器可读的源提交指针**，使「这批文件从哪来、对应源仓哪个提交」永远可回答。本文的 `Source-Commit:` 就是 `Kubernetes-sha:` 的同形字段。**拒绝**：`git subtree` 不带 `--squash` 时的真正历史移植（会产生跨仓合并提交），以及 publishing-bot 的持续双向同步（它服务的是长期并存的镜像关系）。**为什么**：前者与新仓的线性历史保护冲突，后者与决议 §4.3「主仓迁移完成后归档为只读」冲突——本仓要的是一次性搬完即封，不是长期镜像。
+**借**：两者共有的那一半——**把跨仓搬运压成单个提交，同时在提交信息里留一个机器可读的源提交指针**，使「这批文件从哪来、对应源仓哪个提交」永远可回答。本文的 `Source-Commit:` 就是 `Kubernetes-sha:` 的同形字段。**拒绝**：`git subtree` 不带 `--squash` 时的真正历史移植（会产生跨仓合并提交），以及 publishing-bot 的持续双向同步（它服务的是长期并存的镜像关系）。**为什么**：前者与新仓的线性历史保护冲突，后者与决议 `:180` 冲突（该行**意为**：主仓在迁移完成后归档为只读）——本仓要的是一次性搬完即封，不是长期镜像。
 
 ### 3.3 D3 · 命名：精确拼法
 
@@ -112,7 +128,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | gateway 发行名（PyPI distribution） | `gskill-gateway` | **前缀**：`gskill` 是产品短名，做命名空间用，同 `langchain-openai`／`langchain-anthropic` 惯例——前缀让同族包在按名排序的列表里聚成一块。**连字符**：PEP 503 的规范化形式，下划线在 PyPI 上会被归一成连字符，直接用规范形式避免两种写法并存 |
 | studio 发行名 | `gskill-studio` | 同上 |
 | gateway 目录 | `packages/gskill-gateway` | 目录名与发行名一致，免去「目录叫一个名、包叫另一个名」的二次查表 |
-| studio 目录 | `apps/gskill-studio`（其下仍为 `backend` / `frontend` / `tauri` / `tests-e2e`） | 同上；`apps/` 与 `packages/` 的分工承载决议 §4.3「studio 是应用（app），不是库」 |
+| studio 目录 | `apps/gskill-studio`（其下仍为 `backend` / `frontend` / `tauri` / `tests-e2e`） | 同上；`apps/` 与 `packages/` 的分工承载决议 `:172` 原文「- **studio**:应用(app),不是库。」 |
 | gateway Python import 名 | `gskill_gateway` | Python 包名不能带连字符，下划线是唯一合法形式 |
 | studio Python import 名 | **保持 `app`，不改** | studio 是应用不是库，它的顶层模块不作为公开 import 身份被外部引用 |
 | Tauri `productName` 与 Display name | `gskill Studio` | 与产品短名一致 |
@@ -171,12 +187,12 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 - **一条贯穿规则**：凡内容需要改写、但改写本身不是 C-1 过门必要条件的文件（如 `CLAUDE.md` 的指向、`.ah/` 里的路径引用），**C-1 先逐字节搬入、改写归 C-3**。这样 C-1 的哈希核验没有例外。
 - **所有计数由 `scripts/` 下的一支脚本机械复现**，脚本正文与运行输出见 §13 附录 A；本节的每个数字都出自那次运行，不是手工加总。
 
-### 4.1 逐字节搬（C-1，共 2015 个文件）
+### 4.1 逐字节搬（C-1，共 2009 个文件）
 
 | 源路径（主仓） | 目标路径（新仓，C-1 时） | 文件数 | 说明 |
 |---|---|---|---|
-| `apps/studio/**` | 同路径 | 1212 | frontend 715 / backend 443 / tauri 45 / tests-e2e 9 |
-| `packages/graph-agent-gateway/**` | 同路径 | 140 | gateway 包全量（src 61 + tests 77 + 2） |
+| `apps/studio/**` | 同路径 | 1208 | frontend 715 / backend 443 / tauri 45 / tests-e2e 9，**减去 §4.1.1 门禁暂缺表里属于 backend 的 4 个文件**（3 个 C-1 删除、1 个 C-1 修改） |
+| `packages/graph-agent-gateway/**` | 同路径 | 138 | gateway 包全量 140，**减去门禁暂缺表里的 2 个测试文件**（均 C-1 删除） |
 | `packages/graph-agent/{pyproject.toml,README.md,src,tests,spec,scripts}` | 同路径 | 471 | 冻结 engine，见 §3.4 |
 | `docs/**` 的 (a)(b) 两类 | 同路径 | 127 | **不整搬**；三类分法见 §4.1.1 |
 | `scripts/**` | 同路径 | 18 | worktree/PR 流水线、并行黑板、交叉审脚本 |
@@ -221,7 +237,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **(c) 权威文档——不搬、重写（312 个文件）。** 清单、执笔席与证据来源见 §7。它们在新仓落地之前，新仓正文引用这些设计源时**一律写归档坐标**（`agent-harness@<Source-Commit>:<路径>:<行号>`），这正是决议 `:607` 括号里要求的引用形式。
 
-**这三类的边界为什么是这样**：决议 `:607` 禁止的是「把旧的设计权威正文原样搬过去继续当权威」；它没有、也不能禁止搬运**事实记录**（(a)：重写记录即伪造）与**被代码按路径读取的数据**（(b)：不搬则随迁的代码自己就是坏的）。三类都以「在新仓里它是什么身份」为唯一判据，不以目录形状为判据。
+**这三类的边界为什么是这样**：决议 `:607` 禁止的是**把旧的设计权威正文原样搬过去、在新仓继续充当权威**（这是本文对该行的理解，不是它的原文；原文见 §1 表）；它没有、也不能禁止搬运**事实记录**（(a)：重写记录即伪造）与**被代码按路径读取的数据**（(b)：不搬则随迁的代码自己就是坏的）。三类都以「在新仓里它是什么身份」为唯一判据，不以目录形状为判据。
 
 **成熟工程参照**：**参照对象** = Python 的 PEP 体系。PEP 1（<https://peps.python.org/pep-0001/>）原文：
 
@@ -229,14 +245,14 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **借**：**把「历史文档」与「活规范」当成两种不同载体分开处置**——前者定稿后不再实质修改，后者随系统演进而重写。本文的 (a) 类对应「historical document」（决议、盘点、审计报告、台账），(c) 类对应「living specification」（模块设计体、开发 SOP）。**拒绝**：PEP 用 `Superseded-By` / `Replaces` 头把新旧串成链、旧文永久留在同一个仓里这一半。**为什么**：PEP 服务的是一个公开、长期、必须可追溯的标准流程；本仓的旧设计体在批D 重写后就没有读者了，把它留在新仓只会制造「两份都在、不知道该信哪份」的第二真相源——它的追溯需求由归档仓 + 归档坐标满足，这是决议 §11.7-3 已定的方案。
 
-（**另一个候选参照未采用**：Kubernetes 的 KEP 与 kubernetes.io 用户文档的分工。2026-09-02 读 <https://github.com/kubernetes/enhancements/blob/master/keps/README.md>，其中只有「Our aim with KEPs is to clearly communicate new efforts to the Kubernetes contributor community.」一类表述，**找不到**「KEP 是提案记录、不是文档」的明文，证不成，故不引。）
+（**另一个候选参照未采用**：Kubernetes 的 KEP 与 kubernetes.io 用户文档的分工。2026-09-02 读 <https://github.com/kubernetes/enhancements/blob/master/keps/README.md>，其中只有「Our aim with KEPs is to clearly communicate new efforts to the Kubernetes contributor community.」一类表述，**找不到**可用来支撑「KEP 是提案记录而非用户文档」这一分法的明文，证不成，故不引。）
 
-**门禁暂缺表（显式迁移，不是静默丢门）**：这两棵树不搬，随迁的测试里凡**按路径读取它们**的用例在 C-1 里删除，并在此登记复位工单。判据是「读取」而非「引用」——2026-09-02 实测 `git grep -l 'docs/studio/mvp1\|docs/graph-agent-gateway/mvp1' apps/studio/backend/tests packages/graph-agent-gateway/tests` 命中 19 个文件，其中 13 个只在 docstring 里写「Design: …」，**原样保留不动**；真正读取的是下面 6 个：
+**门禁暂缺表（显式迁移，不是静默丢门）**：这两棵树不搬，随迁的测试里凡**按路径读取它们**的用例在 C-1 里删除，并在此登记复位工单。判据是「读取」而非「引用」——2026-09-02 实测命中 **20 个文件**（`git grep -l 'docs/studio/mvp1\|docs/graph-agent-gateway/mvp1' apps/studio/backend/tests packages/graph-agent-gateway/tests | wc -l` = 20，其中 `apps/studio/backend/tests` 一侧 15 个），**6 个构成路径读取、14 个只在 docstring/注释里写「Design: …」**。那 14 个原样保留不动——包括 `packages/graph-agent-gateway/tests/test_gateway_docs_name_real_files.py`，它正文只读 `docs/graph-agent-gateway/USAGE.md`（该文件按 (b) 类随迁），对 `mvp1/` 的提及在 `:14` 的模块 docstring 里。真正读取的是下面 6 个：
 
 | C-1 里删除的用例 | 它守的是什么 | 批D 复位工单 |
 |---|---|---|
 | `apps/studio/backend/tests/docs/test_doc_code_references_exist.py`（整文件：`_governed_docs()` 断言 `baseline.md`/`mvp1-alignment.md` 载体非空，两棵树不在则该断言必假） | 权威设计文档里的代码路径引用必须解析得到 | 批D-studio-1：新设计体落地后重建该门 |
-| `apps/studio/backend/tests/docs/test_design_doc_standards_governance.py` 的 `ROLE_REQUIRED_ROOTS` 中 `docs/studio/mvp1` 一项、`test_summary_role_names_an_authority_file_that_exists`、`test_at_least_one_real_summary_role_exists`（其余用例保留，仍守 `design-doc-standards/**`） | 设计文档的 `status:`/`role:` 落在闭集、`summary` 必须指向真实权威 | 批D-studio-2 |
+| `apps/studio/backend/tests/docs/test_design_doc_standards_governance.py` 的四处：`ROLE_REQUIRED_ROOTS` 中 `docs/studio/mvp1` 一项（`:102`）、`test_priority_roots_are_non_empty`（`:256-258`，断言 `len(_priority_docs()) > 50`）、`test_summary_role_names_an_authority_file_that_exists`（`:283-304`）、`test_at_least_one_real_summary_role_exists`（`:311-321`）。**其余用例保留**，仍守 `design-doc-standards/**` 与全仓 `status:` 闭集 | 设计文档的 `status:`/`role:` 落在闭集、`summary` 必须指向真实权威、受治理语料规模不塌 | 批D-studio-2 |
 | `apps/studio/backend/tests/test_doc_hash_lock.py`（整文件） | `audited-ready` 文档的哈希锁 | 批D-studio-3 |
 | `apps/studio/backend/tests/test_design_unit_lock_snapshot.py`（整文件） | 设计单元索引与锁快照一致 | 批D-studio-4 |
 | `packages/graph-agent-gateway/tests/test_gateway_doc_locks.py`（整文件） | gateway 设计体的哈希锁与单元快照 | 批D-gateway-1 |
@@ -260,11 +276,12 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 | `tests/test_frozen_engine_hash_lock.py` + seal 记录 | 新建 | §3.4 |
 | `LICENSE` | **不动**：两仓的 `LICENSE` 是同一个 git blob（2026-09-02 实测两侧 blob sha 均为 `c7ed1e4abe5749619a5a11534f10fbbb32de75df`，Apache-2.0） | 同一份文件无所谓搬不搬 |
 
-### 4.3 留在归档仓（不搬，836 个文件）
+### 4.3 留在归档仓（不搬，841 个文件）
 
 | 路径 | 文件数 | 不搬的依据 |
 |---|---|---|
 | `.kiro/**` | 484 | 2026-09-02 实测 27 处引用**全部**在 docstring/注释里做出处标注，无任何路径读取 |
+| **门禁暂缺表里 C-1 删除的 5 个测试文件** | 5 | §4.1.1；它们读取不随迁的两棵 MVP1 树，在新仓必红。**它们不在「逐字节搬」桶里**——C-1 的目标树里根本没有这五个文件，若留在该桶，§8.1-① 会以「目标缺失」失败 |
 | `docs/**` 的 (c) 权威文档类 | 312 | §4.1.1；在新仓**重写**而不是搬运，清单见 §7 |
 | `graph-agent-explainer/**` | 14 | 0 处引用（1.8 MB 截图） |
 | `services/community-catalog-gate/**` | 12 | 0 处引用 |
@@ -276,7 +293,9 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 ### 4.4 账目闭合
 
-**2015（逐字节搬）+ 836（留）+ 11（根级配置/权威文件，按 §4.2 逐份处置）+ 6（`.github/**`）= 2868**，等于 `git ls-tree -r --name-only 377e82e0 | wc -l` 的实测值。
+**2009（逐字节搬）+ 841（留）+ 11（根级配置/权威文件，按 §4.2 逐份处置）+ 6（`.github/**`）+ 1（特殊处置：C-1 里改内容的那个门禁文件）= 2868**，等于 `git ls-tree -r --name-only 377e82e0 | wc -l` 的实测值。**这是 `377e82e0` 的快照值**；主仓 `main` 已推进到 `6547029e`（2872 个文件），同一支脚本在该提交上给出 **2011 + 843 + 11 + 6 + 1 = 2872**，C-1 按开工当时的 `Source-Commit` 重算，不照抄本行数字。
+
+**为什么必须有第五个桶**：门禁暂缺表（§4.1.1）里的 6 个文件在 C-1 的目标树里**不是源文件的样子**——5 个被删除、1 个被改内容。把它们留在「逐字节搬」桶，§8.1-① 会必然报「目标缺失」或「内容不等」，即方案自相矛盾。因此：**5 个删除的进「留在归档仓」桶，1 个修改的进「特殊处置」桶**，而附录 A 的脚本用**同一份门禁暂缺表文件列**把它们从「逐字节搬」桶里显式排除——排除清单与暂缺表是一份来源，不是两处各写一遍。
 
 - **11 个根级文件**：`uv.lock`、`AGENTS.md`、`pyproject.toml`、`.gitignore`、`.gitattributes`、`.importlinter`、`codecov.yml`、`.sonarcloud.properties`、`.editorconfig`、`README.md`、`LICENSE`。（另外 4 个根级单文件 `CLAUDE.md`、`skills-lock.json`、`ah.toml`、`.pre-commit-config.yaml` 已计入「逐字节搬」，`Makefile`、`CHANGELOG.md` 已计入「留」。）
 - **6 个 `.github` 文件**：`ci.yml` 扩 job、`package.yml` 移植（均见 §6）；`CODEOWNERS` 由 C-3 追加条目（§7）；`dependabot.yml`、`codeql.yml`、`scorecard.yml` 新仓已有同等配置——2026-09-02 实测两仓 `dependabot.yml` 语义相同，均只覆盖 pip 与 github-actions 两个生态——主仓副本不搬。
@@ -292,10 +311,10 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 |---|---|---|---|---|---|
 | **C-0a** | 主仓 | gateway `pyproject.toml:9` 把 `langchain-openai` 钉到 `>=1.3.5,<1.4.0` | 台账 17 个前驱全绿 + 用户批准本方案 | 主仓 7 道必过检查 | 单行 diff + §9.1 探针结论 |
 | **C-0b** | 主仓 | 按合锁解析结果重解主仓 `uv.lock`；跑通 backend、gateway、graph-agent 全套门禁，红则在主仓修到绿 | **C-0a**（不可并行，见表注） | 主仓 7 道必过检查 | 锁文件版本跳变清单 + 为修红所做的每一处改动 |
-| **C-1** | 新仓 | 一张 squash PR：文件导入（§4.1）+ workspace（§3.1）+ 合锁 + CI 扩展（§6）+ 冻结锁测试（§3.4）+ 三份忽略/属性文件合并（§4.2）+ 门禁暂缺表所列用例的删除（§4.1.1） | C-0a、C-0b 均已合并 | 新仓必过检查（扩展后 9 项，见 §6）+ §8.1-① 哈希核验 0 差异 + §8.1-② 四桶计数复现 | **①** 附录 A 脚本与哈希脚本的输出；**②** §4.2 那张表的每一行 diff；**③** 门禁暂缺表逐行核对（删的是不是只有读取用例） |
+| **C-1** | 新仓 | 一张 squash PR：文件导入（§4.1）+ workspace（§3.1）+ 合锁 + CI 扩展（§6）+ 冻结锁测试（§3.4）+ 三份忽略/属性文件合并（§4.2）+ 门禁暂缺表所列用例的删除（§4.1.1） | C-0a、C-0b 均已合并 | 新仓必过检查（扩展后 11 项，见 §6）+ §8.1-① 哈希核验 0 差异 + §8.1-② 四桶计数复现 | **①** 附录 A 脚本与哈希脚本的输出；**②** §4.2 那张表的每一行 diff；**③** 门禁暂缺表逐行核对（删的是不是只有读取用例） |
 | **C-2** | 新仓 | 机械改名：`packages/graph-agent-gateway` → `packages/gskill-gateway`、import `graph_agent_gateway` → `gskill_gateway`、`apps/studio` → `apps/gskill-studio`、发行名与 `productName`（§3.3） | C-1 已合并 | 新仓必过检查全绿 | 改名是否**穷尽**：源码 import 155 行、`pyproject.toml` 三处、vendor 构建与校验脚本里的路径字面量、`ensure_vendor.test.js` 的硬编码路径、CI 的 working-directory |
-| **C-3** | 新仓 | 权威文档改写（§7.1）+ `CLAUDE.md` 改指向 + `.ah/` 路径引用校正 | **C-2**（C-3 写的是改名后的路径，见表注） | 新仓必过检查全绿 | 改写后的正文是否自包含、是否与新仓实际路径与 9 项必过检查集一致 |
-| **分支保护扩必过集** | 新仓 | 把 `studio-gates`、`frontend-gates`、`graph-agent-tests` 加入必过检查 | **在 C-1 合并前**执行 | 仓库设置变更，非 PR | — |
+| **C-3** | 新仓 | 权威文档改写（§7.1）+ `CLAUDE.md` 改指向 + `.ah/` 路径引用校正 | **C-2**（C-3 写的是改名后的路径，见表注） | 新仓必过检查全绿 | 改写后的正文是否自包含、是否与新仓实际路径与 11 项必过检查集一致 |
+| **分支保护扩必过集** | 新仓 | 把 `studio-gates`、`frontend-gates` 与 `graph-agent-tests` 的三个 matrix context 加入必过检查（共 5 个名字） | **在 C-1 合并前**执行 | 仓库设置变更，非 PR | — |
 | **终态打包门** | 新仓 | 在 C-2 合并后的 `main` 终态提交上手动触发一次 `package.yml` 并绿 | C-2、C-3 均已合并 | §8.2-⑨ | 工作流运行链接 + 装包断言输出 |
 | **C-4** | 主仓 | 主仓 `README.md` / `AGENTS.md` 顶部加归档横幅（指向新仓 + C-1 的导入提交哈希）；随后把仓库设为 archived | 终态打包门已绿 | 主仓 7 道必过检查；archive 动作需用户明确授权（§11 授权点二） | 横幅措辞与哈希正确性 |
 
@@ -338,7 +357,7 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 **风格**：所有 action 按新仓既有风格**用 commit SHA 钉版**（新仓现状如 `actions/checkout@3d3c42e5… # v7.0.1`），主仓那种 `@v7` 浮动标签写法在移植时改成 SHA。
 
-**必过检查集**：由现有 6 项扩为 **9 项** = `quality-gates` + `runtime-tests (3.11|3.12|3.13)` + `cross-platform-smoke (windows-latest|macos-latest)` + `studio-gates` + `frontend-gates` + `graph-agent-tests`。（`graph-agent-tests` 若也按主仓那样按 Python 版本分三格，必过项相应为 11 项；C-1 实施方按移植后的实际 job 名把清单钉死，并与分支保护的名字逐字一致。）
+**必过检查集**：由现有 6 项扩为 **11 项**——`quality-gates`、`runtime-tests (3.11)`、`runtime-tests (3.12)`、`runtime-tests (3.13)`、`cross-platform-smoke (windows-latest)`、`cross-platform-smoke (macos-latest)`、`studio-gates`、`frontend-gates`、`graph-agent-tests (3.11, py311)`、`graph-agent-tests (3.12, py312)`、`graph-agent-tests (3.13, py313)`。**`graph-agent-tests` 按主仓形状是 3.11/3.12/3.13 三个独立 context，占 3 项而不是 1 项**（主仓 `.github/workflows/ci.yml:81-131` 的 matrix）；分支保护按名字逐字匹配，少填两个 context 就等于两格 CI 可以红着合并。C-1 实施方以移植后 GitHub 实际显示的 check 名为准逐字钉死。
 
 **分支保护是仓库设置、不是 PR**：该变更由协调方在 C-1 合并前执行；用户批准本方案即一并授权（§11 授权点一）。
 
@@ -350,12 +369,12 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 | 目标路径（新仓） | 执笔席 | 证据来源（归档仓路径） | 改写内容 |
 |---|---|---|---|
-| `AGENTS.md` | 批C 仓级权威执笔席（Opus 5，xhigh，干净上下文） | `AGENTS.md`、`CLAUDE.md` | **删**第 18 行段落里的那一句「Gateway and Studio plugins are not deliverables in this release line; the design retains only their future external Port/Adapter ownership boundaries.」——搬入后该句为假；**删的是这一句，不是整行**（该行是一整段，其余部分讲 `docs/design/v1-alignment.md` 的 `drafted` 状态与各 Phase 验收）。**并入并以新仓路径与 9 项必过检查集重写**：CI 门禁清单、三模块架构与边界、Workflow Pipeline、Studio Tauri Dev、并行任务黑板、vendor 重建规则。**另须写明两件事**：①§4.1.1 (c) 类设计源不在本仓，引用一律写归档坐标；②§4.1.1 门禁暂缺表所列治理门禁暂缺、正在批D 复位 |
+| `AGENTS.md` | 批C 仓级权威执笔席（Opus 5，xhigh，干净上下文） | `AGENTS.md`、`CLAUDE.md` | **删**第 18 行段落里的那一句「Gateway and Studio plugins are not deliverables in this release line; the design retains only their future external Port/Adapter ownership boundaries.」——搬入后该句为假；**删的是这一句，不是整行**（该行是一整段，其余部分讲 `docs/design/v1-alignment.md` 的 `drafted` 状态与各 Phase 验收）。**并入并以新仓路径与 11 项必过检查集重写**：CI 门禁清单、三模块架构与边界、Workflow Pipeline、Studio Tauri Dev、并行任务黑板、vendor 重建规则。**另须写明两件事**：①§4.1.1 (c) 类设计源不在本仓，引用一律写归档坐标；②§4.1.1 门禁暂缺表所列治理门禁暂缺、正在批D 复位 |
 | `README.md` | 同上 | `README.md` | 改写为 monorepo 分工：runtime（可独立发布的精瘦包）/ gateway（独立包）/ studio（应用）/ 冻结 engine（带退出条件的过渡包） |
 | `docs/design/v1-alignment.md` §2.1 工作名表 | 同上 | 决议 §11.5、本文 §3.3 | 加 gateway、studio 两行（发行名、目录、import 名、Display name） |
 | `.github/CODEOWNERS` | 同上 | `.github/CODEOWNERS` | 加 studio 与 gateway 的契约文件条目；删指向未随迁的 `docs/engine/**` 的三条 |
 | `docs/development/DELIVERY_LEDGER.md` 头部 | 同上 | 台账正文已按 (a) 类随迁 | 只加「仓库 = 新仓」声明，正文不动 |
-| `docs/development/CROSS_PLATFORM.md`、`FRONTEND_UI_SPEC.md`、`JOURNEY_TEST_RULES.md`、`RUN_AND_SCREENSHOT.md`、`FRONTEND_HANDOFF_PROMPT.md`、`PARALLEL_ORCHESTRATION.md` | 批C 开发 SOP 执笔席（Opus 5，xhigh，干净上下文） | 归档仓同名文件 | 以新仓路径、9 项必过检查集、新仓 worktree/PR 流水线重写。（`PARALLEL_ORCHESTRATION.md` 晚于本文快照，按同一规则归此档） |
+| `docs/development/CROSS_PLATFORM.md`、`FRONTEND_UI_SPEC.md`、`JOURNEY_TEST_RULES.md`、`RUN_AND_SCREENSHOT.md`、`FRONTEND_HANDOFF_PROMPT.md`、`PARALLEL_ORCHESTRATION.md` | 批C 开发 SOP 执笔席（Opus 5，xhigh，干净上下文） | 归档仓同名文件 | 以新仓路径、11 项必过检查集、新仓 worktree/PR 流水线重写。（`PARALLEL_ORCHESTRATION.md` 晚于本文快照，按同一规则归此档） |
 | `docs/development/design-doc-standards/**` | 同上 | 已按 (b) 类随迁的同名文件 | **先搬后重写**：它被 `test_design_doc_standards_governance.py` 逐树读取，不搬则 C-1 红；重写落地时删除搬来的旧文 |
 | `CLAUDE.md`（就地校正） | 同上 | 已随迁的同名文件 | 改指向新仓 `AGENTS.md` |
 | `.ah/**` + `ah.toml`（就地校正） | 同上 | 已随迁的同名文件 | 路径引用随迁校正 |
@@ -363,12 +382,16 @@ Source-Paths: <本文 §4 处置表的源→目标路径映射>
 
 ### 7.2 第二档 · 批D 各模块就地重整时重写（不在批C 内，共 202 份）
 
-依据决议 §4.3「搬家在模块化重整之前……先搬后整，只需在最终的目录形状上重整一次」。逐文件清单**不列在正文**，由附录 B 的命令在 `Source-Commit` 上生成；本文快照上的分组计数如下。
+依据决议 `:176` 原文：
+
+> **搬家在模块化重整之前**,理由是**就地重整一次到位**:先搬后整,只需在最终的目录形状上重整一次;先整后搬,等于在旧形状上整一遍、搬完再对齐一遍。
+
+逐文件清单**不列在正文**，由附录 B 的命令在 `Source-Commit` 上生成；本文快照上的分组计数如下。
 
 | 待重写范围（目标路径 = 新仓同名目录） | 文件数 | 执笔席 | 证据来源（归档坐标前缀 `agent-harness@<Source-Commit>:`） |
 |---|---|---|---|
-| `docs/studio/**`（MVP1 设计体 85 + mvp0 24 + `_reorg` 10 + `INDEX.md` 1；含 §4.1.1 门禁暂缺表要复位的四项） | 122 | 批D studio 设计执笔席（Opus 5，xhigh，干净上下文） | `docs/studio/**` |
-| `docs/graph-agent-gateway/**`（`mvp1` 39 + `mvp0` 4 + `README.md` 1 + 其余 1；`USAGE.md` 已按 (b) 类随迁） | 45 | 批D gateway 设计执笔席（Opus 5，xhigh，干净上下文） | `docs/graph-agent-gateway/**` |
+| `docs/studio/**` = `mvp1` **85** + `mvp0` **26** + `_reorg` **10** + `INDEX.md` **1**（`for p in docs/studio/mvp1 docs/studio/mvp0 docs/studio/_reorg docs/studio/INDEX.md; do git ls-tree -r --name-only <REV> -- $p \| wc -l; done`）；含 §4.1.1 门禁暂缺表要复位的四项 | 122 | 批D studio 设计执笔席（Opus 5，xhigh，干净上下文） | `docs/studio/**` |
+| `docs/graph-agent-gateway/**` = `mvp1` **39** + `mvp0` **5** + `README.md` **1**（同上命令；该目录共 46 份，`USAGE.md` 已按 (b) 类随迁，故此处 45） | 45 | 批D gateway 设计执笔席（Opus 5，xhigh，干净上下文） | `docs/graph-agent-gateway/**` |
 | `docs/development/` 下其余非 SOP 文档（`CONTRIBUTING.md`、`STUDIO_DESKTOP_BOUNDARY_SPEC.md`、`LLM_MODEL_CONFIGURATION_FLOW.md` 等 11 份 + `examples/` 2） | 13 | 批D 开发文档执笔席（Opus 5，xhigh，干净上下文） | `docs/development/**` |
 | `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/**` | 6 | 批D 接口设计执笔席（Opus 5，xhigh，干净上下文） | 同名归档路径 |
 | `docs/superpowers/**`（`plans` 3 + `specs` 3） | 6 | 批D 开发文档执笔席 | 同名归档路径 |
@@ -512,7 +535,7 @@ Resolved 154 packages in 9.57s
 ## 11. 待用户批准项
 
 1. **本方案整体**：批C 是结构性变更，按既有工作规则必须先呈方案、用户确认后再动手（决议 `:624`）。批准前不开工任何一张 PR。
-2. **授权点一——新仓分支保护的必过检查集扩为 9 项**（§6）。仓库设置变更，不经 PR，由协调方在 C-1 合并前执行。
+2. **授权点一——新仓分支保护的必过检查集扩为 11 项**（§6）。仓库设置变更，不经 PR，由协调方在 C-1 合并前执行。
 3. **授权点二——把主仓 `SevenX77/agent-harness` 设为 archived**（§5 的 C-4）。对外可见的设置变更，需用户在批准本方案时明确授权。
 
 **本文没有其他待裁项**：初稿呈报与交叉审 r1 提出的全部挂起项已由协调方于 2026-09-02 逐条裁定并写入正文。
@@ -523,80 +546,312 @@ Resolved 154 packages in 9.57s
 
 | 决定 | 参照对象（含坐标） | 借什么 | 拒绝什么 | 为什么拒绝 |
 |---|---|---|---|---|
-| D1 workspace 形状 | uv 官方 workspace 模型；langchain monorepo（`libs/*` + 单锁） | 一仓一锁、成员各自持有 `pyproject.toml` | 根包为虚包 | 会把 runtime 从仓根挪走，连带改发布链，收益为零 |
+| D1 workspace 形状 | uv 官方 workspace 文档 <https://docs.astral.sh/uv/concepts/projects/workspaces/>（引「shares a single lockfile」「root, which is _also_ a workspace member」两句原文）；`pydantic/pydantic-ai` 根 `pyproject.toml`（blob `0418b5a3…`：`[build-system]` + `[project] name = "pydantic-ai"` + `[tool.uv.workspace] members` 五个 + 仓根唯一 `uv.lock`） | 一仓一锁、成员各自 `pyproject.toml`、根 project 本身也是成员且可发布；wheel 内容由构建后端配置决定 | 根做成虚包；**并撤销初稿的 langchain 参照**（其公开文档写明每个 `libs/` 包各有自己的 `uv.lock`，与初稿描述相反） | 虚包会把 runtime 从仓根挪走，连带改发布链，收益为零；错误参照无法复核 |
 | D2 squash 导入 + 出处 trailer | Kubernetes publishing-bot README（`Kubernetes-sha: <sha>`）；`git subtree --squash` 文档（`contrib/subtree/git-subtree.adoc`） | 压成单提交 + 机器可读的源提交指针 | 真正的历史移植；持续双向同步 | 前者与新仓线性历史保护冲突；后者与「主仓迁完即归档」冲突 |
 | D4 冻结包的树哈希锁 | Go `vendor/modules.txt` + `go mod verify`（<https://go.dev/ref/mod>、<https://pkg.go.dev/cmd/go>） | 内容清单 + 把漂移变成非零退出的校验 | 「重新生成清单即可修复」的宽松语义 | 冻结包不允许正常演进，重钉必须是带记录的显式动作 |
 | D6 文档三类处置 | PEP 1（<https://peps.python.org/pep-0001/>） | 历史文档与活规范分开处置 | `Superseded-By` 链、旧文永久同仓留存 | 旧设计体在批D 重写后没有读者，留在新仓即第二真相源；追溯由归档坐标满足 |
 
-**未采用的候选参照**：Kubernetes KEP 与 kubernetes.io 的分工（原拟支撑 D6）。2026-09-02 读 `keps/README.md`，找不到「KEP 是提案记录、不是用户文档」的明文，**证不成，故不引**。
+**未采用的候选参照**：Kubernetes KEP 与 kubernetes.io 的分工（原拟支撑 D6）。2026-09-02 读 `keps/README.md`，找不到可用来支撑「提案记录 vs 用户文档」这一分法的明文，**证不成，故不引**。
 
 ## 13. 附录
 
-### 附录 A · 四桶处置的机械复现脚本
+### 附录 A · 处置分桶与目标核验的可执行契约
 
-脚本随 C-1 提交到新仓 `scripts/migration-buckets.sh`，并在 C-1 的 PR 正文里贴出它在 `Source-Commit` 上的输出。四个桶的定义就是下面这几条命令，本文正文的每个计数均出自它们在 `377e82e0` 上的一次运行：
+脚本 `scripts/migration-buckets.sh` 随 C-1 提交到新仓。它**不是一段供人照抄的命令清单，而是一个会失败的门**：
 
-```bash
-REV=377e82e0
-ls() { git ls-tree -r --name-only "$REV" -- "$@"; }
+**接口**：`migration-buckets.sh --source-repo <路径> --source-commit <sha> [--target-tree <路径>] [--out <目录>]`。
+源提交**由参数给入**，脚本里没有任何硬编码的快照哈希；源仓一律用 `git -C "$SOURCE_REPO"` 访问。
 
-# 桶一 · 逐字节搬
-{ ls apps/studio packages/graph-agent-gateway
-  ls packages/graph-agent/pyproject.toml packages/graph-agent/README.md      packages/graph-agent/src packages/graph-agent/tests      packages/graph-agent/spec packages/graph-agent/scripts
-  ls code-diagnostics config
-  # docs (a) 记录类
-  ls docs/design docs/studio-mvp1-execution docs/handoffs docs/engine/graph-skill-runtime      docs/pr-reports docs/references docs/deferred-items.md      docs/development/DELIVERY_LEDGER.md docs/development/PROBLEM_LEDGER.md
-  # docs (b) 被随迁代码按路径读取的数据文件
-  ls docs/development/llm_provider_notes docs/development/design-doc-standards      docs/development/STUDIO_REQUEST_AUDIT.md docs/graph-agent-gateway/USAGE.md
-  ls scripts .claude skills-lock.json .ah ah.toml .pre-commit-config.yaml CLAUDE.md
-} | sort -u > move.txt
+**它在哪里跑**：C-1 的实施机上，**源仓归档 clone 与新仓目标树同时可见**的位置——例如
+`migration-buckets.sh --source-repo ~/clones/agent-harness --source-commit <Source-Commit> --target-tree .`
+在新仓 worktree 里执行。**不能在新仓里直接 `git ls-tree <Source-Commit>`**：新仓没有主仓的历史，
+那条命令会以 128 退出（这正是脚本第一步就 `git -C "$SRC" cat-file -e "$REV^{commit}"` 的原因）。
+目标树必须是一个 git 检出（脚本在其中用 `git hash-object --stdin-paths` 批量算内容哈希）。
 
-# 桶三 · 根级配置/权威文件(按 §4.2 逐份处置)
-printf '%s
-' uv.lock AGENTS.md pyproject.toml .gitignore .gitattributes .importlinter   codecov.yml .sonarcloud.properties .editorconfig README.md LICENSE | sort > root.txt
+**它断言什么**（任一不成立即非零退出，`set -euo pipefail`）：
 
-# 桶四 · .github(按 §6 重写/移植)
-ls .github | sort > gh.txt
+| 断言 | 失败时的退出码 |
+|---|---|
+| `<source-commit>` 在源仓里是一个真提交 | 3 |
+| 五桶两两不交（`uniq -d` 为空） | 1 |
+| 五桶并集 == 源提交的全部跟踪文件 | 1 |
+| 「逐字节搬」桶的每个文件在目标树里存在 | 1 |
+| 该桶每个文件的内容哈希与源一致 | 1 |
 
-# 桶二 · 留在归档仓 = 全集 − 上面三桶
-ls . | sort -u > all.txt
-cat move.txt root.txt gh.txt | sort -u > accounted.txt
-comm -23 all.txt accounted.txt > stay.txt
+**内容哈希用 git 的 blob 哈希，不是逐文件 `sha256sum`**：源侧从一次 `git ls-tree -r <REV>` 直接读出
+（blob 哈希就在输出里，零额外进程），目标侧一次 `git hash-object --stdin-paths` 批量算完。
+两侧同法计算，相等当且仅当字节相同；代价是 2 次进程调用而不是 4000 次——在 Windows 上这是分钟与秒的差别。
 
-wc -l < move.txt; wc -l < stay.txt; wc -l < root.txt; wc -l < gh.txt
-cat move.txt stay.txt root.txt gh.txt | sort | uniq -d          # 必须为空(两两不交)
-cat move.txt stay.txt root.txt gh.txt | sort -u | wc -l         # 必须等于 wc -l < all.txt
-```
+**2026-09-02 / 09-03 的实跑证据（含负例）**：
 
-**2026-09-02 在 `377e82e0` 上的实际输出**：
+| 场景 | 命令要点 | 输出 | 退出码 |
+|---|---|---|---|
+| 正例 · 分桶（快照提交） | `--source-commit 377e82e0` | `逐字节搬 2009 / 留在归档仓 841 / 根级 11 / .github 6 / 特殊处置 1 / 全集 2868`，`OK 五桶两两不交`、`OK 并集等于全集 (2868)` | **0** |
+| 正例 · 分桶（当前 main） | `--source-commit 6547029e` | `2011 / 843 / 11 / 6 / 1 / 全集 2872`，两条 OK | **0** |
+| 正例 · 目标核验 | `--source-commit 6547029e --target-tree <主仓工作树>` | `OK 逐字节核验 差异数=0 总数=2011` | **0** |
+| 负例 · 桶重叠 | 注入 `CLAUDE.md` 同时进两个桶 | `FAIL overlap between buckets: CLAUDE.md` → `RESULT=FAIL` | **1** |
+| 负例 · 内容不等 | 源 `377e82e0` 对目标 `6547029e` 工作树 | `FAIL content differs (1): docs/development/DELIVERY_LEDGER.md` | **1** |
+| 负例 · 目标缺文件 | 目标指向空 git 仓 | `FAIL missing in target:` ×2009 | **1** |
+| 负例 · 源提交不存在 | `--source-commit deadbeef` | `FAIL: deadbeef is not a commit in <源仓>` | **3** |
 
-```
-REV=377e82e0
-逐字节搬    2015
-留在归档仓   836
-根级          11
-.github        6
-合计        2868
-全集        2868
-无重叠
-```
+「内容不等」那一例同时说明了为什么必须按 `Source-Commit` 重算：`docs/development/DELIVERY_LEDGER.md`
+在 `377e82e0` 与 `6547029e` 之间改过，拿旧快照去核验新目标就会（正确地）失败。
 
-**判据是最后两条断言，不是「总数对得上」**：并集必须等于全集，且四桶两两不交。总数相等可以由两处相反的误差互相抵消而来——本方案明确要防这种失败形态，所以脚本在任一条不满足时非零退出。
+**门禁暂缺表是排除清单的唯一来源**：脚本把 §4.1.1 那 6 个文件写在一处（5 个删除 + 1 个修改），
+「逐字节搬」桶用 `grep -v -x -F -f` 把它们排除，「留在归档仓」桶因是补集而自动收下那 5 个删除文件。
+两处各写一遍就会漂移，所以只写一遍。
 
-### 附录 B · 第二档重写清单的逐文件生成
+**脚本正文**（C-1 提交的即此文件）：
 
 ```bash
-# 在主仓（或归档仓）上运行，<Source-Commit> 取 C-1 导入提交里记录的哈希
-bash scripts/migration-buckets.sh <Source-Commit>      # 产出 move.txt（逐字节搬清单）
-git ls-tree -r --name-only <Source-Commit> -- docs | grep -v -x -F -f move.txt > docs-c-class.txt
-# docs-c-class.txt 即 §4.1.1 的 (c) 类 312 份；按 §7.2 的目录分组切给各执笔席
+#!/usr/bin/env bash
+# 批C 搬迁的处置分桶与目标核验(方案 docs/design/gskill-migration-plan-2026-09-02.md §4/§8.1)。
+#
+# 它回答两个问题,任一不成立即非零退出:
+#   1. 源仓 <source-commit> 的每个跟踪文件,是否恰好落进五个桶里的一个?
+#   2. 「逐字节搬」桶里的每个文件,在目标树里是否存在、内容是否与源一致?
+#
+# 用法:
+#   migration-buckets.sh --source-repo <路径> --source-commit <sha> [--target-tree <路径>] [--out <目录>]
+# 给了 --target-tree 才做第 2 问;C-1 里必须给,而且要在**源仓归档 clone 与新仓目标树同时可见**的
+# 检出上运行(脚本对源仓一律用 `git -C "$SOURCE_REPO"`,不依赖当前目录所在仓的历史——新仓里没有
+# 主仓的提交,直接 `git ls-tree <source-commit>` 会以 128 退出)。
+set -euo pipefail
+
+SRC="" REV="" TGT="" OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --source-repo)   SRC="$2"; shift 2 ;;
+    --source-commit) REV="$2"; shift 2 ;;
+    --target-tree)   TGT="$2"; shift 2 ;;
+    --out)           OUT="$2"; shift 2 ;;
+    --inject-overlap) INJECT="$2"; shift 2 ;;   # 仅供自测:把一个路径同时塞进两个桶
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$SRC" ] && [ -n "$REV" ] || { echo "usage: --source-repo <path> --source-commit <sha> [--target-tree <path>]" >&2; exit 2; }
+git -C "$SRC" cat-file -e "$REV^{commit}" 2>/dev/null || { echo "FAIL: $REV is not a commit in $SRC" >&2; exit 3; }
+OUT="${OUT:-$(mktemp -d)}"; mkdir -p "$OUT"
+
+ls_() { git -C "$SRC" ls-tree -r --name-only "$REV" -- "$@"; }
+
+# 门禁暂缺表(方案 §4.1.1)的文件列 —— 唯一来源,下面三处都引用它
+cat > "$OUT/gate-gap.txt" <<'EOF'
+apps/studio/backend/tests/docs/test_doc_code_references_exist.py
+apps/studio/backend/tests/test_doc_hash_lock.py
+apps/studio/backend/tests/test_design_unit_lock_snapshot.py
+packages/graph-agent-gateway/tests/test_gateway_doc_locks.py
+packages/graph-agent-gateway/tests/test_gateway_design_units_bind_real_code.py
+EOF
+echo 'apps/studio/backend/tests/docs/test_design_doc_standards_governance.py' > "$OUT/special.txt"
+
+# 桶一 · 逐字节搬(显式排除上面六个:五个 C-1 删除、一个 C-1 修改)
+{ ls_ apps/studio packages/graph-agent-gateway
+  ls_ packages/graph-agent/pyproject.toml packages/graph-agent/README.md \
+      packages/graph-agent/src packages/graph-agent/tests \
+      packages/graph-agent/spec packages/graph-agent/scripts
+  ls_ code-diagnostics config
+  ls_ docs/design docs/studio-mvp1-execution docs/handoffs docs/engine/graph-skill-runtime \
+      docs/pr-reports docs/references docs/deferred-items.md \
+      docs/development/DELIVERY_LEDGER.md docs/development/PROBLEM_LEDGER.md
+  ls_ docs/development/llm_provider_notes docs/development/design-doc-standards \
+      docs/development/STUDIO_REQUEST_AUDIT.md docs/graph-agent-gateway/USAGE.md
+  ls_ scripts .claude skills-lock.json .ah ah.toml .pre-commit-config.yaml CLAUDE.md
+} | sort -u | grep -v -x -F -f "$OUT/gate-gap.txt" | grep -v -x -F -f "$OUT/special.txt" > "$OUT/move.txt"
+
+# 桶三 · 根级配置/权威文件(§4.2 逐份处置)
+printf '%s\n' uv.lock AGENTS.md pyproject.toml .gitignore .gitattributes .importlinter \
+  codecov.yml .sonarcloud.properties .editorconfig README.md LICENSE | sort > "$OUT/root.txt"
+# 桶四 · .github(§6 重写/移植)
+ls_ .github | sort > "$OUT/gh.txt"
+# 桶五 · 特殊处置(C-1 里改内容的门禁文件)= special.txt
+# 桶二 · 留在归档仓 = 全集 − 其余四桶(门禁暂缺表的五个删除文件天然落在这里)
+ls_ . | sort -u > "$OUT/all.txt"
+if [ -n "${INJECT:-}" ]; then echo "$INJECT" >> "$OUT/root.txt"; sort -u -o "$OUT/root.txt" "$OUT/root.txt"; fi
+cat "$OUT/move.txt" "$OUT/root.txt" "$OUT/gh.txt" "$OUT/special.txt" | sort -u > "$OUT/accounted.txt"
+comm -23 "$OUT/all.txt" "$OUT/accounted.txt" > "$OUT/stay.txt"
+
+printf 'SOURCE_COMMIT=%s\n' "$REV"
+printf '%-12s %5d\n' 逐字节搬 "$(wc -l < "$OUT/move.txt")" 留在归档仓 "$(wc -l < "$OUT/stay.txt")" \
+  根级 "$(wc -l < "$OUT/root.txt")" .github "$(wc -l < "$OUT/gh.txt")" 特殊处置 "$(wc -l < "$OUT/special.txt")"
+printf '%-12s %5d\n' 全集 "$(wc -l < "$OUT/all.txt")"
+
+fail=0
+dup="$(cat "$OUT/move.txt" "$OUT/stay.txt" "$OUT/root.txt" "$OUT/gh.txt" "$OUT/special.txt" | sort | uniq -d || true)"
+if [ -n "$dup" ]; then echo "FAIL overlap between buckets:"; echo "$dup"; fail=1; else echo "OK 五桶两两不交"; fi
+union="$(cat "$OUT/move.txt" "$OUT/stay.txt" "$OUT/root.txt" "$OUT/gh.txt" "$OUT/special.txt" | sort -u | wc -l)"
+total="$(wc -l < "$OUT/all.txt")"
+if [ "$union" != "$total" ]; then echo "FAIL union=$union != all=$total"; fail=1; else echo "OK 并集等于全集 ($total)"; fi
+
+if [ -n "$TGT" ]; then
+  # 期望内容哈希:git 的 blob 哈希,源侧从 ls-tree 直接读(一次调用),目标侧用 hash-object 批量算(一次调用)
+  git -C "$SRC" ls-tree -r "$REV" | awk '{print $3"\t"substr($0, index($0,$4))}' | sort -k2 > "$OUT/src-hashes.tsv"
+  missing=0
+  while IFS= read -r p; do
+    [ -f "$TGT/$p" ] || { echo "FAIL missing in target: $p"; missing=$((missing+1)); }
+  done < "$OUT/move.txt"
+  [ "$missing" -eq 0 ] || { echo "RESULT=FAIL"; exit 1; }
+  # 目标侧哈希:在目标树内用相对路径批量算(目标树必须是一个 git 检出——C-1 里就是新仓的 worktree)
+  ( cd "$TGT" && git hash-object --stdin-paths ) < "$OUT/move.txt" > "$OUT/tgt-hashes.txt"
+  paste "$OUT/tgt-hashes.txt" "$OUT/move.txt" | sort -k2 > "$OUT/tgt-hashes.tsv"
+  diffs="$(join -j 2 -o 0,1.1,2.1 "$OUT/src-hashes.tsv" "$OUT/tgt-hashes.tsv" | awk '$2!=$3{print $1}' || true)"
+  n_diff="$(printf '%s' "$diffs" | grep -c . || true)"
+  if [ "$n_diff" != "0" ]; then echo "FAIL content differs ($n_diff):"; echo "$diffs" | head -20; fail=1
+  else echo "OK 逐字节核验 差异数=0 总数=$(wc -l < "$OUT/move.txt")"; fi
+fi
+[ "$fail" -eq 0 ] || { echo "RESULT=FAIL"; exit 1; }
+echo "RESULT=PASS"
 ```
 
-本文快照 `377e82e0` 上该清单共 **312** 行，按目录分组的计数见 §7.2 表与 §4.3。
+### 附录 B · 不随迁的两棵 MVP1 设计树逐文件清单（124 份）
+
+决议 `:610` 要求本方案附权威文档重写清单。§7.2 给的是分组、执笔席与证据来源，本附录给**逐文件**清单，
+一行不少。**继承规则（表头即规则，逐行不再重复）**：
+
+- **目标路径** = 新仓同名路径（`docs/studio/mvp1/**` → `docs/studio/mvp1/**`；批D 重写落地时若目录形状变化，
+  以批D 的模块重整方案为准，本方案不预判）。
+- **执笔席** = 按顶层目录继承 §7.2：`docs/studio/mvp1/**` 归**批D studio 设计执笔席（Opus 5，xhigh，干净上下文）**；
+  `docs/graph-agent-gateway/mvp1/**` 归**批D gateway 设计执笔席（Opus 5，xhigh，干净上下文）**。
+- **证据来源** = `agent-harness@<Source-Commit>:<下表路径>:<行号>`（归档坐标，决议 `:607` 要求的引用形式）。
+
+清单由下列命令生成（本表是它在 `377e82e0` 上的输出，共 124 行）：
+
+```bash
+git ls-tree -r --name-only <Source-Commit> -- docs/studio/mvp1 docs/graph-agent-gateway/mvp1
+```
+
+  1. `docs/graph-agent-gateway/mvp1/01-handoff-interface/baseline.md`
+  2. `docs/graph-agent-gateway/mvp1/01-handoff-interface/mvp1-alignment.md`
+  3. `docs/graph-agent-gateway/mvp1/02-orch-role-resolution/baseline.md`
+  4. `docs/graph-agent-gateway/mvp1/02-orch-role-resolution/mvp1-alignment.md`
+  5. `docs/graph-agent-gateway/mvp1/03-orch-credentials-endpoints/baseline.md`
+  6. `docs/graph-agent-gateway/mvp1/03-orch-credentials-endpoints/mvp1-alignment.md`
+  7. `docs/graph-agent-gateway/mvp1/04-orch-registry-schema/baseline.md`
+  8. `docs/graph-agent-gateway/mvp1/04-orch-registry-schema/mvp1-alignment.md`
+  9. `docs/graph-agent-gateway/mvp1/05-orch-capabilities-and-models/baseline.md`
+ 10. `docs/graph-agent-gateway/mvp1/05-orch-capabilities-and-models/mvp1-alignment.md`
+ 11. `docs/graph-agent-gateway/mvp1/06-orch-error-classification/baseline.md`
+ 12. `docs/graph-agent-gateway/mvp1/06-orch-error-classification/mvp1-alignment.md`
+ 13. `docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/baseline.md`
+ 14. `docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/mvp1-alignment.md`
+ 15. `docs/graph-agent-gateway/mvp1/08-orch-test-status-ssot/baseline.md`
+ 16. `docs/graph-agent-gateway/mvp1/08-orch-test-status-ssot/mvp1-alignment.md`
+ 17. `docs/graph-agent-gateway/mvp1/09-inv-invocation-runtime/baseline.md`
+ 18. `docs/graph-agent-gateway/mvp1/09-inv-invocation-runtime/mvp1-alignment.md`
+ 19. `docs/graph-agent-gateway/mvp1/10-inv-route-chat-model-factory/baseline.md`
+ 20. `docs/graph-agent-gateway/mvp1/10-inv-route-chat-model-factory/mvp1-alignment.md`
+ 21. `docs/graph-agent-gateway/mvp1/11-inv-provider-profiles/baseline.md`
+ 22. `docs/graph-agent-gateway/mvp1/11-inv-provider-profiles/mvp1-alignment.md`
+ 23. `docs/graph-agent-gateway/mvp1/13-x-tracing-events-exceptions/baseline.md`
+ 24. `docs/graph-agent-gateway/mvp1/13-x-tracing-events-exceptions/mvp1-alignment.md`
+ 25. `docs/graph-agent-gateway/mvp1/14-media-generation/design-decision.md`
+ 26. `docs/graph-agent-gateway/mvp1/AUDIT_REMEDIATION_PLAN.md`
+ 27. `docs/graph-agent-gateway/mvp1/AUDIT_REPORT.md`
+ 28. `docs/graph-agent-gateway/mvp1/DESIGN_UNITS_INDEX.md`
+ 29. `docs/graph-agent-gateway/mvp1/README.md`
+ 30. `docs/graph-agent-gateway/mvp1/_audited-ready-hashes.json`
+ 31. `docs/graph-agent-gateway/mvp1/_design-unit-lock-snapshot.json`
+ 32. `docs/graph-agent-gateway/mvp1/_impl/IMPL_PLAN.md`
+ 33. `docs/graph-agent-gateway/mvp1/_impl/WS1-chatx-core.md`
+ 34. `docs/graph-agent-gateway/mvp1/_impl/WS2-base-url-gemini-handoff.md`
+ 35. `docs/graph-agent-gateway/mvp1/_impl/WS2-base-url.md`
+ 36. `docs/graph-agent-gateway/mvp1/_impl/WS4-fallback-events.md`
+ 37. `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`
+ 38. `docs/graph-agent-gateway/mvp1/predict-migration-to-engine.md`
+ 39. `docs/graph-agent-gateway/mvp1/references/chatx-provider-patterns.md`
+ 40. `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md`
+ 41. `docs/studio/mvp1/01_workflows/00_settings.md`
+ 42. `docs/studio/mvp1/01_workflows/01_init.md`
+ 43. `docs/studio/mvp1/01_workflows/02_authoring.md`
+ 44. `docs/studio/mvp1/01_workflows/03_compile.md`
+ 45. `docs/studio/mvp1/01_workflows/04_run-and-verify.md`
+ 46. `docs/studio/mvp1/01_workflows/05_debugging.md`
+ 47. `docs/studio/mvp1/01_workflows/06_eval.md`
+ 48. `docs/studio/mvp1/01_workflows/INDEX.md`
+ 49. `docs/studio/mvp1/02_capabilities/README.md`
+ 50. `docs/studio/mvp1/02_capabilities/compile-lint/baseline.md`
+ 51. `docs/studio/mvp1/02_capabilities/compile-lint/mvp1-alignment.md`
+ 52. `docs/studio/mvp1/02_capabilities/conflict-overwrite/baseline.md`
+ 53. `docs/studio/mvp1/02_capabilities/conflict-overwrite/mvp1-alignment.md`
+ 54. `docs/studio/mvp1/02_capabilities/copilot-assist/baseline.md`
+ 55. `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md`
+ 56. `docs/studio/mvp1/02_capabilities/debug-resume/baseline.md`
+ 57. `docs/studio/mvp1/02_capabilities/debug-resume/mvp1-alignment.md`
+ 58. `docs/studio/mvp1/02_capabilities/file-editing/baseline.md`
+ 59. `docs/studio/mvp1/02_capabilities/file-editing/mvp1-alignment.md`
+ 60. `docs/studio/mvp1/02_capabilities/golden-eval/baseline.md`
+ 61. `docs/studio/mvp1/02_capabilities/golden-eval/mvp1-alignment.md`
+ 62. `docs/studio/mvp1/02_capabilities/graph-authoring/baseline.md`
+ 63. `docs/studio/mvp1/02_capabilities/graph-authoring/mvp1-alignment.md`
+ 64. `docs/studio/mvp1/02_capabilities/media-generation/design-decision.md`
+ 65. `docs/studio/mvp1/02_capabilities/phase-editing/baseline.md`
+ 66. `docs/studio/mvp1/02_capabilities/phase-editing/mvp1-alignment.md`
+ 67. `docs/studio/mvp1/02_capabilities/predict/baseline.md`
+ 68. `docs/studio/mvp1/02_capabilities/predict/mvp1-alignment.md`
+ 69. `docs/studio/mvp1/02_capabilities/publish/baseline.md`
+ 70. `docs/studio/mvp1/02_capabilities/publish/mvp1-alignment.md`
+ 71. `docs/studio/mvp1/02_capabilities/run-execution/baseline.md`
+ 72. `docs/studio/mvp1/02_capabilities/run-execution/mvp1-alignment.md`
+ 73. `docs/studio/mvp1/02_capabilities/skill-workspace/baseline.md`
+ 74. `docs/studio/mvp1/02_capabilities/skill-workspace/mvp1-alignment.md`
+ 75. `docs/studio/mvp1/02_capabilities/studio-settings/baseline.md`
+ 76. `docs/studio/mvp1/02_capabilities/studio-settings/mvp1-alignment.md`
+ 77. `docs/studio/mvp1/02_capabilities/trace-observability/baseline.md`
+ 78. `docs/studio/mvp1/02_capabilities/trace-observability/mvp1-alignment.md`
+ 79. `docs/studio/mvp1/03_regions/README.md`
+ 80. `docs/studio/mvp1/03_regions/assets/baseline.md`
+ 81. `docs/studio/mvp1/03_regions/assets/mvp1-alignment.md`
+ 82. `docs/studio/mvp1/03_regions/canvas/baseline.md`
+ 83. `docs/studio/mvp1/03_regions/canvas/mvp1-alignment.md`
+ 84. `docs/studio/mvp1/03_regions/center-action-bar/baseline.md`
+ 85. `docs/studio/mvp1/03_regions/center-action-bar/mvp1-alignment.md`
+ 86. `docs/studio/mvp1/03_regions/copilot/ah-orchestration-design.md`
+ 87. `docs/studio/mvp1/03_regions/copilot/baseline.md`
+ 88. `docs/studio/mvp1/03_regions/copilot/mvp1-alignment.md`
+ 89. `docs/studio/mvp1/03_regions/editor/baseline.md`
+ 90. `docs/studio/mvp1/03_regions/editor/mvp1-alignment.md`
+ 91. `docs/studio/mvp1/03_regions/input/baseline.md`
+ 92. `docs/studio/mvp1/03_regions/input/mvp1-alignment.md`
+ 93. `docs/studio/mvp1/03_regions/local-history/baseline.md`
+ 94. `docs/studio/mvp1/03_regions/local-history/mvp1-alignment.md`
+ 95. `docs/studio/mvp1/03_regions/properties/baseline.md`
+ 96. `docs/studio/mvp1/03_regions/properties/mvp1-alignment.md`
+ 97. `docs/studio/mvp1/03_regions/settings/baseline.md`
+ 98. `docs/studio/mvp1/03_regions/settings/mvp1-alignment.md`
+ 99. `docs/studio/mvp1/03_regions/shell-layout/baseline.md`
+100. `docs/studio/mvp1/03_regions/shell-layout/mvp1-alignment.md`
+101. `docs/studio/mvp1/03_regions/timeline/baseline.md`
+102. `docs/studio/mvp1/03_regions/timeline/mvp1-alignment.md`
+103. `docs/studio/mvp1/03_regions/welcome/baseline.md`
+104. `docs/studio/mvp1/03_regions/welcome/mvp1-alignment.md`
+105. `docs/studio/mvp1/04_platform/README.md`
+106. `docs/studio/mvp1/04_platform/engine/baseline.md`
+107. `docs/studio/mvp1/04_platform/engine/mvp1-alignment.md`
+108. `docs/studio/mvp1/04_platform/gateway/baseline.md`
+109. `docs/studio/mvp1/04_platform/gateway/mvp1-alignment.md`
+110. `docs/studio/mvp1/04_platform/i18n.md`
+111. `docs/studio/mvp1/04_platform/llm-copilot-http-api/baseline.md`
+112. `docs/studio/mvp1/04_platform/llm-copilot-http-api/mvp1-alignment.md`
+113. `docs/studio/mvp1/04_platform/native-fs/baseline.md`
+114. `docs/studio/mvp1/04_platform/native-fs/mvp1-alignment.md`
+115. `docs/studio/mvp1/04_platform/state-engine/baseline.md`
+116. `docs/studio/mvp1/04_platform/state-engine/mvp1-alignment.md`
+117. `docs/studio/mvp1/DESIGN_UNITS_INDEX.md`
+118. `docs/studio/mvp1/README.md`
+119. `docs/studio/mvp1/_audited-ready-hashes.json`
+120. `docs/studio/mvp1/_design-unit-lock-snapshot.json`
+121. `docs/studio/mvp1/_impl/IMPL_PLAN.md`
+122. `docs/studio/mvp1/_impl/STUDIO-MVP1-INTEGRATION-BASELINE.md`
+123. `docs/studio/mvp1/_migrated-coverage-drift.md`
+124. `docs/studio/mvp1/_proposal-skill-repo-git-model.md`
+
+**这 124 份与 §4 账目的关系**：它们全在「留在归档仓」桶里，是 (c) 类 312 份中的 124 份；
+另外 188 份 (c) 类文档的分组见 §7.2 与 §7.3。
 
 ## 修订记录
 
 | 日期 | 变更 | 说明 |
 |---|---|---|
+| 2026-09-03 | 交叉审 r2（codex，七条 P1 + 两条 P2）经协调方逐条裁定后返修 | ①**引文核验改成双向**：正向核对每条登记引文逐字命中源文件，**反向**扫描正文里每一个「」串——它要么是登记引文的子串，要么在一份写明理由的白名单（本文自造的术语/节名/对自身草稿与工具输出的回指）里；当前 75 个串：登记引文覆盖 22、白名单 53、未登记 0。五条 MISS 按此处理：`AGENTS.md:233`、决议 `:172`、决议 `:176` 改为逐字引用，决议 `:180` 改为「意为」，「把旧的设计权威正文原样搬过去继续当权威」是本文的理解、去引号。②**门禁暂缺表的 6 个文件出「逐字节搬」桶**：5 个 C-1 删除的进「留在归档仓」桶、1 个 C-1 修改的进新增的「特殊处置」桶，附录 A 的脚本用**同一份暂缺表文件列**把它们显式排除——此前它们同时被要求「删/改」与「sha256 与源全等」，方案自相矛盾。账目重算 **2009 + 841 + 11 + 6 + 1 = 2868**（`377e82e0` 快照）、**2011 + 843 + 11 + 6 + 1 = 2872**（当前 `6547029e`）。③门禁暂缺表补 `test_priority_roots_are_non_empty`（`:256-258` 断言 `len(_priority_docs()) > 50`，两棵树不搬后语料只剩 5 份必红）；同族排查已覆盖 `tests/docs/**` 与两个 package 的全部文档类断言。④附录 A 改成**可执行契约**：源提交由参数给入、`set -euo pipefail`、五类断言各有退出码，并附三个负例与两个正例的实跑输出。⑤附录 B **逐行列出 124 份**不随迁的 MVP1 文档，表头给目标路径/执笔席/证据坐标的继承规则。⑥必过集 **9 → 11**（`graph-agent-tests` 是三个 matrix context），五处统一。⑦D1 参照**撤销 langchain**（其公开文档写明每个 `libs/` 包各有自己的 `uv.lock`，与初稿描述相反），改引 uv 官方 workspace 文档两句原文 + `pydantic/pydantic-ai` 的实测坐标，并写明后者不能证明的那一半。⑧grep 计数订正为 20 个文件 = 6 读取 + 14 docstring。⑨§7.2 分组按实跑订正为 studio `85+26+10+1=122`、gateway `39+5+1=45`。 |
 | 2026-09-02 | 交叉审 r1（codex，十条 P1 + 一条 P2）经协调方逐条裁定后返修 | ①**全部引文改为逐字**，源自本仓文件的引文由脚本从源文件抽取后插入，并以 `grep -F` 逐条回核（核对输出贴在 PR）。②**`docs/studio/mvp1/**` 与 `docs/graph-agent-gateway/mvp1/**` 改判为不搬**（协调方依据决议 `:607` 与 `AGENTS.md:366` 裁定）：它们是目标设计真相载体，归 (c) 类由批D 重写；连带新增**门禁暂缺表**（6 个读取用例在 C-1 删除 + 批D 复位工单），(b) 类收窄为 17 份真正被代码按路径读取的数据文件。③§7 按 `:610` 补齐**目标路径 / 执笔席 / 证据来源**三项，逐文件清单移入附录 B 的生成命令。④账目按脚本重算 **2015 + 836 + 11 + 6 = 2868**，并把判据从「总数相等」改为「并集等于全集且两两不交」。⑤§9.1 改写为**可复现配方**，按真实 workspace 形状重跑得 154 包，并补「不加 C-0a 则无解」的退出码与错误原文；版本表两列均为实测。⑥C-0b 前驱改为 C-0a。⑦C-3 前驱改为 C-2，新增**终态打包门**并作为 C-4 前驱。⑧**冻结 engine 改为源码 + 测试 + 契约清单一起搬，`graph-agent-tests` 保留为必过门**（协调方依据「因果验证」裁定：共享锁会换掉它脚下的依赖，源码不变不等于行为不变），树哈希锁覆盖 `tests/**`，连带随迁 `code-diagnostics/**` 与 `config/**`。⑨§8 拆为**机械核验项**与**人证项**两段，合并桶补人证判据。⑩补 D8 编号与 §12 参照汇总（D1/D2/D4/D6 各写「参照—借—拒—为什么」，KEP 候选因证不成而不引）。⑪数字按实跑订正：import 132 行/34 文件（真 import 131）、gateway import 155 行/39 文件、受治理载体 151、backend 443 文件/2281 个测试，每个数字旁给生成命令。 |
 | 2026-09-02 | 初稿落盘 | 按已批决议 §4.3 / §4.4 / §11.5 / §11.7 与盘点 `inventory-synthesis.md:124,174`，把批C 搬迁写成可执行方案。状态 `drafted`，**待用户批准**。 |

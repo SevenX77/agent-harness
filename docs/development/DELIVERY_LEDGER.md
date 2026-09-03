@@ -47,6 +47,7 @@
 | 清单生成器 | — | 待开工 | F-T3 |
 | F-T3-尾修 | — | 进行中(docs/f-t3-tail) | F-T3 |
 | B′-3 | 新仓 #23 | ✅ 已合并(#23) | B′-2 |
+| 台账-2 | 主仓 #1103 | 🚧 进行中(#1103) | SOP |
 | 批C 搬迁方案 | — | 🚧 进行中(#1102) | D-T13,F-T8,D-T1,F-T1+D-T12,import-linter,旁-1,F-T2,X-T1a,SOP,台账,B′-1,B′-2,D-T3,F-T3,语料-1,语料-2,语料-3 |
 
   **怎么读这张表**:`PR` 列的「新仓」= [`SevenX77/graph-skill-runtime`](https://github.com/SevenX77/graph-skill-runtime),
